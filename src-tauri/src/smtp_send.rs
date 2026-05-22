@@ -23,6 +23,11 @@ use sha2::{Digest, Sha256};
 use crate::{
     auth::{evaluate_account_setup_auth_policy, AuthKind, AuthPolicy, ProviderKind, SaslMechanism},
     credentials::{CredentialError, CredentialSlot, WindowsCredentialManager},
+    draft_persistence::{
+        ensure_active_draft, insert_sent_mail_copy_record, mark_draft_sent_after_confirmed_send,
+        sent_mail_copy_for_confirmed_send, ConfirmedSentDraft, DraftPersistenceError,
+        SentFolderPolicy, SentFolderSyncState,
+    },
     ipc_validation::{
         validate_bounded_text, validate_entity_id, validate_payload_size, IpcValidationError,
         MAX_TEXT_FIELD_BYTES,
@@ -175,6 +180,7 @@ pub struct OutboundAttachmentMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendEmailRequest {
     pub account_id: String,
+    pub draft_id: Option<String>,
     pub to: Vec<OutboundEmailAddress>,
     pub cc: Vec<OutboundEmailAddress>,
     pub bcc: Vec<OutboundEmailAddress>,
@@ -230,11 +236,13 @@ impl SmtpAuth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendProgressEvent {
     AccountResolved,
+    DraftPrepared { draft_id: String },
     AuthResolved { mechanism: SaslMechanism },
     AttachmentStreamed { attachment_id: String, bytes: u64 },
     MimeComposed { message_size_bytes: u64 },
     SmtpAccepted,
     SentStateRecorded,
+    DraftFinalized { draft_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,10 +253,13 @@ pub struct SmtpDelivery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendEmailReport {
     pub account_id: String,
+    pub source_draft_id: Option<String>,
     pub rfc_message_id: String,
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_security: SmtpSecurity,
+    pub sent_folder_policy: SentFolderPolicy,
+    pub sent_folder_sync_state: SentFolderSyncState,
     pub provider_response: Option<String>,
     pub message_size_bytes: u64,
     pub attachment_bytes_streamed: u64,
@@ -259,6 +270,8 @@ pub struct SendEmailReport {
 pub struct ConfirmedSendRecord {
     pub id: String,
     pub account_id: String,
+    pub provider_kind: ProviderKind,
+    pub source_draft_id: Option<String>,
     pub rfc_message_id: String,
     pub subject: String,
     pub from_address: String,
@@ -285,6 +298,7 @@ pub enum SendEmailError {
     InvalidRequest {
         reason: &'static str,
     },
+    DraftPersistence(String),
     UnsupportedAuth {
         reason: &'static str,
     },
@@ -325,6 +339,9 @@ impl fmt::Display for SendEmailError {
             Self::InvalidAddress { field } => write!(formatter, "{field} is not a valid address"),
             Self::InvalidRequest { reason } => {
                 write!(formatter, "send request is invalid: {reason}")
+            }
+            Self::DraftPersistence(message) => {
+                write!(formatter, "draft persistence failed: {message}")
             }
             Self::UnsupportedAuth { reason } => {
                 write!(formatter, "SMTP auth is unsupported: {reason}")
@@ -383,10 +400,31 @@ impl From<rusqlite::Error> for SendEmailError {
     }
 }
 
+impl From<DraftPersistenceError> for SendEmailError {
+    fn from(value: DraftPersistenceError) -> Self {
+        Self::DraftPersistence(value.to_string())
+    }
+}
+
 pub trait SmtpAccountStore {
     fn load_smtp_account(&mut self, account_id: &str) -> Result<SmtpAccountConfig, SendEmailError>;
-    fn record_confirmed_send(&mut self, record: &ConfirmedSendRecord)
-        -> Result<(), SendEmailError>;
+    fn ensure_active_draft_for_send(
+        &mut self,
+        _account_id: &str,
+        _draft_id: &str,
+    ) -> Result<(), SendEmailError> {
+        Ok(())
+    }
+    fn record_confirmed_send(
+        &mut self,
+        record: &ConfirmedSendRecord,
+    ) -> Result<ConfirmedSendPersistence, SendEmailError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmedSendPersistence {
+    pub sent_folder_policy: SentFolderPolicy,
+    pub sent_folder_sync_state: SentFolderSyncState,
 }
 
 pub trait SmtpAuthResolver {
@@ -496,14 +534,33 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
         })
     }
 
+    fn ensure_active_draft_for_send(
+        &mut self,
+        account_id: &str,
+        draft_id: &str,
+    ) -> Result<(), SendEmailError> {
+        ensure_active_draft(self.connection, account_id, draft_id)?;
+        Ok(())
+    }
+
     fn record_confirmed_send(
         &mut self,
         record: &ConfirmedSendRecord,
-    ) -> Result<(), SendEmailError> {
-        self.connection.execute(
+    ) -> Result<ConfirmedSendPersistence, SendEmailError> {
+        let sent_copy = sent_mail_copy_for_confirmed_send(
+            self.connection,
+            &record.account_id,
+            record.provider_kind,
+            &record.id,
+            &record.rfc_message_id,
+        )?;
+        let transaction = self.connection.unchecked_transaction()?;
+
+        transaction.execute(
             "INSERT INTO smtp_send_receipts (
                id,
                account_id,
+               source_draft_id,
                rfc_message_id,
                subject,
                from_address,
@@ -518,10 +575,11 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
                message_size_bytes,
                provider_response
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 &record.id,
                 &record.account_id,
+                &record.source_draft_id,
                 &record.rfc_message_id,
                 &record.subject,
                 &record.from_address,
@@ -537,8 +595,23 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
                 &record.provider_response
             ],
         )?;
+        if let Some(draft_id) = &record.source_draft_id {
+            mark_draft_sent_after_confirmed_send(
+                &transaction,
+                ConfirmedSentDraft {
+                    account_id: record.account_id.clone(),
+                    draft_id: draft_id.clone(),
+                    send_receipt_id: record.id.clone(),
+                },
+            )?;
+        }
+        insert_sent_mail_copy_record(&transaction, &sent_copy)?;
+        transaction.commit()?;
 
-        Ok(())
+        Ok(ConfirmedSendPersistence {
+            sent_folder_policy: sent_copy.sent_folder_policy,
+            sent_folder_sync_state: sent_copy.sync_state,
+        })
     }
 }
 
@@ -830,6 +903,13 @@ where
     let account = account_store.load_smtp_account(&request.account_id)?;
     progress.push(SendProgressEvent::AccountResolved);
 
+    if let Some(draft_id) = &request.draft_id {
+        account_store.ensure_active_draft_for_send(&account.account_id, draft_id)?;
+        progress.push(SendProgressEvent::DraftPrepared {
+            draft_id: draft_id.clone(),
+        });
+    }
+
     let auth = auth_resolver.resolve_smtp_auth(&account)?;
     progress.push(SendProgressEvent::AuthResolved {
         mechanism: auth.mechanism(),
@@ -865,6 +945,8 @@ where
     let record = ConfirmedSendRecord {
         id: stable_send_receipt_id(&account.account_id, &rfc_message_id),
         account_id: account.account_id.clone(),
+        provider_kind: account.provider_kind,
+        source_draft_id: request.draft_id.clone(),
         rfc_message_id: rfc_message_id.clone(),
         subject: request.subject.clone(),
         from_address: account.display_email.clone(),
@@ -879,15 +961,23 @@ where
         message_size_bytes: composed.message_size_bytes,
         provider_response: delivery.provider_response.clone(),
     };
-    account_store.record_confirmed_send(&record)?;
+    let persistence = account_store.record_confirmed_send(&record)?;
     progress.push(SendProgressEvent::SentStateRecorded);
+    if let Some(draft_id) = &request.draft_id {
+        progress.push(SendProgressEvent::DraftFinalized {
+            draft_id: draft_id.clone(),
+        });
+    }
 
     Ok(SendEmailReport {
         account_id: account.account_id,
+        source_draft_id: request.draft_id,
         rfc_message_id,
         smtp_host: account.smtp_host,
         smtp_port: account.smtp_port,
         smtp_security: account.smtp_security,
+        sent_folder_policy: persistence.sent_folder_policy,
+        sent_folder_sync_state: persistence.sent_folder_sync_state,
         provider_response: delivery.provider_response,
         message_size_bytes: composed.message_size_bytes,
         attachment_bytes_streamed: composed.attachment_bytes_streamed,
@@ -1038,6 +1128,9 @@ fn compose_body_part(request: &SendEmailRequest) -> Result<BodyPart, SendEmailEr
 
 fn validate_send_request(request: &SendEmailRequest) -> Result<(), SendEmailError> {
     validate_entity_id("account_id", &request.account_id)?;
+    if let Some(draft_id) = &request.draft_id {
+        validate_entity_id("draft_id", draft_id)?;
+    }
     if request.to.len() + request.cc.len() + request.bcc.len() == 0 {
         return Err(SendEmailError::InvalidRequest {
             reason: "at least one recipient is required",
@@ -1333,6 +1426,7 @@ mod tests {
     fn request() -> SendEmailRequest {
         SendEmailRequest {
             account_id: "acct_send".into(),
+            draft_id: None,
             to: vec![address("recipient@example.com")],
             cc: vec![OutboundEmailAddress::new(Some("Copy"), "copy@example.com").unwrap()],
             bcc: vec![address("hidden@example.com")],
@@ -1407,6 +1501,32 @@ mod tests {
                    'sender@gmail.com',
                    'oauth2',
                    'cred_acct_send'
+                 )",
+                [],
+            )
+            .unwrap();
+    }
+
+    fn seed_active_draft(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO composer_drafts (
+                   id,
+                   account_id,
+                   subject,
+                   to_addresses_json,
+                   body_text,
+                   body_html,
+                   attachment_ids_json
+                 )
+                 VALUES (
+                   'draft_1',
+                   'acct_send',
+                   'Draft subject',
+                   '[{\"address\":\"recipient@example.com\"}]',
+                   'Draft body',
+                   '<p>Draft body</p>',
+                   '[\"att_report\"]'
                  )",
                 [],
             )
@@ -1544,6 +1664,14 @@ mod tests {
         assert_eq!(report.smtp_host, "smtp.example.com");
         assert_eq!(report.smtp_port, 587);
         assert_eq!(report.smtp_security, SmtpSecurity::StartTls);
+        assert_eq!(
+            report.sent_folder_policy,
+            SentFolderPolicy::LocalReceiptOnly
+        );
+        assert_eq!(
+            report.sent_folder_sync_state,
+            SentFolderSyncState::Unsupported
+        );
         assert_eq!(report.attachment_bytes_streamed, 11);
         assert_eq!(smtp.seen_mechanism, Some(SaslMechanism::Plain));
         assert_eq!(smtp.sent_messages.len(), 1);
@@ -1585,6 +1713,21 @@ mod tests {
                 Some("250 accepted".into())
             )
         );
+        let sent_copy = connection
+            .query_row(
+                "SELECT sent_folder_policy, sync_state
+                 FROM sent_mail_copies
+                 WHERE send_receipt_id = (
+                   SELECT id FROM smtp_send_receipts WHERE account_id = 'acct_send'
+                 )",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            sent_copy,
+            ("local_receipt_only".into(), "unsupported".into())
+        );
         assert!(matches!(
             report.progress.as_slice(),
             [
@@ -1602,6 +1745,7 @@ mod tests {
     fn failed_smtp_delivery_does_not_record_sent_state() {
         let connection = migrated_connection();
         seed_generic_account(&connection);
+        seed_active_draft(&connection);
         let mut account_store = SqliteSmtpAccountStore::new(&connection);
         let mut auth = FakeAuthResolver {
             auth: SmtpAuth::Plain {
@@ -1615,8 +1759,10 @@ mod tests {
             ..Default::default()
         };
 
+        let mut request = request();
+        request.draft_id = Some("draft_1".into());
         let error = send_email(
-            request(),
+            request,
             &mut account_store,
             &mut auth,
             &mut attachments,
@@ -1631,6 +1777,14 @@ mod tests {
             })
             .unwrap();
         assert_eq!(receipt_count, 0);
+        let draft_state = connection
+            .query_row(
+                "SELECT draft_state FROM composer_drafts WHERE id = 'draft_1'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        assert_eq!(draft_state, "active");
     }
 
     #[test]
@@ -1662,6 +1816,14 @@ mod tests {
         assert_eq!(report.smtp_host, "smtp.gmail.com");
         assert_eq!(report.smtp_port, 587);
         assert_eq!(report.smtp_security, SmtpSecurity::StartTls);
+        assert_eq!(
+            report.sent_folder_policy,
+            SentFolderPolicy::ProviderAutoCopies
+        );
+        assert_eq!(
+            report.sent_folder_sync_state,
+            SentFolderSyncState::NotRequired
+        );
         assert_eq!(smtp.seen_mechanism, Some(SaslMechanism::XOAuth2));
         let auth_mechanism = connection
             .query_row("SELECT auth_mechanism FROM smtp_send_receipts", [], |row| {
@@ -1669,6 +1831,72 @@ mod tests {
             })
             .unwrap();
         assert_eq!(auth_mechanism, "xoauth2");
+    }
+
+    #[test]
+    fn confirmed_send_marks_source_draft_sent_and_clears_draft_content() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        seed_active_draft(&connection);
+        let mut account_store = SqliteSmtpAccountStore::new(&connection);
+        let mut auth = FakeAuthResolver {
+            auth: SmtpAuth::Plain {
+                username: "sender@example.com".into(),
+                password: SecretString::new("app-password"),
+            },
+        };
+        let mut attachments = FakeAttachmentStore::with_text_attachment();
+        let mut smtp = FakeSmtpSender::default();
+        let mut request = request();
+        request.draft_id = Some("draft_1".into());
+        request.message_id = Some("<draft-send@example.com>".into());
+
+        let report = send_email(
+            request,
+            &mut account_store,
+            &mut auth,
+            &mut attachments,
+            &mut smtp,
+        )
+        .unwrap();
+
+        assert_eq!(report.source_draft_id, Some("draft_1".into()));
+        let draft = connection
+            .query_row(
+                "SELECT draft_state, subject, body_text, body_html, sent_receipt_id
+                 FROM composer_drafts
+                 WHERE id = 'draft_1'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(draft.0, "sent");
+        assert_eq!(draft.1, "");
+        assert!(draft.2.is_none());
+        assert!(draft.3.is_none());
+        assert!(draft.4.is_some());
+        let source_draft_id = connection
+            .query_row(
+                "SELECT source_draft_id FROM smtp_send_receipts WHERE rfc_message_id = '<draft-send@example.com>'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap();
+        assert_eq!(source_draft_id, Some("draft_1".into()));
+        assert!(report.progress.iter().any(|event| {
+            matches!(event, SendProgressEvent::DraftPrepared { draft_id } if draft_id == "draft_1")
+        }));
+        assert!(report.progress.iter().any(|event| {
+            matches!(event, SendProgressEvent::DraftFinalized { draft_id } if draft_id == "draft_1")
+        }));
     }
 
     #[test]

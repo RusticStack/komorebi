@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 4;
+pub const LATEST_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -32,6 +32,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 4,
         name: "smtp_send_receipts",
         sql: include_str!("../migrations/004_smtp_send_receipts.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "drafts_and_sent_mail",
+        sql: include_str!("../migrations/005_drafts_and_sent_mail.sql"),
     },
 ];
 
@@ -356,6 +361,8 @@ mod tests {
             "messages_fts",
             "attachments",
             "smtp_send_receipts",
+            "composer_drafts",
+            "sent_mail_copies",
             "templates",
             "template_versions",
         ] {
@@ -374,6 +381,8 @@ mod tests {
             "idx_messages_unread",
             "idx_attachments_message",
             "idx_smtp_send_receipts_account_sent",
+            "idx_composer_drafts_account_state_updated",
+            "idx_sent_mail_copies_account_state",
             "idx_templates_account",
         ] {
             assert!(indexes.contains(index), "missing index {index}");
@@ -388,6 +397,8 @@ mod tests {
             "messages_fts_after_delete",
             "messages_fts_after_update",
             "attachments_touch_updated_at",
+            "composer_drafts_touch_updated_at",
+            "sent_mail_copies_touch_updated_at",
             "templates_touch_updated_at",
         ] {
             assert!(triggers.contains(trigger), "missing trigger {trigger}");
@@ -471,6 +482,7 @@ mod tests {
                 [
                     "id",
                     "account_id",
+                    "source_draft_id",
                     "rfc_message_id",
                     "subject",
                     "from_address",
@@ -483,6 +495,45 @@ mod tests {
                     "provider_response",
                     "sent_at",
                     "created_at",
+                ]
+                .as_slice(),
+            ),
+            (
+                "composer_drafts",
+                [
+                    "id",
+                    "account_id",
+                    "draft_state",
+                    "subject",
+                    "to_addresses_json",
+                    "body_text",
+                    "body_html",
+                    "attachment_ids_json",
+                    "autosave_revision",
+                    "last_autosaved_at",
+                    "discarded_at",
+                    "sent_receipt_id",
+                    "sent_at",
+                    "created_at",
+                    "updated_at",
+                ]
+                .as_slice(),
+            ),
+            (
+                "sent_mail_copies",
+                [
+                    "id",
+                    "send_receipt_id",
+                    "account_id",
+                    "rfc_message_id",
+                    "provider_kind",
+                    "sent_folder_policy",
+                    "sync_state",
+                    "sent_folder_id",
+                    "sent_folder_remote_id",
+                    "last_error",
+                    "created_at",
+                    "updated_at",
                 ]
                 .as_slice(),
             ),
@@ -872,7 +923,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2, 3, 4]
+            vec![2, 3, 4, 5]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -919,7 +970,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![3, 4]
+            vec![3, 4, 5]
         );
         let attributes_json = connection
             .query_row(
@@ -958,7 +1009,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![4]
+            vec![4, 5]
         );
         connection
             .execute(
@@ -987,6 +1038,110 @@ mod tests {
                    'starttls',
                    'plain',
                    512
+                 )",
+                [],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn drafts_and_sent_mail_migration_adds_local_composer_state_to_v4_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..4] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 4;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+        connection
+            .execute(
+                "INSERT INTO smtp_send_receipts (
+                   id,
+                   account_id,
+                   rfc_message_id,
+                   subject,
+                   from_address,
+                   to_addresses_json,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security,
+                   auth_mechanism,
+                   message_size_bytes
+                 )
+                 VALUES (
+                   'send_1',
+                   'acct_1',
+                   '<sent@example.com>',
+                   'sent',
+                   'sender@example.com',
+                   '[\"recipient@example.com\"]',
+                   'smtp.example.com',
+                   587,
+                   'starttls',
+                   'plain',
+                   512
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 4);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![5]
+        );
+        connection
+            .execute(
+                "INSERT INTO composer_drafts (
+                   id,
+                   account_id,
+                   subject,
+                   to_addresses_json,
+                   body_text
+                 )
+                 VALUES (
+                   'draft_1',
+                   'acct_1',
+                   'Draft',
+                   '[{\"address\":\"person@example.com\"}]',
+                   'Body'
+                 )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sent_mail_copies (
+                   id,
+                   send_receipt_id,
+                   account_id,
+                   rfc_message_id,
+                   provider_kind,
+                   sent_folder_policy,
+                   sync_state
+                 )
+                 VALUES (
+                   'sentcopy_1',
+                   'send_1',
+                   'acct_1',
+                   '<sent@example.com>',
+                   'gmail',
+                   'provider_auto_copies',
+                   'not_required'
                  )",
                 [],
             )

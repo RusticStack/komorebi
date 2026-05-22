@@ -1,6 +1,7 @@
 pub mod attachment_safety;
 pub mod auth;
 pub mod credentials;
+pub mod draft_persistence;
 pub mod imap_sync;
 pub mod ipc_boundary;
 pub mod ipc_validation;

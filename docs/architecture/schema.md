@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index, and SMTP send receipt migration implemented.
+Status: initial production schema, FTS5 search index, SMTP send receipts, draft persistence, and Sent-copy planning implemented.
 Last reviewed: 2026-05-22.
 
 ## Implementation
@@ -21,6 +21,8 @@ Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.r
 
 Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
 
+Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs`. Active drafts autosave locally; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
+
 ## Tables
 
 The current schema defines:
@@ -32,6 +34,8 @@ The current schema defines:
 - `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata.
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
 - `smtp_send_receipts`: confirmed outbound SMTP send receipts recorded after provider acceptance.
+- `composer_drafts`: local composer draft autosave state.
+- `sent_mail_copies`: provider-aware Sent-folder copy/upload state for confirmed sends.
 - `templates`: future composer template records.
 - `template_versions`: version history for future template editing.
 - `messages_fts`: FTS5 external-content search index over message subject, sender, and body columns.
@@ -45,6 +49,8 @@ Sync state-machine behavior is documented in `docs/architecture/sync-state-machi
 Inbound MIME normalization behavior is documented in `docs/architecture/mime-normalization.md`.
 
 SMTP send behavior is documented in `docs/architecture/smtp-send.md`.
+
+Draft and Sent persistence behavior is documented in `docs/architecture/draft-and-sent-persistence.md`.
 
 ## FTS5 Search
 
@@ -93,6 +99,8 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - Template JSON and setting JSON must pass `json_valid`.
 - Global template names and per-account template names are deduplicated separately.
 - SMTP send receipts reference accounts, store JSON address snapshots, restrict SMTP security/auth enum values, and are inserted only by the Rust send boundary after confirmed transport acceptance.
+- Composer drafts reference accounts, require JSON address/reference/attachment arrays, and clear private content when discarded or marked sent.
+- Sent mail copy records reference confirmed send receipts and account/provider metadata, and distinguish provider auto-copy, pending IMAP append, and local-receipt-only states.
 
 ## Deferred Schema Work
 
@@ -115,6 +123,7 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - FTS5 integrity checks pass after trigger and rebuild paths.
 - Folder semantics migration adds `attributes_json` to version-2 databases and defaults existing rows to `[]`.
 - SMTP send receipt migration adds `smtp_send_receipts` to version-3 databases and accepts valid confirmed send records.
+- Draft/Sent migration adds `composer_drafts`, `sent_mail_copies`, and `smtp_send_receipts.source_draft_id` to version-4 databases.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 

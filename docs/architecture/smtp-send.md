@@ -16,6 +16,7 @@ Komorebi sends outbound mail through a backend-only boundary that:
 - Composes MIME with `lettre`.
 - Streams attachment file bytes from app-generated storage paths in bounded chunks.
 - Records local sent state only after the SMTP transport returns an accepted response.
+- Converts a supplied active draft id to sent state only after confirmed SMTP acceptance.
 
 The current module is not wired to `invoke_handler` and does not grant frontend command permissions. That keeps the existing zero-permission Tauri capability posture intact until account setup, composer UI, draft state, command ACL, and command-specific UI validation exist.
 
@@ -98,7 +99,9 @@ The receipt records:
 
 `send_email` inserts a receipt only after `SmtpSender::send` succeeds. Transport failure returns an error and leaves `smtp_send_receipts` unchanged.
 
-This is not full Sent-folder synchronization. Uploading/synchronizing the sent copy to a provider Sent folder remains a separate draft/Sent semantics task.
+When a source draft id is supplied, `send_email` validates that the draft is active before auth/network work. After SMTP acceptance, it inserts the receipt, marks the draft sent, clears private draft content, and writes the provider-aware `sent_mail_copies` record in one transaction.
+
+This is not full Sent-folder synchronization. Provider-aware Sent-copy planning is implemented in `docs/architecture/draft-and-sent-persistence.md`, but the IMAP APPEND worker for pending Sent uploads remains future work.
 
 ## Tests
 
@@ -108,6 +111,8 @@ This is not full Sent-folder synchronization. Uploading/synchronizing the sent c
 - Gmail default SMTP metadata with XOAUTH2.
 - Password and OAuth auth resolution without exposing secrets through debug output.
 - Failed SMTP delivery leaving no sent receipt.
+- Failed SMTP delivery leaving the source draft active.
+- Confirmed SMTP delivery converting the source draft to sent state.
 - BCC header removal from formatted MIME.
 - Attachment chunk streaming through a fake attachment store.
 - Attachment storage path traversal denial under a temp root.
@@ -121,8 +126,7 @@ No test uses a live mailbox, live SMTP server, real account, or real credential.
 
 - Frontend composer wiring.
 - Tauri `send_email` IPC registration and capability grant.
-- Draft autosave/discard/restore semantics.
-- Sent folder upload or provider-specific append behavior.
+- IMAP APPEND worker for pending Sent uploads.
 - SMTP protocol-level fake server.
 - Live account setup and live SMTP integration tests.
 
@@ -132,7 +136,9 @@ Keep this document synchronized with:
 
 - `src-tauri/src/smtp_send.rs`
 - `src-tauri/src/schema.rs`
+- `src-tauri/src/draft_persistence.rs`
 - `src-tauri/migrations/004_smtp_send_receipts.sql`
+- `src-tauri/migrations/005_drafts_and_sent_mail.sql`
 - `docs/architecture/provider-auth.md`
 - `docs/architecture/token-lifecycle.md`
 - `docs/architecture/credential-model.md`
