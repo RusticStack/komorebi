@@ -11,6 +11,7 @@ This means:
 
 - Message metadata, `body_text`, and `body_html` stored in SQLite are plaintext database content.
 - Active draft subject, recipient JSON, body text, body HTML, and attachment-id references in `composer_drafts` are plaintext database content until the draft is discarded or converted to sent state.
+- Per-account `signature_html` values are plaintext account metadata.
 - FTS5 indexed message terms in `messages_fts` are plaintext index content.
 - Attachment files stored under the app-generated attachment directory are plaintext files.
 - Attachment metadata in SQLite is plaintext metadata.
@@ -52,7 +53,7 @@ Forbidden until implemented:
 
 If local mail encryption is promoted later, it must cover the full cache lifecycle:
 
-- SQLite message bodies, active draft content, and private metadata.
+- SQLite message bodies, active draft content, account signatures, and private metadata.
 - FTS/search content or a documented decision to disable/rebuild FTS under encryption constraints.
 - Attachment file bytes and preview materialization.
 - Key storage or derivation, unlock UX, recovery posture, backup/export behavior, and account removal cleanup.
@@ -69,6 +70,7 @@ Keep this document synchronized with:
 - `Project Komorebi - Email Client Plan.md`
 - `docs/architecture/schema.md`
 - `docs/architecture/draft-and-sent-persistence.md`
+- `docs/architecture/account-signatures.md`
 - `docs/architecture/attachment-safety.md`
 - `docs/architecture/credential-model.md`
 - `AGENTS.md`

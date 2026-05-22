@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index, SMTP send receipts, draft persistence, and Sent-copy planning implemented.
+Status: initial production schema, FTS5 search index, SMTP send receipts, draft persistence, Sent-copy planning, and per-account signatures implemented.
 Last reviewed: 2026-05-22.
 
 ## Implementation
@@ -22,6 +22,8 @@ Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.r
 Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
 
 Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs`. Active drafts autosave locally; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
+
+Per-account signature persistence is implemented in `src-tauri/src/account_signatures.rs` through the existing `accounts.signature_html` column. Signatures are sanitized account metadata and are not credentials.
 
 ## Tables
 
@@ -51,6 +53,8 @@ Inbound MIME normalization behavior is documented in `docs/architecture/mime-nor
 SMTP send behavior is documented in `docs/architecture/smtp-send.md`.
 
 Draft and Sent persistence behavior is documented in `docs/architecture/draft-and-sent-persistence.md`.
+
+Account signature behavior is documented in `docs/architecture/account-signatures.md`.
 
 ## FTS5 Search
 
@@ -91,6 +95,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 
 - SQLite account rows never include password, app-password, access-token, refresh-token, client-secret, authorization-code, or authorization-header columns.
 - `accounts.credential_ref` is the only persisted secret reference and is unique.
+- `accounts.signature_html` stores optional sanitized HTML account metadata. Empty signatures store `NULL`.
 - Generic IMAP/SMTP accounts must include IMAP and SMTP host, port, and security metadata.
 - Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
 - `folders.attributes_json` must be valid JSON and stores normalized provider LIST/XLIST/SPECIAL-USE attributes for roles the current enum does not model directly.
@@ -115,6 +120,7 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - Required tables, indexes, and timestamp triggers.
 - Required account, folder, message, attachment, and template columns.
 - Absence of secret columns from account metadata.
+- Presence of `accounts.signature_html` as non-secret account metadata.
 - Foreign-key enforcement and account cascade behavior.
 - IMAP UID identity separated from RFC `Message-ID`.
 - FTS5 search returns expected fixture rows.

@@ -4,12 +4,12 @@ Last updated: 2026-05-22
 
 ## Current State
 
-Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, and local draft/Sent persistence now exist; frontend command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
+Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, local draft/Sent persistence, and account signature persistence now exist; frontend command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
 
 The accepted boundary is:
 
 - React may own presentation, selection, form state, and read-only query composition.
-- Rust owns every operation that can mutate credentials, local cache, attachment files, migrations, or remote mailbox state.
+- Rust owns every operation that can mutate credentials, local cache, account metadata, attachment files, migrations, or remote mailbox state.
 - Direct frontend SQL is disabled today. If it is introduced later, it is read-only only and must be justified by a documented table/query scope.
 
 ## Rust-Only Privileged Operations
@@ -18,12 +18,13 @@ These operations must be typed Rust commands or internal Rust worker calls:
 
 - Server-affecting mail actions: send, move, archive, delete, mark read/unread, flag, draft upload, Sent upload, folder rename/delete, and any IMAP/SMTP command that changes provider state. Use `docs/architecture/destructive-mail-actions.md` for move/delete/archive/mark-read/expunge semantics.
 - Credential access: account creation, reauthentication, token refresh, credential lookup, credential rotation, credential deletion, and OAuth revocation.
+- Account metadata mutation: account display metadata, provider metadata, and per-account signatures. Use `docs/architecture/account-signatures.md` for signature sanitization and insertion rules.
 - Attachment writes: downloading, saving, moving, deleting, preview preparation, inline CID materialization, and any file-path selection after a message is parsed. Use `docs/architecture/attachment-safety.md` for path, filename, type, size, and preview rules.
 - Destructive deletes: account removal, cache deletion, attachment cleanup, local message purge, folder cache reset, and provider delete/expunge.
 - Migrations: schema creation, schema upgrades, FTS setup/rebuild, trigger creation, integrity checks, and rollback/recovery.
 - Sync cache mutation: folder discovery, UID/UIDVALIDITY state, message upsert, flag update, expunge handling, body/attachment metadata persistence, search index updates, and retry bookkeeping.
 
-The boundary source of truth is `src-tauri/src/ipc_boundary.rs`. Initial sync cache mutation and folder worker semantics live in `src-tauri/src/imap_sync.rs` and are tested with fake IMAP fixtures. Backend SMTP send semantics live in `src-tauri/src/smtp_send.rs` and are tested with fake SMTP sender/attachment/auth stores. Draft/Sent persistence lives in `src-tauri/src/draft_persistence.rs` and is tested with disposable SQLite fixtures. Boundary tests require each privileged category to remain Rust-owned.
+The boundary source of truth is `src-tauri/src/ipc_boundary.rs`. Initial sync cache mutation and folder worker semantics live in `src-tauri/src/imap_sync.rs` and are tested with fake IMAP fixtures. Backend SMTP send semantics live in `src-tauri/src/smtp_send.rs` and are tested with fake SMTP sender/attachment/auth stores. Draft/Sent persistence lives in `src-tauri/src/draft_persistence.rs` and is tested with disposable SQLite fixtures. Account signature persistence lives in `src-tauri/src/account_signatures.rs` and is tested with disposable SQLite fixtures. Boundary tests require each privileged category to remain Rust-owned.
 
 ## Frontend SQL Policy
 
@@ -58,6 +59,7 @@ Do not expose commands that accept raw SQL, arbitrary filesystem paths, arbitrar
 - `src-tauri/src/imap_sync.rs` tests enforce initial Rust-owned sync cache mutation and folder IDLE/polling worker semantics before any frontend command is registered.
 - `src-tauri/src/smtp_send.rs` tests enforce backend-only SMTP send composition, auth resolution, attachment streaming, and confirmed send receipt behavior before any frontend command is registered.
 - `src-tauri/src/draft_persistence.rs` tests enforce backend-owned draft autosave/discard/sent conversion and provider-aware Sent-copy state before any frontend command is registered.
+- `src-tauri/src/account_signatures.rs` tests enforce backend-owned per-account signature storage, sanitization, clearing, and deterministic insertion before any frontend command is registered.
 - `src-tauri/src/ipc_validation.rs` tests enforce the shared IPC denial policy before any command is registered.
 - `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, and unregistered custom commands.
 - `docs/architecture/tauri-capabilities.md` defines the capability permission policy.

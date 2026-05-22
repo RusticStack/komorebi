@@ -1,3 +1,4 @@
+pub mod account_signatures;
 pub mod attachment_safety;
 pub mod auth;
 pub mod credentials;

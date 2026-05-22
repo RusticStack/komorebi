@@ -28,7 +28,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -37,7 +39,9 @@ button {
 }
 
 button:disabled,
-input:disabled {
+input:disabled,
+select:disabled,
+textarea:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -118,6 +122,10 @@ input:disabled {
   gap: 10px;
 }
 
+.sidebar-section--footer {
+  margin-top: auto;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -136,7 +144,9 @@ input:disabled {
 .folder,
 .list-toolbar button,
 .reader-actions button,
-.icon-command {
+.icon-command,
+.settings-button,
+.settings-panel button {
   border: 1px solid transparent;
   border-radius: 8px;
   color: #2d2d2d;
@@ -219,6 +229,14 @@ input:disabled {
   padding: 7px 12px;
   background: #9a624f;
   color: #fffaf5;
+}
+
+.settings-button {
+  min-height: 38px;
+  padding: 8px 10px;
+  text-align: left;
+  border-color: #d8d0c4;
+  background: #f7f5f2;
 }
 
 .search {
@@ -420,8 +438,96 @@ input:disabled {
   background: #f7f5f2;
 }
 
+.settings-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(520px, 100vw);
+  z-index: 10;
+  border-left: 1px solid #dfd9d0;
+  background: #fffdf9;
+  box-shadow: -18px 0 38px rgb(45 45 45 / 12%);
+}
+
+.settings-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 18px;
+  height: 100%;
+  padding: 24px;
+  overflow: auto;
+}
+
+.settings-panel__header,
+.settings-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-panel__header h2,
+.settings-panel__header p {
+  margin: 0;
+}
+
+.settings-panel button {
+  min-height: 38px;
+  padding: 7px 12px;
+  border-color: #ddd4c8;
+  background: #f2eee6;
+}
+
+.settings-panel__actions button[type="submit"] {
+  background: #9a624f;
+  color: #fffaf5;
+}
+
+.signature-settings {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.signature-settings label {
+  display: grid;
+  gap: 6px;
+  color: #716d66;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.signature-settings select,
+.signature-settings textarea {
+  width: 100%;
+  border: 1px solid #d8d0c4;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #2d2d2d;
+  background: #fffdf9;
+}
+
+.signature-settings textarea {
+  min-height: 160px;
+  resize: vertical;
+  font-family:
+    "Cascadia Mono",
+    "Consolas",
+    monospace;
+  font-size: 0.88rem;
+}
+
+.signature-preview {
+  min-height: 120px;
+  padding: 14px;
+  border: 1px solid #e7e1d8;
+  border-radius: 8px;
+  background: #fbfaf8;
+}
+
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid #5d7567;
   outline-offset: 2px;
 }
@@ -455,5 +561,9 @@ input:focus-visible {
 
   .message-list {
     min-height: 520px;
+  }
+
+  .settings-drawer {
+    width: 100vw;
   }
 }

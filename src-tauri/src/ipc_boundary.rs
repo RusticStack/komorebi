@@ -7,6 +7,7 @@ pub enum BoundaryOwner {
 pub enum PrivilegedOperation {
     ServerAffectingMailAction,
     CredentialAccess,
+    AccountMetadataMutation,
     AttachmentWrite,
     DestructiveDelete,
     Migration,
@@ -44,6 +45,12 @@ pub const PRIVILEGED_MUTATION_BOUNDARIES: &[MutationBoundary] = &[
         owner: BoundaryOwner::RustCommand,
         command_family: "account_auth",
         rationale: "Credential Manager and OAuth tokens must never be exposed to React or direct SQL.",
+    },
+    MutationBoundary {
+        operation: PrivilegedOperation::AccountMetadataMutation,
+        owner: BoundaryOwner::RustCommand,
+        command_family: "account_metadata",
+        rationale: "Account display metadata and signatures need ownership checks, sanitization, and typed persistence.",
     },
     MutationBoundary {
         operation: PrivilegedOperation::AttachmentWrite,
@@ -89,6 +96,7 @@ mod tests {
     const REQUIRED_OPERATIONS: &[PrivilegedOperation] = &[
         PrivilegedOperation::ServerAffectingMailAction,
         PrivilegedOperation::CredentialAccess,
+        PrivilegedOperation::AccountMetadataMutation,
         PrivilegedOperation::AttachmentWrite,
         PrivilegedOperation::DestructiveDelete,
         PrivilegedOperation::Migration,

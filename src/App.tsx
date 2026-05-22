@@ -1,9 +1,13 @@
+import { useState } from "react";
 import "./App.css";
+import { AccountSignatureSettings } from "./settings/AccountSignatureSettings";
 
 type AccountSummary = {
   id: string;
   label: string;
+  email: string;
   status: "connected" | "reconnect-needed" | "offline";
+  signatureHtml: string | null;
 };
 
 type FolderSummary = {
@@ -36,6 +40,7 @@ const initialMailState: MailShellState = {
 };
 
 function App() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const hasAccounts = initialMailState.accounts.length > 0;
   const hasMessages = initialMailState.messages.length > 0;
   const selectedMessage = initialMailState.messages.find(
@@ -92,6 +97,16 @@ function App() {
             <p className="empty-note">Folders appear after an account is added.</p>
           )}
         </nav>
+
+        <section className="sidebar-section sidebar-section--footer" aria-label="App">
+          <button
+            className="settings-button"
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Settings
+          </button>
+        </section>
       </aside>
 
       <section className="message-list" aria-label="Messages">
@@ -178,6 +193,21 @@ function App() {
           <span>Remote content blocked by default</span>
         </footer>
       </section>
+
+      {settingsOpen ? (
+        <div className="settings-drawer">
+          <AccountSignatureSettings
+            accounts={initialMailState.accounts.map((account) => ({
+              id: account.id,
+              label: account.label,
+              email: account.email,
+              signatureHtml: account.signatureHtml,
+            }))}
+            onSaveSignature={() => undefined}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }

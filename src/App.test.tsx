@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
 
 describe("App", () => {
@@ -21,11 +21,25 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: "Compose" }),
     ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeEnabled();
     expect(screen.getByRole("searchbox")).toBeDisabled();
     expect(
       screen.queryByText("Welcome to Tauri + React"),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("personal@example.com")).not.toBeInTheDocument();
     expect(screen.queryByText("Client kickoff agenda")).not.toBeInTheDocument();
+  });
+
+  it("opens accountless settings without exposing fake signature data", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const settings = screen.getByRole("region", { name: "Settings" });
+
+    expect(settings).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Signatures" })).toBeVisible();
+    expect(within(settings).getByText("No accounts configured.")).toBeVisible();
+    expect(screen.queryByText("Personal signature")).not.toBeInTheDocument();
   });
 });

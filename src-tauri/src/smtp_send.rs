@@ -21,6 +21,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
+    account_signatures::{
+        insert_signature_into_body_html, insert_signature_into_body_text, AccountSignatureError,
+    },
     auth::{evaluate_account_setup_auth_policy, AuthKind, AuthPolicy, ProviderKind, SaslMechanism},
     credentials::{CredentialError, CredentialSlot, WindowsCredentialManager},
     draft_persistence::{
@@ -81,6 +84,7 @@ pub struct SmtpAccountConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_security: SmtpSecurity,
+    pub signature_html: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -299,6 +303,7 @@ pub enum SendEmailError {
         reason: &'static str,
     },
     DraftPersistence(String),
+    AccountSignature(String),
     UnsupportedAuth {
         reason: &'static str,
     },
@@ -342,6 +347,9 @@ impl fmt::Display for SendEmailError {
             }
             Self::DraftPersistence(message) => {
                 write!(formatter, "draft persistence failed: {message}")
+            }
+            Self::AccountSignature(message) => {
+                write!(formatter, "account signature failed: {message}")
             }
             Self::UnsupportedAuth { reason } => {
                 write!(formatter, "SMTP auth is unsupported: {reason}")
@@ -403,6 +411,12 @@ impl From<rusqlite::Error> for SendEmailError {
 impl From<DraftPersistenceError> for SendEmailError {
     fn from(value: DraftPersistenceError) -> Self {
         Self::DraftPersistence(value.to_string())
+    }
+}
+
+impl From<AccountSignatureError> for SendEmailError {
+    fn from(value: AccountSignatureError) -> Self {
+        Self::AccountSignature(value.to_string())
     }
 }
 
@@ -479,7 +493,8 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
                    auth_kind,
                    smtp_host,
                    smtp_port,
-                   smtp_security
+                   smtp_security,
+                   signature_html
                  FROM accounts
                  WHERE id = ?1 AND removed_at IS NULL",
                 [account_id],
@@ -493,6 +508,7 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, Option<i64>>(6)?,
                         row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -507,6 +523,7 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
             smtp_host,
             smtp_port,
             smtp_security,
+            signature_html,
         )) = row
         else {
             return Err(SendEmailError::UnknownAccount);
@@ -531,6 +548,7 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
             smtp_host,
             smtp_port,
             smtp_security,
+            signature_html,
         })
     }
 
@@ -1022,7 +1040,7 @@ fn compose_message(
         builder = builder.reply_to(recipient.mailbox()?);
     }
 
-    let body = compose_body_part(request)?;
+    let body = compose_body_part(account, request)?;
     let mut attachment_bytes_streamed = 0_u64;
     let mut attachment_parts = Vec::new();
     for attachment in &request.attachments {
@@ -1109,17 +1127,35 @@ fn compose_message(
     })
 }
 
-fn compose_body_part(request: &SendEmailRequest) -> Result<BodyPart, SendEmailError> {
-    match (&request.body_text, &request.body_html) {
+fn compose_body_part(
+    account: &SmtpAccountConfig,
+    request: &SendEmailRequest,
+) -> Result<BodyPart, SendEmailError> {
+    let body_text = if request.body_html.is_none() {
+        request
+            .body_text
+            .as_deref()
+            .map(|text| insert_signature_into_body_text(text, account.signature_html.as_deref()))
+            .transpose()?
+    } else {
+        request.body_text.clone()
+    };
+    let body_html = request
+        .body_html
+        .as_ref()
+        .map(|html| {
+            insert_signature_into_body_html(html.as_str(), account.signature_html.as_deref())
+        })
+        .transpose()?;
+
+    match (&body_text, &body_html) {
         (Some(text), Some(html)) => Ok(BodyPart::Multi(
             MultiPart::alternative()
                 .singlepart(SinglePart::plain(text.clone()))
-                .singlepart(SinglePart::html(html.as_str().to_string())),
+                .singlepart(SinglePart::html(html.clone())),
         )),
         (Some(text), None) => Ok(BodyPart::Single(SinglePart::plain(text.clone()))),
-        (None, Some(html)) => Ok(BodyPart::Single(SinglePart::html(
-            html.as_str().to_string(),
-        ))),
+        (None, Some(html)) => Ok(BodyPart::Single(SinglePart::html(html.clone()))),
         (None, None) => Err(SendEmailError::InvalidRequest {
             reason: "message body is required",
         }),
@@ -1533,6 +1569,15 @@ mod tests {
             .unwrap();
     }
 
+    fn seed_account_signature(connection: &Connection, signature_html: &str) {
+        connection
+            .execute(
+                "UPDATE accounts SET signature_html = ?1 WHERE id = 'acct_send'",
+                [signature_html],
+            )
+            .unwrap();
+    }
+
     #[derive(Debug, Clone)]
     struct FakeAuthResolver {
         auth: SmtpAuth,
@@ -1834,6 +1879,49 @@ mod tests {
     }
 
     #[test]
+    fn smtp_send_inserts_sanitized_account_signature_into_html_body() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        seed_account_signature(
+            &connection,
+            r#"<p onclick="alert(1)">Regards<br><strong>Sender</strong><img src="https://tracker.example/pixel.gif"></p>"#,
+        );
+        let mut account_store = SqliteSmtpAccountStore::new(&connection);
+        let mut auth = FakeAuthResolver {
+            auth: SmtpAuth::Plain {
+                username: "sender@example.com".into(),
+                password: SecretString::new("app-password"),
+            },
+        };
+        let mut attachments = FakeAttachmentStore::default();
+        let mut smtp = FakeSmtpSender::default();
+        let mut request = request();
+        request.attachments.clear();
+
+        send_email(
+            request,
+            &mut account_store,
+            &mut auth,
+            &mut attachments,
+            &mut smtp,
+        )
+        .unwrap();
+
+        let sent = &smtp.sent_messages[0];
+        assert_eq!(
+            sent.matches(crate::account_signatures::SIGNATURE_HTML_BLOCK_START)
+                .count(),
+            1
+        );
+        assert!(sent.contains("komorebi-account-signature"));
+        assert!(sent.contains("Regards"));
+        assert!(sent.contains("Sender"));
+        assert!(!sent.contains("onclick"));
+        assert!(!sent.contains("<img"));
+        assert!(!sent.contains("tracker.example"));
+    }
+
+    #[test]
     fn confirmed_send_marks_source_draft_sent_and_clears_draft_content() {
         let connection = migrated_connection();
         seed_generic_account(&connection);
@@ -1948,6 +2036,7 @@ mod tests {
             smtp_host: "smtp.example.com".into(),
             smtp_port: 25,
             smtp_security: SmtpSecurity::None,
+            signature_html: None,
         };
         let auth = SmtpAuth::Plain {
             username: "sender@example.com".into(),
@@ -2184,6 +2273,7 @@ mod tests {
             smtp_host: "smtp.example.com".into(),
             smtp_port: 587,
             smtp_security: SmtpSecurity::StartTls,
+            signature_html: None,
         };
 
         let auth = resolver.resolve_smtp_auth(&generic).unwrap();
