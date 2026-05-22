@@ -75,7 +75,7 @@ Rules:
 3. Rust writes the secret to Windows Credential Manager.
 4. Rust writes the SQLite account metadata with `credential_ref` only after the credential write succeeds.
 5. Sync/send code resolves credentials by `account_id` inside Rust.
-6. Rust refreshes OAuth tokens inside Rust and stores new refresh tokens only through the credential backend.
+6. Rust refreshes OAuth tokens inside Rust and stores new refresh tokens only through the credential backend, following `docs/architecture/token-lifecycle.md`.
 7. Rust returns auth status, errors, and expiry metadata to React, never the secret value.
 
 ## Clearing And Rotation
@@ -91,6 +91,8 @@ Account removal must run as a single typed backend workflow:
 7. Write a redacted local audit event such as `account_removed`, never the email password or token.
 
 Credential rotation must write the replacement credential first, verify it can authenticate or refresh, then replace `credential_ref`/metadata. Failed rotation leaves the previous credential intact.
+
+Token refresh, reconnect-needed status, and provider revocation handling are defined in `docs/architecture/token-lifecycle.md` and enforced by `src-tauri/src/token_lifecycle.rs`.
 
 ## Frontend And IPC Boundaries
 

@@ -79,3 +79,4 @@ Before Gmail or Microsoft account setup is enabled, Komorebi needs:
 - Gmail XOAUTH2 protocol details: https://developers.google.com/workspace/gmail/imap/xoauth2-protocol
 - Microsoft OAuth support for IMAP/POP/SMTP: https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth
 - Microsoft Basic authentication deprecation in Exchange Online: https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-basic-authentication-exchange-online
+- Token lifecycle policy: `docs/architecture/token-lifecycle.md`

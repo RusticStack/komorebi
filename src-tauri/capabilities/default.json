@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Main window capability. Grants no frontend access until a feature-specific permission is reviewed and tested.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": []
 }

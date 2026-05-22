@@ -4,13 +4,13 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, and `docs/architecture/provider-auth.md`.
-- Local code inspected: scaffolded React app in `src/`, Tauri/Rust shell in `src-tauri/`, and Rust auth policy in `src-tauri/src/auth.rs`.
-- Local tests inspected: `src/App.test.tsx`; `src-tauri/src/auth.rs` unit tests for provider/auth policy.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, and `docs/architecture/tauri-capabilities.md`.
+- Local code inspected: scaffolded React app in `src/`, Tauri/Rust shell in `src-tauri/`, Rust auth policy in `src-tauri/src/auth.rs`, and Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`.
+- Local tests inspected: `src/App.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup.
 - Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
-- Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
+- Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; provider-auth architecture docs and auth policy code are untracked/modified until committed.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; token lifecycle and capability architecture docs/tests/code/config are untracked or modified until committed.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
 - External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
@@ -47,15 +47,13 @@ Purpose: prevent the earliest design choices from leaking credentials, exposing 
   Evidence: `docs/architecture/credential-model.md` chooses Windows Credential Manager/DPAPI as the approved Windows-first secret backend, rejects Tauri Store/SQLite/browser storage/logs/diagnostics/frontend state for secrets, forbids plaintext passwords and tokens at rest, defines SQLite account metadata vs Credential Manager entries, and documents account removal, credential rotation, runtime access, and diagnostics clearing rules.
 - [x] Support modern authentication paths for major providers.
   Evidence: `docs/architecture/provider-auth.md` requires OAuth2/XOAUTH2 for Gmail and Microsoft, explicitly marks those providers unsupported until OAuth is implemented, rejects Gmail/Microsoft manual password and app-password fallback, and limits password/app-password setup to compatible generic IMAP/SMTP providers. `src-tauri/src/auth.rs` enforces the provider/auth matrix with Rust tests covering Gmail/Microsoft denial paths, OAuth-pending unsupported status, future XOAUTH2 allowed status, and generic password allowance.
-- [ ] Implement token refresh and revocation handling.
-  Evidence: no account model or sync worker exists.
-  Acceptance: expired tokens refresh without exposing secrets to React; failed refresh leads to a safe reconnect-needed state; account removal wipes credentials and local cache according to documented retention rules.
+- [x] Implement token refresh and revocation handling.
+  Evidence: `docs/architecture/token-lifecycle.md` defines backend-only token refresh, reconnect-needed status, provider revocation policy, local cleanup, and storage rules. `src-tauri/src/token_lifecycle.rs` implements the lifecycle behind credential-store, access-cache, OAuth-client, and account-data traits. Tests prove expired tokens refresh without putting secrets in frontend-safe views, failed/missing refresh enters reconnect-needed state, account removal clears credentials/access cache/local cache/metadata, and local cleanup still happens when provider revocation fails.
 
 ### Tauri And IPC Security
 
-- [ ] Define least-privilege Tauri capabilities.
-  Evidence: no `src-tauri/capabilities` exists; Tauri v2 requires explicit permission design.
-  Acceptance: main webview has only required permissions; SQL execute, filesystem, opener, shell/process, HTTP, and command permissions are scoped or denied by default; capability files are reviewed in tests or CI.
+- [x] Define least-privilege Tauri capabilities.
+  Evidence: `src-tauri/tauri.conf.json` explicitly enables only the `default` capability; `src-tauri/capabilities/default.json` targets only the `main` window and grants no frontend Tauri permissions; `docs/architecture/tauri-capabilities.md` documents the denial policy for SQL, filesystem, opener, shell/process, HTTP, remote-origin, wildcard, and custom-command access. `src-tauri/build.rs` keeps the app command ACL list explicit and empty. `src-tauri/capabilities/capabilities.test.ts` reviews all capability JSON files plus Tauri config, forbidden Rust plugin registrations, and custom-command registration. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
 - [ ] Keep privileged mutations in Rust commands.
   Evidence: the plan allows frontend database queries through the SQL plugin, but write boundaries are not specified.
   Acceptance: server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation are typed Rust commands; frontend SQL is read-only or narrowly justified.

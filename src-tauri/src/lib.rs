@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod token_lifecycle;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

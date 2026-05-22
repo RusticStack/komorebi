@@ -36,6 +36,10 @@ The accepted credential architecture is documented in [docs/architecture/credent
 
 Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft account setup are disabled until OAuth2/XOAUTH2 is implemented; generic password/app-password setup is limited to compatible generic IMAP/SMTP providers.
 
+Token refresh, reconnect-needed state, and account-removal cleanup are documented in [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md). React receives redacted auth status only; token refresh and revocation handling stay in Rust.
+
+Tauri capability policy is documented in [docs/architecture/tauri-capabilities.md](docs/architecture/tauri-capabilities.md). The main webview currently has no frontend Tauri permissions; SQL, filesystem, opener, shell/process, HTTP, and custom-command access are denied unless a future feature adds a scoped capability and test coverage.
+
 ## Setup
 
 ```powershell
@@ -60,6 +64,12 @@ Build the frontend:
 
 ```powershell
 pnpm build
+```
+
+Validate Tauri configuration without producing installers:
+
+```powershell
+pnpm tauri build --no-bundle
 ```
 
 Run the full root check suite:
