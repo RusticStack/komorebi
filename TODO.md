@@ -4,15 +4,15 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, and `docs/architecture/ipc-validation.md`.
-- Local code inspected: scaffolded React app in `src/`, Tauri/Rust shell in `src-tauri/`, Rust auth policy in `src-tauri/src/auth.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, and Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`.
-- Local tests inspected: `src/App.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, `docs/architecture/ipc-validation.md`, and `docs/architecture/message-rendering.md`.
+- Local code inspected: scaffolded React app in `src/`, safe email rendering boundary in `src/mail/rendering/`, Tauri/Rust shell in `src-tauri/`, Rust auth policy in `src-tauri/src/auth.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, and Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`.
+- Local tests inspected: `src/App.test.tsx`; `src/mail/rendering/SafeEmailBody.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths.
 - Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
 - Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; IPC boundary and validation architecture docs/tests/code are modified until committed.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; safe message rendering, IPC boundary, and validation architecture docs/tests/code are modified until committed.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
-- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
+- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, DOMPurify docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
 ## P0 - Repository Substrate And Executable Baseline
 
@@ -61,9 +61,8 @@ Purpose: prevent the earliest design choices from leaking credentials, exposing 
 
 ### Message Rendering And Attachments
 
-- [ ] Build a safe email HTML rendering boundary.
-  Evidence: plan requires `body_html` and safe previewing, but no sanitizer/rendering design exists.
-  Acceptance: untrusted HTML is sanitized, scripts/event handlers are removed, remote resources are blocked by default, links are rewritten or opened safely, plain-text fallback exists, and XSS fixture tests fail before and pass after.
+- [x] Build a safe email HTML rendering boundary.
+  Evidence: `docs/architecture/message-rendering.md` defines the rendering boundary. `src/mail/rendering/emailHtml.ts` sanitizes untrusted email HTML with DOMPurify, removes scripts/event handlers/style/resource-loading attributes, blocks remote and inline resources by default, rewrites safe `http`/`https`/`mailto` links for delegated opening, strips unsafe links, and exposes plain text. `src/mail/rendering/SafeEmailBody.tsx` is the only sanctioned `dangerouslySetInnerHTML` sink and renders plain-text fallback without interpreting markup. `src/mail/rendering/xssFixtures.ts` and `src/mail/rendering/SafeEmailBody.test.tsx` cover hostile HTML fixtures, remote resource blocking, safe/unsafe links, and fallback rendering. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
 - [ ] Design attachment storage and preview safety.
   Evidence: plan stores `attachments.local_path`, but no filename/path or preview policy exists.
   Acceptance: app-generated storage paths are used, sender filenames are display-only, path traversal is impossible, size/type limits exist, previews are opt-in and type-checked, and auto-open is forbidden.
@@ -139,7 +138,7 @@ Purpose: deliver the actual usable personal email client promised by the plan. R
   Evidence: plan requires `@tanstack/react-virtual`; no code exists.
   Acceptance: 10,000+ fixture messages render without UI lag; row selection, unread, flagged, sender, subject, date, and snippet remain stable during scroll.
 - [ ] Implement safe message detail view.
-  Evidence: no reader exists.
+  Evidence: the placeholder reader now uses `SafeEmailBody`, but no real message-detail workflow, attachment list, reply/forward routing, remote-content preference UI, or fixture-backed mailbox state exists yet.
   Acceptance: plain and sanitized HTML views work; remote images are blocked by default; attachment list is safe; reply/forward actions are available but disabled or routed until implemented.
 - [ ] Implement FTS-backed search UX.
   Evidence: plan requires instant FTS5 search but no frontend or DB exists.

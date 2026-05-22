@@ -297,9 +297,54 @@ button {
   padding: 34px;
 }
 
-.reader-body p {
+.reader-body p,
+.safe-email-body__html p {
   max-width: 68ch;
   margin-bottom: 18px;
+}
+
+.safe-email-body {
+  display: grid;
+  gap: 18px;
+}
+
+.safe-email-body__html {
+  max-width: 72ch;
+}
+
+.safe-email-body__html a {
+  color: #5d7567;
+  font-weight: 700;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.safe-email-body__html img {
+  display: block;
+  max-width: 100%;
+  border: 1px dashed #d8d0c4;
+  border-radius: 8px;
+}
+
+.safe-email-body__plain {
+  max-width: 72ch;
+  margin: 0;
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+.safe-email-body__notice,
+.safe-email-body__empty {
+  max-width: 68ch;
+  color: #716d66;
+}
+
+.safe-email-body__notice {
+  margin: 0;
+  border-left: 3px solid #9a624f;
+  padding: 8px 0 8px 12px;
+  background: #fbfaf8;
+  font-size: 0.88rem;
 }
 
 .reader-status {

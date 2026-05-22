@@ -1,4 +1,5 @@
 import "./App.css";
+import { SafeEmailBody } from "./mail/rendering/SafeEmailBody";
 
 const folders = [
   { name: "Unified inbox", count: 18, active: true },
@@ -38,6 +39,26 @@ const messages = [
     unread: false,
   },
 ];
+
+const selectedMessageBodyHtml = `
+  <p>Hello,</p>
+  <p>
+    The kickoff outline is ready for review. The first implementation pass
+    should focus on account setup, safe local storage, and the
+    SQLite-backed message cache before connecting live mailboxes.
+  </p>
+  <p>
+    The attachment queue is empty, and remote content remains blocked.
+    <a href="https://example.com/kickoff">Open agenda</a>
+  </p>
+  <img src="https://tracker.example/open.png" alt="tracking pixel">
+`;
+
+const selectedMessageBodyText = `Hello,
+
+The kickoff outline is ready for review. The first implementation pass should focus on account setup, safe local storage, and the SQLite-backed message cache before connecting live mailboxes.
+
+The attachment queue is empty, and remote content remains blocked.`;
 
 function App() {
   return (
@@ -125,15 +146,10 @@ function App() {
         </div>
 
         <article className="reader-body">
-          <p>Hello,</p>
-          <p>
-            The kickoff outline is ready for review. The first implementation
-            pass should focus on account setup, safe local storage, and the
-            SQLite-backed message cache before connecting live mailboxes.
-          </p>
-          <p>
-            The attachment queue is empty, and remote content remains blocked.
-          </p>
+          <SafeEmailBody
+            bodyHtml={selectedMessageBodyHtml}
+            bodyText={selectedMessageBodyText}
+          />
         </article>
 
         <footer className="reader-status">
