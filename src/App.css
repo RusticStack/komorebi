@@ -23,8 +23,10 @@
 
 body {
   margin: 0;
+  width: 100%;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 button,
@@ -44,6 +46,13 @@ select:disabled,
 textarea:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.list-toolbar button:disabled,
+.composer-panel button:disabled,
+.settings-panel button:disabled {
+  background: #d8d0c4;
+  color: #716d66;
 }
 
 .app-shell {
@@ -66,7 +75,8 @@ textarea:disabled {
 .brand,
 .message-row,
 .sender-line,
-.reader-status {
+.reader-status,
+.unified-toggle {
   display: flex;
   align-items: center;
 }
@@ -146,7 +156,9 @@ textarea:disabled {
 .reader-actions button,
 .icon-command,
 .settings-button,
-.settings-panel button {
+.settings-panel button,
+.composer-panel button,
+.status-note button {
   border: 1px solid transparent;
   border-radius: 8px;
   color: #2d2d2d;
@@ -172,14 +184,46 @@ textarea:disabled {
   background: #f7f5f2;
 }
 
+.account-button.is-active {
+  border-color: #c2d0c2;
+  background: #d8e0d7;
+}
+
 .account-button span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.account-button strong {
+.account-button strong,
+.account-button small {
   color: #5d7567;
   font-size: 0.78rem;
+}
+
+.account-button small {
+  overflow: hidden;
+  color: #716d66;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.unified-toggle {
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d8d0c4;
+  border-radius: 8px;
+  background: #f7f5f2;
+  color: #2d2d2d;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.unified-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #5d7567;
 }
 
 .folder {
@@ -200,6 +244,33 @@ textarea:disabled {
   font-size: 0.88rem;
 }
 
+.status-note {
+  display: grid;
+  gap: 8px;
+}
+
+.status-note p {
+  margin: 0;
+}
+
+.status-note--error {
+  padding: 10px;
+  border: 1px solid #e1c8be;
+  border-radius: 8px;
+  background: #fff7f3;
+  color: #774331;
+  font-size: 0.88rem;
+}
+
+.status-note button,
+.empty-panel button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-color: #d8d0c4;
+  background: #f7f5f2;
+}
+
 .message-list {
   display: flex;
   min-width: 0;
@@ -217,10 +288,15 @@ textarea:disabled {
   border-bottom: 1px solid #e7e1d8;
 }
 
+.list-toolbar > div {
+  min-width: 0;
+}
+
 .list-toolbar h2,
 .reader-header h2 {
   font-size: 1.55rem;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .list-toolbar button,
@@ -268,9 +344,13 @@ textarea:disabled {
 .message {
   display: grid;
   gap: 6px;
+  width: 100%;
+  border: 0;
   padding: 16px 22px;
   border-bottom: 1px solid #eee8df;
+  color: #2d2d2d;
   background: #fbfaf8;
+  text-align: left;
 }
 
 .message[aria-current="true"] {
@@ -331,6 +411,7 @@ textarea:disabled {
 .empty-panel p,
 .reader-empty p {
   color: #716d66;
+  overflow-wrap: anywhere;
 }
 
 .reader {
@@ -448,7 +529,18 @@ textarea:disabled {
   box-shadow: -18px 0 38px rgb(45 45 45 / 12%);
 }
 
-.settings-panel {
+.composer-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(560px, 100vw);
+  z-index: 10;
+  border-left: 1px solid #dfd9d0;
+  background: #fffdf9;
+  box-shadow: -18px 0 38px rgb(45 45 45 / 12%);
+}
+
+.settings-panel,
+.composer-panel {
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 18px;
@@ -477,18 +569,28 @@ textarea:disabled {
   background: #f2eee6;
 }
 
-.settings-panel__actions button[type="submit"] {
+.composer-panel button {
+  min-height: 38px;
+  padding: 7px 12px;
+  border-color: #ddd4c8;
+  background: #f2eee6;
+}
+
+.settings-panel__actions button[type="submit"],
+.composer-form .settings-panel__actions button:last-child {
   background: #9a624f;
   color: #fffaf5;
 }
 
-.signature-settings {
+.signature-settings,
+.composer-form {
   display: grid;
   align-content: start;
   gap: 16px;
 }
 
-.signature-settings label {
+.signature-settings label,
+.composer-form label {
   display: grid;
   gap: 6px;
   color: #716d66;
@@ -497,7 +599,9 @@ textarea:disabled {
 }
 
 .signature-settings select,
-.signature-settings textarea {
+.signature-settings textarea,
+.composer-form input,
+.composer-form textarea {
   width: 100%;
   border: 1px solid #d8d0c4;
   border-radius: 8px;
@@ -506,7 +610,8 @@ textarea:disabled {
   background: #fffdf9;
 }
 
-.signature-settings textarea {
+.signature-settings textarea,
+.composer-form textarea {
   min-height: 160px;
   resize: vertical;
   font-family:
@@ -545,13 +650,19 @@ textarea:focus-visible {
 @media (max-width: 640px) {
   .app-shell {
     grid-template-columns: 1fr;
+    width: 100%;
+    max-width: 100vw;
     height: auto;
     min-height: 100vh;
     overflow: visible;
   }
 
   .sidebar,
+  .reader,
   .message-list {
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
     border-right: 0;
   }
 
@@ -559,11 +670,44 @@ textarea:focus-visible {
     gap: 18px;
   }
 
+  .unified-toggle {
+    justify-content: flex-start;
+  }
+
   .message-list {
     min-height: 520px;
   }
 
-  .settings-drawer {
+  .list-toolbar {
+    display: grid;
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+  }
+
+  .list-toolbar button {
+    justify-self: start;
+  }
+
+  .list-toolbar,
+  .search,
+  .empty-panel,
+  .reader-empty,
+  .reader-header,
+  .reader-actions,
+  .reader-body,
+  .reader-status {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .reader {
+    display: grid;
+    min-height: 320px;
+    border-top: 1px solid #dfd9d0;
+  }
+
+  .settings-drawer,
+  .composer-drawer {
     width: 100vw;
   }
 }
