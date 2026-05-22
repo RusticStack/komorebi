@@ -12,7 +12,7 @@ Last audit refresh: 2026-05-22
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
 - Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; current P2 schema changes are uncommitted until the user asks for a commit.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
-- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, Windows Credential Manager Win32 docs, DOMPurify docs, RFC 9051, RFC 6851, `async-imap`, `lettre`, `mail-parser`, SQLite CREATE TABLE/foreign-key/PRAGMA/FTS5 docs, Gmail IMAP/SMTP OAuth/XOAUTH2 docs, Microsoft Exchange Online OAuth/basic-auth docs, Microsoft authorization-code/PKCE docs, OWASP XSS/file-upload/path-traversal guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
+- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, Windows Credential Manager Win32 docs, DOMPurify docs, RFC 9051, RFC 6851, `async-imap`, `lettre`, `mail-parser`, SQLite CREATE TABLE/foreign-key/PRAGMA/FTS5 external-content, rebuild, and integrity-check docs, Gmail IMAP/SMTP OAuth/XOAUTH2 docs, Microsoft Exchange Online OAuth/basic-auth docs, Microsoft authorization-code/PKCE docs, OWASP XSS/file-upload/path-traversal guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
 ## P0 - Repository Substrate And Executable Baseline
 
@@ -78,9 +78,8 @@ Purpose: make local cache and remote mail state accurate, recoverable, and searc
   Evidence: `src-tauri/migrations/001_initial_schema.sql` defines `schema_migrations`, `settings`, `accounts`, `folders`, `messages`, `attachments`, `templates`, and `template_versions` with primary keys, foreign keys, unique constraints, partial unique indexes, query indexes, timestamp columns/triggers, JSON checks, non-secret account metadata, account/folder/message relations, attachment records, and future-compatible template versioning. `src-tauri/src/schema.rs` applies migrations transactionally, enables foreign keys, records `PRAGMA user_version`, rejects newer databases, and tests migration idempotency, required schema objects, constraints, cascades, timestamp triggers, and `PRAGMA foreign_key_check`.
 - [x] Separate IMAP UID identity from RFC message identity.
   Evidence: `messages.id` is the local row id, while `messages.imap_uid`, `messages.uid_validity`, `messages.rfc_message_id`, and `messages.provider_message_id` are distinct columns. The partial unique index `ux_messages_imap_identity` prevents duplicate `(account_id, folder_id, uid_validity, imap_uid)` rows when IMAP identity exists, while RFC `Message-ID` is indexed but not unique. `schema.rs` tests prove duplicate UID in the same folder/UIDVALIDITY is rejected and the same UID/RFC message can exist in a different folder without collision.
-- [ ] Implement FTS5 with consistency controls.
-  Evidence: plan names `messages_fts`, but not triggers, rebuild, or integrity checks.
-  Acceptance: FTS table has insert/update/delete triggers or an equivalent tested update path; migrations can rebuild FTS; integrity check exists after indexed-column migrations; search returns expected fixture rows.
+- [x] Implement FTS5 with consistency controls.
+  Evidence: `src-tauri/migrations/002_messages_fts.sql` creates `messages_fts` as an FTS5 external-content table over `messages.rowid`, indexes subject, sender name/email, text body, and HTML body, adds insert/update/delete triggers for indexed columns, and rebuilds the index during migration so version-1 databases with existing messages are backfilled. `src-tauri/src/schema.rs` exposes `search_messages_fts`, `rebuild_messages_fts`, and `check_messages_fts_integrity`. Tests prove search returns expected fixture rows, update/delete triggers keep results consistent, rebuild restores missing entries, version-1 upgrade rebuilds existing rows, and FTS integrity checks pass.
 - [ ] Decide message-body and attachment encryption at rest.
   Evidence: plan promises privacy but does not say whether cached message content is encrypted.
   Acceptance: docs either implement encrypted local mail storage or clearly state the local cache is unencrypted; UI and README avoid stronger claims than the implementation.
@@ -137,7 +136,7 @@ Purpose: deliver the actual usable personal email client promised by the plan. R
   Evidence: the sanitizer and `SafeEmailBody` boundary are implemented and tested, but the app shell currently has no selected message workflow, attachment list, reply/forward routing, remote-content preference UI, or fixture-backed mailbox state.
   Acceptance: plain and sanitized HTML views work; remote images are blocked by default; attachment list is safe; reply/forward actions are available but disabled or routed until implemented.
 - [ ] Implement FTS-backed search UX.
-  Evidence: plan requires instant FTS5 search but no frontend or DB exists.
+  Evidence: backend FTS5 schema and search helper exist, but no frontend search workflow or query state exists.
   Acceptance: search spans subject, sender, and body across active accounts; results identify account/folder; empty/no-index states are handled; query input is debounced and cancellable.
 
 ### Composer
@@ -168,7 +167,7 @@ Purpose: create evidence that the client works without risking real mailboxes. R
 ### Test Infrastructure
 
 - [ ] Add Rust unit and integration tests.
-  Evidence: Rust unit tests now cover schema migrations and constraints, provider auth policy, OAuth provider behavior, token lifecycle, IPC mutation-boundary policy, shared IPC input validation, attachment safety, and destructive mail-action semantics. No sync, real frontend-callable command, MIME, or credential-backend integration tests exist yet.
+  Evidence: Rust unit tests now cover schema migrations, constraints, FTS5 search/rebuild/integrity behavior, provider auth policy, OAuth provider behavior, token lifecycle, IPC mutation-boundary policy, shared IPC input validation, attachment safety, and destructive mail-action semantics. No sync, real frontend-callable command, MIME, or credential-backend integration tests exist yet.
   Acceptance: `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs sync, schema, command validation, MIME, attachment, and credential-boundary tests.
 - [ ] Add frontend tests.
   Evidence: `src/App.test.tsx` is a smoke test for the accountless shell only; `SafeEmailBody.test.tsx` covers renderer safety, but no state/query, i18n, or composer tests exist yet.

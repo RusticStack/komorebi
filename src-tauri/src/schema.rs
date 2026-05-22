@@ -1,9 +1,9 @@
 use std::{error::Error, fmt, time::Duration};
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 1;
+pub const LATEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -12,11 +12,18 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial_schema",
-    sql: include_str!("../migrations/001_initial_schema.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial_schema",
+        sql: include_str!("../migrations/001_initial_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "messages_fts",
+        sql: include_str!("../migrations/002_messages_fts.sql"),
+    },
+];
 
 #[derive(Debug)]
 pub enum SchemaMigrationError {
@@ -99,6 +106,73 @@ pub fn apply_migrations(
         latest_version: current_schema_version(connection)?,
         applied,
     })
+}
+
+pub fn rebuild_messages_fts(connection: &Connection) -> Result<(), SchemaMigrationError> {
+    connection.execute(
+        "INSERT INTO messages_fts (messages_fts) VALUES ('rebuild')",
+        [],
+    )?;
+
+    Ok(())
+}
+
+pub fn check_messages_fts_integrity(connection: &Connection) -> Result<(), SchemaMigrationError> {
+    connection.execute(
+        "INSERT INTO messages_fts (messages_fts, rank) VALUES ('integrity-check', 1)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageSearchResult {
+    pub message_id: String,
+    pub account_id: String,
+    pub folder_id: String,
+    pub subject: String,
+    pub sender_email: Option<String>,
+    pub rank: f64,
+}
+
+pub fn search_messages_fts(
+    connection: &Connection,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<MessageSearchResult>, SchemaMigrationError> {
+    let bounded_limit = limit.clamp(1, 100);
+    let mut statement = connection.prepare(
+        "SELECT
+           messages.id,
+           messages.account_id,
+           messages.folder_id,
+           messages.subject,
+           messages.sender_email,
+           bm25(messages_fts) AS rank
+         FROM messages_fts
+         JOIN messages ON messages.rowid = messages_fts.rowid
+         WHERE messages_fts MATCH ?1
+         ORDER BY rank, messages.date_received DESC, messages.id
+         LIMIT ?2",
+    )?;
+    let rows = statement.query_map(params![query, bounded_limit], |row| {
+        Ok(MessageSearchResult {
+            message_id: row.get(0)?,
+            account_id: row.get(1)?,
+            folder_id: row.get(2)?,
+            subject: row.get(3)?,
+            sender_email: row.get(4)?,
+            rank: row.get(5)?,
+        })
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+
+    Ok(results)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,10 +304,10 @@ mod tests {
 
         assert_eq!(first_report.current_version, 0);
         assert_eq!(first_report.latest_version, LATEST_SCHEMA_VERSION);
-        assert_eq!(first_report.applied.len(), 1);
+        assert_eq!(first_report.applied.len(), 2);
         assert_eq!(second_report.current_version, LATEST_SCHEMA_VERSION);
         assert!(second_report.applied.is_empty());
-        assert_eq!(migration_count, 1);
+        assert_eq!(migration_count, 2);
         assert_eq!(application_id, KOMOREBI_APPLICATION_ID);
         assert_eq!(foreign_keys_enabled, 1);
     }
@@ -269,6 +343,7 @@ mod tests {
             "accounts",
             "folders",
             "messages",
+            "messages_fts",
             "attachments",
             "templates",
             "template_versions",
@@ -297,6 +372,9 @@ mod tests {
             "accounts_touch_updated_at",
             "folders_touch_updated_at",
             "messages_touch_updated_at",
+            "messages_fts_after_insert",
+            "messages_fts_after_delete",
+            "messages_fts_after_update",
             "attachments_touch_updated_at",
             "templates_touch_updated_at",
         ] {
@@ -621,5 +699,154 @@ mod tests {
             .unwrap();
 
         assert_eq!(violation_count, 0);
+    }
+
+    #[test]
+    fn fts_search_returns_expected_fixture_rows() {
+        let connection = migrated_connection();
+        seed_account_folder_message(&connection);
+        connection
+            .execute(
+                "INSERT INTO messages (
+                   id,
+                   account_id,
+                   folder_id,
+                   imap_uid,
+                   uid_validity,
+                   rfc_message_id,
+                   subject,
+                   sender_name,
+                   sender_email,
+                   body_text,
+                   date_received
+                 )
+                 VALUES (
+                   'msg_2',
+                   'acct_1',
+                   'folder_1',
+                   43,
+                   777,
+                   '<message-2@example.com>',
+                   'Cache status',
+                   'Komorebi Ops',
+                   'ops@example.com',
+                   'Phoenix search fixture for the local cache.',
+                   '2026-05-23T00:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let schema_results = search_messages_fts(&connection, "schema", 10).unwrap();
+        let phoenix_results = search_messages_fts(&connection, "phoenix", 10).unwrap();
+
+        assert_eq!(schema_results.len(), 1);
+        assert_eq!(schema_results[0].message_id, "msg_1");
+        assert_eq!(phoenix_results.len(), 1);
+        assert_eq!(phoenix_results[0].message_id, "msg_2");
+        check_messages_fts_integrity(&connection).unwrap();
+    }
+
+    #[test]
+    fn fts_triggers_track_message_updates_and_deletes() {
+        let connection = migrated_connection();
+        seed_account_folder_message(&connection);
+
+        assert_eq!(
+            search_messages_fts(&connection, "schema", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        connection
+            .execute(
+                "UPDATE messages
+                 SET subject = 'Updated agenda', body_text = 'Phoenix follow-up body'
+                 WHERE id = 'msg_1'",
+                [],
+            )
+            .unwrap();
+
+        assert!(search_messages_fts(&connection, "schema", 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            search_messages_fts(&connection, "phoenix", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        connection
+            .execute("DELETE FROM messages WHERE id = 'msg_1'", [])
+            .unwrap();
+
+        assert!(search_messages_fts(&connection, "phoenix", 10)
+            .unwrap()
+            .is_empty());
+        check_messages_fts_integrity(&connection).unwrap();
+    }
+
+    #[test]
+    fn fts_rebuild_restores_missing_index_entries() {
+        let connection = migrated_connection();
+        seed_account_folder_message(&connection);
+
+        connection
+            .execute(
+                "INSERT INTO messages_fts (messages_fts) VALUES ('delete-all')",
+                [],
+            )
+            .unwrap();
+        assert!(search_messages_fts(&connection, "schema", 10)
+            .unwrap()
+            .is_empty());
+
+        rebuild_messages_fts(&connection).unwrap();
+
+        assert_eq!(
+            search_messages_fts(&connection, "schema", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        check_messages_fts_integrity(&connection).unwrap();
+    }
+
+    #[test]
+    fn fts_migration_rebuilds_rows_from_existing_v1_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        connection.execute_batch(MIGRATIONS[0].sql).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                (MIGRATIONS[0].version, MIGRATIONS[0].name),
+            )
+            .unwrap();
+        connection
+            .execute_batch("PRAGMA user_version = 1;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 1);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert_eq!(
+            search_messages_fts(&connection, "schema", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        check_messages_fts_integrity(&connection).unwrap();
     }
 }

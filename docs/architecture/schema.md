@@ -1,11 +1,11 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema implemented.
+Status: initial production schema and FTS5 search index implemented.
 Last reviewed: 2026-05-22.
 
 ## Implementation
 
-The SQLite schema is versioned in `src-tauri/migrations/001_initial_schema.sql` and applied by `src-tauri/src/schema.rs`.
+The SQLite schema is versioned in `src-tauri/migrations/*.sql` and applied by `src-tauri/src/schema.rs`.
 
 The Rust backend owns migrations. React and frontend SQL must not create, migrate, or mutate schema. The migration runner:
 
@@ -17,7 +17,7 @@ The Rust backend owns migrations. React and frontend SQL must not create, migrat
 
 ## Tables
 
-The initial schema defines:
+The current schema defines:
 
 - `schema_migrations`: applied migration history.
 - `settings`: global preferences stored as validated JSON values.
@@ -27,8 +27,27 @@ The initial schema defines:
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
 - `templates`: future composer template records.
 - `template_versions`: version history for future template editing.
+- `messages_fts`: FTS5 external-content search index over message subject, sender, and body columns.
 
 All durable tables include `created_at`; mutable tables include `updated_at` with timestamp triggers.
+
+## FTS5 Search
+
+`src-tauri/migrations/002_messages_fts.sql` creates `messages_fts` as an FTS5 external-content table linked to `messages.rowid`. It indexes:
+
+- `subject`
+- `sender_name`
+- `sender_email`
+- `body_text`
+- `body_html`
+
+The migration adds insert, update, and delete triggers for indexed columns. It also issues `INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')` so upgrading a version-1 database with existing messages backfills the index.
+
+`src-tauri/src/schema.rs` exposes:
+
+- `search_messages_fts`: parameterized FTS search joined back to `messages`.
+- `rebuild_messages_fts`: explicit FTS rebuild command for repair or future indexed-column migrations.
+- `check_messages_fts_integrity`: FTS5 `integrity-check` command with external-content table validation.
 
 ## Identity Rules
 
@@ -60,8 +79,6 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 
 ## Deferred Schema Work
 
-FTS5 is intentionally not part of this migration because it has a dedicated follow-up task. When added, it must use tested triggers or an equivalent controlled update path, rebuild support, and integrity checks.
-
 Message-body and attachment encryption at rest is still undecided. This schema must not be described as encrypted local mail storage until encryption is implemented and verified.
 
 ## Tests
@@ -75,6 +92,10 @@ Message-body and attachment encryption at rest is still undecided. This schema m
 - Absence of secret columns from account metadata.
 - Foreign-key enforcement and account cascade behavior.
 - IMAP UID identity separated from RFC `Message-ID`.
+- FTS5 search returns expected fixture rows.
+- FTS5 insert/update/delete triggers keep indexed content consistent.
+- FTS5 rebuild restores missing index entries and backfills rows when upgrading a version-1 database.
+- FTS5 integrity checks pass after trigger and rebuild paths.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 
