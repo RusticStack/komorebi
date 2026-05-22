@@ -4,7 +4,7 @@ Last updated: 2026-05-22
 
 ## Current State
 
-Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. The database schema, migration path, input validation layer, initial Rust sync state machine, and folder IDLE/polling worker now exist; command exposure remains blocked until account setup, live adapters, worker orchestration, and command-specific validation are implemented.
+Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, and backend SMTP send boundary now exist; frontend command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
 
 The accepted boundary is:
 
@@ -23,7 +23,7 @@ These operations must be typed Rust commands or internal Rust worker calls:
 - Migrations: schema creation, schema upgrades, FTS setup/rebuild, trigger creation, integrity checks, and rollback/recovery.
 - Sync cache mutation: folder discovery, UID/UIDVALIDITY state, message upsert, flag update, expunge handling, body/attachment metadata persistence, search index updates, and retry bookkeeping.
 
-The boundary source of truth is `src-tauri/src/ipc_boundary.rs`. Initial sync cache mutation and folder worker semantics live in `src-tauri/src/imap_sync.rs` and are tested with fake IMAP fixtures. Boundary tests require each privileged category to remain Rust-owned.
+The boundary source of truth is `src-tauri/src/ipc_boundary.rs`. Initial sync cache mutation and folder worker semantics live in `src-tauri/src/imap_sync.rs` and are tested with fake IMAP fixtures. Backend SMTP send semantics live in `src-tauri/src/smtp_send.rs` and are tested with fake SMTP sender/attachment/auth stores. Boundary tests require each privileged category to remain Rust-owned.
 
 ## Frontend SQL Policy
 
@@ -56,6 +56,7 @@ Do not expose commands that accept raw SQL, arbitrary filesystem paths, arbitrar
 
 - `src-tauri/src/ipc_boundary.rs` tests enforce that the privileged categories stay Rust-only.
 - `src-tauri/src/imap_sync.rs` tests enforce initial Rust-owned sync cache mutation and folder IDLE/polling worker semantics before any frontend command is registered.
+- `src-tauri/src/smtp_send.rs` tests enforce backend-only SMTP send composition, auth resolution, attachment streaming, and confirmed send receipt behavior before any frontend command is registered.
 - `src-tauri/src/ipc_validation.rs` tests enforce the shared IPC denial policy before any command is registered.
 - `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, and unregistered custom commands.
 - `docs/architecture/tauri-capabilities.md` defines the capability permission policy.

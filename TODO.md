@@ -4,13 +4,13 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/schema.md`, `docs/architecture/sync-state-machine.md`, `docs/architecture/mime-normalization.md`, `docs/architecture/local-cache-encryption.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, `docs/architecture/ipc-validation.md`, `docs/architecture/message-rendering.md`, `docs/architecture/attachment-safety.md`, and `docs/architecture/destructive-mail-actions.md`.
-- Local code inspected: accountless React app shell in `src/`, safe email rendering boundary in `src/mail/rendering/`, Tauri/Rust shell in `src-tauri/`, SQLite migration SQL in `src-tauri/migrations/`, Rust schema migration runner in `src-tauri/src/schema.rs`, Rust IMAP sync state machine, folder IDLE/polling worker, server flag/folder semantics normalization, and SQLite cache in `src-tauri/src/imap_sync.rs`, Rust MIME normalization in `src-tauri/src/mime_normalization.rs`, Rust auth policy in `src-tauri/src/auth.rs`, Rust OAuth provider implementation in `src-tauri/src/oauth.rs`, Windows Credential Manager wrapper in `src-tauri/src/credentials.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`, Rust attachment safety policy in `src-tauri/src/attachment_safety.rs`, and Rust destructive mail-action policy in `src-tauri/src/mail_actions.rs`.
-- Local tests inspected: `src/App.test.tsx`; `src/mail/rendering/SafeEmailBody.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/schema.rs` unit tests for migration application, schema objects, constraints, JSON checks, identity uniqueness, folder semantics migration, and foreign-key integrity; `src-tauri/src/imap_sync.rs` unit tests for fake IMAP folder discovery, initial fetch, incremental UID fetch, flag updates, full flag preservation, folder special-use/attribute normalization, unknown custom folder usability, expunge handling, UIDVALIDITY reset, IDLE mailbox wakeups, IDLE timeout refresh, polling fallback, capability-probe reconnect, IDLE-wait reconnect, cancellation, account removal, backoff, invalid fixture responses, and unknown-account denial; `src-tauri/src/mime_normalization.rs` unit tests for encoded headers, charsets, multipart alternatives, inline CID images, attachment metadata, malformed MIME, SQLite metadata persistence, and denial paths; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/oauth.rs` unit tests for OAuth URLs, PKCE, token exchange/refresh, revocation, and XOAUTH2; `src-tauri/src/credentials.rs` unit tests for credential target naming and redaction; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths; `src-tauri/src/attachment_safety.rs` unit tests for storage path, display filename, type/size, preview, and auto-open safety; `src-tauri/src/mail_actions.rs` unit tests for local mailbox action semantics.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/schema.md`, `docs/architecture/sync-state-machine.md`, `docs/architecture/mime-normalization.md`, `docs/architecture/smtp-send.md`, `docs/architecture/local-cache-encryption.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, `docs/architecture/ipc-validation.md`, `docs/architecture/message-rendering.md`, `docs/architecture/attachment-safety.md`, and `docs/architecture/destructive-mail-actions.md`.
+- Local code inspected: accountless React app shell in `src/`, safe email rendering boundary in `src/mail/rendering/`, Tauri/Rust shell in `src-tauri/`, SQLite migration SQL in `src-tauri/migrations/`, Rust schema migration runner in `src-tauri/src/schema.rs`, Rust IMAP sync state machine, folder IDLE/polling worker, server flag/folder semantics normalization, and SQLite cache in `src-tauri/src/imap_sync.rs`, Rust MIME normalization in `src-tauri/src/mime_normalization.rs`, Rust SMTP send boundary in `src-tauri/src/smtp_send.rs`, Rust auth policy in `src-tauri/src/auth.rs`, Rust OAuth provider implementation in `src-tauri/src/oauth.rs`, Windows Credential Manager wrapper in `src-tauri/src/credentials.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`, Rust attachment safety policy in `src-tauri/src/attachment_safety.rs`, and Rust destructive mail-action policy in `src-tauri/src/mail_actions.rs`.
+- Local tests inspected: `src/App.test.tsx`; `src/mail/rendering/SafeEmailBody.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/schema.rs` unit tests for migration application, schema objects, constraints, JSON checks, identity uniqueness, folder semantics migration, SMTP send receipt migration, and foreign-key integrity; `src-tauri/src/imap_sync.rs` unit tests for fake IMAP folder discovery, initial fetch, incremental UID fetch, flag updates, full flag preservation, folder special-use/attribute normalization, unknown custom folder usability, expunge handling, UIDVALIDITY reset, IDLE mailbox wakeups, IDLE timeout refresh, polling fallback, capability-probe reconnect, IDLE-wait reconnect, cancellation, account removal, backoff, invalid fixture responses, and unknown-account denial; `src-tauri/src/mime_normalization.rs` unit tests for encoded headers, charsets, multipart alternatives, inline CID images, attachment metadata, malformed MIME, SQLite metadata persistence, and denial paths; `src-tauri/src/smtp_send.rs` unit tests for account transport resolution, MIME composition, auth resolution, attachment streaming/path denial, SMTP failure behavior, confirmed send receipts, and send validation denial paths; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/oauth.rs` unit tests for OAuth URLs, PKCE, token exchange/refresh, revocation, and XOAUTH2; `src-tauri/src/credentials.rs` unit tests for credential target naming and redaction; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths; `src-tauri/src/attachment_safety.rs` unit tests for storage path, display filename, type/size, preview, and auto-open safety; `src-tauri/src/mail_actions.rs` unit tests for local mailbox action semantics.
 - Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
 - Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; current P2 flag/folder semantics code/doc changes are uncommitted until the user asks for a commit.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; current P2 SMTP send code/doc changes are uncommitted until the user asks for a commit.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
 - External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, Windows Credential Manager Win32 docs, DOMPurify docs, RFC 9051, RFC 6851, `async-imap`, `lettre`, `mail-parser`, SQLite CREATE TABLE/foreign-key/PRAGMA/FTS5 external-content, rebuild, and integrity-check docs, Gmail IMAP/SMTP OAuth/XOAUTH2 docs, Microsoft Exchange Online OAuth/basic-auth docs, Microsoft authorization-code/PKCE docs, OWASP XSS/file-upload/path-traversal guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
@@ -96,9 +96,8 @@ Purpose: make local cache and remote mail state accurate, recoverable, and searc
 
 ### Sending And Drafts
 
-- [ ] Implement SMTP send with account-specific transport.
-  Evidence: no `send_email` command exists.
-  Acceptance: selected sender account resolves SMTP host/auth safely, composes MIME through `lettre`, streams attachments without excessive memory, reports progress/errors, and records sent state only after confirmed send.
+- [x] Implement SMTP send with account-specific transport.
+  Evidence: `docs/architecture/smtp-send.md` documents the backend-only send boundary. `src-tauri/src/smtp_send.rs` implements typed `send_email` request/report/error models, account-specific SMTP host/port/security resolution, Gmail/Microsoft default SMTP metadata, provider/auth policy enforcement, backend-only OAuth access-token refresh through `TokenLifecycle`, generic password lookup through Windows Credential Manager slots, outbound MIME composition through `lettre`, attachment ID-only streaming through app-generated storage paths, plaintext authenticated SMTP denial, progress events, safe transport errors, and confirmed send receipt insertion only after SMTP acceptance. `src-tauri/migrations/004_smtp_send_receipts.sql` records confirmed local send receipts. Tests cover generic send, Gmail XOAUTH2 defaults, failed transport without receipt insertion, BCC header stripping, fake attachment chunk streaming, path traversal denial, URL-like SMTP host denial, unsafe HTML/recipient/body/id denial, plaintext SMTP denial, and secret redaction. The boundary is not exposed to React yet because Tauri command ACL/capability, composer UI, drafts, and Sent-folder behavior remain separate tasks.
 - [ ] Define sent-mail and draft persistence.
   Evidence: plan mentions composer and signatures but not draft autosave or Sent folder upload.
   Acceptance: drafts autosave locally, can be discarded intentionally, survive restart, and are cleared or converted to sent state after send; Sent folder behavior is documented per provider capability.
@@ -162,7 +161,7 @@ Purpose: create evidence that the client works without risking real mailboxes. R
 ### Test Infrastructure
 
 - [ ] Add Rust unit and integration tests.
-  Evidence: Rust unit tests now cover schema migrations, constraints, FTS5 search/rebuild/integrity behavior, folder semantics migration, fake IMAP sync state-machine and IDLE/polling worker behavior, flag/folder semantics normalization, MIME normalization, provider auth policy, OAuth provider behavior, token lifecycle, IPC mutation-boundary policy, shared IPC input validation, attachment safety, and destructive mail-action semantics. No real frontend-callable command, live IMAP adapter, SMTP, or credential-backend integration tests exist yet.
+  Evidence: Rust unit tests now cover schema migrations, constraints, FTS5 search/rebuild/integrity behavior, folder semantics and SMTP send receipt migrations, fake IMAP sync state-machine and IDLE/polling worker behavior, flag/folder semantics normalization, MIME normalization, SMTP send boundary behavior, provider auth policy, OAuth provider behavior, token lifecycle, IPC mutation-boundary policy, shared IPC input validation, attachment safety, and destructive mail-action semantics. No real frontend-callable command, live IMAP adapter, protocol-level SMTP server, or credential-backend integration tests exist yet.
   Acceptance: `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs sync, schema, command validation, MIME, attachment, and credential-boundary tests.
 - [ ] Add frontend tests.
   Evidence: `src/App.test.tsx` is a smoke test for the accountless shell only; `SafeEmailBody.test.tsx` covers renderer safety, but no state/query, i18n, or composer tests exist yet.
@@ -177,7 +176,7 @@ Purpose: create evidence that the client works without risking real mailboxes. R
   Evidence: `src-tauri/src/mime_normalization.rs` includes focused inline Rust fixtures for parser behavior, but no reusable fixture-file corpus exists yet.
   Acceptance: fixtures include encoded headers, Portuguese text, Japanese/non-ASCII names, HTML + plain alternatives, nested multipart, CID images, attachments, malformed boundaries, phishing links, and XSS payloads.
 - [ ] Create fake IMAP/SMTP test surfaces.
-  Evidence: `src-tauri/src/imap_sync.rs` now includes a fake IMAP fixture for sync state-machine and folder-worker tests, including reconnects, expunges, UIDVALIDITY reset, IDLE wakeups, IDLE timeout refresh, polling fallback, account removal, cancellation, and invalid responses. There is still no fake SMTP send surface, no protocol-level IMAP fixture, no auth-failure fixture, and no large-mailbox fixture.
+  Evidence: `src-tauri/src/imap_sync.rs` includes a fake IMAP fixture for sync state-machine and folder-worker tests, including reconnects, expunges, UIDVALIDITY reset, IDLE wakeups, IDLE timeout refresh, polling fallback, account removal, cancellation, and invalid responses. `src-tauri/src/smtp_send.rs` includes fake SMTP sender, auth resolver, and attachment store surfaces for backend send tests. There is still no protocol-level IMAP fixture, no protocol-level SMTP fixture, no auth-failure server fixture, and no large-mailbox fixture.
   Acceptance: sync and send tests run locally without real accounts; fake server can simulate reconnects, IDLE updates, expunges, auth failures, and large mailboxes.
 - [ ] Create performance fixtures.
   Evidence: plan promises sub-50MB memory and instant search but no measurement harness exists.
@@ -214,7 +213,7 @@ Purpose: make releases repeatable and auditable on Windows. Risk: medium-high be
 ### Windows Release
 
 - [ ] Configure app identity and installer metadata.
-  Evidence: no Tauri config exists.
+  Evidence: `src-tauri/tauri.conf.json` defines product name, version, bundle identifier, window defaults, and icon paths, but publisher metadata, installer behavior, uninstall behavior, and release-package verification are not complete.
   Acceptance: product name, bundle identifier, icons, version, publisher metadata, install path, and uninstall behavior are configured and tested.
 - [ ] Define code-signing plan.
   Evidence: no release docs exist.
@@ -245,10 +244,10 @@ Purpose: help users diagnose sync issues without violating the zero-telemetry pr
 ### Privacy And Data Lifecycle
 
 - [ ] Write a zero-telemetry privacy statement.
-  Evidence: plan promises zero telemetry/ads but no user-facing doc exists.
+  Evidence: README and architecture docs state zero telemetry and local-first constraints, but there is no complete user-facing privacy statement covering all stored local data, account network calls, diagnostics, and removal/cache behavior.
   Acceptance: README or docs state what data is stored locally, what network calls happen, what is never collected, and how users remove account/cache data.
 - [ ] Define account removal and cache cleanup.
-  Evidence: no data lifecycle docs exist.
+  Evidence: `docs/architecture/token-lifecycle.md` defines credential/token cleanup behavior and local cache deletion hooks for account removal, but user-facing retention choices, UI flow, sync-worker stop orchestration, and full cache cleanup implementation remain missing.
   Acceptance: removing an account revokes/wipes credentials, stops sync, and offers clear local cache deletion/retention behavior.
 - [ ] Define backup/export/import posture.
   Evidence: not covered by plan.
@@ -260,12 +259,10 @@ Purpose: keep future autonomous work scoped and reviewable. Risk: medium because
 
 ### Human Docs
 
-- [ ] Add README setup and usage docs.
-  Evidence: no README exists.
-  Acceptance: README covers project goals, prerequisites, install, dev, test, build, privacy posture, and current limitations.
-- [ ] Add architecture documentation.
-  Evidence: only the plan exists.
-  Acceptance: docs describe process boundaries, IPC, capabilities, schema, sync state machine, credential storage, rendering safety, and attachment lifecycle.
+- [x] Add README setup and usage docs.
+  Evidence: `README.md` covers project goals, pinned toolchain, Windows prerequisites, setup, dev/build/check commands, generated output rules, privacy/security posture, and current limitations for account setup, live adapters, frontend command exposure, drafts, Sent-folder upload, and local-cache encryption.
+- [x] Add architecture documentation.
+  Evidence: `docs/architecture/` now documents credential storage, provider auth, token lifecycle, Tauri capabilities, IPC/mutation boundaries, IPC validation, schema/migrations/FTS, sync state machine, MIME normalization, SMTP send, local cache encryption posture, safe message rendering, attachment safety, and destructive mail-action semantics.
 - [ ] Add provider setup guides.
   Evidence: no account setup docs exist.
   Acceptance: Gmail, Microsoft/Outlook, and generic IMAP/SMTP setup requirements are documented with supported auth modes and known limitations.
@@ -273,10 +270,10 @@ Purpose: keep future autonomous work scoped and reviewable. Risk: medium because
 ### Agent Docs
 
 - [ ] Keep `AGENTS.md` updated as implementation lands.
-  Evidence: `AGENTS.md` names the scaffolded commands, generated paths, known baseline gaps, and current toolchain/check setup; this remains an ongoing maintenance task as implementation lands.
+  Evidence: `AGENTS.md` names the scaffolded commands, generated paths, known baseline gaps, current toolchain/check setup, and implemented credential/auth/token/capability/IPC/rendering/attachment/destructive-action/schema/sync/MIME/SMTP boundaries; this remains an ongoing maintenance task as implementation lands.
   Acceptance: AGENTS stays synchronized with actual commands, known baseline failures, generated paths, and project-specific traps from real bugs.
 - [ ] Keep this ledger current.
-  Evidence: this is the first audit refresh.
+  Evidence: this ledger is updated through the backend SMTP send boundary work on 2026-05-22.
   Acceptance: completed tasks are checked with evidence; broad tasks are reopened as narrower follow-ups; last audit date is updated after each full audit.
 - [ ] Add execution-plan template only if long-running tasks need it.
   Evidence: no `.agent/PLANS.md` exists.
@@ -292,10 +289,10 @@ Purpose: prove the product promises under realistic Windows desktop conditions. 
   Evidence: plan promises sub-50MB memory footprint but no app or measurement exists.
   Acceptance: release-build measurements on Windows are recorded for idle, 10,000-message inbox, search, sync, and composer scenarios; docs only claim numbers that are measured.
 - [ ] Measure search latency.
-  Evidence: plan promises instantaneous local search but no FTS implementation exists.
+  Evidence: plan promises instantaneous local search and backend FTS5 exists, but no benchmark harness or frontend search workflow exists.
   Acceptance: benchmark reports query latency across representative message counts and body sizes; slow paths have regression thresholds.
 - [ ] Measure sync and attachment handling.
-  Evidence: no sync or attachment code exists.
+  Evidence: fake-backed sync, attachment safety, MIME metadata parsing, and SMTP attachment streaming boundaries exist, but no live adapter, attachment file persistence worker, or benchmark harness exists.
   Acceptance: benchmarks cover initial sync, incremental sync, reconnect, large mailbox, large attachment metadata, and attachment download without excessive memory growth.
 
 ### Compatibility
@@ -304,7 +301,7 @@ Purpose: prove the product promises under realistic Windows desktop conditions. 
   Evidence: plan targets Windows 10/11 but no builds exist.
   Acceptance: tested Windows versions, WebView2 behavior, installer behavior, and known OS-specific limitations are documented.
 - [ ] Validate international content.
-  Evidence: plan includes English and Portuguese, and codename contains Japanese text, but no parser or UI exists.
+  Evidence: plan includes English and Portuguese, codename contains Japanese text, and Rust MIME parser tests cover some non-ASCII headers/addresses; no i18n UI or broad international fixture corpus exists yet.
   Acceptance: fixtures verify non-ASCII names, subjects, body text, filenames, dates, and right-sized UI rendering in English and `pt-PT`.
 
 ## Deferred And Future Scope

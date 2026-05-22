@@ -96,7 +96,8 @@ No test uses a real mailbox, real account, or real user message.
 - MIME fixture files outside Rust unit tests.
 - Persisting attachment bytes to app-generated storage paths.
 - Inline image resolution in the React reader.
-- SMTP MIME generation for outbound messages.
+
+Outbound SMTP MIME generation is a separate backend boundary documented in `docs/architecture/smtp-send.md`.
 
 ## Documentation Sync
 

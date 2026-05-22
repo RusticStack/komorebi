@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 3;
+pub const LATEST_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -27,6 +27,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "folder_semantics",
         sql: include_str!("../migrations/003_folder_semantics.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "smtp_send_receipts",
+        sql: include_str!("../migrations/004_smtp_send_receipts.sql"),
     },
 ];
 
@@ -350,6 +355,7 @@ mod tests {
             "messages",
             "messages_fts",
             "attachments",
+            "smtp_send_receipts",
             "templates",
             "template_versions",
         ] {
@@ -367,6 +373,7 @@ mod tests {
             "idx_messages_account_rfc_message_id",
             "idx_messages_unread",
             "idx_attachments_message",
+            "idx_smtp_send_receipts_account_sent",
             "idx_templates_account",
         ] {
             assert!(indexes.contains(index), "missing index {index}");
@@ -456,6 +463,26 @@ mod tests {
                     "storage_relative_path",
                     "created_at",
                     "updated_at",
+                ]
+                .as_slice(),
+            ),
+            (
+                "smtp_send_receipts",
+                [
+                    "id",
+                    "account_id",
+                    "rfc_message_id",
+                    "subject",
+                    "from_address",
+                    "to_addresses_json",
+                    "smtp_host",
+                    "smtp_port",
+                    "smtp_security",
+                    "auth_mechanism",
+                    "message_size_bytes",
+                    "provider_response",
+                    "sent_at",
+                    "created_at",
                 ]
                 .as_slice(),
             ),
@@ -845,7 +872,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2, 3]
+            vec![2, 3, 4]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -892,7 +919,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![3]
+            vec![3, 4]
         );
         let attributes_json = connection
             .query_row(
@@ -902,5 +929,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(attributes_json, "[]");
+    }
+
+    #[test]
+    fn smtp_send_receipts_migration_adds_confirmed_send_state_table_to_v3_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..3] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 3;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 3);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![4]
+        );
+        connection
+            .execute(
+                "INSERT INTO smtp_send_receipts (
+                   id,
+                   account_id,
+                   rfc_message_id,
+                   subject,
+                   from_address,
+                   to_addresses_json,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security,
+                   auth_mechanism,
+                   message_size_bytes
+                 )
+                 VALUES (
+                   'send_1',
+                   'acct_1',
+                   '<sent@example.com>',
+                   'sent',
+                   'sender@example.com',
+                   '[\"recipient@example.com\"]',
+                   'smtp.example.com',
+                   587,
+                   'starttls',
+                   'plain',
+                   512
+                 )",
+                [],
+            )
+            .unwrap();
     }
 }

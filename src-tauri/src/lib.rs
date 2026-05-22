@@ -8,6 +8,7 @@ pub mod mail_actions;
 pub mod mime_normalization;
 pub mod oauth;
 pub mod schema;
+pub mod smtp_send;
 pub mod token_lifecycle;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

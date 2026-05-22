@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema and FTS5 search index implemented.
+Status: initial production schema, FTS5 search index, and SMTP send receipt migration implemented.
 Last reviewed: 2026-05-22.
 
 ## Implementation
@@ -19,6 +19,8 @@ Initial sync cache mutation is implemented in `src-tauri/src/imap_sync.rs` throu
 
 Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.rs`. It parses raw message bytes into the message columns used by `SqliteSyncCache`, stable attachment metadata records that match the `attachments` table shape, and an idempotent SQLite persistence helper for message plus attachment metadata.
 
+Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
+
 ## Tables
 
 The current schema defines:
@@ -29,6 +31,7 @@ The current schema defines:
 - `folders`: provider folders, special-use classification, preserved provider attributes, sync counters, UIDVALIDITY, and sync status.
 - `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata.
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
+- `smtp_send_receipts`: confirmed outbound SMTP send receipts recorded after provider acceptance.
 - `templates`: future composer template records.
 - `template_versions`: version history for future template editing.
 - `messages_fts`: FTS5 external-content search index over message subject, sender, and body columns.
@@ -40,6 +43,8 @@ Message bodies and FTS indexed terms are not encrypted at rest in the current sc
 Sync state-machine behavior is documented in `docs/architecture/sync-state-machine.md`.
 
 Inbound MIME normalization behavior is documented in `docs/architecture/mime-normalization.md`.
+
+SMTP send behavior is documented in `docs/architecture/smtp-send.md`.
 
 ## FTS5 Search
 
@@ -87,6 +92,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - Attachments reference their owning message through `(account_id, folder_id, message_id)` and cascade with the account/message.
 - Template JSON and setting JSON must pass `json_valid`.
 - Global template names and per-account template names are deduplicated separately.
+- SMTP send receipts reference accounts, store JSON address snapshots, restrict SMTP security/auth enum values, and are inserted only by the Rust send boundary after confirmed transport acceptance.
 
 ## Deferred Schema Work
 
@@ -108,6 +114,7 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - FTS5 rebuild restores missing index entries and backfills rows when upgrading a version-1 database.
 - FTS5 integrity checks pass after trigger and rebuild paths.
 - Folder semantics migration adds `attributes_json` to version-2 databases and defaults existing rows to `[]`.
+- SMTP send receipt migration adds `smtp_send_receipts` to version-3 databases and accepts valid confirmed send records.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 
