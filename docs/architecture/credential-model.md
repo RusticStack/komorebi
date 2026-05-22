@@ -64,7 +64,7 @@ Rules:
 - `account_id` is the local UUID, never the raw email address.
 - `oauth-refresh` stores the provider refresh token when OAuth2 is implemented.
 - `oauth-access` is optional and may store an access token only with an expiry timestamp in the protected payload. Prefer memory-only access tokens.
-- `generic-password` stores a provider app password or manual password only for generic IMAP/SMTP providers that cannot use OAuth2. Gmail and Microsoft must use OAuth2/XOAUTH2 or remain unsupported until implemented.
+- `generic-password` stores a provider app password or manual password only for compatible generic IMAP/SMTP providers. Gmail and Microsoft must use OAuth2/XOAUTH2 or remain unsupported until implemented, as defined in `docs/architecture/provider-auth.md`.
 - Credential payloads are serialized by Rust only. React sends setup input once over a typed command and never receives the stored value back.
 - The Windows credential username may be `provider_kind:account_id`; the display email stays in SQLite metadata.
 
@@ -94,6 +94,7 @@ Credential rotation must write the replacement credential first, verify it can a
 
 ## Frontend And IPC Boundaries
 
+- Every account setup or reauthentication command must evaluate the provider/auth policy in `src-tauri/src/auth.rs` before storing credentials or account metadata.
 - No frontend API may expose `get_password`, `get_token`, `export_secret`, raw credential target names, or arbitrary credential reads.
 - Allowed account commands are narrowly typed, for example `create_account`, `reauth_account`, `remove_account`, `get_account_auth_status`, and `test_account_connection`.
 - `get_account_auth_status` may return booleans, expiry times, provider names, and redacted error codes only.

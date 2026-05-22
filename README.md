@@ -34,6 +34,8 @@ Reference: https://v2.tauri.app/start/prerequisites/
 
 The accepted credential architecture is documented in [docs/architecture/credential-model.md](docs/architecture/credential-model.md). Komorebi uses Windows Credential Manager/DPAPI for account secrets. Plaintext passwords and tokens are forbidden in SQLite, Tauri Store, browser storage, logs, diagnostics, and frontend state.
 
+Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft account setup are disabled until OAuth2/XOAUTH2 is implemented; generic password/app-password setup is limited to compatible generic IMAP/SMTP providers.
+
 ## Setup
 
 ```powershell

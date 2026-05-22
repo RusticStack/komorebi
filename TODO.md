@@ -4,13 +4,13 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, and `docs/architecture/credential-model.md`.
-- Local code inspected: scaffolded React app in `src/` and Tauri/Rust shell in `src-tauri/`.
-- Local tests inspected: `src/App.test.tsx`; `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs 0 Rust tests successfully.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, and `docs/architecture/provider-auth.md`.
+- Local code inspected: scaffolded React app in `src/`, Tauri/Rust shell in `src-tauri/`, and Rust auth policy in `src-tauri/src/auth.rs`.
+- Local tests inspected: `src/App.test.tsx`; `src-tauri/src/auth.rs` unit tests for provider/auth policy.
 - Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
 - Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; credential architecture docs and new check config/test files are untracked until committed.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; provider-auth architecture docs and auth policy code are untracked/modified until committed.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
 - External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
@@ -45,9 +45,8 @@ Purpose: prevent the earliest design choices from leaking credentials, exposing 
 
 - [x] Define the credential model before implementing account add.
   Evidence: `docs/architecture/credential-model.md` chooses Windows Credential Manager/DPAPI as the approved Windows-first secret backend, rejects Tauri Store/SQLite/browser storage/logs/diagnostics/frontend state for secrets, forbids plaintext passwords and tokens at rest, defines SQLite account metadata vs Credential Manager entries, and documents account removal, credential rotation, runtime access, and diagnostics clearing rules.
-- [ ] Support modern authentication paths for major providers.
-  Evidence: external research shows Gmail and Microsoft support OAuth/XOAUTH2 for IMAP/SMTP and Microsoft disables or blocks Basic authentication in many Exchange Online contexts.
-  Acceptance: Gmail and Microsoft account flows use OAuth2/XOAUTH2 or are explicitly marked unsupported until implemented; generic password/app-password flow is limited to compatible providers and documented as such.
+- [x] Support modern authentication paths for major providers.
+  Evidence: `docs/architecture/provider-auth.md` requires OAuth2/XOAUTH2 for Gmail and Microsoft, explicitly marks those providers unsupported until OAuth is implemented, rejects Gmail/Microsoft manual password and app-password fallback, and limits password/app-password setup to compatible generic IMAP/SMTP providers. `src-tauri/src/auth.rs` enforces the provider/auth matrix with Rust tests covering Gmail/Microsoft denial paths, OAuth-pending unsupported status, future XOAUTH2 allowed status, and generic password allowance.
 - [ ] Implement token refresh and revocation handling.
   Evidence: no account model or sync worker exists.
   Acceptance: expired tokens refresh without exposing secrets to React; failed refresh leads to a safe reconnect-needed state; account removal wipes credentials and local cache according to documented retention rules.
