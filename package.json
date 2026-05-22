@@ -10,9 +10,17 @@
   },
   "scripts": {
     "dev": "vite",
+    "lint": "pnpm lint:frontend && pnpm lint:rust",
+    "lint:frontend": "eslint . --max-warnings=0",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "pnpm test:frontend && pnpm test:rust",
+    "test:frontend": "vitest run",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
+    "fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
+    "check": "pnpm fmt:check && pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -20,11 +28,22 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.9.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^10.4.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.59.4",
     "vite": "^7.0.4",
-    "@tauri-apps/cli": "^2"
+    "vitest": "^4.1.7"
   }
 }

@@ -6,11 +6,11 @@ Last audit refresh: 2026-05-22
 
 - Local docs inspected: `Project Komorebi - Email Client Plan.md` and `README.md`.
 - Local code inspected: scaffolded React app in `src/` and Tauri/Rust shell in `src-tauri/`.
-- Local tests inspected: no explicit tests exist; `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs 0 tests successfully.
-- Local scripts inspected: `package.json` scripts for Vite build/dev/preview and Tauri CLI.
-- Local config inspected: `.node-version`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
+- Local tests inspected: `src/App.test.tsx`; `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs 0 Rust tests successfully.
+- Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
+- Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; `AGENTS.md`, `TODO.md`, and `.gitignore` are tracked; scaffold, README, and toolchain pin files are untracked until committed.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; new check config/test files are untracked until committed.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
 - External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
@@ -34,9 +34,8 @@ Purpose: make the project real enough for agents and humans to build, test, and 
   Evidence: `package.json`, `pnpm-lock.yaml`, `src/`, `src-tauri/`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` now exist. `pnpm install` and `pnpm build` pass from the repo root. A controlled `pnpm tauri dev --no-watch` run compiled and launched `target\debug\komorebi.exe`, then the process tree was stopped after verification. The first screen is a placeholder 3-pane mail-client shell, not the starter Tauri/Vite/React marketing page.
 - [x] Pin the development toolchain.
   Evidence: `.node-version` pins Node `24.16.0`; `package.json` pins Node `24.16.0` and pnpm `10.33.2`; `pnpm-lock.yaml` exists; `rust-toolchain.toml` pins Rust `1.95.0`, `rustfmt`, `clippy`, and `x86_64-pc-windows-msvc`; `src-tauri/Cargo.lock` exists; `README.md` documents Windows C++ Build Tools and WebView2 expectations.
-- [ ] Establish root check commands.
-  Evidence: `package.json` now has `dev`, `build`, `preview`, and `tauri` scripts, and Rust format/clippy/test commands work when invoked directly. No `pnpm lint`, `pnpm test`, or root scripts for Rust format/clippy/test exist yet.
-  Acceptance: root scripts call frontend lint/test/build and Rust fmt/clippy/test; failing commands are either fixed or documented as known baseline failures with exact errors.
+- [x] Establish root check commands.
+  Evidence: `package.json` now defines `pnpm lint`, `pnpm lint:frontend`, `pnpm lint:rust`, `pnpm test`, `pnpm test:frontend`, `pnpm test:rust`, `pnpm fmt:check`, `pnpm build`, and `pnpm check`. `pnpm check` runs Rust format check, frontend ESLint, Rust clippy, frontend Vitest, Rust tests, and frontend build. `src/App.test.tsx` verifies the placeholder mail shell and guards against the starter Tauri page returning. No baseline check failures remain for this task.
 
 ## P1 - Privacy, Credential Safety, And User-Data Loss Prevention
 
@@ -180,10 +179,10 @@ Purpose: create evidence that the client works without risking real mailboxes. R
 ### Test Infrastructure
 
 - [ ] Add Rust unit and integration tests.
-  Evidence: no Rust code or tests exist.
+  Evidence: only the Tauri shell Rust code exists, and `cargo test --manifest-path src-tauri/Cargo.toml --all-features` currently runs 0 Rust tests.
   Acceptance: `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs sync, schema, command validation, MIME, attachment, and credential-boundary tests.
 - [ ] Add frontend tests.
-  Evidence: no React app or tests exist.
+  Evidence: `src/App.test.tsx` is a smoke test for the placeholder shell only; no state/query, renderer-safety, i18n, or composer tests exist yet.
   Acceptance: Vitest/React Testing Library cover state/query behavior, renderer safety, i18n, composer validation, and core navigation.
 - [ ] Add end-to-end UI smoke tests.
   Evidence: no Playwright/WebDriver setup exists.
@@ -291,8 +290,8 @@ Purpose: keep future autonomous work scoped and reviewable. Risk: medium because
 ### Agent Docs
 
 - [ ] Keep `AGENTS.md` updated as implementation lands.
-  Evidence: current `AGENTS.md` is based on a plan-only repo.
-  Acceptance: once scaffold exists, AGENTS names actual commands, known baseline failures, generated paths, and project-specific traps from real bugs.
+  Evidence: `AGENTS.md` names the scaffolded commands, generated paths, known baseline gaps, and current toolchain/check setup; this remains an ongoing maintenance task as implementation lands.
+  Acceptance: AGENTS stays synchronized with actual commands, known baseline failures, generated paths, and project-specific traps from real bugs.
 - [ ] Keep this ledger current.
   Evidence: this is the first audit refresh.
   Acceptance: completed tasks are checked with evidence; broad tasks are reopened as narrower follow-ups; last audit date is updated after each full audit.

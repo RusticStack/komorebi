@@ -56,12 +56,29 @@ Build the frontend:
 pnpm build
 ```
 
-Run Rust checks:
+Run the full root check suite:
 
 ```powershell
-cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+pnpm check
+```
+
+Run individual root checks:
+
+```powershell
+pnpm fmt:check
+pnpm lint
+pnpm test
+pnpm build
+```
+
+The root scripts fan out to frontend and Rust checks:
+
+```powershell
+pnpm lint:frontend
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+pnpm test:frontend
 cargo test --manifest-path src-tauri/Cargo.toml --all-features
+cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
 ```
 
 ## Generated Outputs
