@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import App from "./App";
 import type {
@@ -183,6 +183,80 @@ describe("App", () => {
     expect(settings).toBeVisible();
     expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
     expect(within(settings).getByLabelText("Account")).toHaveValue("acct_personal");
+  });
+
+  it("supports keyboard navigation for search, folders, messages, and reading", () => {
+    render(<App initialData={fixtureMail} />);
+
+    const shell = screen.getByRole("main");
+    const search = screen.getByRole("searchbox");
+
+    fireEvent.keyDown(shell, { key: "/" });
+    expect(search).toHaveFocus();
+
+    const roadmap = screen.getByRole("button", { name: /Roadmap review/ });
+    roadmap.focus();
+    fireEvent.keyDown(roadmap, { key: "ArrowDown" });
+
+    const invoice = screen.getByRole("button", { name: /Invoice question/ });
+    expect(invoice).toHaveFocus();
+    expect(
+      within(screen.getByRole("region", { name: "Selected message" })).getByRole(
+        "heading",
+        { name: "Invoice question" },
+      ),
+    ).toBeVisible();
+
+    fireEvent.keyDown(invoice, { key: "Enter" });
+    expect(screen.getByRole("region", { name: "Selected message" })).toHaveFocus();
+
+    const folders = screen.getByRole("navigation", { name: "Folders" });
+    const unifiedInbox = within(folders).getByRole("button", {
+      name: /Unified Inbox folder/,
+    });
+    unifiedInbox.focus();
+    fireEvent.keyDown(unifiedInbox, { key: "ArrowDown" });
+
+    const personalInbox = within(folders).getAllByRole("button", {
+      name: /^Inbox folder/,
+    })[0];
+    expect(personalInbox).toHaveFocus();
+    expect(screen.getByText("Roadmap review")).toBeVisible();
+    expect(screen.queryByText("Archived receipt")).not.toBeInTheDocument();
+  });
+
+  it("keeps composer and settings dialogs keyboard reachable with focus return", async () => {
+    render(<App initialData={fixtureMail} />);
+
+    const composeButton = screen.getByRole("button", { name: "Compose" });
+    composeButton.focus();
+    fireEvent.click(composeButton);
+
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+    await waitFor(() => {
+      expect(within(composer).getByLabelText("To")).toHaveFocus();
+    });
+
+    within(composer).getByRole("button", { name: "Close" }).focus();
+    fireEvent.keyDown(composer, { key: "Tab", shiftKey: true });
+    expect(within(composer).getByRole("button", { name: "Send" })).toHaveFocus();
+    fireEvent.keyDown(composer, { key: "Tab" });
+    expect(within(composer).getByRole("button", { name: "Close" })).toHaveFocus();
+
+    fireEvent.keyDown(composer, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Composer" })).not.toBeInTheDocument();
+    expect(composeButton).toHaveFocus();
+
+    const settingsButton = screen.getByRole("button", { name: "Settings" });
+    settingsButton.focus();
+    fireEvent.click(settingsButton);
+
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+    expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
+
+    fireEvent.keyDown(settings, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+    expect(settingsButton).toHaveFocus();
   });
 
   it("loads real shell data through the cache data source and preserves selection when scope still contains it", async () => {

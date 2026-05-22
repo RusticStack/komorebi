@@ -1,7 +1,7 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell and multi-account local-cache navigation implemented; live account setup and sync adapters are not registered.
-Last reviewed: 2026-05-22.
+Status: 3-pane shell, multi-account local-cache navigation, and keyboard/accessibility workflows implemented; live account setup and sync adapters are not registered.
+Last reviewed: 2026-05-23.
 
 ## Current Scope
 
@@ -78,6 +78,18 @@ In account mode:
 
 Search filters the current account/folder scope by sender, sender email, subject, preview, and plain body text.
 
+## Keyboard And Accessibility
+
+The shell must remain usable from the keyboard before live account setup exists:
+
+- `/` and Ctrl/Cmd+F focus the search field when message data is ready; shortcuts are ignored from editable fields and while a drawer is open.
+- Account, folder, and message lists support Arrow Up/Down/Left/Right plus Home/End to move focus and update the active scope or message.
+- Enter or Space on a focused message selects it and moves focus to the reader pane.
+- The reader pane is programmatically focusable so keyboard users have a stable reading target after selecting a message.
+- Account, folder, and message controls expose screen-reader labels with account email/status/unread counts, folder counts, and message read/flagged/sender/subject/date state.
+- Composer and Settings drawers render as modal dialogs with `aria-modal`, initial focus, trapped Tab navigation at the dialog edges, Escape close, and focus return to the opener.
+- Visible focus states are required for buttons, form fields, reader focus, and drawer focus.
+
 ## Reader
 
 The reader pane supports:
@@ -124,6 +136,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - selected-message preservation for compatible scope changes
 - message search
 - message selection and reader rendering
+- keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
 - composer drawer entry
 - settings drawer entry
 - loading/error shell states
@@ -141,6 +154,7 @@ No test uses real mailbox data, real credentials, or live provider connections.
 - SMTP send command wiring.
 - Virtualized large message list.
 - i18n dictionaries.
+- E2E accessibility, axe, or real screen-reader harness.
 
 ## Documentation Sync
 

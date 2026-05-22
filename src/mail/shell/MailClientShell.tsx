@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import { AccountSignatureSettings } from "../../settings/AccountSignatureSettings";
 import {
@@ -41,6 +48,15 @@ export function MailClientShell({
     ),
   );
   const [drawer, setDrawer] = useState<Drawer>(null);
+  const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const messageButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const readerRef = useRef<HTMLElement | null>(null);
+  const composeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const visibleFolders = useMemo(() => foldersForScope(state), [state]);
   const visibleMessages = useMemo(() => messagesForScope(state), [state]);
   const activeMessage = selectedMessage(state);
@@ -57,6 +73,164 @@ export function MailClientShell({
       ...current,
       ...update,
     }));
+  }
+
+  function openDrawer(nextDrawer: Drawer, restoreFocus: HTMLElement | null) {
+    restoreFocusRef.current = restoreFocus;
+    setDrawer(nextDrawer);
+  }
+
+  function closeDrawer() {
+    const restoreFocus = restoreFocusRef.current;
+    setDrawer(null);
+    restoreFocusRef.current = null;
+    restoreFocus?.focus();
+  }
+
+  function focusSearch() {
+    if (!hasAccounts || state.loadState.messages !== "ready") {
+      return;
+    }
+
+    searchInputRef.current?.focus();
+  }
+
+  function handleShellKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (drawer || isEditableTarget(event.target)) {
+      return;
+    }
+
+    if (
+      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") ||
+      event.key === "/"
+    ) {
+      event.preventDefault();
+      focusSearch();
+    }
+  }
+
+  function moveAccountFocus(nextIndex: number) {
+    const boundedIndex = clampIndex(nextIndex, state.data.accounts.length);
+    const account = state.data.accounts[boundedIndex];
+    if (!account) {
+      return;
+    }
+
+    setState((current) => selectAccountScope(current, account.id));
+    accountButtonRefs.current[boundedIndex]?.focus();
+  }
+
+  function handleAccountKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) {
+    const nextIndex = nextIndexForKey(
+      event.key,
+      currentIndex,
+      state.data.accounts.length,
+    );
+
+    if (nextIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    moveAccountFocus(nextIndex);
+  }
+
+  function moveFolderFocus(nextIndex: number) {
+    const itemCount = visibleFolders.length + 1;
+    const boundedIndex = clampIndex(nextIndex, itemCount);
+    const folder = boundedIndex === 0 ? null : visibleFolders[boundedIndex - 1];
+
+    setState((current) => selectFolderScope(current, folder?.id ?? null));
+    folderButtonRefs.current[boundedIndex]?.focus();
+  }
+
+  function handleFolderKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) {
+    const nextIndex = nextIndexForKey(
+      event.key,
+      currentIndex,
+      visibleFolders.length + 1,
+    );
+
+    if (nextIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    moveFolderFocus(nextIndex);
+  }
+
+  function selectMessageAndFocusButton(messageIndex: number) {
+    const message = visibleMessages[messageIndex];
+    if (!message) {
+      return;
+    }
+
+    patchState({ selectedMessageId: message.id });
+    messageButtonRefs.current[messageIndex]?.focus();
+  }
+
+  function handleMessageKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+    messageId: string,
+  ) {
+    const nextIndex = nextIndexForKey(
+      event.key,
+      currentIndex,
+      visibleMessages.length,
+    );
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      selectMessageAndFocusButton(nextIndex);
+      return;
+    }
+
+    if (isActivationKey(event.key)) {
+      event.preventDefault();
+      patchState({ selectedMessageId: messageId });
+      readerRef.current?.focus();
+    }
+  }
+
+  function handleDrawerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDrawer();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusableElements = getFocusableElements(drawerRef.current);
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      drawerRef.current?.focus();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement;
+
+    if (event.shiftKey && activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+      return;
+    }
+
+    if (!event.shiftKey && activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
   }
 
   async function reloadMailShell() {
@@ -115,8 +289,21 @@ export function MailClientShell({
     };
   }, [loadMailShellData]);
 
+  useEffect(() => {
+    if (!drawer) {
+      return;
+    }
+
+    const dialog = drawerRef.current;
+    const preferredFocus = dialog?.querySelector<HTMLElement>(
+      "[data-autofocus='true']",
+    );
+
+    (preferredFocus ?? getFocusableElements(dialog)[0] ?? dialog)?.focus();
+  }, [drawer]);
+
   return (
-    <main className="app-shell">
+    <main className="app-shell" onKeyDown={handleShellKeyDown}>
       <aside className="sidebar" aria-label="Mailboxes">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -170,7 +357,7 @@ export function MailClientShell({
             emptyLabel="No accounts configured."
             onRetry={loadMailShellData ? reloadMailShell : undefined}
           >
-            {state.data.accounts.map((account) => (
+            {state.data.accounts.map((account, index) => (
               <button
                 className={
                   !state.unifiedInbox && account.id === state.selectedAccountId
@@ -179,6 +366,13 @@ export function MailClientShell({
                 }
                 type="button"
                 key={account.id}
+                aria-label={`${account.label} account, ${account.email}, ${account.unreadCount} unread, ${account.status}`}
+                ref={(element) => {
+                  accountButtonRefs.current[index] = element;
+                }}
+                onKeyDown={(event) =>
+                  handleAccountKeyDown(event, index)
+                }
                 onClick={() =>
                   setState((current) => selectAccountScope(current, account.id))
                 }
@@ -207,12 +401,17 @@ export function MailClientShell({
             <button
               className={!state.selectedFolderId ? "folder is-active" : "folder"}
               type="button"
+              aria-label={`${state.unifiedInbox ? "Unified Inbox" : "All mail"} folder, ${unreadCountForScope(state)} unread`}
+              ref={(element) => {
+                folderButtonRefs.current[0] = element;
+              }}
+              onKeyDown={(event) => handleFolderKeyDown(event, 0)}
               onClick={() => setState((current) => selectFolderScope(current, null))}
             >
               <span>{state.unifiedInbox ? "Unified Inbox" : "All mail"}</span>
               <span>{unreadCountForScope(state)}</span>
             </button>
-            {visibleFolders.map((folder) => (
+            {visibleFolders.map((folder, index) => (
               <button
                 className={
                   folder.id === state.selectedFolderId
@@ -221,6 +420,11 @@ export function MailClientShell({
                 }
                 type="button"
                 key={folder.id}
+                aria-label={`${folder.name} folder, ${folder.unreadCount} unread, ${folder.totalCount} messages`}
+                ref={(element) => {
+                  folderButtonRefs.current[index + 1] = element;
+                }}
+                onKeyDown={(event) => handleFolderKeyDown(event, index + 1)}
                 onClick={() =>
                   setState((current) => selectFolderScope(current, folder.id))
                 }
@@ -236,7 +440,8 @@ export function MailClientShell({
           <button
             className="settings-button"
             type="button"
-            onClick={() => setDrawer("settings")}
+            ref={settingsButtonRef}
+            onClick={() => openDrawer("settings", settingsButtonRef.current)}
           >
             Settings
           </button>
@@ -252,9 +457,10 @@ export function MailClientShell({
             <h2>{listTitle}</h2>
           </div>
           <button
+            ref={composeButtonRef}
             type="button"
             disabled={!canCompose}
-            onClick={() => setDrawer("composer")}
+            onClick={() => openDrawer("composer", composeButtonRef.current)}
           >
             Compose
           </button>
@@ -263,6 +469,7 @@ export function MailClientShell({
         <label className="search">
           <span>Search mail</span>
           <input
+            ref={searchInputRef}
             type="search"
             placeholder="Sender, subject, or body"
             disabled={!hasAccounts || state.loadState.messages !== "ready"}
@@ -286,11 +493,20 @@ export function MailClientShell({
                 selectedMessageId: messageId,
               })
             }
+            onMessageKeyDown={handleMessageKeyDown}
+            setMessageButtonRef={(index, element) => {
+              messageButtonRefs.current[index] = element;
+            }}
           />
         </div>
       </section>
 
-      <section className="reader" aria-label="Selected message">
+      <section
+        className="reader"
+        aria-label="Selected message"
+        ref={readerRef}
+        tabIndex={-1}
+      >
         <ReaderPane
           state={state}
           message={activeMessage}
@@ -300,7 +516,15 @@ export function MailClientShell({
       </section>
 
       {drawer === "settings" ? (
-        <div className="settings-drawer">
+        <div
+          className="settings-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Settings"
+          ref={drawerRef}
+          tabIndex={-1}
+          onKeyDown={handleDrawerKeyDown}
+        >
           <AccountSignatureSettings
             accounts={state.data.accounts.map((account) => ({
               id: account.id,
@@ -322,16 +546,28 @@ export function MailClientShell({
                 },
               }));
             }}
-            onClose={() => setDrawer(null)}
+            onClose={closeDrawer}
           />
         </div>
       ) : null}
 
       {drawer === "composer" ? (
-        <ComposerDrawer
-          accountLabel={activeAccount?.label ?? state.data.accounts[0]?.label ?? ""}
-          onClose={() => setDrawer(null)}
-        />
+        <div
+          className="composer-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Composer"
+          ref={drawerRef}
+          tabIndex={-1}
+          onKeyDown={handleDrawerKeyDown}
+        >
+          <ComposerDrawer
+            accountLabel={
+              activeAccount?.label ?? state.data.accounts[0]?.label ?? ""
+            }
+            onClose={closeDrawer}
+          />
+        </div>
       ) : null}
     </main>
   );
@@ -381,11 +617,22 @@ function MessageListState({
   visibleMessages,
   onRetry,
   onSelectMessage,
+  onMessageKeyDown,
+  setMessageButtonRef,
 }: {
   state: MailShellState;
   visibleMessages: ReturnType<typeof messagesForScope>;
   onRetry?: () => void;
   onSelectMessage: (messageId: string) => void;
+  onMessageKeyDown: (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    messageId: string,
+  ) => void;
+  setMessageButtonRef: (
+    index: number,
+    element: HTMLButtonElement | null,
+  ) => void;
 }) {
   if (state.loadState.messages === "loading") {
     return (
@@ -435,12 +682,19 @@ function MessageListState({
     );
   }
 
-  return visibleMessages.map((message) => (
+  return visibleMessages.map((message, index) => (
     <button
       className={message.unread ? "message is-unread" : "message"}
       key={message.id}
       type="button"
       aria-current={message.id === state.selectedMessageId ? "true" : undefined}
+      aria-label={`${message.unread ? "Unread" : "Read"}${
+        message.flagged ? ", flagged" : ""
+      } message from ${message.sender}, ${message.subject || "no subject"}, ${
+        message.receivedAt
+      }`}
+      ref={(element) => setMessageButtonRef(index, element)}
+      onKeyDown={(event) => onMessageKeyDown(event, index, message.id)}
       onClick={() => onSelectMessage(message.id)}
     >
       <div className="message-row">
@@ -559,39 +813,41 @@ function ComposerDrawer({
   onClose: () => void;
 }) {
   return (
-    <div className="composer-drawer">
-      <section className="composer-panel" aria-label="Composer">
-        <header className="settings-panel__header">
-          <div>
-            <p className="eyebrow">{accountLabel || "Composer"}</p>
-            <h2>New message</h2>
-          </div>
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-        </header>
+    <section className="composer-panel" aria-label="Composer">
+      <header className="settings-panel__header">
+        <div>
+          <p className="eyebrow">{accountLabel || "Composer"}</p>
+          <h2>New message</h2>
+        </div>
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+      </header>
 
-        <form className="composer-form">
-          <label>
-            <span>To</span>
-            <input type="text" placeholder="recipient@example.com" />
-          </label>
-          <label>
-            <span>Subject</span>
-            <input type="text" />
-          </label>
-          <label>
-            <span>Message</span>
-            <textarea rows={10} />
-          </label>
+      <form className="composer-form">
+        <label>
+          <span>To</span>
+          <input
+            type="text"
+            placeholder="recipient@example.com"
+            data-autofocus="true"
+          />
+        </label>
+        <label>
+          <span>Subject</span>
+          <input type="text" />
+        </label>
+        <label>
+          <span>Message</span>
+          <textarea rows={10} />
+        </label>
 
-          <div className="settings-panel__actions">
-            <button type="button">Save draft</button>
-            <button type="button">Send</button>
-          </div>
-        </form>
-      </section>
-    </div>
+        <div className="settings-panel__actions">
+          <button type="button">Save draft</button>
+          <button type="button">Send</button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -612,4 +868,76 @@ function unreadCountForScope(state: MailShellState) {
   }
 
   return visibleFolders.reduce((total, folder) => total + folder.unreadCount, 0);
+}
+
+function nextIndexForKey(
+  key: string,
+  currentIndex: number,
+  itemCount: number,
+): number | null {
+  switch (key) {
+    case "ArrowDown":
+    case "ArrowRight":
+      return clampIndex(currentIndex + 1, itemCount);
+    case "ArrowUp":
+    case "ArrowLeft":
+      return clampIndex(currentIndex - 1, itemCount);
+    case "Home":
+      return clampIndex(0, itemCount);
+    case "End":
+      return clampIndex(itemCount - 1, itemCount);
+    default:
+      return null;
+  }
+}
+
+function clampIndex(index: number, itemCount: number) {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.max(index, 0), itemCount - 1);
+}
+
+function isActivationKey(key: string) {
+  return key === "Enter" || key === " ";
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+
+  return (
+    target.isContentEditable ||
+    tagName === "input" ||
+    tagName === "select" ||
+    tagName === "textarea"
+  );
+}
+
+function getFocusableElements(container: HTMLElement | null) {
+  if (!container) {
+    return [];
+  }
+
+  const selectors = [
+    "button:not([disabled])",
+    "a[href]",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ];
+
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(selectors.join(",")),
+  ).filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      !element.hidden &&
+      !element.closest("[hidden], [aria-hidden='true']"),
+  );
 }
