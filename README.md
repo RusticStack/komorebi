@@ -30,6 +30,10 @@ WebView2 is the rendering engine used by Tauri on Windows. It is normally presen
 
 Reference: https://v2.tauri.app/start/prerequisites/
 
+## Security Model
+
+The accepted credential architecture is documented in [docs/architecture/credential-model.md](docs/architecture/credential-model.md). Komorebi uses Windows Credential Manager/DPAPI for account secrets. Plaintext passwords and tokens are forbidden in SQLite, Tauri Store, browser storage, logs, diagnostics, and frontend state.
+
 ## Setup
 
 ```powershell
