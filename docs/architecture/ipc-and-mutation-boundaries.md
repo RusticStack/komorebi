@@ -4,7 +4,7 @@ Last updated: 2026-05-22
 
 ## Current State
 
-Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. That is intentional until the database schema, migration path, sync engine, and input validation layer exist.
+Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. The database schema, migration path, and input validation layer now exist; command exposure remains blocked until sync/cache ownership and command-specific validation are implemented.
 
 The accepted boundary is:
 

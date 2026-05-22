@@ -42,6 +42,8 @@ Tauri capability policy is documented in [docs/architecture/tauri-capabilities.m
 
 IPC and mutation boundaries are documented in [docs/architecture/ipc-and-mutation-boundaries.md](docs/architecture/ipc-and-mutation-boundaries.md). Server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation stay in typed Rust commands or internal Rust workers. Frontend SQL is disabled until a read-only policy is implemented and tested.
 
+SQLite schema and migrations are documented in [docs/architecture/schema.md](docs/architecture/schema.md). The initial migration defines settings, accounts, folders, messages, attachments, templates, template versions, primary/foreign keys, uniqueness rules, indexes, timestamps, and schema-version tracking.
+
 IPC input validation is documented in [docs/architecture/ipc-validation.md](docs/architecture/ipc-validation.md). Future commands must reject arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, unbounded payloads, and unknown or unowned account/folder/message IDs before side effects.
 
 Safe email rendering is documented in [docs/architecture/message-rendering.md](docs/architecture/message-rendering.md). Untrusted email HTML is sanitized through a single React boundary, remote resources are blocked by default, links are rewritten for delegated opening, and plain-text fallback is preserved.

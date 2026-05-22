@@ -42,9 +42,12 @@ The local SQLite `accounts` record stores only non-secret account metadata and c
 | `auth_kind` | yes | no | `oauth2`, `app_password`, or `manual_password`. |
 | `credential_ref` | yes | no | Opaque reference to Windows Credential Manager target name. |
 | `signature_html` | yes | no | Sanitized account signature, not a credential. |
-| `created_at`, `updated_at`, `last_auth_at` | yes | no | Local timestamps. |
+| `auth_status` | yes | no | Redacted auth state such as `connected` or `reconnect_needed`. |
+| `created_at`, `updated_at`, `last_auth_at`, `removed_at` | yes | no | Local timestamps. |
 
 SQLite must not store `password`, `app_password`, `access_token`, `refresh_token`, `client_secret`, `authorization_code`, `authorization_header`, token response JSON, or provider cookies.
+
+The current account table is defined in `src-tauri/migrations/001_initial_schema.sql` and summarized in `docs/architecture/schema.md`.
 
 ## Credential Manager Entries
 

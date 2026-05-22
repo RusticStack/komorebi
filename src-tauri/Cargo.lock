@@ -781,8 +781,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fastrand"
@@ -1277,9 +1289,27 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "hashlink"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea0b22561a9c04a7cb1a302c013e0259cd3b4bb619f145b32f72b8b4bcbed230"
+dependencies = [
+ "hashbrown 0.16.1",
+]
 
 [[package]]
 name = "heck"
@@ -1728,6 +1758,7 @@ dependencies = [
  "base64 0.22.1",
  "rand",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -1799,6 +1830,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -2650,6 +2692,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsqlite-vfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
+dependencies = [
+ "hashbrown 0.16.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e"
+dependencies = [
+ "bitflags 2.11.1",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+ "sqlite-wasm-rs",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2674,7 +2741,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3106,6 +3173,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlite-wasm-rs"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdd578e94101503d97e2b286bbf8db2135035ca24b2ce4cbf3f9e2fb2bbf1eee"
+dependencies = [
+ "cc",
+ "js-sys",
+ "rsqlite-vfs",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3483,10 +3562,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4441,15 +4520,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75283be5efb2831d37ea142365f009c02ec203cd29a3ebecbc093d52315b66d0"
 dependencies = [
  "windows-targets 0.42.2",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
 ]
 
 [[package]]

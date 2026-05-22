@@ -1,0 +1,88 @@
+# SQLite Schema And Migrations
+
+Status: initial production schema implemented.
+Last reviewed: 2026-05-22.
+
+## Implementation
+
+The SQLite schema is versioned in `src-tauri/migrations/001_initial_schema.sql` and applied by `src-tauri/src/schema.rs`.
+
+The Rust backend owns migrations. React and frontend SQL must not create, migrate, or mutate schema. The migration runner:
+
+- Enables `PRAGMA foreign_keys = ON` for the connection before migration work.
+- Uses `PRAGMA application_id = 1263354434` to identify Komorebi databases.
+- Uses `PRAGMA user_version` plus the `schema_migrations` table for version tracking.
+- Applies migrations transactionally and rejects databases newer than the compiled schema version.
+- Uses `rusqlite` with bundled SQLite so tests and Windows builds do not depend on a system SQLite install.
+
+## Tables
+
+The initial schema defines:
+
+- `schema_migrations`: applied migration history.
+- `settings`: global preferences stored as validated JSON values.
+- `accounts`: non-secret account metadata and credential references only.
+- `folders`: provider folders, special-use classification, sync counters, UIDVALIDITY, and sync status.
+- `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata.
+- `attachments`: attachment metadata with display filenames and app-generated storage references.
+- `templates`: future composer template records.
+- `template_versions`: version history for future template editing.
+
+All durable tables include `created_at`; mutable tables include `updated_at` with timestamp triggers.
+
+## Identity Rules
+
+`messages.id` is the local stable row id. It is not an IMAP UID and not an RFC `Message-ID`.
+
+Remote identity is stored separately:
+
+- `account_id`
+- `folder_id`
+- `uid_validity`
+- `imap_uid`
+- `rfc_message_id`
+- `provider_message_id`
+
+The unique partial index `ux_messages_imap_identity` prevents duplicate `(account_id, folder_id, uid_validity, imap_uid)` rows when IMAP identity exists. The RFC `Message-ID` is indexed but not unique because providers can expose the same RFC message across folders, accounts, or duplicate deliveries.
+
+## Constraints
+
+The schema uses primary keys, foreign keys, unique constraints, partial unique indexes, JSON checks, enum-style checks, and non-negative counter checks. Notable invariants:
+
+- SQLite account rows never include password, app-password, access-token, refresh-token, client-secret, authorization-code, or authorization-header columns.
+- `accounts.credential_ref` is the only persisted secret reference and is unique.
+- Generic IMAP/SMTP accounts must include IMAP and SMTP host, port, and security metadata.
+- Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
+- Messages must store `imap_uid` and `uid_validity` together, or neither for local-only states.
+- Attachments reference their owning message through `(account_id, folder_id, message_id)` and cascade with the account/message.
+- Template JSON and setting JSON must pass `json_valid`.
+- Global template names and per-account template names are deduplicated separately.
+
+## Deferred Schema Work
+
+FTS5 is intentionally not part of this migration because it has a dedicated follow-up task. When added, it must use tested triggers or an equivalent controlled update path, rebuild support, and integrity checks.
+
+Message-body and attachment encryption at rest is still undecided. This schema must not be described as encrypted local mail storage until encryption is implemented and verified.
+
+## Tests
+
+`src-tauri/src/schema.rs` tests cover:
+
+- Initial migration application, version recording, idempotency, and application id.
+- Newer-database rejection.
+- Required tables, indexes, and timestamp triggers.
+- Required account, folder, message, attachment, and template columns.
+- Absence of secret columns from account metadata.
+- Foreign-key enforcement and account cascade behavior.
+- IMAP UID identity separated from RFC `Message-ID`.
+- JSON validation for settings and templates.
+- `PRAGMA foreign_key_check` on valid seed data.
+
+`pnpm check` runs these tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
+
+## References
+
+- SQLite CREATE TABLE, constraints, and STRICT tables: https://www.sqlite.org/lang_createtable.html
+- SQLite foreign-key enforcement: https://www.sqlite.org/foreignkeys.html
+- SQLite PRAGMA `foreign_keys`, `foreign_key_check`, `application_id`, and `user_version`: https://www.sqlite.org/pragma.html
+- SQLite FTS5 external-content rebuild guidance: https://www.sqlite.org/fts5.html

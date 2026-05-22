@@ -4,15 +4,15 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, `docs/architecture/ipc-validation.md`, `docs/architecture/message-rendering.md`, `docs/architecture/attachment-safety.md`, and `docs/architecture/destructive-mail-actions.md`.
-- Local code inspected: accountless React app shell in `src/`, safe email rendering boundary in `src/mail/rendering/`, Tauri/Rust shell in `src-tauri/`, Rust auth policy in `src-tauri/src/auth.rs`, Rust OAuth provider implementation in `src-tauri/src/oauth.rs`, Windows Credential Manager wrapper in `src-tauri/src/credentials.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`, Rust attachment safety policy in `src-tauri/src/attachment_safety.rs`, and Rust destructive mail-action policy in `src-tauri/src/mail_actions.rs`.
-- Local tests inspected: `src/App.test.tsx`; `src/mail/rendering/SafeEmailBody.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/oauth.rs` unit tests for OAuth URLs, PKCE, token exchange/refresh, revocation, and XOAUTH2; `src-tauri/src/credentials.rs` unit tests for credential target naming and redaction; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths; `src-tauri/src/attachment_safety.rs` unit tests for storage path, display filename, type/size, preview, and auto-open safety; `src-tauri/src/mail_actions.rs` unit tests for local mailbox action semantics.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/schema.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, `docs/architecture/ipc-validation.md`, `docs/architecture/message-rendering.md`, `docs/architecture/attachment-safety.md`, and `docs/architecture/destructive-mail-actions.md`.
+- Local code inspected: accountless React app shell in `src/`, safe email rendering boundary in `src/mail/rendering/`, Tauri/Rust shell in `src-tauri/`, SQLite migration SQL in `src-tauri/migrations/`, Rust schema migration runner in `src-tauri/src/schema.rs`, Rust auth policy in `src-tauri/src/auth.rs`, Rust OAuth provider implementation in `src-tauri/src/oauth.rs`, Windows Credential Manager wrapper in `src-tauri/src/credentials.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`, Rust attachment safety policy in `src-tauri/src/attachment_safety.rs`, and Rust destructive mail-action policy in `src-tauri/src/mail_actions.rs`.
+- Local tests inspected: `src/App.test.tsx`; `src/mail/rendering/SafeEmailBody.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/schema.rs` unit tests for migration application, schema objects, constraints, JSON checks, identity uniqueness, and foreign-key integrity; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/oauth.rs` unit tests for OAuth URLs, PKCE, token exchange/refresh, revocation, and XOAUTH2; `src-tauri/src/credentials.rs` unit tests for credential target naming and redaction; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths; `src-tauri/src/attachment_safety.rs` unit tests for storage path, display filename, type/size, preview, and auto-open safety; `src-tauri/src/mail_actions.rs` unit tests for local mailbox action semantics.
 - Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
 - Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; current P0/P1 verification changes are uncommitted until the user asks for a commit.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; current P2 schema changes are uncommitted until the user asks for a commit.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
-- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, Windows Credential Manager Win32 docs, DOMPurify docs, RFC 9051, RFC 6851, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth/XOAUTH2 docs, Microsoft Exchange Online OAuth/basic-auth docs, Microsoft authorization-code/PKCE docs, OWASP XSS/file-upload/path-traversal guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
+- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, Windows Credential Manager Win32 docs, DOMPurify docs, RFC 9051, RFC 6851, `async-imap`, `lettre`, `mail-parser`, SQLite CREATE TABLE/foreign-key/PRAGMA/FTS5 docs, Gmail IMAP/SMTP OAuth/XOAUTH2 docs, Microsoft Exchange Online OAuth/basic-auth docs, Microsoft authorization-code/PKCE docs, OWASP XSS/file-upload/path-traversal guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
 ## P0 - Repository Substrate And Executable Baseline
 
@@ -74,12 +74,10 @@ Purpose: make local cache and remote mail state accurate, recoverable, and searc
 
 ### Schema And Migrations
 
-- [ ] Replace the rough schema with production SQLite migrations.
-  Evidence: the plan has table sketches only; no migrations exist.
-  Acceptance: migrations define primary keys, foreign keys, unique constraints, indexes, timestamps, account/folder/message relations, attachment records, settings, and future-compatible template tables where needed.
-- [ ] Separate IMAP UID identity from RFC message identity.
-  Evidence: plan labels `messages.message_id` as "IMAP UID", which conflates two different concepts.
-  Acceptance: schema stores account id, folder id, UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata distinctly; uniqueness rules prevent cross-folder/account collisions.
+- [x] Replace the rough schema with production SQLite migrations.
+  Evidence: `src-tauri/migrations/001_initial_schema.sql` defines `schema_migrations`, `settings`, `accounts`, `folders`, `messages`, `attachments`, `templates`, and `template_versions` with primary keys, foreign keys, unique constraints, partial unique indexes, query indexes, timestamp columns/triggers, JSON checks, non-secret account metadata, account/folder/message relations, attachment records, and future-compatible template versioning. `src-tauri/src/schema.rs` applies migrations transactionally, enables foreign keys, records `PRAGMA user_version`, rejects newer databases, and tests migration idempotency, required schema objects, constraints, cascades, timestamp triggers, and `PRAGMA foreign_key_check`.
+- [x] Separate IMAP UID identity from RFC message identity.
+  Evidence: `messages.id` is the local row id, while `messages.imap_uid`, `messages.uid_validity`, `messages.rfc_message_id`, and `messages.provider_message_id` are distinct columns. The partial unique index `ux_messages_imap_identity` prevents duplicate `(account_id, folder_id, uid_validity, imap_uid)` rows when IMAP identity exists, while RFC `Message-ID` is indexed but not unique. `schema.rs` tests prove duplicate UID in the same folder/UIDVALIDITY is rejected and the same UID/RFC message can exist in a different folder without collision.
 - [ ] Implement FTS5 with consistency controls.
   Evidence: plan names `messages_fts`, but not triggers, rebuild, or integrity checks.
   Acceptance: FTS table has insert/update/delete triggers or an equivalent tested update path; migrations can rebuild FTS; integrity check exists after indexed-column migrations; search returns expected fixture rows.
@@ -170,7 +168,7 @@ Purpose: create evidence that the client works without risking real mailboxes. R
 ### Test Infrastructure
 
 - [ ] Add Rust unit and integration tests.
-  Evidence: Rust unit tests now cover provider auth policy, token lifecycle, IPC mutation-boundary policy, and shared IPC input validation, but no sync, schema, real command, MIME, attachment, or credential-backend integration tests exist yet.
+  Evidence: Rust unit tests now cover schema migrations and constraints, provider auth policy, OAuth provider behavior, token lifecycle, IPC mutation-boundary policy, shared IPC input validation, attachment safety, and destructive mail-action semantics. No sync, real frontend-callable command, MIME, or credential-backend integration tests exist yet.
   Acceptance: `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs sync, schema, command validation, MIME, attachment, and credential-boundary tests.
 - [ ] Add frontend tests.
   Evidence: `src/App.test.tsx` is a smoke test for the accountless shell only; `SafeEmailBody.test.tsx` covers renderer safety, but no state/query, i18n, or composer tests exist yet.
@@ -213,10 +211,10 @@ Purpose: make releases repeatable and auditable on Windows. Risk: medium-high be
   Evidence: no `.github/workflows` or equivalent CI config exists.
   Acceptance: CI runs frontend install/lint/test/build, Rust fmt/clippy/test, and Tauri build or package smoke on Windows.
 - [ ] Add dependency and license review.
-  Evidence: no dependency manifests exist.
+  Evidence: dependency manifests exist and `rusqlite` with bundled SQLite was added for schema migrations, but there is no dependency/license/advisory review workflow yet.
   Acceptance: production dependency additions are reviewed for license/security; Rust and npm advisories are checked by CI or documented manual commands.
 - [ ] Add generated-artifact checks.
-  Evidence: no gitignore or generated output exists.
+  Evidence: `.gitignore` excludes generated outputs, but there is no CI/review automation yet to reject generated dependency/build/runtime artifacts.
   Acceptance: CI or review docs prevent committing `node_modules`, `dist`, `target`, runtime DBs, fixture-generated blobs, and installer outputs unless explicitly intended.
 
 ### Windows Release
