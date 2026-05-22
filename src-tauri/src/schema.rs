@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 2;
+pub const LATEST_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -22,6 +22,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "messages_fts",
         sql: include_str!("../migrations/002_messages_fts.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "folder_semantics",
+        sql: include_str!("../migrations/003_folder_semantics.sql"),
     },
 ];
 
@@ -304,10 +309,10 @@ mod tests {
 
         assert_eq!(first_report.current_version, 0);
         assert_eq!(first_report.latest_version, LATEST_SCHEMA_VERSION);
-        assert_eq!(first_report.applied.len(), 2);
+        assert_eq!(first_report.applied.len(), MIGRATIONS.len());
         assert_eq!(second_report.current_version, LATEST_SCHEMA_VERSION);
         assert!(second_report.applied.is_empty());
-        assert_eq!(migration_count, 2);
+        assert_eq!(migration_count, MIGRATIONS.len() as i64);
         assert_eq!(application_id, KOMOREBI_APPLICATION_ID);
         assert_eq!(foreign_keys_enabled, 1);
     }
@@ -410,6 +415,7 @@ mod tests {
                     "remote_id",
                     "name",
                     "kind",
+                    "attributes_json",
                     "uid_validity",
                     "unread_count",
                     "sync_state",
@@ -839,7 +845,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2]
+            vec![2, 3]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -847,6 +853,54 @@ mod tests {
                 .len(),
             1
         );
+        let attributes_json = connection
+            .query_row(
+                "SELECT attributes_json FROM folders WHERE remote_id = 'INBOX'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        assert_eq!(attributes_json, "[]");
         check_messages_fts_integrity(&connection).unwrap();
+    }
+
+    #[test]
+    fn folder_semantics_migration_adds_attribute_preservation_to_v2_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        connection.execute_batch(MIGRATIONS[0].sql).unwrap();
+        connection.execute_batch(MIGRATIONS[1].sql).unwrap();
+        for migration in &MIGRATIONS[..2] {
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 2;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 2);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![3]
+        );
+        let attributes_json = connection
+            .query_row(
+                "SELECT attributes_json FROM folders WHERE remote_id = 'INBOX'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        assert_eq!(attributes_json, "[]");
     }
 }

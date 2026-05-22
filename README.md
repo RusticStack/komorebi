@@ -42,9 +42,9 @@ Tauri capability policy is documented in [docs/architecture/tauri-capabilities.m
 
 IPC and mutation boundaries are documented in [docs/architecture/ipc-and-mutation-boundaries.md](docs/architecture/ipc-and-mutation-boundaries.md). Server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation stay in typed Rust commands or internal Rust workers. Frontend SQL is disabled until a read-only policy is implemented and tested.
 
-SQLite schema and migrations are documented in [docs/architecture/schema.md](docs/architecture/schema.md). The migrations define settings, accounts, folders, messages, attachments, templates, template versions, FTS5 message search, primary/foreign keys, uniqueness rules, indexes, timestamps, and schema-version tracking.
+SQLite schema and migrations are documented in [docs/architecture/schema.md](docs/architecture/schema.md). The migrations define settings, accounts, folders, preserved folder attributes, messages, attachments, templates, template versions, FTS5 message search, primary/foreign keys, uniqueness rules, indexes, timestamps, and schema-version tracking.
 
-IMAP sync state-machine behavior is documented in [docs/architecture/sync-state-machine.md](docs/architecture/sync-state-machine.md). The Rust backend now has a provider-agnostic sync engine, folder IDLE worker with polling fallback, and SQLite cache integration tested against fake IMAP fixtures; live `async-imap` account connection and frontend account setup remain future work.
+IMAP sync state-machine behavior is documented in [docs/architecture/sync-state-machine.md](docs/architecture/sync-state-machine.md). The Rust backend now has a provider-agnostic sync engine, folder IDLE worker with polling fallback, server flag/folder semantics normalization, and SQLite cache integration tested against fake IMAP fixtures; live `async-imap` account connection and frontend account setup remain future work.
 
 Inbound MIME normalization is documented in [docs/architecture/mime-normalization.md](docs/architecture/mime-normalization.md). Raw message bytes are parsed in Rust with `mail-parser` into decoded message fields and stable attachment metadata records, then can be persisted to SQLite through the backend boundary. Live IMAP adapter integration and attachment file persistence remain future work.
 

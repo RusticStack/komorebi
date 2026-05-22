@@ -40,6 +40,17 @@ impl RemoteFolderKind {
             Self::Important => "important",
         }
     }
+
+    fn from_special_use(special_use: RemoteSpecialUse) -> Self {
+        match special_use {
+            RemoteSpecialUse::Inbox => Self::Inbox,
+            RemoteSpecialUse::Sent => Self::Sent,
+            RemoteSpecialUse::Drafts => Self::Drafts,
+            RemoteSpecialUse::Archive => Self::Archive,
+            RemoteSpecialUse::Trash => Self::Trash,
+            RemoteSpecialUse::Junk => Self::Junk,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +84,64 @@ pub struct RemoteFolder {
     pub kind: RemoteFolderKind,
     pub special_use: Option<RemoteSpecialUse>,
     pub delimiter: Option<String>,
+    pub attributes: BTreeSet<String>,
+}
+
+impl RemoteFolder {
+    pub fn new(
+        remote_id: impl Into<String>,
+        name: impl Into<String>,
+        display_name: impl Into<String>,
+        kind: RemoteFolderKind,
+        special_use: Option<RemoteSpecialUse>,
+        delimiter: Option<String>,
+    ) -> Self {
+        Self {
+            remote_id: remote_id.into(),
+            name: name.into(),
+            display_name: display_name.into(),
+            kind,
+            special_use,
+            delimiter,
+            attributes: BTreeSet::new(),
+        }
+    }
+
+    pub fn from_imap_attributes<I, S>(
+        remote_id: impl Into<String>,
+        name: impl Into<String>,
+        display_name: Option<String>,
+        delimiter: Option<String>,
+        attributes: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let remote_id = remote_id.into();
+        let name = name.into();
+        let display_name =
+            display_name.unwrap_or_else(|| display_name_from_folder_name(&name, &delimiter));
+        let attributes: BTreeSet<String> = attributes
+            .into_iter()
+            .filter_map(|attribute| normalize_folder_attribute(attribute.as_ref()))
+            .collect();
+        let special_use = detect_special_use(&name, &attributes);
+        let kind = special_use.map_or_else(
+            || detect_folder_kind_from_attributes(&attributes),
+            RemoteFolderKind::from_special_use,
+        );
+
+        Self {
+            remote_id,
+            name,
+            display_name,
+            kind,
+            special_use,
+            delimiter,
+            attributes,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +167,30 @@ pub enum RemoteFlag {
 impl RemoteFlag {
     pub fn keyword(value: impl Into<String>) -> Self {
         Self::Keyword(value.into())
+    }
+
+    pub fn from_imap_token(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed == "*" {
+            return None;
+        }
+
+        match trimmed.to_ascii_lowercase().as_str() {
+            "\\seen" => Some(Self::Seen),
+            "\\flagged" => Some(Self::Flagged),
+            "\\answered" => Some(Self::Answered),
+            "\\draft" => Some(Self::Draft),
+            "\\deleted" => Some(Self::Deleted),
+            "\\recent" => Some(Self::Recent),
+            _ => Some(Self::Keyword(trimmed.to_string())),
+        }
+    }
+
+    pub fn from_imap_tokens<'a>(values: impl IntoIterator<Item = &'a str>) -> BTreeSet<RemoteFlag> {
+        values
+            .into_iter()
+            .filter_map(Self::from_imap_token)
+            .collect()
     }
 
     fn as_imap_string(&self) -> String {
@@ -1148,6 +1241,111 @@ fn validate_remote_folder(folder: &RemoteFolder) -> Result<(), SyncError> {
     Ok(())
 }
 
+fn display_name_from_folder_name(name: &str, delimiter: &Option<String>) -> String {
+    delimiter
+        .as_deref()
+        .filter(|delimiter| !delimiter.is_empty())
+        .and_then(|delimiter| name.rsplit(delimiter).next())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(name)
+        .trim()
+        .to_string()
+}
+
+fn normalize_folder_attribute(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(without_slash) = trimmed.strip_prefix('\\') {
+        let without_slash = without_slash.trim();
+        if without_slash.is_empty() {
+            return None;
+        }
+
+        return Some(format!(
+            "\\{}",
+            canonical_folder_attribute_name(without_slash).unwrap_or(without_slash)
+        ));
+    }
+
+    Some(trimmed.to_string())
+}
+
+fn canonical_folder_attribute_name(value: &str) -> Option<&'static str> {
+    match value.to_ascii_lowercase().as_str() {
+        "all" => Some("All"),
+        "allmail" => Some("AllMail"),
+        "archive" => Some("Archive"),
+        "drafts" => Some("Drafts"),
+        "flagged" => Some("Flagged"),
+        "haschildren" => Some("HasChildren"),
+        "hasnochildren" => Some("HasNoChildren"),
+        "important" => Some("Important"),
+        "inbox" => Some("Inbox"),
+        "junk" => Some("Junk"),
+        "marked" => Some("Marked"),
+        "noinferiors" => Some("Noinferiors"),
+        "nonexistent" => Some("NonExistent"),
+        "noselect" => Some("Noselect"),
+        "sent" => Some("Sent"),
+        "spam" => Some("Spam"),
+        "starred" => Some("Starred"),
+        "trash" => Some("Trash"),
+        "unmarked" => Some("Unmarked"),
+        _ => None,
+    }
+}
+
+fn detect_special_use(name: &str, attributes: &BTreeSet<String>) -> Option<RemoteSpecialUse> {
+    if folder_has_attribute(attributes, &["inbox"]) || name.eq_ignore_ascii_case("INBOX") {
+        return Some(RemoteSpecialUse::Inbox);
+    }
+
+    if folder_has_attribute(attributes, &["sent"]) {
+        return Some(RemoteSpecialUse::Sent);
+    }
+
+    if folder_has_attribute(attributes, &["drafts"]) {
+        return Some(RemoteSpecialUse::Drafts);
+    }
+
+    if folder_has_attribute(attributes, &["trash"]) {
+        return Some(RemoteSpecialUse::Trash);
+    }
+
+    if folder_has_attribute(attributes, &["junk", "spam"]) {
+        return Some(RemoteSpecialUse::Junk);
+    }
+
+    if folder_has_attribute(attributes, &["archive"]) {
+        return Some(RemoteSpecialUse::Archive);
+    }
+
+    None
+}
+
+fn detect_folder_kind_from_attributes(attributes: &BTreeSet<String>) -> RemoteFolderKind {
+    if folder_has_attribute(attributes, &["all", "allmail"]) {
+        RemoteFolderKind::All
+    } else if folder_has_attribute(attributes, &["important"]) {
+        RemoteFolderKind::Important
+    } else {
+        RemoteFolderKind::Custom
+    }
+}
+
+fn folder_has_attribute(attributes: &BTreeSet<String>, wanted: &[&str]) -> bool {
+    attributes.iter().any(|attribute| {
+        let key = attribute
+            .trim()
+            .trim_start_matches('\\')
+            .to_ascii_lowercase();
+        wanted.iter().any(|wanted| key == *wanted)
+    })
+}
+
 fn validate_remote_status(status: &RemoteFolderStatus) -> Result<(), SyncError> {
     if status.uid_validity == 0 {
         return Err(SyncError::InvalidRemoteState {
@@ -1306,6 +1504,7 @@ impl SyncCache for SqliteSyncCache<'_> {
             .special_use
             .map(RemoteSpecialUse::as_schema_value)
             .map(str::to_string);
+        let attributes_json = folder_attributes_json(&folder.attributes)?;
 
         self.connection.execute(
             "INSERT INTO folders (
@@ -1316,6 +1515,7 @@ impl SyncCache for SqliteSyncCache<'_> {
                display_name,
                kind,
                special_use,
+               attributes_json,
                uid_validity,
                uid_next,
                delimiter,
@@ -1323,12 +1523,13 @@ impl SyncCache for SqliteSyncCache<'_> {
                total_count,
                sync_state
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(account_id, remote_id) DO UPDATE SET
                name = excluded.name,
                display_name = excluded.display_name,
                kind = excluded.kind,
                special_use = excluded.special_use,
+               attributes_json = excluded.attributes_json,
                uid_validity = excluded.uid_validity,
                uid_next = excluded.uid_next,
                delimiter = excluded.delimiter,
@@ -1343,6 +1544,7 @@ impl SyncCache for SqliteSyncCache<'_> {
                 &folder.display_name,
                 folder.kind.as_schema_value(),
                 special_use,
+                attributes_json,
                 uid_validity,
                 uid_next,
                 &folder.delimiter,
@@ -1723,6 +1925,11 @@ fn flags_json(flags: &BTreeSet<RemoteFlag>) -> Result<String, SyncError> {
     serde_json::to_string(&values).map_err(SyncError::cache)
 }
 
+fn folder_attributes_json(attributes: &BTreeSet<String>) -> Result<String, SyncError> {
+    let values: Vec<&str> = attributes.iter().map(String::as_str).collect();
+    serde_json::to_string(&values).map_err(SyncError::cache)
+}
+
 fn bool_to_i64(value: bool) -> i64 {
     i64::from(value)
 }
@@ -1809,14 +2016,13 @@ mod tests {
         fn with_inbox(messages: Vec<RemoteMessage>) -> Self {
             let mut server = Self::default();
             server.add_folder(
-                RemoteFolder {
-                    remote_id: INBOX_REMOTE.into(),
-                    name: "INBOX".into(),
-                    display_name: "Inbox".into(),
-                    kind: RemoteFolderKind::Inbox,
-                    special_use: Some(RemoteSpecialUse::Inbox),
-                    delimiter: Some("/".into()),
-                },
+                RemoteFolder::from_imap_attributes(
+                    INBOX_REMOTE,
+                    "INBOX",
+                    Some("Inbox".into()),
+                    Some("/".into()),
+                    ["\\Inbox"],
+                ),
                 77,
                 messages,
             );
@@ -2154,6 +2360,96 @@ mod tests {
     }
 
     #[test]
+    fn imap_flag_tokens_map_standard_flags_and_preserve_custom_keywords() {
+        let flags = RemoteFlag::from_imap_tokens([
+            "\\seen",
+            "\\FLAGGED",
+            "\\Answered",
+            "\\Draft",
+            "\\Deleted",
+            "\\Recent",
+            "$Forwarded",
+            "\\NonJunk",
+            "",
+            "*",
+        ]);
+
+        assert!(flags.contains(&RemoteFlag::Seen));
+        assert!(flags.contains(&RemoteFlag::Flagged));
+        assert!(flags.contains(&RemoteFlag::Answered));
+        assert!(flags.contains(&RemoteFlag::Draft));
+        assert!(flags.contains(&RemoteFlag::Deleted));
+        assert!(flags.contains(&RemoteFlag::Recent));
+        assert!(flags.contains(&RemoteFlag::keyword("$Forwarded")));
+        assert!(flags.contains(&RemoteFlag::keyword("\\NonJunk")));
+
+        let preserved: Vec<String> = serde_json::from_str(&flags_json(&flags).unwrap()).unwrap();
+        assert_eq!(
+            preserved,
+            vec![
+                "\\Seen",
+                "\\Flagged",
+                "\\Answered",
+                "\\Draft",
+                "\\Deleted",
+                "\\Recent",
+                "$Forwarded",
+                "\\NonJunk"
+            ]
+        );
+    }
+
+    #[test]
+    fn folder_attributes_detect_special_use_and_preserve_provider_values() {
+        let sent = RemoteFolder::from_imap_attributes(
+            "[Gmail]/Sent Mail",
+            "[Gmail]/Sent Mail",
+            None,
+            Some("/".into()),
+            ["\\sent", "\\HasNoChildren"],
+        );
+        assert_eq!(sent.display_name, "Sent Mail");
+        assert_eq!(sent.kind, RemoteFolderKind::Sent);
+        assert_eq!(sent.special_use, Some(RemoteSpecialUse::Sent));
+        assert!(sent.attributes.contains("\\Sent"));
+        assert!(sent.attributes.contains("\\HasNoChildren"));
+
+        let junk = RemoteFolder::from_imap_attributes(
+            "[Gmail]/Spam",
+            "[Gmail]/Spam",
+            None,
+            Some("/".into()),
+            ["\\Spam"],
+        );
+        assert_eq!(junk.kind, RemoteFolderKind::Junk);
+        assert_eq!(junk.special_use, Some(RemoteSpecialUse::Junk));
+        assert!(junk.attributes.contains("\\Spam"));
+
+        let all_mail = RemoteFolder::from_imap_attributes(
+            "[Gmail]/All Mail",
+            "[Gmail]/All Mail",
+            None,
+            Some("/".into()),
+            ["\\AllMail"],
+        );
+        assert_eq!(all_mail.kind, RemoteFolderKind::All);
+        assert_eq!(all_mail.special_use, None);
+        assert!(all_mail.attributes.contains("\\AllMail"));
+
+        let unknown = RemoteFolder::from_imap_attributes(
+            "Projects/Client",
+            "Projects/Client",
+            None,
+            Some("/".into()),
+            ["\\VendorRole"],
+        );
+        assert_eq!(unknown.display_name, "Client");
+        assert_eq!(unknown.kind, RemoteFolderKind::Custom);
+        assert_eq!(unknown.special_use, None);
+        assert!(unknown.attributes.contains("\\VendorRole"));
+    }
+
+    #[test]
     fn initial_sync_discovers_folders_and_fetches_messages_into_sqlite_cache() {
         let connection = migrated_connection();
         seed_account(&connection);
@@ -2162,14 +2458,13 @@ mod tests {
             message(77, 2, "Unread invoice", &[]),
         ]);
         server.add_folder(
-            RemoteFolder {
-                remote_id: "[Gmail]/All Mail".into(),
-                name: "[Gmail]/All Mail".into(),
-                display_name: "All Mail".into(),
-                kind: RemoteFolderKind::All,
-                special_use: None,
-                delimiter: Some("/".into()),
-            },
+            RemoteFolder::from_imap_attributes(
+                "[Gmail]/All Mail",
+                "[Gmail]/All Mail",
+                None,
+                Some("/".into()),
+                ["\\All"],
+            ),
             88,
             Vec::new(),
         );
@@ -2217,6 +2512,112 @@ mod tests {
         let search = search_messages_fts(&connection, "Komorebi", 10).unwrap();
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].subject, "Welcome to Komorebi");
+    }
+
+    #[test]
+    fn sync_preserves_full_flags_and_unknown_folder_semantics() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::default();
+        let mut custom_message = message(55, 10, "Custom folder message", &[]);
+        custom_message.flags = RemoteFlag::from_imap_tokens([
+            "\\Seen",
+            "\\Flagged",
+            "\\Answered",
+            "\\Draft",
+            "\\Deleted",
+            "\\Recent",
+            "$Forwarded",
+            "\\NonJunk",
+        ]);
+        server.add_folder(
+            RemoteFolder::from_imap_attributes(
+                "Projects/Client",
+                "Projects/Client",
+                None,
+                Some("/".into()),
+                ["\\VendorRole", "\\HasNoChildren"],
+            ),
+            55,
+            vec![custom_message],
+        );
+
+        let report = run_sync(&mut server, &connection).unwrap();
+
+        assert_eq!(report.folders_seen, 1);
+        assert_eq!(report.messages_fetched, 1);
+        assert_eq!(message_count(&connection), 1);
+
+        let folder_row = connection
+            .query_row(
+                "SELECT kind, special_use, display_name, attributes_json
+                 FROM folders
+                 WHERE account_id = ?1 AND remote_id = 'Projects/Client'",
+                [ACCOUNT_ID],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(folder_row.0, "custom");
+        assert_eq!(folder_row.1, None);
+        assert_eq!(folder_row.2, "Client");
+        let attributes: Vec<String> = serde_json::from_str(&folder_row.3).unwrap();
+        assert_eq!(attributes, vec!["\\HasNoChildren", "\\VendorRole"]);
+
+        let message_row = connection
+            .query_row(
+                "SELECT
+                   is_read,
+                   is_flagged,
+                   is_answered,
+                   is_draft,
+                   is_deleted,
+                   flags_json
+                 FROM messages
+                 WHERE imap_uid = 10",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                message_row.0,
+                message_row.1,
+                message_row.2,
+                message_row.3,
+                message_row.4
+            ),
+            (1, 1, 1, 1, 1)
+        );
+        let flags: Vec<String> = serde_json::from_str(&message_row.5).unwrap();
+        assert_eq!(
+            flags,
+            vec![
+                "\\Seen",
+                "\\Flagged",
+                "\\Answered",
+                "\\Draft",
+                "\\Deleted",
+                "\\Recent",
+                "$Forwarded",
+                "\\NonJunk"
+            ]
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # IMAP Sync State Machine
 
-Status: initial Rust state machine, folder worker, and SQLite cache integration implemented.
+Status: initial Rust state machine, folder worker, folder/flag semantics, and SQLite cache integration implemented.
 Last reviewed: 2026-05-22.
 
 ## Current Scope
@@ -13,7 +13,7 @@ Implemented now:
 
 - Account-level sync entry point with cancellation checks.
 - Folder discovery from the remote server.
-- Folder `UIDVALIDITY`, `UIDNEXT`, unread count, total count, special-use, kind, and delimiter cache updates.
+- Folder `UIDVALIDITY`, `UIDNEXT`, unread count, total count, special-use, kind, delimiter, and provider attribute cache updates.
 - Initial message fetch for all remote UIDs missing from the local cache.
 - Incremental UID fetch for newly observed remote UIDs only.
 - Existing-message flag refresh for retained UIDs.
@@ -28,6 +28,8 @@ Implemented now:
 - Clean stop reports for app-exit cancellation and account removal.
 - Fake IMAP server fixtures that simulate initial sync, incremental sync, flag changes, expunges, UIDVALIDITY reset, IDLE wakeups, IDLE timeout refresh, polling fallback, reconnect, backoff, account removal, and cancellation.
 - Stable message ids shared with the MIME normalization boundary.
+- Server flag normalization for `\Seen`, `\Flagged`, `\Answered`, `\Draft`, `\Deleted`, `\Recent`, and provider/custom keywords.
+- Folder attribute normalization for IMAP LIST/XLIST/SPECIAL-USE style attributes, including supported special-use detection and preservation of unknown provider attributes.
 
 Not implemented by this task:
 
@@ -74,6 +76,7 @@ The worker returns `FolderWorkerReport` instead of treating normal shutdown as a
 
 - Folder rows are matched by `(account_id, remote_id)`.
 - Local folder IDs are backend-generated stable IDs derived from account and remote folder identity.
+- Folder `attributes_json` preserves normalized provider LIST/XLIST/SPECIAL-USE attributes. Unknown provider attributes do not make the folder unusable.
 - Message rows are matched by `(account_id, folder_id, uid_validity, imap_uid)`.
 - Local message IDs are backend-generated stable IDs derived from account, folder, UIDVALIDITY, and UID.
 - MIME normalization uses the same stable message ID derivation for attachment records.
@@ -92,7 +95,26 @@ The current standard flag mapping is:
 - `\Draft` -> `messages.is_draft`
 - `\Deleted` -> `messages.is_deleted`
 
-`\Recent` and provider keywords are preserved in `flags_json`. Special-use folder detection is represented in folder metadata; provider-specific folder behavior remains a follow-up under "Preserve server flags and folder semantics."
+`\Recent` and provider keywords are preserved in `flags_json`.
+
+`RemoteFlag::from_imap_token` maps standard flags case-insensitively and preserves non-standard keywords such as `$Forwarded` or provider-specific `\NonJunk` as keywords. The sync cache updates boolean columns for standard state and always writes the complete normalized flag set into `flags_json`.
+
+## Folder Semantics
+
+`RemoteFolder::from_imap_attributes` is the adapter boundary for folder roles. It normalizes provider attributes into `attributes_json`, detects supported special-use roles, and falls back to `custom` for unknown folders.
+
+Supported detected roles:
+
+- `INBOX` or `\Inbox` -> `kind = inbox`, `special_use = inbox`
+- `\Sent` -> `sent`
+- `\Drafts` -> `drafts`
+- `\Trash` -> `trash`
+- `\Junk` or `\Spam` -> `junk`
+- `\Archive` -> `archive`
+- `\All` or `\AllMail` -> `kind = all`, raw attribute preserved
+- `\Important` -> `kind = important`, raw attribute preserved
+
+Unsupported or provider-specific roles remain usable as `kind = custom`, `special_use = NULL`, with their attributes preserved in `attributes_json`.
 
 ## Cancellation And Backoff
 
@@ -121,6 +143,8 @@ The current standard flag mapping is:
 - Clean worker stop on account removal.
 - Invalid fake-server responses for missing requested UIDs.
 - Unknown account rejection before server access.
+- Standard and custom IMAP flag normalization/preservation.
+- Special-use folder detection, unknown provider attribute preservation, and sync of messages in custom folders.
 
 No test uses a real mailbox or real credentials.
 

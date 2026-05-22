@@ -26,7 +26,7 @@ The current schema defines:
 - `schema_migrations`: applied migration history.
 - `settings`: global preferences stored as validated JSON values.
 - `accounts`: non-secret account metadata and credential references only.
-- `folders`: provider folders, special-use classification, sync counters, UIDVALIDITY, and sync status.
+- `folders`: provider folders, special-use classification, preserved provider attributes, sync counters, UIDVALIDITY, and sync status.
 - `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata.
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
 - `templates`: future composer template records.
@@ -82,6 +82,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - `accounts.credential_ref` is the only persisted secret reference and is unique.
 - Generic IMAP/SMTP accounts must include IMAP and SMTP host, port, and security metadata.
 - Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
+- `folders.attributes_json` must be valid JSON and stores normalized provider LIST/XLIST/SPECIAL-USE attributes for roles the current enum does not model directly.
 - Messages must store `imap_uid` and `uid_validity` together, or neither for local-only states.
 - Attachments reference their owning message through `(account_id, folder_id, message_id)` and cascade with the account/message.
 - Template JSON and setting JSON must pass `json_valid`.
@@ -106,6 +107,7 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - FTS5 insert/update/delete triggers keep indexed content consistent.
 - FTS5 rebuild restores missing index entries and backfills rows when upgrading a version-1 database.
 - FTS5 integrity checks pass after trigger and rebuild paths.
+- Folder semantics migration adds `attributes_json` to version-2 databases and defaults existing rows to `[]`.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 
