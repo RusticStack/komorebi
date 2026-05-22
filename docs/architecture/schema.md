@@ -31,6 +31,8 @@ The current schema defines:
 
 All durable tables include `created_at`; mutable tables include `updated_at` with timestamp triggers.
 
+Message bodies and FTS indexed terms are not encrypted at rest in the current schema. The accepted cache-encryption posture is documented in `docs/architecture/local-cache-encryption.md`.
+
 ## FTS5 Search
 
 `src-tauri/migrations/002_messages_fts.sql` creates `messages_fts` as an FTS5 external-content table linked to `messages.rowid`. It indexes:
@@ -79,7 +81,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 
 ## Deferred Schema Work
 
-Message-body and attachment encryption at rest is still undecided. This schema must not be described as encrypted local mail storage until encryption is implemented and verified.
+Encrypted local mail storage is future work. This schema stores message bodies and FTS terms as plaintext SQLite content until a reviewed encryption design and migration are implemented.
 
 ## Tests
 
