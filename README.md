@@ -44,6 +44,8 @@ IPC and mutation boundaries are documented in [docs/architecture/ipc-and-mutatio
 
 SQLite schema and migrations are documented in [docs/architecture/schema.md](docs/architecture/schema.md). The migrations define settings, accounts, folders, messages, attachments, templates, template versions, FTS5 message search, primary/foreign keys, uniqueness rules, indexes, timestamps, and schema-version tracking.
 
+IMAP sync state-machine behavior is documented in [docs/architecture/sync-state-machine.md](docs/architecture/sync-state-machine.md). The Rust backend now has a provider-agnostic sync engine and SQLite cache integration tested against fake IMAP fixtures; live IMAP account connection, IDLE/polling workers, MIME parsing, and frontend account setup remain future work.
+
 Local cache encryption posture is documented in [docs/architecture/local-cache-encryption.md](docs/architecture/local-cache-encryption.md). The current local mail cache is unencrypted: cached message bodies, FTS index terms, and attachment files are stored locally as plaintext. Account secrets remain separate and are stored through Windows Credential Manager.
 
 IPC input validation is documented in [docs/architecture/ipc-validation.md](docs/architecture/ipc-validation.md). Future commands must reject arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, unbounded payloads, and unknown or unowned account/folder/message IDs before side effects.

@@ -15,6 +15,8 @@ The Rust backend owns migrations. React and frontend SQL must not create, migrat
 - Applies migrations transactionally and rejects databases newer than the compiled schema version.
 - Uses `rusqlite` with bundled SQLite so tests and Windows builds do not depend on a system SQLite install.
 
+Initial sync cache mutation is implemented in `src-tauri/src/imap_sync.rs` through `SqliteSyncCache`. The sync state machine writes folders and messages through backend-generated local IDs while preserving remote `remote_id`, UID, and UIDVALIDITY identity.
+
 ## Tables
 
 The current schema defines:
@@ -32,6 +34,8 @@ The current schema defines:
 All durable tables include `created_at`; mutable tables include `updated_at` with timestamp triggers.
 
 Message bodies and FTS indexed terms are not encrypted at rest in the current schema. The accepted cache-encryption posture is documented in `docs/architecture/local-cache-encryption.md`.
+
+Sync state-machine behavior is documented in `docs/architecture/sync-state-machine.md`.
 
 ## FTS5 Search
 

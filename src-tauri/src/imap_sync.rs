@@ -1,0 +1,1858 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
+
+use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteFolderKind {
+    Inbox,
+    Sent,
+    Drafts,
+    Archive,
+    Trash,
+    Junk,
+    Custom,
+    All,
+    Important,
+}
+
+impl RemoteFolderKind {
+    fn as_schema_value(self) -> &'static str {
+        match self {
+            Self::Inbox => "inbox",
+            Self::Sent => "sent",
+            Self::Drafts => "drafts",
+            Self::Archive => "archive",
+            Self::Trash => "trash",
+            Self::Junk => "junk",
+            Self::Custom => "custom",
+            Self::All => "all",
+            Self::Important => "important",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteSpecialUse {
+    Inbox,
+    Sent,
+    Drafts,
+    Archive,
+    Trash,
+    Junk,
+}
+
+impl RemoteSpecialUse {
+    fn as_schema_value(self) -> &'static str {
+        match self {
+            Self::Inbox => "inbox",
+            Self::Sent => "sent",
+            Self::Drafts => "drafts",
+            Self::Archive => "archive",
+            Self::Trash => "trash",
+            Self::Junk => "junk",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFolder {
+    pub remote_id: String,
+    pub name: String,
+    pub display_name: String,
+    pub kind: RemoteFolderKind,
+    pub special_use: Option<RemoteSpecialUse>,
+    pub delimiter: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFolderStatus {
+    pub uid_validity: u64,
+    pub uid_next: u64,
+    pub existing_uids: BTreeSet<u64>,
+    pub unread_count: u32,
+    pub total_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RemoteFlag {
+    Seen,
+    Flagged,
+    Answered,
+    Draft,
+    Deleted,
+    Recent,
+    Keyword(String),
+}
+
+impl RemoteFlag {
+    pub fn keyword(value: impl Into<String>) -> Self {
+        Self::Keyword(value.into())
+    }
+
+    fn as_imap_string(&self) -> String {
+        match self {
+            Self::Seen => "\\Seen".into(),
+            Self::Flagged => "\\Flagged".into(),
+            Self::Answered => "\\Answered".into(),
+            Self::Draft => "\\Draft".into(),
+            Self::Deleted => "\\Deleted".into(),
+            Self::Recent => "\\Recent".into(),
+            Self::Keyword(value) => value.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteMessage {
+    pub uid: u64,
+    pub uid_validity: u64,
+    pub rfc_message_id: Option<String>,
+    pub provider_message_id: Option<String>,
+    pub subject: String,
+    pub sender_name: Option<String>,
+    pub sender_email: Option<String>,
+    pub to_addresses_json: String,
+    pub cc_addresses_json: String,
+    pub bcc_addresses_json: String,
+    pub reply_to_addresses_json: String,
+    pub references_json: String,
+    pub date_received: Option<String>,
+    pub internal_date: Option<String>,
+    pub flags: BTreeSet<RemoteFlag>,
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub snippet: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub has_attachments: bool,
+}
+
+impl RemoteMessage {
+    pub fn fixture(uid_validity: u64, uid: u64, subject: impl Into<String>) -> Self {
+        Self {
+            uid,
+            uid_validity,
+            rfc_message_id: Some(format!("<uid-{uid}@fixture.komorebi>")),
+            provider_message_id: None,
+            subject: subject.into(),
+            sender_name: Some("Fixture Sender".into()),
+            sender_email: Some("sender@example.com".into()),
+            to_addresses_json: "[]".into(),
+            cc_addresses_json: "[]".into(),
+            bcc_addresses_json: "[]".into(),
+            reply_to_addresses_json: "[]".into(),
+            references_json: "[]".into(),
+            date_received: Some(format!("2026-05-22T12:{uid:02}:00Z")),
+            internal_date: Some(format!("2026-05-22T12:{uid:02}:00Z")),
+            flags: BTreeSet::new(),
+            body_text: Some(format!("Fixture body for UID {uid}")),
+            body_html: None,
+            snippet: Some(format!("Fixture body for UID {uid}")),
+            size_bytes: Some(128),
+            has_attachments: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFlagUpdate {
+    pub uid: u64,
+    pub uid_validity: u64,
+    pub flags: BTreeSet<RemoteFlag>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedFolderState {
+    pub folder_id: String,
+    pub uid_validity: Option<u64>,
+    pub uid_next: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncFolderReport {
+    pub folder_id: String,
+    pub remote_id: String,
+    pub discovered: bool,
+    pub uid_validity_reset: bool,
+    pub messages_fetched: usize,
+    pub flags_updated: usize,
+    pub expunged: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SyncAccountReport {
+    pub folders_seen: usize,
+    pub messages_fetched: usize,
+    pub flags_updated: usize,
+    pub expunged: usize,
+    pub uid_validity_resets: usize,
+    pub reconnects: usize,
+    pub backoff_delays: Vec<Duration>,
+    pub folders: Vec<SyncFolderReport>,
+}
+
+impl SyncAccountReport {
+    fn merge_attempt(&mut self, attempt: Self) {
+        self.folders_seen += attempt.folders_seen;
+        self.messages_fetched += attempt.messages_fetched;
+        self.flags_updated += attempt.flags_updated;
+        self.expunged += attempt.expunged;
+        self.uid_validity_resets += attempt.uid_validity_resets;
+        self.folders.extend(attempt.folders);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncError {
+    Cancelled,
+    UnknownAccount,
+    InvalidRemoteState { reason: &'static str },
+    TransientServer { reason: String },
+    PermanentServer { reason: String },
+    Cache { reason: String },
+}
+
+impl SyncError {
+    pub fn transient(reason: impl Into<String>) -> Self {
+        Self::TransientServer {
+            reason: reason.into(),
+        }
+    }
+
+    pub fn permanent(reason: impl Into<String>) -> Self {
+        Self::PermanentServer {
+            reason: reason.into(),
+        }
+    }
+
+    fn cache(error: impl fmt::Display) -> Self {
+        Self::Cache {
+            reason: error.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for SyncError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled => write!(formatter, "sync was cancelled"),
+            Self::UnknownAccount => write!(formatter, "account was not found"),
+            Self::InvalidRemoteState { reason } => {
+                write!(formatter, "invalid remote state: {reason}")
+            }
+            Self::TransientServer { .. } => write!(formatter, "mail server operation can retry"),
+            Self::PermanentServer { .. } => write!(formatter, "mail server operation failed"),
+            Self::Cache { .. } => write!(formatter, "local cache operation failed"),
+        }
+    }
+}
+
+impl Error for SyncError {}
+
+impl From<rusqlite::Error> for SyncError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::cache(value)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncCancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Default for SyncCancellationToken {
+    fn default() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl SyncCancellationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    fn ensure_not_cancelled(&self) -> Result<(), SyncError> {
+        if self.is_cancelled() {
+            return Err(SyncError::Cancelled);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackoffPolicy {
+    pub max_attempts: u8,
+    pub initial_delay: Duration,
+    pub max_delay: Duration,
+    pub multiplier: u32,
+}
+
+impl Default for BackoffPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(250),
+            max_delay: Duration::from_secs(5),
+            multiplier: 2,
+        }
+    }
+}
+
+impl BackoffPolicy {
+    fn normalized(self) -> Self {
+        Self {
+            max_attempts: self.max_attempts.max(1),
+            initial_delay: self.initial_delay,
+            max_delay: self.max_delay.max(self.initial_delay),
+            multiplier: self.multiplier.max(1),
+        }
+    }
+
+    pub fn delay_for_retry(self, retry_index: u8) -> Duration {
+        let policy = self.normalized();
+        let mut delay = policy.initial_delay;
+        for _ in 0..retry_index {
+            delay = delay.saturating_mul(policy.multiplier);
+            if delay >= policy.max_delay {
+                return policy.max_delay;
+            }
+        }
+
+        delay.min(policy.max_delay)
+    }
+}
+
+pub trait BackoffWaiter {
+    fn wait(
+        &mut self,
+        delay: Duration,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<(), SyncError>;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopBackoffWaiter;
+
+impl BackoffWaiter for NoopBackoffWaiter {
+    fn wait(
+        &mut self,
+        _delay: Duration,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<(), SyncError> {
+        cancellation.ensure_not_cancelled()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ThreadBackoffWaiter;
+
+impl BackoffWaiter for ThreadBackoffWaiter {
+    fn wait(
+        &mut self,
+        delay: Duration,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<(), SyncError> {
+        let slice = Duration::from_millis(50);
+        let mut remaining = delay;
+        while remaining > Duration::ZERO {
+            cancellation.ensure_not_cancelled()?;
+            let sleep_for = remaining.min(slice);
+            thread::sleep(sleep_for);
+            remaining = remaining.saturating_sub(sleep_for);
+        }
+
+        cancellation.ensure_not_cancelled()
+    }
+}
+
+pub trait ImapSyncServer {
+    fn list_folders(&mut self, account_id: &str) -> Result<Vec<RemoteFolder>, SyncError>;
+    fn select_folder(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+    ) -> Result<RemoteFolderStatus, SyncError>;
+    fn fetch_messages(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        uid_validity: u64,
+        uids: &[u64],
+    ) -> Result<Vec<RemoteMessage>, SyncError>;
+    fn fetch_flags(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        uid_validity: u64,
+        uids: &[u64],
+    ) -> Result<Vec<RemoteFlagUpdate>, SyncError>;
+    fn reconnect(&mut self, account_id: &str) -> Result<(), SyncError>;
+}
+
+pub trait SyncCache {
+    fn account_exists(&self, account_id: &str) -> Result<bool, SyncError>;
+    fn cached_folder_state(
+        &self,
+        account_id: &str,
+        remote_id: &str,
+    ) -> Result<Option<CachedFolderState>, SyncError>;
+    fn upsert_folder(
+        &mut self,
+        account_id: &str,
+        folder: &RemoteFolder,
+        status: &RemoteFolderStatus,
+        sync_state: FolderSyncState,
+    ) -> Result<String, SyncError>;
+    fn set_folder_sync_state(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        sync_state: FolderSyncState,
+    ) -> Result<(), SyncError>;
+    fn clear_folder_messages(&mut self, account_id: &str, folder_id: &str)
+        -> Result<(), SyncError>;
+    fn message_uids(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+    ) -> Result<BTreeSet<u64>, SyncError>;
+    fn upsert_message(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        message: &RemoteMessage,
+    ) -> Result<(), SyncError>;
+    fn update_message_flags(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+        uid: u64,
+        flags: &BTreeSet<RemoteFlag>,
+    ) -> Result<bool, SyncError>;
+    fn delete_message_by_uid(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+        uid: u64,
+    ) -> Result<bool, SyncError>;
+    fn finish_folder_sync(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        status: &RemoteFolderStatus,
+    ) -> Result<(), SyncError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderSyncState {
+    Idle,
+    Syncing,
+    Error,
+    Paused,
+}
+
+impl FolderSyncState {
+    fn as_schema_value(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Syncing => "syncing",
+            Self::Error => "error",
+            Self::Paused => "paused",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ImapSyncEngine {
+    pub backoff: BackoffPolicy,
+}
+
+impl ImapSyncEngine {
+    pub fn new(backoff: BackoffPolicy) -> Self {
+        Self { backoff }
+    }
+
+    pub fn sync_account<S, C, W>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        account_id: &str,
+        cancellation: &SyncCancellationToken,
+        waiter: &mut W,
+    ) -> Result<SyncAccountReport, SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+        W: BackoffWaiter,
+    {
+        cancellation.ensure_not_cancelled()?;
+        if !cache.account_exists(account_id)? {
+            return Err(SyncError::UnknownAccount);
+        }
+
+        let policy = self.backoff.normalized();
+        let mut report = SyncAccountReport::default();
+
+        for attempt_index in 0..policy.max_attempts {
+            cancellation.ensure_not_cancelled()?;
+            match self.sync_once(server, cache, account_id, cancellation) {
+                Ok(attempt_report) => {
+                    report.merge_attempt(attempt_report);
+                    return Ok(report);
+                }
+                Err(SyncError::TransientServer { reason })
+                    if attempt_index + 1 < policy.max_attempts =>
+                {
+                    let delay = policy.delay_for_retry(attempt_index);
+                    report.reconnects += 1;
+                    report.backoff_delays.push(delay);
+                    server.reconnect(account_id).map_err(|error| match error {
+                        SyncError::TransientServer {
+                            reason: reconnect_reason,
+                        } => SyncError::TransientServer {
+                            reason: format!("{reason}; reconnect failed: {reconnect_reason}"),
+                        },
+                        other => other,
+                    })?;
+                    waiter.wait(delay, cancellation)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(SyncError::TransientServer {
+            reason: "sync retry budget exhausted".into(),
+        })
+    }
+
+    fn sync_once<S, C>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        account_id: &str,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<SyncAccountReport, SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+    {
+        cancellation.ensure_not_cancelled()?;
+        let folders = server.list_folders(account_id)?;
+        let mut account_report = SyncAccountReport::default();
+
+        for folder in folders {
+            cancellation.ensure_not_cancelled()?;
+            let folder_report =
+                self.sync_folder(server, cache, account_id, &folder, cancellation)?;
+            account_report.folders_seen += 1;
+            account_report.messages_fetched += folder_report.messages_fetched;
+            account_report.flags_updated += folder_report.flags_updated;
+            account_report.expunged += folder_report.expunged;
+            if folder_report.uid_validity_reset {
+                account_report.uid_validity_resets += 1;
+            }
+            account_report.folders.push(folder_report);
+        }
+
+        Ok(account_report)
+    }
+
+    fn sync_folder<S, C>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        account_id: &str,
+        folder: &RemoteFolder,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<SyncFolderReport, SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+    {
+        validate_remote_folder(folder)?;
+        let cached_before = cache.cached_folder_state(account_id, &folder.remote_id)?;
+        let status = server.select_folder(account_id, &folder.remote_id)?;
+        validate_remote_status(&status)?;
+
+        let folder_id =
+            cache.upsert_folder(account_id, folder, &status, FolderSyncState::Syncing)?;
+        let discovered = cached_before.is_none();
+        let uid_validity_reset = cached_before
+            .as_ref()
+            .and_then(|state| state.uid_validity)
+            .is_some_and(|cached_uid_validity| cached_uid_validity != status.uid_validity);
+
+        if uid_validity_reset {
+            cache.clear_folder_messages(account_id, &folder_id)?;
+        }
+
+        let known_uids = if uid_validity_reset {
+            BTreeSet::new()
+        } else {
+            cache.message_uids(account_id, &folder_id, status.uid_validity)?
+        };
+
+        let expunged_uids: Vec<u64> = known_uids
+            .difference(&status.existing_uids)
+            .copied()
+            .collect();
+        let mut expunged = 0;
+        for uid in expunged_uids {
+            cancellation.ensure_not_cancelled()?;
+            if cache.delete_message_by_uid(account_id, &folder_id, status.uid_validity, uid)? {
+                expunged += 1;
+            }
+        }
+
+        let retained_uids: Vec<u64> = known_uids
+            .intersection(&status.existing_uids)
+            .copied()
+            .collect();
+        let mut flags_updated = 0;
+        if !retained_uids.is_empty() {
+            cancellation.ensure_not_cancelled()?;
+            let flag_updates = server.fetch_flags(
+                account_id,
+                &folder.remote_id,
+                status.uid_validity,
+                &retained_uids,
+            )?;
+            let flag_updates = validate_flag_updates(&status, &retained_uids, flag_updates)?;
+            for update in flag_updates.values() {
+                cancellation.ensure_not_cancelled()?;
+                if cache.update_message_flags(
+                    account_id,
+                    &folder_id,
+                    status.uid_validity,
+                    update.uid,
+                    &update.flags,
+                )? {
+                    flags_updated += 1;
+                }
+            }
+        }
+
+        let new_uids: Vec<u64> = status
+            .existing_uids
+            .difference(&known_uids)
+            .copied()
+            .collect();
+        let mut messages_fetched = 0;
+        if !new_uids.is_empty() {
+            cancellation.ensure_not_cancelled()?;
+            let messages = server.fetch_messages(
+                account_id,
+                &folder.remote_id,
+                status.uid_validity,
+                &new_uids,
+            )?;
+            let messages = validate_messages(&status, &new_uids, messages)?;
+            for message in messages.values() {
+                cancellation.ensure_not_cancelled()?;
+                cache.upsert_message(account_id, &folder_id, message)?;
+                messages_fetched += 1;
+            }
+        }
+
+        cache.finish_folder_sync(account_id, &folder_id, &status)?;
+
+        Ok(SyncFolderReport {
+            folder_id,
+            remote_id: folder.remote_id.clone(),
+            discovered,
+            uid_validity_reset,
+            messages_fetched,
+            flags_updated,
+            expunged,
+        })
+    }
+}
+
+fn validate_remote_folder(folder: &RemoteFolder) -> Result<(), SyncError> {
+    if folder.remote_id.trim().is_empty()
+        || folder.name.trim().is_empty()
+        || folder.display_name.trim().is_empty()
+    {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "folder identity fields must be non-empty",
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_remote_status(status: &RemoteFolderStatus) -> Result<(), SyncError> {
+    if status.uid_validity == 0 {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "UIDVALIDITY must be positive",
+        });
+    }
+
+    if status.uid_next == 0 {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "UIDNEXT must be positive",
+        });
+    }
+
+    if status.existing_uids.iter().any(|uid| *uid == 0) {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "message UIDs must be positive",
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_messages(
+    status: &RemoteFolderStatus,
+    requested_uids: &[u64],
+    messages: Vec<RemoteMessage>,
+) -> Result<BTreeMap<u64, RemoteMessage>, SyncError> {
+    let requested: BTreeSet<u64> = requested_uids.iter().copied().collect();
+    let mut by_uid = BTreeMap::new();
+    for message in messages {
+        if message.uid_validity != status.uid_validity {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "fetched message UIDVALIDITY did not match selected folder",
+            });
+        }
+
+        if !requested.contains(&message.uid) {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "server returned an unrequested message UID",
+            });
+        }
+
+        if by_uid.insert(message.uid, message).is_some() {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "server returned duplicate message UIDs",
+            });
+        }
+    }
+
+    if by_uid.len() != requested.len() {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "server did not return all requested message UIDs",
+        });
+    }
+
+    Ok(by_uid)
+}
+
+fn validate_flag_updates(
+    status: &RemoteFolderStatus,
+    requested_uids: &[u64],
+    updates: Vec<RemoteFlagUpdate>,
+) -> Result<BTreeMap<u64, RemoteFlagUpdate>, SyncError> {
+    let requested: BTreeSet<u64> = requested_uids.iter().copied().collect();
+    let mut by_uid = BTreeMap::new();
+    for update in updates {
+        if update.uid_validity != status.uid_validity {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "flag update UIDVALIDITY did not match selected folder",
+            });
+        }
+
+        if !requested.contains(&update.uid) {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "server returned flags for an unrequested UID",
+            });
+        }
+
+        if by_uid.insert(update.uid, update).is_some() {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "server returned duplicate flag updates",
+            });
+        }
+    }
+
+    if by_uid.len() != requested.len() {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "server did not return all requested flag updates",
+        });
+    }
+
+    Ok(by_uid)
+}
+
+pub struct SqliteSyncCache<'connection> {
+    connection: &'connection Connection,
+}
+
+impl<'connection> SqliteSyncCache<'connection> {
+    pub fn new(connection: &'connection Connection) -> Self {
+        Self { connection }
+    }
+}
+
+impl SyncCache for SqliteSyncCache<'_> {
+    fn account_exists(&self, account_id: &str) -> Result<bool, SyncError> {
+        let count = self.connection.query_row(
+            "SELECT COUNT(*) FROM accounts WHERE id = ?1 AND removed_at IS NULL",
+            [account_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+
+        Ok(count > 0)
+    }
+
+    fn cached_folder_state(
+        &self,
+        account_id: &str,
+        remote_id: &str,
+    ) -> Result<Option<CachedFolderState>, SyncError> {
+        self.connection
+            .query_row(
+                "SELECT id, uid_validity, uid_next
+                 FROM folders
+                 WHERE account_id = ?1 AND remote_id = ?2",
+                params![account_id, remote_id],
+                |row| {
+                    Ok(CachedFolderState {
+                        folder_id: row.get(0)?,
+                        uid_validity: optional_i64_to_u64(row.get::<_, Option<i64>>(1)?),
+                        uid_next: optional_i64_to_u64(row.get::<_, Option<i64>>(2)?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(SyncError::from)
+    }
+
+    fn upsert_folder(
+        &mut self,
+        account_id: &str,
+        folder: &RemoteFolder,
+        status: &RemoteFolderStatus,
+        sync_state: FolderSyncState,
+    ) -> Result<String, SyncError> {
+        let folder_id = self
+            .cached_folder_state(account_id, &folder.remote_id)?
+            .map(|state| state.folder_id)
+            .unwrap_or_else(|| generated_id("folder", &[account_id, &folder.remote_id]));
+
+        let uid_validity = u64_to_i64(status.uid_validity)?;
+        let uid_next = u64_to_i64(status.uid_next)?;
+        let unread_count = u32_to_i64(status.unread_count);
+        let total_count = u32_to_i64(status.total_count);
+        let special_use = folder
+            .special_use
+            .map(RemoteSpecialUse::as_schema_value)
+            .map(str::to_string);
+
+        self.connection.execute(
+            "INSERT INTO folders (
+               id,
+               account_id,
+               remote_id,
+               name,
+               display_name,
+               kind,
+               special_use,
+               uid_validity,
+               uid_next,
+               delimiter,
+               unread_count,
+               total_count,
+               sync_state
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(account_id, remote_id) DO UPDATE SET
+               name = excluded.name,
+               display_name = excluded.display_name,
+               kind = excluded.kind,
+               special_use = excluded.special_use,
+               uid_validity = excluded.uid_validity,
+               uid_next = excluded.uid_next,
+               delimiter = excluded.delimiter,
+               unread_count = excluded.unread_count,
+               total_count = excluded.total_count,
+               sync_state = excluded.sync_state",
+            params![
+                &folder_id,
+                account_id,
+                &folder.remote_id,
+                &folder.name,
+                &folder.display_name,
+                folder.kind.as_schema_value(),
+                special_use,
+                uid_validity,
+                uid_next,
+                &folder.delimiter,
+                unread_count,
+                total_count,
+                sync_state.as_schema_value()
+            ],
+        )?;
+
+        Ok(folder_id)
+    }
+
+    fn set_folder_sync_state(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        sync_state: FolderSyncState,
+    ) -> Result<(), SyncError> {
+        self.connection.execute(
+            "UPDATE folders
+             SET sync_state = ?3
+             WHERE account_id = ?1 AND id = ?2",
+            params![account_id, folder_id, sync_state.as_schema_value()],
+        )?;
+
+        Ok(())
+    }
+
+    fn clear_folder_messages(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+    ) -> Result<(), SyncError> {
+        self.connection.execute(
+            "DELETE FROM messages WHERE account_id = ?1 AND folder_id = ?2",
+            params![account_id, folder_id],
+        )?;
+
+        Ok(())
+    }
+
+    fn message_uids(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+    ) -> Result<BTreeSet<u64>, SyncError> {
+        let mut statement = self.connection.prepare(
+            "SELECT imap_uid
+             FROM messages
+             WHERE account_id = ?1
+               AND folder_id = ?2
+               AND uid_validity = ?3
+               AND imap_uid IS NOT NULL
+             ORDER BY imap_uid",
+        )?;
+        let rows = statement.query_map(
+            params![account_id, folder_id, u64_to_i64(uid_validity)?],
+            |row| row.get::<_, i64>(0),
+        )?;
+
+        let mut uids = BTreeSet::new();
+        for row in rows {
+            uids.insert(i64_to_u64(row?)?);
+        }
+
+        Ok(uids)
+    }
+
+    fn upsert_message(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        message: &RemoteMessage,
+    ) -> Result<(), SyncError> {
+        let existing_id = self
+            .connection
+            .query_row(
+                "SELECT id
+                 FROM messages
+                 WHERE account_id = ?1
+                   AND folder_id = ?2
+                   AND uid_validity = ?3
+                   AND imap_uid = ?4",
+                params![
+                    account_id,
+                    folder_id,
+                    u64_to_i64(message.uid_validity)?,
+                    u64_to_i64(message.uid)?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let message_id = existing_id.unwrap_or_else(|| {
+            generated_id(
+                "msg",
+                &[
+                    account_id,
+                    folder_id,
+                    &message.uid_validity.to_string(),
+                    &message.uid.to_string(),
+                ],
+            )
+        });
+
+        let flags_json = flags_json(&message.flags)?;
+        let flag_state = FlagState::from_flags(&message.flags);
+        self.connection.execute(
+            "INSERT INTO messages (
+               id,
+               account_id,
+               folder_id,
+               imap_uid,
+               uid_validity,
+               rfc_message_id,
+               provider_message_id,
+               references_json,
+               subject,
+               sender_name,
+               sender_email,
+               to_addresses_json,
+               cc_addresses_json,
+               bcc_addresses_json,
+               reply_to_addresses_json,
+               date_received,
+               internal_date,
+               is_read,
+               is_flagged,
+               is_answered,
+               is_draft,
+               is_deleted,
+               has_attachments,
+               flags_json,
+               body_text,
+               body_html,
+               snippet,
+               size_bytes,
+               sync_state
+             )
+             VALUES (
+               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+               ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+               ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, 'synced'
+             )
+             ON CONFLICT(id) DO UPDATE SET
+               imap_uid = excluded.imap_uid,
+               uid_validity = excluded.uid_validity,
+               rfc_message_id = excluded.rfc_message_id,
+               provider_message_id = excluded.provider_message_id,
+               references_json = excluded.references_json,
+               subject = excluded.subject,
+               sender_name = excluded.sender_name,
+               sender_email = excluded.sender_email,
+               to_addresses_json = excluded.to_addresses_json,
+               cc_addresses_json = excluded.cc_addresses_json,
+               bcc_addresses_json = excluded.bcc_addresses_json,
+               reply_to_addresses_json = excluded.reply_to_addresses_json,
+               date_received = excluded.date_received,
+               internal_date = excluded.internal_date,
+               is_read = excluded.is_read,
+               is_flagged = excluded.is_flagged,
+               is_answered = excluded.is_answered,
+               is_draft = excluded.is_draft,
+               is_deleted = excluded.is_deleted,
+               has_attachments = excluded.has_attachments,
+               flags_json = excluded.flags_json,
+               body_text = excluded.body_text,
+               body_html = excluded.body_html,
+               snippet = excluded.snippet,
+               size_bytes = excluded.size_bytes,
+               sync_state = 'synced'",
+            params![
+                &message_id,
+                account_id,
+                folder_id,
+                u64_to_i64(message.uid)?,
+                u64_to_i64(message.uid_validity)?,
+                &message.rfc_message_id,
+                &message.provider_message_id,
+                &message.references_json,
+                &message.subject,
+                &message.sender_name,
+                &message.sender_email,
+                &message.to_addresses_json,
+                &message.cc_addresses_json,
+                &message.bcc_addresses_json,
+                &message.reply_to_addresses_json,
+                &message.date_received,
+                &message.internal_date,
+                flag_state.is_read,
+                flag_state.is_flagged,
+                flag_state.is_answered,
+                flag_state.is_draft,
+                flag_state.is_deleted,
+                bool_to_i64(message.has_attachments),
+                flags_json,
+                &message.body_text,
+                &message.body_html,
+                &message.snippet,
+                optional_u64_to_i64(message.size_bytes)?
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    fn update_message_flags(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+        uid: u64,
+        flags: &BTreeSet<RemoteFlag>,
+    ) -> Result<bool, SyncError> {
+        let existing = self
+            .connection
+            .query_row(
+                "SELECT is_read, is_flagged, is_answered, is_draft, is_deleted, flags_json
+                 FROM messages
+                 WHERE account_id = ?1
+                   AND folder_id = ?2
+                   AND uid_validity = ?3
+                   AND imap_uid = ?4",
+                params![
+                    account_id,
+                    folder_id,
+                    u64_to_i64(uid_validity)?,
+                    u64_to_i64(uid)?
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some(existing) = existing else {
+            return Ok(false);
+        };
+
+        let flags_json = flags_json(flags)?;
+        let flag_state = FlagState::from_flags(flags);
+        let changed = existing
+            != (
+                flag_state.is_read,
+                flag_state.is_flagged,
+                flag_state.is_answered,
+                flag_state.is_draft,
+                flag_state.is_deleted,
+                flags_json.clone(),
+            );
+
+        if changed {
+            self.connection.execute(
+                "UPDATE messages
+                 SET is_read = ?5,
+                     is_flagged = ?6,
+                     is_answered = ?7,
+                     is_draft = ?8,
+                     is_deleted = ?9,
+                     flags_json = ?10,
+                     sync_state = 'synced'
+                 WHERE account_id = ?1
+                   AND folder_id = ?2
+                   AND uid_validity = ?3
+                   AND imap_uid = ?4",
+                params![
+                    account_id,
+                    folder_id,
+                    u64_to_i64(uid_validity)?,
+                    u64_to_i64(uid)?,
+                    flag_state.is_read,
+                    flag_state.is_flagged,
+                    flag_state.is_answered,
+                    flag_state.is_draft,
+                    flag_state.is_deleted,
+                    flags_json
+                ],
+            )?;
+        }
+
+        Ok(changed)
+    }
+
+    fn delete_message_by_uid(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+        uid: u64,
+    ) -> Result<bool, SyncError> {
+        let changed = self.connection.execute(
+            "DELETE FROM messages
+             WHERE account_id = ?1
+               AND folder_id = ?2
+               AND uid_validity = ?3
+               AND imap_uid = ?4",
+            params![
+                account_id,
+                folder_id,
+                u64_to_i64(uid_validity)?,
+                u64_to_i64(uid)?
+            ],
+        )?;
+
+        Ok(changed > 0)
+    }
+
+    fn finish_folder_sync(
+        &mut self,
+        account_id: &str,
+        folder_id: &str,
+        status: &RemoteFolderStatus,
+    ) -> Result<(), SyncError> {
+        self.connection.execute(
+            "UPDATE folders
+             SET uid_validity = ?3,
+                 uid_next = ?4,
+                 unread_count = ?5,
+                 total_count = ?6,
+                 sync_state = 'idle',
+                 last_synced_at = CURRENT_TIMESTAMP
+             WHERE account_id = ?1 AND id = ?2",
+            params![
+                account_id,
+                folder_id,
+                u64_to_i64(status.uid_validity)?,
+                u64_to_i64(status.uid_next)?,
+                u32_to_i64(status.unread_count),
+                u32_to_i64(status.total_count)
+            ],
+        )?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FlagState {
+    is_read: i64,
+    is_flagged: i64,
+    is_answered: i64,
+    is_draft: i64,
+    is_deleted: i64,
+}
+
+impl FlagState {
+    fn from_flags(flags: &BTreeSet<RemoteFlag>) -> Self {
+        Self {
+            is_read: bool_to_i64(flags.contains(&RemoteFlag::Seen)),
+            is_flagged: bool_to_i64(flags.contains(&RemoteFlag::Flagged)),
+            is_answered: bool_to_i64(flags.contains(&RemoteFlag::Answered)),
+            is_draft: bool_to_i64(flags.contains(&RemoteFlag::Draft)),
+            is_deleted: bool_to_i64(flags.contains(&RemoteFlag::Deleted)),
+        }
+    }
+}
+
+fn generated_id(prefix: &str, parts: &[&str]) -> String {
+    let mut digest = Sha256::new();
+    for part in parts {
+        digest.update(part.as_bytes());
+        digest.update([0]);
+    }
+    let hash = digest.finalize();
+    let mut output = String::with_capacity(prefix.len() + 1 + 32);
+    output.push_str(prefix);
+    output.push('_');
+    for byte in hash.iter().take(16) {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
+}
+
+fn flags_json(flags: &BTreeSet<RemoteFlag>) -> Result<String, SyncError> {
+    let values: Vec<String> = flags.iter().map(RemoteFlag::as_imap_string).collect();
+    serde_json::to_string(&values).map_err(SyncError::cache)
+}
+
+fn bool_to_i64(value: bool) -> i64 {
+    i64::from(value)
+}
+
+fn u32_to_i64(value: u32) -> i64 {
+    i64::from(value)
+}
+
+fn u64_to_i64(value: u64) -> Result<i64, SyncError> {
+    i64::try_from(value).map_err(|_| SyncError::InvalidRemoteState {
+        reason: "remote integer exceeds SQLite storage range",
+    })
+}
+
+fn optional_u64_to_i64(value: Option<u64>) -> Result<Option<i64>, SyncError> {
+    value.map(u64_to_i64).transpose()
+}
+
+fn i64_to_u64(value: i64) -> Result<u64, SyncError> {
+    u64::try_from(value).map_err(|_| SyncError::InvalidRemoteState {
+        reason: "cached UID was negative",
+    })
+}
+
+fn optional_i64_to_u64(value: Option<i64>) -> Option<u64> {
+    value.and_then(|value| u64::try_from(value).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{apply_migrations, search_messages_fts};
+    use std::collections::VecDeque;
+
+    const ACCOUNT_ID: &str = "acct_sync";
+    const INBOX_REMOTE: &str = "INBOX";
+
+    #[derive(Debug, Clone)]
+    struct FakeMailboxFolder {
+        folder: RemoteFolder,
+        uid_validity: u64,
+        messages: BTreeMap<u64, RemoteMessage>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum FakeFailure {
+        ListTransient(String),
+    }
+
+    #[derive(Debug, Default)]
+    struct FakeImapServer {
+        folders: BTreeMap<String, FakeMailboxFolder>,
+        failures: VecDeque<FakeFailure>,
+        reconnects: usize,
+        list_calls: usize,
+        fetch_message_calls: Vec<Vec<u64>>,
+        fetch_flag_calls: Vec<Vec<u64>>,
+    }
+
+    impl FakeImapServer {
+        fn with_inbox(messages: Vec<RemoteMessage>) -> Self {
+            let mut server = Self::default();
+            server.add_folder(
+                RemoteFolder {
+                    remote_id: INBOX_REMOTE.into(),
+                    name: "INBOX".into(),
+                    display_name: "Inbox".into(),
+                    kind: RemoteFolderKind::Inbox,
+                    special_use: Some(RemoteSpecialUse::Inbox),
+                    delimiter: Some("/".into()),
+                },
+                77,
+                messages,
+            );
+            server
+        }
+
+        fn add_folder(
+            &mut self,
+            folder: RemoteFolder,
+            uid_validity: u64,
+            messages: Vec<RemoteMessage>,
+        ) {
+            self.folders.insert(
+                folder.remote_id.clone(),
+                FakeMailboxFolder {
+                    folder,
+                    uid_validity,
+                    messages: messages
+                        .into_iter()
+                        .map(|message| (message.uid, message))
+                        .collect(),
+                },
+            );
+        }
+
+        fn set_inbox_messages(&mut self, uid_validity: u64, messages: Vec<RemoteMessage>) {
+            let folder = self
+                .folders
+                .get_mut(INBOX_REMOTE)
+                .expect("inbox fixture must exist");
+            folder.uid_validity = uid_validity;
+            folder.messages = messages
+                .into_iter()
+                .map(|message| (message.uid, message))
+                .collect();
+        }
+
+        fn fail_next_list_transient(&mut self, reason: impl Into<String>) {
+            self.failures
+                .push_back(FakeFailure::ListTransient(reason.into()));
+        }
+    }
+
+    impl ImapSyncServer for FakeImapServer {
+        fn list_folders(&mut self, _account_id: &str) -> Result<Vec<RemoteFolder>, SyncError> {
+            self.list_calls += 1;
+            if let Some(FakeFailure::ListTransient(reason)) = self.failures.pop_front() {
+                return Err(SyncError::transient(reason));
+            }
+
+            Ok(self
+                .folders
+                .values()
+                .map(|folder| folder.folder.clone())
+                .collect())
+        }
+
+        fn select_folder(
+            &mut self,
+            _account_id: &str,
+            remote_id: &str,
+        ) -> Result<RemoteFolderStatus, SyncError> {
+            let folder = self
+                .folders
+                .get(remote_id)
+                .ok_or_else(|| SyncError::permanent("folder missing"))?;
+            let existing_uids: BTreeSet<u64> = folder.messages.keys().copied().collect();
+            let unread_count = folder
+                .messages
+                .values()
+                .filter(|message| !message.flags.contains(&RemoteFlag::Seen))
+                .count() as u32;
+            let uid_next = existing_uids
+                .iter()
+                .next_back()
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1)
+                .max(1);
+
+            Ok(RemoteFolderStatus {
+                uid_validity: folder.uid_validity,
+                uid_next,
+                existing_uids,
+                unread_count,
+                total_count: folder.messages.len() as u32,
+            })
+        }
+
+        fn fetch_messages(
+            &mut self,
+            _account_id: &str,
+            remote_id: &str,
+            uid_validity: u64,
+            uids: &[u64],
+        ) -> Result<Vec<RemoteMessage>, SyncError> {
+            self.fetch_message_calls.push(uids.to_vec());
+            let folder = self
+                .folders
+                .get(remote_id)
+                .ok_or_else(|| SyncError::permanent("folder missing"))?;
+            if folder.uid_validity != uid_validity {
+                return Err(SyncError::permanent("uidvalidity changed"));
+            }
+
+            uids.iter()
+                .map(|uid| {
+                    folder
+                        .messages
+                        .get(uid)
+                        .cloned()
+                        .ok_or_else(|| SyncError::permanent("message missing"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        }
+
+        fn fetch_flags(
+            &mut self,
+            _account_id: &str,
+            remote_id: &str,
+            uid_validity: u64,
+            uids: &[u64],
+        ) -> Result<Vec<RemoteFlagUpdate>, SyncError> {
+            self.fetch_flag_calls.push(uids.to_vec());
+            let folder = self
+                .folders
+                .get(remote_id)
+                .ok_or_else(|| SyncError::permanent("folder missing"))?;
+            if folder.uid_validity != uid_validity {
+                return Err(SyncError::permanent("uidvalidity changed"));
+            }
+
+            uids.iter()
+                .map(|uid| {
+                    let message = folder
+                        .messages
+                        .get(uid)
+                        .ok_or_else(|| SyncError::permanent("message missing"))?;
+                    Ok(RemoteFlagUpdate {
+                        uid: *uid,
+                        uid_validity,
+                        flags: message.flags.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, SyncError>>()
+        }
+
+        fn reconnect(&mut self, _account_id: &str) -> Result<(), SyncError> {
+            self.reconnects += 1;
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct RecordingBackoffWaiter {
+        delays: Vec<Duration>,
+        cancel_during_wait: Option<SyncCancellationToken>,
+    }
+
+    impl BackoffWaiter for RecordingBackoffWaiter {
+        fn wait(
+            &mut self,
+            delay: Duration,
+            cancellation: &SyncCancellationToken,
+        ) -> Result<(), SyncError> {
+            self.delays.push(delay);
+            if let Some(token) = &self.cancel_during_wait {
+                token.cancel();
+            }
+            cancellation.ensure_not_cancelled()
+        }
+    }
+
+    fn migrated_connection() -> Connection {
+        let mut connection = Connection::open_in_memory().unwrap();
+        apply_migrations(&mut connection).unwrap();
+        connection
+    }
+
+    fn seed_account(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO accounts (
+                   id,
+                   provider_kind,
+                   display_email,
+                   username,
+                   auth_kind,
+                   credential_ref,
+                   imap_host,
+                   imap_port,
+                   imap_security,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security
+                 )
+                 VALUES (
+                   ?1,
+                   'generic_imap_smtp',
+                   'sync@example.com',
+                   'sync@example.com',
+                   'app_password',
+                   'komorebi:test:sync',
+                   'imap.example.com',
+                   993,
+                   'tls',
+                   'smtp.example.com',
+                   465,
+                   'tls'
+                 )",
+                [ACCOUNT_ID],
+            )
+            .unwrap();
+    }
+
+    fn run_sync(
+        server: &mut FakeImapServer,
+        connection: &Connection,
+    ) -> Result<SyncAccountReport, SyncError> {
+        let mut cache = SqliteSyncCache::new(connection);
+        ImapSyncEngine::default().sync_account(
+            server,
+            &mut cache,
+            ACCOUNT_ID,
+            &SyncCancellationToken::new(),
+            &mut NoopBackoffWaiter,
+        )
+    }
+
+    fn message(uid_validity: u64, uid: u64, subject: &str, flags: &[RemoteFlag]) -> RemoteMessage {
+        let mut message = RemoteMessage::fixture(uid_validity, uid, subject);
+        message.flags = flags.iter().cloned().collect();
+        message
+    }
+
+    fn message_count(connection: &Connection) -> i64 {
+        connection
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    fn message_flag_state(connection: &Connection, uid: u64) -> (i64, i64, i64) {
+        connection
+            .query_row(
+                "SELECT is_read, is_flagged, is_deleted
+                 FROM messages
+                 WHERE imap_uid = ?1",
+                [u64_to_i64(uid).unwrap()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn initial_sync_discovers_folders_and_fetches_messages_into_sqlite_cache() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![
+            message(77, 1, "Welcome to Komorebi", &[RemoteFlag::Seen]),
+            message(77, 2, "Unread invoice", &[]),
+        ]);
+        server.add_folder(
+            RemoteFolder {
+                remote_id: "[Gmail]/All Mail".into(),
+                name: "[Gmail]/All Mail".into(),
+                display_name: "All Mail".into(),
+                kind: RemoteFolderKind::All,
+                special_use: None,
+                delimiter: Some("/".into()),
+            },
+            88,
+            Vec::new(),
+        );
+
+        let report = run_sync(&mut server, &connection).unwrap();
+
+        assert_eq!(report.folders_seen, 2);
+        assert_eq!(report.messages_fetched, 2);
+        assert_eq!(report.flags_updated, 0);
+        assert_eq!(message_count(&connection), 2);
+        assert_eq!(message_flag_state(&connection, 1), (1, 0, 0));
+
+        let folder_row = connection
+            .query_row(
+                "SELECT kind, special_use, uid_validity, uid_next, unread_count, total_count, sync_state
+                 FROM folders
+                 WHERE account_id = ?1 AND remote_id = 'INBOX'",
+                [ACCOUNT_ID],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            folder_row,
+            (
+                "inbox".into(),
+                Some("inbox".into()),
+                77,
+                3,
+                1,
+                2,
+                "idle".into()
+            )
+        );
+
+        let search = search_messages_fts(&connection, "Komorebi", 10).unwrap();
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].subject, "Welcome to Komorebi");
+    }
+
+    #[test]
+    fn incremental_sync_fetches_only_new_uids_and_updates_flags() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![
+            message(77, 1, "First", &[]),
+            message(77, 2, "Second", &[]),
+        ]);
+
+        run_sync(&mut server, &connection).unwrap();
+        server.fetch_message_calls.clear();
+        server.fetch_flag_calls.clear();
+        server.set_inbox_messages(
+            77,
+            vec![
+                message(77, 1, "First", &[]),
+                message(77, 2, "Second", &[RemoteFlag::Seen, RemoteFlag::Flagged]),
+                message(77, 3, "Third", &[RemoteFlag::Seen]),
+            ],
+        );
+
+        let report = run_sync(&mut server, &connection).unwrap();
+
+        assert_eq!(report.messages_fetched, 1);
+        assert_eq!(report.flags_updated, 1);
+        assert_eq!(message_count(&connection), 3);
+        assert_eq!(server.fetch_message_calls, vec![vec![3]]);
+        assert_eq!(server.fetch_flag_calls, vec![vec![1, 2]]);
+        assert_eq!(message_flag_state(&connection, 2), (1, 1, 0));
+        assert_eq!(message_flag_state(&connection, 3), (1, 0, 0));
+    }
+
+    #[test]
+    fn expunge_handling_removes_missing_remote_uids_from_cache() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![
+            message(77, 1, "Expunged later", &[]),
+            message(77, 2, "Still present", &[]),
+        ]);
+
+        run_sync(&mut server, &connection).unwrap();
+        server.set_inbox_messages(77, vec![message(77, 2, "Still present", &[])]);
+
+        let report = run_sync(&mut server, &connection).unwrap();
+
+        assert_eq!(report.expunged, 1);
+        assert_eq!(message_count(&connection), 1);
+        let remaining_uid = connection
+            .query_row("SELECT imap_uid FROM messages", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+        assert_eq!(remaining_uid, 2);
+        assert!(search_messages_fts(&connection, "Expunged", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn uidvalidity_change_resets_folder_before_refetching() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![message(77, 1, "Old UIDVALIDITY", &[])]);
+
+        run_sync(&mut server, &connection).unwrap();
+        server.set_inbox_messages(
+            99,
+            vec![message(99, 1, "New UIDVALIDITY", &[RemoteFlag::Seen])],
+        );
+
+        let report = run_sync(&mut server, &connection).unwrap();
+
+        assert_eq!(report.uid_validity_resets, 1);
+        assert_eq!(report.messages_fetched, 1);
+        assert_eq!(message_count(&connection), 1);
+        assert!(search_messages_fts(&connection, "Old", 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            search_messages_fts(&connection, "New", 10).unwrap().len(),
+            1
+        );
+        assert_eq!(message_flag_state(&connection, 1), (1, 0, 0));
+    }
+
+    #[test]
+    fn reconnect_and_backoff_after_transient_server_failure() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![message(77, 1, "After reconnect", &[])]);
+        server.fail_next_list_transient("network drop");
+        let token = SyncCancellationToken::new();
+        let mut cache = SqliteSyncCache::new(&connection);
+        let mut waiter = RecordingBackoffWaiter::default();
+        let engine = ImapSyncEngine::new(BackoffPolicy {
+            max_attempts: 2,
+            initial_delay: Duration::from_millis(10),
+            max_delay: Duration::from_millis(100),
+            multiplier: 2,
+        });
+
+        let report = engine
+            .sync_account(&mut server, &mut cache, ACCOUNT_ID, &token, &mut waiter)
+            .unwrap();
+
+        assert_eq!(report.reconnects, 1);
+        assert_eq!(report.backoff_delays, vec![Duration::from_millis(10)]);
+        assert_eq!(waiter.delays, vec![Duration::from_millis(10)]);
+        assert_eq!(server.reconnects, 1);
+        assert_eq!(server.list_calls, 2);
+        assert_eq!(message_count(&connection), 1);
+    }
+
+    #[test]
+    fn cancellation_stops_before_retry_after_backoff_is_requested() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![message(77, 1, "Should not sync", &[])]);
+        server.fail_next_list_transient("temporary outage");
+        let token = SyncCancellationToken::new();
+        let mut cache = SqliteSyncCache::new(&connection);
+        let mut waiter = RecordingBackoffWaiter {
+            cancel_during_wait: Some(token.clone()),
+            ..RecordingBackoffWaiter::default()
+        };
+        let engine = ImapSyncEngine::new(BackoffPolicy {
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(5),
+            max_delay: Duration::from_millis(20),
+            multiplier: 2,
+        });
+
+        let error = engine
+            .sync_account(&mut server, &mut cache, ACCOUNT_ID, &token, &mut waiter)
+            .unwrap_err();
+
+        assert_eq!(error, SyncError::Cancelled);
+        assert_eq!(server.reconnects, 1);
+        assert_eq!(server.list_calls, 1);
+        assert_eq!(message_count(&connection), 0);
+    }
+
+    #[test]
+    fn server_fixture_validation_rejects_missing_fetch_results() {
+        let status = RemoteFolderStatus {
+            uid_validity: 77,
+            uid_next: 3,
+            existing_uids: BTreeSet::from([1, 2]),
+            unread_count: 0,
+            total_count: 2,
+        };
+
+        assert_eq!(
+            validate_messages(&status, &[1, 2], vec![message(77, 1, "Only one", &[])]).unwrap_err(),
+            SyncError::InvalidRemoteState {
+                reason: "server did not return all requested message UIDs"
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_account_is_rejected_before_server_calls() {
+        let connection = migrated_connection();
+        let mut cache = SqliteSyncCache::new(&connection);
+        let mut server = FakeImapServer::with_inbox(Vec::new());
+
+        let error = ImapSyncEngine::default()
+            .sync_account(
+                &mut server,
+                &mut cache,
+                ACCOUNT_ID,
+                &SyncCancellationToken::new(),
+                &mut NoopBackoffWaiter,
+            )
+            .unwrap_err();
+
+        assert_eq!(error, SyncError::UnknownAccount);
+        assert_eq!(server.list_calls, 0);
+    }
+}
