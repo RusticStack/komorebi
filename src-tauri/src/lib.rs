@@ -1,8 +1,10 @@
 pub mod attachment_safety;
 pub mod auth;
+pub mod credentials;
 pub mod ipc_boundary;
 pub mod ipc_validation;
 pub mod mail_actions;
+pub mod oauth;
 pub mod token_lifecycle;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

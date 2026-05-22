@@ -1,13 +1,13 @@
 # Token Lifecycle
 
-Status: accepted lifecycle policy; provider HTTP clients are not implemented yet.
+Status: accepted and implemented for the backend lifecycle and provider HTTP client layer.
 Last reviewed: 2026-05-22.
 
 ## Decision
 
 Token refresh, token revocation, reconnect-needed state, and account-removal cleanup are Rust-backend responsibilities. React receives only redacted account-auth status and must never receive access tokens, refresh tokens, authorization headers, credential target names, or provider token response bodies.
 
-The enforceable lifecycle core lives in `src-tauri/src/token_lifecycle.rs`. It is intentionally written behind traits so the future Windows Credential Manager implementation, OAuth HTTP clients, SQLite account state, and sync worker can be connected without changing frontend behavior.
+The enforceable lifecycle core lives in `src-tauri/src/token_lifecycle.rs`. It is intentionally written behind traits so Windows Credential Manager, OAuth HTTP clients, SQLite account state, and sync workers can be connected without changing frontend behavior. The Windows credential implementation lives in `src-tauri/src/credentials.rs`; the provider OAuth HTTP implementation lives in `src-tauri/src/oauth.rs`.
 
 ## Refresh Flow
 
@@ -53,7 +53,7 @@ Local cleanup must proceed even if provider revocation fails or is unsupported. 
 
 ## Provider Revocation Policy
 
-Gmail supports programmatic revocation through Google's OAuth revocation endpoint. Revoking a Google access token also revokes the corresponding refresh token when one exists. Komorebi should revoke the refresh token on Gmail account removal when OAuth is implemented.
+Gmail supports programmatic revocation through Google's OAuth revocation endpoint. Komorebi's provider OAuth client posts the stored refresh token to that endpoint on account removal when revocation is requested.
 
 Microsoft refresh tokens can expire or be revoked by the sign-in service, user actions, password changes, or admin actions. Microsoft documentation expects clients to handle revocation by reauthenticating when refresh fails. Komorebi must always delete local Microsoft tokens and cache on removal; provider-side revocation is represented as unsupported until a reviewed Microsoft-specific revocation mechanism is added.
 
@@ -79,6 +79,20 @@ Generic OAuth provider revocation is unsupported until provider-specific revocat
 - Network/provider refresh failure marks reconnect-needed.
 - Account removal revokes when requested and clears credentials, access cache, local cache, and metadata.
 - Account removal still clears local state if provider revocation fails.
+
+`src-tauri/src/oauth.rs` covers:
+
+- Gmail and Microsoft OAuth authorization URLs with provider scopes and PKCE.
+- Authorization-code exchange and refresh-token HTTP forms.
+- Invalid-grant mapping into reconnect-needed lifecycle behavior.
+- Google revocation and Microsoft revocation-unsupported behavior.
+- XOAUTH2 SASL response construction without exposing tokens to React.
+
+`src-tauri/src/credentials.rs` covers:
+
+- Namespaced Windows Credential Manager target names.
+- Account-id validation before target-name construction.
+- Redacted secret debug output.
 
 ## References
 

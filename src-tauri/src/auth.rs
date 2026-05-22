@@ -40,6 +40,24 @@ pub enum AuthPolicy {
     },
 }
 
+pub fn current_auth_implementation(provider: ProviderKind) -> AuthImplementation {
+    match provider {
+        ProviderKind::Gmail | ProviderKind::Microsoft => AuthImplementation::OAuth2Ready,
+        ProviderKind::GenericImapSmtp => AuthImplementation::OAuth2Pending,
+    }
+}
+
+pub fn evaluate_account_setup_auth_policy(
+    provider: ProviderKind,
+    requested_auth: AuthKind,
+) -> AuthPolicy {
+    evaluate_auth_policy(
+        provider,
+        requested_auth,
+        current_auth_implementation(provider),
+    )
+}
+
 pub fn evaluate_auth_policy(
     provider: ProviderKind,
     requested_auth: AuthKind,
@@ -88,7 +106,7 @@ fn evaluate_major_provider(
             AuthImplementation::OAuth2Pending => AuthPolicy::UnsupportedUntilImplemented {
                 required_auth: AuthKind::OAuth2,
                 required_mechanism: SaslMechanism::XOAuth2,
-                reason: "OAuth2/XOAUTH2 flow is documented but not implemented yet",
+                reason: "OAuth2/XOAUTH2 flow is unavailable in this configuration",
             },
         },
         AuthKind::AppPassword | AuthKind::ManualPassword => AuthPolicy::Rejected {
@@ -140,7 +158,7 @@ mod tests {
             AuthPolicy::UnsupportedUntilImplemented {
                 required_auth: AuthKind::OAuth2,
                 required_mechanism: SaslMechanism::XOAuth2,
-                reason: "OAuth2/XOAUTH2 flow is documented but not implemented yet",
+                reason: "OAuth2/XOAUTH2 flow is unavailable in this configuration",
             },
         );
     }
@@ -153,6 +171,24 @@ mod tests {
                 AuthKind::OAuth2,
                 AuthImplementation::OAuth2Ready,
             ),
+            AuthPolicy::Allowed {
+                mechanism: SaslMechanism::XOAuth2,
+                credential_slot: "oauth-refresh",
+            },
+        );
+    }
+
+    #[test]
+    fn current_major_provider_oauth_is_ready() {
+        assert_eq!(
+            evaluate_account_setup_auth_policy(ProviderKind::Gmail, AuthKind::OAuth2),
+            AuthPolicy::Allowed {
+                mechanism: SaslMechanism::XOAuth2,
+                credential_slot: "oauth-refresh",
+            },
+        );
+        assert_eq!(
+            evaluate_account_setup_auth_policy(ProviderKind::Microsoft, AuthKind::OAuth2),
             AuthPolicy::Allowed {
                 mechanism: SaslMechanism::XOAuth2,
                 credential_slot: "oauth-refresh",

@@ -6,7 +6,7 @@ Last updated: 2026-05-22
 
 Komorebi has no frontend-callable mail-action IPC commands yet. The destructive-action semantics exist first in `src-tauri/src/mail_actions.rs` so future UI and sync work have typed behavior before connecting real IMAP accounts.
 
-No live mailbox is used by these tests. `src-tauri/src/mail_actions.rs` includes a local fake mailbox store for action-state verification.
+No live mailbox is used by these tests. `src-tauri/src/mail_actions.rs` includes a local in-memory mailbox store for action-state verification.
 
 ## Typed Actions
 
@@ -42,7 +42,7 @@ If a provider lacks Trash, a future provider-specific policy must document wheth
 
 Server-affecting actions use a retry policy with `MAX_MAIL_ACTION_ATTEMPTS` attempts. Transient server failures return `RetryDecision::RetryNow` until the limit is exhausted. Validation errors, missing account/folder/message targets, confirmation failures, and permanent server errors are not retryable.
 
-The fake-store tests verify transient failures do not mutate local fake server state before retry.
+The local mailbox-state tests verify transient failures do not mutate local test state before retry.
 
 Future sync/cache integration must record pending, applied, retrying, failed, and undoable action states separately from server state. A command returning success means the remote mutation was accepted by the mail-action layer; cache updates still need reconciliation with sync.
 

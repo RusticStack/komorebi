@@ -1,16 +1,13 @@
 # Credential Model
 
-Status: accepted for the Windows-first implementation.
+Status: accepted and implemented for the Windows-first secret-store layer.
 Last reviewed: 2026-05-22.
 
 ## Decision
 
 Komorebi will store mail-account secrets in Windows Credential Manager through the Rust backend. Windows Credential Manager entries are user-scoped and protected by the Windows credential subsystem/DPAPI. The frontend must never receive raw passwords, refresh tokens, access tokens, credential blobs, or decrypted secret material.
 
-The first implementation should use a narrow Rust credential-store abstraction so the call sites do not depend on one crate or Win32 API shape. Acceptable implementation choices are:
-
-- A reviewed Rust wrapper over Windows Credential Manager.
-- Direct use of the Windows `CredWrite`, `CredRead`, and `CredDelete` APIs through the `windows` crate.
+The implementation lives in `src-tauri/src/credentials.rs`. It uses a narrow Rust abstraction over the Windows `CredWriteW`, `CredReadW`, and `CredDeleteW` APIs through `windows-sys`, so call sites do not depend on raw Win32 API shape.
 
 No credential storage may be implemented with browser storage, Tauri Store, SQLite, plain files, logs, diagnostics bundles, or environment variables. `tauri-plugin-store` may hold non-secret preferences only.
 
@@ -62,9 +59,9 @@ Komorebi/mail-account/{account_id}/generic-password
 Rules:
 
 - `account_id` is the local UUID, never the raw email address.
-- `oauth-refresh` stores the provider refresh token when OAuth2 is implemented.
+- `oauth-refresh` stores provider refresh tokens for Gmail and Microsoft OAuth2.
 - `oauth-access` is optional and may store an access token only with an expiry timestamp in the protected payload. Prefer memory-only access tokens.
-- `generic-password` stores a provider app password or manual password only for compatible generic IMAP/SMTP providers. Gmail and Microsoft must use OAuth2/XOAUTH2 or remain unsupported until implemented, as defined in `docs/architecture/provider-auth.md`.
+- `generic-password` stores a provider app password or manual password only for compatible generic IMAP/SMTP providers. Gmail and Microsoft must use OAuth2/XOAUTH2, as defined in `docs/architecture/provider-auth.md`.
 - Credential payloads are serialized by Rust only. React sends setup input once over a typed command and never receives the stored value back.
 - The Windows credential username may be `provider_kind:account_id`; the display email stays in SQLite metadata.
 
@@ -92,7 +89,7 @@ Account removal must run as a single typed backend workflow:
 
 Credential rotation must write the replacement credential first, verify it can authenticate or refresh, then replace `credential_ref`/metadata. Failed rotation leaves the previous credential intact.
 
-Token refresh, reconnect-needed status, and provider revocation handling are defined in `docs/architecture/token-lifecycle.md` and enforced by `src-tauri/src/token_lifecycle.rs`.
+Token refresh, reconnect-needed status, provider revocation handling, and the provider OAuth HTTP client are defined in `docs/architecture/token-lifecycle.md` and enforced by `src-tauri/src/token_lifecycle.rs` plus `src-tauri/src/oauth.rs`.
 
 ## Frontend And IPC Boundaries
 

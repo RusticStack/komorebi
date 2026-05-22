@@ -1,8 +1,8 @@
 # Komorebi
 
-Komorebi is a privacy-first Windows 10/11 desktop email client scaffolded with Tauri v2, React, TypeScript, Vite, and Rust.
+Komorebi is a privacy-first Windows 10/11 desktop email client built with Tauri v2, React, TypeScript, Vite, and Rust.
 
-The current implementation is an executable placeholder shell: a static 3-pane mail layout that verifies the desktop scaffold. It does not connect to real mail accounts yet.
+The current implementation is an executable first-run shell with no seeded mailbox data. It does not connect to real mail accounts yet.
 
 ## Toolchain
 
@@ -34,9 +34,9 @@ Reference: https://v2.tauri.app/start/prerequisites/
 
 The accepted credential architecture is documented in [docs/architecture/credential-model.md](docs/architecture/credential-model.md). Komorebi uses Windows Credential Manager/DPAPI for account secrets. Plaintext passwords and tokens are forbidden in SQLite, Tauri Store, browser storage, logs, diagnostics, and frontend state.
 
-Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft account setup are disabled until OAuth2/XOAUTH2 is implemented; generic password/app-password setup is limited to compatible generic IMAP/SMTP providers.
+Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft backend auth uses OAuth2/XOAUTH2 only; generic password/app-password setup is limited to compatible generic IMAP/SMTP providers. The user-facing account setup UI remains future TODO work.
 
-Token refresh, reconnect-needed state, and account-removal cleanup are documented in [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md). React receives redacted auth status only; token refresh and revocation handling stay in Rust.
+Token refresh, reconnect-needed state, provider revocation, and account-removal cleanup are documented in [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md). React receives redacted auth status only; token refresh and revocation handling stay in Rust.
 
 Tauri capability policy is documented in [docs/architecture/tauri-capabilities.md](docs/architecture/tauri-capabilities.md). The main webview currently has no frontend Tauri permissions; SQL, filesystem, opener, shell/process, HTTP, and custom-command access are denied unless a future feature adds a scoped capability and test coverage.
 
@@ -48,7 +48,7 @@ Safe email rendering is documented in [docs/architecture/message-rendering.md](d
 
 Attachment safety is documented in [docs/architecture/attachment-safety.md](docs/architecture/attachment-safety.md). Attachment storage paths are app-generated in Rust, sender filenames are display-only, path traversal is rejected, size/type limits are enforced, previews are opt-in and type-checked, and auto-open is forbidden.
 
-Destructive mail action semantics are documented in [docs/architecture/destructive-mail-actions.md](docs/architecture/destructive-mail-actions.md). Move, archive, delete-to-trash, mark-read, and expunge behavior is typed in Rust, confirmation-aware, reversible where possible, and tested against fake mailbox state only.
+Destructive mail action semantics are documented in [docs/architecture/destructive-mail-actions.md](docs/architecture/destructive-mail-actions.md). Move, archive, delete-to-trash, mark-read, and expunge behavior is typed in Rust, confirmation-aware, reversible where possible, and tested against local test mailbox state only.
 
 ## Setup
 

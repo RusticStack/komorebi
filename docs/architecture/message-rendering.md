@@ -6,7 +6,7 @@ Last updated: 2026-05-22
 
 Komorebi renders untrusted email HTML only through `src/mail/rendering/SafeEmailBody.tsx`. The sanitizer and link/resource policy live in `src/mail/rendering/emailHtml.ts`.
 
-The placeholder reader already uses this boundary. Do not render message bodies through any other `dangerouslySetInnerHTML` sink.
+The current app shell has no selected message and therefore renders no message HTML. When a message-detail view is connected, it must use this boundary and must not add any other `dangerouslySetInnerHTML` sink.
 
 ## Sanitization Policy
 

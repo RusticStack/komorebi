@@ -37,7 +37,7 @@ Direct frontend SQL may be considered only for read-heavy views after schema wor
 - No access to account secrets, credential references, token metadata beyond redacted auth status, attachment local paths that could expose filesystem structure, or hidden sync bookkeeping needed for correctness.
 - A test that rejects `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `ALTER`, `DROP`, `PRAGMA` mutation, and multiple-statement SQL from any frontend-facing query helper.
 
-Until that policy exists, React must request data through typed Rust commands or mocked fixture state only.
+Until that policy exists, React must request data through typed Rust commands or explicit test fixture state only.
 
 ## Typed Command Requirements
 
