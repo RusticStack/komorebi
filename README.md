@@ -48,6 +48,8 @@ Safe email rendering is documented in [docs/architecture/message-rendering.md](d
 
 Attachment safety is documented in [docs/architecture/attachment-safety.md](docs/architecture/attachment-safety.md). Attachment storage paths are app-generated in Rust, sender filenames are display-only, path traversal is rejected, size/type limits are enforced, previews are opt-in and type-checked, and auto-open is forbidden.
 
+Destructive mail action semantics are documented in [docs/architecture/destructive-mail-actions.md](docs/architecture/destructive-mail-actions.md). Move, archive, delete-to-trash, mark-read, and expunge behavior is typed in Rust, confirmation-aware, reversible where possible, and tested against fake mailbox state only.
+
 ## Setup
 
 ```powershell

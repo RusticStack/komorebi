@@ -16,7 +16,7 @@ The accepted boundary is:
 
 These operations must be typed Rust commands or internal Rust worker calls:
 
-- Server-affecting mail actions: send, move, archive, delete, mark read/unread, flag, draft upload, Sent upload, folder rename/delete, and any IMAP/SMTP command that changes provider state.
+- Server-affecting mail actions: send, move, archive, delete, mark read/unread, flag, draft upload, Sent upload, folder rename/delete, and any IMAP/SMTP command that changes provider state. Use `docs/architecture/destructive-mail-actions.md` for move/delete/archive/mark-read/expunge semantics.
 - Credential access: account creation, reauthentication, token refresh, credential lookup, credential rotation, credential deletion, and OAuth revocation.
 - Attachment writes: downloading, saving, moving, deleting, preview preparation, inline CID materialization, and any file-path selection after a message is parsed. Use `docs/architecture/attachment-safety.md` for path, filename, type, size, and preview rules.
 - Destructive deletes: account removal, cache deletion, attachment cleanup, local message purge, folder cache reset, and provider delete/expunge.

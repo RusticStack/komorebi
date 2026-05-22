@@ -35,6 +35,7 @@ Validation errors must be safe for React. Do not echo credentials, email address
 - `validate_entity_id` for internal id shape.
 - `validate_message_scope` plus `EntityLookup` for account/folder/message existence and ownership checks.
 - Attachment-specific path, filename, type, size, and preview validation lives in `src-tauri/src/attachment_safety.rs`.
+- Destructive mail-action target validation and retry semantics live in `src-tauri/src/mail_actions.rs`.
 
 These helpers are not a substitute for command-specific validation. They are the minimum shared policy.
 
