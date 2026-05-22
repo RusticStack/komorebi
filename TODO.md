@@ -4,13 +4,13 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`.
-- Local code inspected: none present at audit time.
-- Local tests inspected: none present at audit time.
-- Local scripts inspected: none present at audit time.
-- Local config inspected: none present at audit time.
-- Local generated/runtime surfaces inspected: none present at audit time.
-- Repository state inspected: final verification showed `git status --short --branch` succeeds on `main...origin/main`; `git ls-files` tracks only `Project Komorebi - Email Client Plan.md`; `.gitignore`, `AGENTS.md`, and `TODO.md` are untracked until committed.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md` and `README.md`.
+- Local code inspected: scaffolded React app in `src/` and Tauri/Rust shell in `src-tauri/`.
+- Local tests inspected: no explicit tests exist; `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs 0 tests successfully.
+- Local scripts inspected: `package.json` scripts for Vite build/dev/preview and Tauri CLI.
+- Local config inspected: `.node-version`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
+- Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; `AGENTS.md`, `TODO.md`, and `.gitignore` are tracked; scaffold, README, and toolchain pin files are untracked until committed.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
 - External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
@@ -27,17 +27,15 @@ Purpose: make the project real enough for agents and humans to build, test, and 
 - [x] Add a production-readiness ledger.
   Evidence: this `TODO.md` exists and records audited surfaces, missing implementation, priorities, acceptance criteria, and deferred work.
 - [x] Verify source control.
-  Evidence: final verification showed `git status --short --branch` succeeds on `main...origin/main`, and `git ls-files` tracks the project plan.
+  Evidence: `git status --short --branch` succeeds on `main...origin/main`; `git ls-files` tracks the project plan, `.gitignore`, `AGENTS.md`, and `TODO.md`.
 - [x] Add repository ignore rules and decide whether to commit the audit docs.
-  Evidence: `.gitignore` now excludes Node dependencies, frontend build/cache output, Rust/Tauri targets and bundle artifacts, local runtime/user-data directories, disposable SQLite databases, secrets, logs, diagnostics, and editor/OS noise. `AGENTS.md` and `TODO.md` remain untracked because no commit was requested; `AGENTS.md` requires an explicit user request before committing.
-- [ ] Scaffold the Tauri v2 + React + TypeScript + Vite app.
-  Evidence: no `package.json`, `src`, `src-tauri`, `Cargo.toml`, or Tauri config exists.
-  Acceptance: `pnpm install`, `pnpm build`, and a first Tauri dev launch work from the repo root; the app opens a placeholder mail-client shell rather than a marketing page.
-- [ ] Pin the development toolchain.
-  Evidence: no `packageManager`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `Cargo.lock`, or Windows prerequisite docs exist.
-  Acceptance: Node/package-manager and Rust versions are pinned, lockfiles exist, and README documents required Windows build tools and WebView2 expectations.
+  Evidence: tracked `.gitignore` excludes Node dependencies, frontend build/cache output, Rust/Tauri targets and bundle artifacts, local runtime/user-data directories, disposable SQLite databases, secrets, logs, diagnostics, and editor/OS noise. The new scaffold files remain untracked because no commit was requested; `AGENTS.md` requires an explicit user request before committing.
+- [x] Scaffold the Tauri v2 + React + TypeScript + Vite app.
+  Evidence: `package.json`, `pnpm-lock.yaml`, `src/`, `src-tauri/`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` now exist. `pnpm install` and `pnpm build` pass from the repo root. A controlled `pnpm tauri dev --no-watch` run compiled and launched `target\debug\komorebi.exe`, then the process tree was stopped after verification. The first screen is a placeholder 3-pane mail-client shell, not the starter Tauri/Vite/React marketing page.
+- [x] Pin the development toolchain.
+  Evidence: `.node-version` pins Node `24.16.0`; `package.json` pins Node `24.16.0` and pnpm `10.33.2`; `pnpm-lock.yaml` exists; `rust-toolchain.toml` pins Rust `1.95.0`, `rustfmt`, `clippy`, and `x86_64-pc-windows-msvc`; `src-tauri/Cargo.lock` exists; `README.md` documents Windows C++ Build Tools and WebView2 expectations.
 - [ ] Establish root check commands.
-  Evidence: no lint, test, build, format, clippy, or package scripts exist.
+  Evidence: `package.json` now has `dev`, `build`, `preview`, and `tauri` scripts, and Rust format/clippy/test commands work when invoked directly. No `pnpm lint`, `pnpm test`, or root scripts for Rust format/clippy/test exist yet.
   Acceptance: root scripts call frontend lint/test/build and Rust fmt/clippy/test; failing commands are either fixed or documented as known baseline failures with exact errors.
 
 ## P1 - Privacy, Credential Safety, And User-Data Loss Prevention

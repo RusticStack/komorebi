@@ -1,0 +1,69 @@
+# Komorebi
+
+Komorebi is a privacy-first Windows 10/11 desktop email client scaffolded with Tauri v2, React, TypeScript, Vite, and Rust.
+
+The current implementation is an executable placeholder shell: a static 3-pane mail layout that verifies the desktop scaffold. It does not connect to real mail accounts yet.
+
+## Toolchain
+
+Use the pinned versions below for local development:
+
+- Node.js `24.16.0`, pinned in `.node-version` and `package.json`.
+- pnpm `10.33.2`, pinned in `package.json` via `packageManager`.
+- Rust `1.95.0` for `x86_64-pc-windows-msvc`, pinned in `rust-toolchain.toml`.
+- Cargo lockfile: `src-tauri/Cargo.lock`.
+- pnpm lockfile: `pnpm-lock.yaml`.
+
+If `pnpm` is not available but Node is installed, install the pinned package manager:
+
+```powershell
+npm install -g pnpm@10.33.2
+```
+
+## Windows Prerequisites
+
+Tauri development on Windows requires Microsoft C++ Build Tools and Microsoft Edge WebView2.
+
+Install the Visual Studio Build Tools with the `Desktop development with C++` workload. Keep the Rust host toolchain on the MSVC target, `x86_64-pc-windows-msvc`, because this project pins and verifies that target.
+
+WebView2 is the rendering engine used by Tauri on Windows. It is normally present on Windows 10 version 1803 and later, and on Windows 11. If a supported machine is missing WebView2, install the Microsoft Edge WebView2 Evergreen Runtime before running the app. Release packaging still needs a dedicated verification pass before public distribution.
+
+Reference: https://v2.tauri.app/start/prerequisites/
+
+## Setup
+
+```powershell
+pnpm install
+```
+
+## Development
+
+Run the Vite frontend:
+
+```powershell
+pnpm dev
+```
+
+Run the Tauri desktop shell:
+
+```powershell
+pnpm tauri dev
+```
+
+Build the frontend:
+
+```powershell
+pnpm build
+```
+
+Run Rust checks:
+
+```powershell
+cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --all-features
+```
+
+## Generated Outputs
+
+Do not commit generated dependency, build, or runtime outputs such as `node_modules/`, `dist/`, `src-tauri/target/`, `src-tauri/gen/`, local app-data directories, disposable SQLite databases, or diagnostics logs.
