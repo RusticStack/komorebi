@@ -27,11 +27,12 @@ Implemented now:
 - Periodic folder refresh after IDLE timeout.
 - Clean stop reports for app-exit cancellation and account removal.
 - Fake IMAP server fixtures that simulate initial sync, incremental sync, flag changes, expunges, UIDVALIDITY reset, IDLE wakeups, IDLE timeout refresh, polling fallback, reconnect, backoff, account removal, and cancellation.
+- Stable message ids shared with the MIME normalization boundary.
 
 Not implemented by this task:
 
 - Live `async-imap` network adapter.
-- MIME parsing or attachment extraction.
+- Live adapter calls into MIME normalization and attachment extraction/storage writes.
 - SMTP send fixtures.
 - Frontend account setup or sync-status UI.
 
@@ -75,6 +76,7 @@ The worker returns `FolderWorkerReport` instead of treating normal shutdown as a
 - Local folder IDs are backend-generated stable IDs derived from account and remote folder identity.
 - Message rows are matched by `(account_id, folder_id, uid_validity, imap_uid)`.
 - Local message IDs are backend-generated stable IDs derived from account, folder, UIDVALIDITY, and UID.
+- MIME normalization uses the same stable message ID derivation for attachment records.
 - IMAP flags are stored in `flags_json`; standard flags also update boolean columns.
 - Message inserts and body updates flow through the existing `messages_fts` triggers.
 
@@ -127,6 +129,7 @@ No test uses a real mailbox or real credentials.
 Keep this document synchronized with:
 
 - `src-tauri/src/imap_sync.rs`
+- `src-tauri/src/mime_normalization.rs`
 - `src-tauri/src/schema.rs`
 - `src-tauri/migrations/*.sql`
 - `docs/architecture/schema.md`

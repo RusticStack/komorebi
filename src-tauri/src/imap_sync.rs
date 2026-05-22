@@ -119,6 +119,7 @@ pub struct RemoteMessage {
     pub uid_validity: u64,
     pub rfc_message_id: Option<String>,
     pub provider_message_id: Option<String>,
+    pub in_reply_to: Option<String>,
     pub subject: String,
     pub sender_name: Option<String>,
     pub sender_email: Option<String>,
@@ -144,6 +145,7 @@ impl RemoteMessage {
             uid_validity,
             rfc_message_id: Some(format!("<uid-{uid}@fixture.komorebi>")),
             provider_message_id: None,
+            in_reply_to: None,
             subject: subject.into(),
             sender_name: Some("Fixture Sender".into()),
             sender_email: Some("sender@example.com".into()),
@@ -162,6 +164,23 @@ impl RemoteMessage {
             has_attachments: false,
         }
     }
+}
+
+pub(crate) fn stable_imap_message_id(
+    account_id: &str,
+    folder_id: &str,
+    uid_validity: u64,
+    uid: u64,
+) -> String {
+    generated_id(
+        "msg",
+        &[
+            account_id,
+            folder_id,
+            &uid_validity.to_string(),
+            &uid.to_string(),
+        ],
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1418,15 +1437,7 @@ impl SyncCache for SqliteSyncCache<'_> {
             )
             .optional()?;
         let message_id = existing_id.unwrap_or_else(|| {
-            generated_id(
-                "msg",
-                &[
-                    account_id,
-                    folder_id,
-                    &message.uid_validity.to_string(),
-                    &message.uid.to_string(),
-                ],
-            )
+            stable_imap_message_id(account_id, folder_id, message.uid_validity, message.uid)
         });
 
         let flags_json = flags_json(&message.flags)?;
@@ -1440,6 +1451,7 @@ impl SyncCache for SqliteSyncCache<'_> {
                uid_validity,
                rfc_message_id,
                provider_message_id,
+               in_reply_to,
                references_json,
                subject,
                sender_name,
@@ -1466,13 +1478,14 @@ impl SyncCache for SqliteSyncCache<'_> {
              VALUES (
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-               ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, 'synced'
+               ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, 'synced'
              )
              ON CONFLICT(id) DO UPDATE SET
                imap_uid = excluded.imap_uid,
                uid_validity = excluded.uid_validity,
                rfc_message_id = excluded.rfc_message_id,
                provider_message_id = excluded.provider_message_id,
+               in_reply_to = excluded.in_reply_to,
                references_json = excluded.references_json,
                subject = excluded.subject,
                sender_name = excluded.sender_name,
@@ -1503,6 +1516,7 @@ impl SyncCache for SqliteSyncCache<'_> {
                 u64_to_i64(message.uid_validity)?,
                 &message.rfc_message_id,
                 &message.provider_message_id,
+                &message.in_reply_to,
                 &message.references_json,
                 &message.subject,
                 &message.sender_name,

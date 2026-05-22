@@ -5,6 +5,7 @@ pub mod imap_sync;
 pub mod ipc_boundary;
 pub mod ipc_validation;
 pub mod mail_actions;
+pub mod mime_normalization;
 pub mod oauth;
 pub mod schema;
 pub mod token_lifecycle;

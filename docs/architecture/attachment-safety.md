@@ -4,7 +4,7 @@ Last updated: 2026-05-22
 
 ## Current State
 
-Komorebi has no live attachment download, preview, or open commands yet. The attachment safety layer exists first so future sync, MIME parsing, and reader UI work cannot persist or preview untrusted attachment content with ad hoc path handling.
+Komorebi has no live attachment download, preview, or open commands yet. The attachment safety layer exists first so sync, MIME normalization, and reader UI work cannot persist or preview untrusted attachment content with ad hoc path handling.
 
 The code source of truth is `src-tauri/src/attachment_safety.rs`.
 
@@ -43,6 +43,8 @@ Current storage allowlist:
 - `application/zip`
 
 The safety layer sniffs content bytes and compares them to the declared MIME type when a declared type is present. `application/octet-stream` may be accepted only when sniffing identifies an allowed type. Explicitly dangerous declared types such as HTML, SVG, JavaScript, shell/batch/MSI/downloadable executable types, and legacy Office binary types are rejected.
+
+`src-tauri/src/mime_normalization.rs` applies this validation while parsing inbound MIME parts. A parsed attachment that fails storage validation may remain as metadata with a warning, but future storage/download code must not write or preview the bytes unless the attachment safety boundary accepts them.
 
 Any expansion of the allowlist must add tests for declared type, sniffed bytes, storage extension, preview behavior, and unsafe-open denial.
 
