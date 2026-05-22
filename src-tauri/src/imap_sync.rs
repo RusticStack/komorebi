@@ -216,6 +216,7 @@ impl SyncAccountReport {
 pub enum SyncError {
     Cancelled,
     UnknownAccount,
+    UnknownFolder,
     InvalidRemoteState { reason: &'static str },
     TransientServer { reason: String },
     PermanentServer { reason: String },
@@ -247,6 +248,7 @@ impl fmt::Display for SyncError {
         match self {
             Self::Cancelled => write!(formatter, "sync was cancelled"),
             Self::UnknownAccount => write!(formatter, "account was not found"),
+            Self::UnknownFolder => write!(formatter, "folder was not found"),
             Self::InvalidRemoteState { reason } => {
                 write!(formatter, "invalid remote state: {reason}")
             }
@@ -410,6 +412,34 @@ pub trait ImapSyncServer {
     fn reconnect(&mut self, account_id: &str) -> Result<(), SyncError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdleCapability {
+    Available,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdleWaitOutcome {
+    MailboxChanged,
+    Timeout,
+    IdleUnavailable,
+}
+
+pub trait ImapIdleServer: ImapSyncServer {
+    fn idle_capability(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+    ) -> Result<IdleCapability, SyncError>;
+    fn idle_wait(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        timeout: Duration,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<IdleWaitOutcome, SyncError>;
+}
+
 pub trait SyncCache {
     fn account_exists(&self, account_id: &str) -> Result<bool, SyncError>;
     fn cached_folder_state(
@@ -491,6 +521,60 @@ pub struct ImapSyncEngine {
     pub backoff: BackoffPolicy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FolderWorkerConfig<'a> {
+    pub account_id: &'a str,
+    pub remote_id: &'a str,
+    pub idle_timeout: Duration,
+    pub poll_interval: Duration,
+    pub max_cycles: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderWorkerStopReason {
+    MaxCyclesReached,
+    Cancelled,
+    AccountRemoved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderWorkerReport {
+    pub stop_reason: FolderWorkerStopReason,
+    pub cycles_completed: usize,
+    pub sync_runs: usize,
+    pub idle_waits: usize,
+    pub idle_change_refreshes: usize,
+    pub idle_timeout_refreshes: usize,
+    pub poll_refreshes: usize,
+    pub idle_fallbacks: usize,
+    pub reconnects: usize,
+    pub backoff_delays: Vec<Duration>,
+    pub sync_reports: Vec<SyncFolderReport>,
+}
+
+impl FolderWorkerReport {
+    fn new() -> Self {
+        Self {
+            stop_reason: FolderWorkerStopReason::MaxCyclesReached,
+            cycles_completed: 0,
+            sync_runs: 0,
+            idle_waits: 0,
+            idle_change_refreshes: 0,
+            idle_timeout_refreshes: 0,
+            poll_refreshes: 0,
+            idle_fallbacks: 0,
+            reconnects: 0,
+            backoff_delays: Vec::new(),
+            sync_reports: Vec::new(),
+        }
+    }
+
+    fn stopped(mut self, reason: FolderWorkerStopReason) -> Self {
+        self.stop_reason = reason;
+        self
+    }
+}
+
 impl ImapSyncEngine {
     pub fn new(backoff: BackoffPolicy) -> Self {
         Self { backoff }
@@ -549,6 +633,202 @@ impl ImapSyncEngine {
         })
     }
 
+    pub fn sync_folder_by_remote_id<S, C, W>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        account_id: &str,
+        remote_id: &str,
+        cancellation: &SyncCancellationToken,
+        waiter: &mut W,
+    ) -> Result<SyncFolderReport, SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+        W: BackoffWaiter,
+    {
+        cancellation.ensure_not_cancelled()?;
+        if !cache.account_exists(account_id)? {
+            return Err(SyncError::UnknownAccount);
+        }
+
+        let policy = self.backoff.normalized();
+        for attempt_index in 0..policy.max_attempts {
+            cancellation.ensure_not_cancelled()?;
+            match self.sync_folder_once_by_remote_id(
+                server,
+                cache,
+                account_id,
+                remote_id,
+                cancellation,
+            ) {
+                Ok(folder_report) => return Ok(folder_report),
+                Err(SyncError::TransientServer { reason })
+                    if attempt_index + 1 < policy.max_attempts =>
+                {
+                    server.reconnect(account_id).map_err(|error| match error {
+                        SyncError::TransientServer {
+                            reason: reconnect_reason,
+                        } => SyncError::TransientServer {
+                            reason: format!("{reason}; reconnect failed: {reconnect_reason}"),
+                        },
+                        other => other,
+                    })?;
+                    waiter.wait(policy.delay_for_retry(attempt_index), cancellation)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(SyncError::TransientServer {
+            reason: "folder sync retry budget exhausted".into(),
+        })
+    }
+
+    pub fn run_folder_worker<S, C, W>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        config: FolderWorkerConfig<'_>,
+        cancellation: &SyncCancellationToken,
+        waiter: &mut W,
+    ) -> Result<FolderWorkerReport, SyncError>
+    where
+        S: ImapIdleServer,
+        C: SyncCache,
+        W: BackoffWaiter,
+    {
+        validate_folder_worker_config(config)?;
+        let mut report = FolderWorkerReport::new();
+        let mut idle_capability = None;
+
+        loop {
+            if let Some(max_cycles) = config.max_cycles {
+                if report.cycles_completed >= max_cycles {
+                    return Ok(report.stopped(FolderWorkerStopReason::MaxCyclesReached));
+                }
+            }
+
+            if cancellation.is_cancelled() {
+                return Ok(report.stopped(FolderWorkerStopReason::Cancelled));
+            }
+
+            if !cache.account_exists(config.account_id)? {
+                return Ok(report.stopped(FolderWorkerStopReason::AccountRemoved));
+            }
+
+            let can_idle = match idle_capability {
+                Some(capability) => capability == IdleCapability::Available,
+                None => match server.idle_capability(config.account_id, config.remote_id) {
+                    Ok(IdleCapability::Available) => {
+                        idle_capability = Some(IdleCapability::Available);
+                        true
+                    }
+                    Ok(IdleCapability::Unavailable) => {
+                        idle_capability = Some(IdleCapability::Unavailable);
+                        false
+                    }
+                    Err(SyncError::Cancelled) => {
+                        return Ok(report.stopped(FolderWorkerStopReason::Cancelled));
+                    }
+                    Err(SyncError::TransientServer { reason }) => {
+                        self.reconnect_after_worker_drop(
+                            server,
+                            config.account_id,
+                            reason,
+                            cancellation,
+                            waiter,
+                            &mut report,
+                        )?;
+                        idle_capability = None;
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                },
+            };
+
+            if can_idle {
+                report.idle_waits += 1;
+                match server.idle_wait(
+                    config.account_id,
+                    config.remote_id,
+                    config.idle_timeout,
+                    cancellation,
+                ) {
+                    Ok(IdleWaitOutcome::MailboxChanged) => {
+                        report.idle_change_refreshes += 1;
+                        if let Err(error) = self.worker_sync_folder(
+                            server,
+                            cache,
+                            config,
+                            cancellation,
+                            waiter,
+                            &mut report,
+                        ) {
+                            return stop_worker_or_error(report, error);
+                        }
+                        report.cycles_completed += 1;
+                    }
+                    Ok(IdleWaitOutcome::Timeout) => {
+                        report.idle_timeout_refreshes += 1;
+                        if let Err(error) = self.worker_sync_folder(
+                            server,
+                            cache,
+                            config,
+                            cancellation,
+                            waiter,
+                            &mut report,
+                        ) {
+                            return stop_worker_or_error(report, error);
+                        }
+                        report.cycles_completed += 1;
+                    }
+                    Ok(IdleWaitOutcome::IdleUnavailable) => {
+                        report.idle_fallbacks += 1;
+                        idle_capability = Some(IdleCapability::Unavailable);
+                        if let Err(error) = self.worker_poll_then_sync(
+                            server,
+                            cache,
+                            config,
+                            cancellation,
+                            waiter,
+                            &mut report,
+                        ) {
+                            return stop_worker_or_error(report, error);
+                        }
+                    }
+                    Err(SyncError::Cancelled) => {
+                        return Ok(report.stopped(FolderWorkerStopReason::Cancelled));
+                    }
+                    Err(SyncError::TransientServer { reason }) => {
+                        self.reconnect_after_worker_drop(
+                            server,
+                            config.account_id,
+                            reason,
+                            cancellation,
+                            waiter,
+                            &mut report,
+                        )?;
+                        idle_capability = None;
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                report.idle_fallbacks += 1;
+                if let Err(error) = self.worker_poll_then_sync(
+                    server,
+                    cache,
+                    config,
+                    cancellation,
+                    waiter,
+                    &mut report,
+                ) {
+                    return stop_worker_or_error(report, error);
+                }
+            }
+        }
+    }
+
     fn sync_once<S, C>(
         &self,
         server: &mut S,
@@ -579,6 +859,27 @@ impl ImapSyncEngine {
         }
 
         Ok(account_report)
+    }
+
+    fn sync_folder_once_by_remote_id<S, C>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        account_id: &str,
+        remote_id: &str,
+        cancellation: &SyncCancellationToken,
+    ) -> Result<SyncFolderReport, SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+    {
+        let folder = server
+            .list_folders(account_id)?
+            .into_iter()
+            .find(|folder| folder.remote_id == remote_id)
+            .ok_or(SyncError::UnknownFolder)?;
+
+        self.sync_folder(server, cache, account_id, &folder, cancellation)
     }
 
     fn sync_folder<S, C>(
@@ -689,6 +990,129 @@ impl ImapSyncEngine {
             flags_updated,
             expunged,
         })
+    }
+
+    fn worker_poll_then_sync<S, C, W>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        config: FolderWorkerConfig<'_>,
+        cancellation: &SyncCancellationToken,
+        waiter: &mut W,
+        report: &mut FolderWorkerReport,
+    ) -> Result<(), SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+        W: BackoffWaiter,
+    {
+        waiter
+            .wait(config.poll_interval, cancellation)
+            .map_err(|error| match error {
+                SyncError::Cancelled => SyncError::Cancelled,
+                other => other,
+            })?;
+        if cancellation.is_cancelled() {
+            return Err(SyncError::Cancelled);
+        }
+
+        if !cache.account_exists(config.account_id)? {
+            return Err(SyncError::UnknownAccount);
+        }
+
+        report.poll_refreshes += 1;
+        self.worker_sync_folder(server, cache, config, cancellation, waiter, report)?;
+        report.cycles_completed += 1;
+
+        Ok(())
+    }
+
+    fn worker_sync_folder<S, C, W>(
+        &self,
+        server: &mut S,
+        cache: &mut C,
+        config: FolderWorkerConfig<'_>,
+        cancellation: &SyncCancellationToken,
+        waiter: &mut W,
+        report: &mut FolderWorkerReport,
+    ) -> Result<(), SyncError>
+    where
+        S: ImapSyncServer,
+        C: SyncCache,
+        W: BackoffWaiter,
+    {
+        match self.sync_folder_by_remote_id(
+            server,
+            cache,
+            config.account_id,
+            config.remote_id,
+            cancellation,
+            waiter,
+        ) {
+            Ok(sync_report) => {
+                report.sync_runs += 1;
+                report.sync_reports.push(sync_report);
+                Ok(())
+            }
+            Err(SyncError::Cancelled) => Err(SyncError::Cancelled),
+            Err(SyncError::UnknownAccount) => Err(SyncError::UnknownAccount),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn reconnect_after_worker_drop<S, W>(
+        &self,
+        server: &mut S,
+        account_id: &str,
+        reason: String,
+        cancellation: &SyncCancellationToken,
+        waiter: &mut W,
+        report: &mut FolderWorkerReport,
+    ) -> Result<(), SyncError>
+    where
+        S: ImapSyncServer,
+        W: BackoffWaiter,
+    {
+        let policy = self.backoff.normalized();
+        report.reconnects += 1;
+        server.reconnect(account_id).map_err(|error| match error {
+            SyncError::TransientServer {
+                reason: reconnect_reason,
+            } => SyncError::TransientServer {
+                reason: format!("{reason}; reconnect failed: {reconnect_reason}"),
+            },
+            other => other,
+        })?;
+        let delay = policy.delay_for_retry(0);
+        report.backoff_delays.push(delay);
+        waiter.wait(delay, cancellation)
+    }
+}
+
+fn validate_folder_worker_config(config: FolderWorkerConfig<'_>) -> Result<(), SyncError> {
+    if config.account_id.trim().is_empty() || config.remote_id.trim().is_empty() {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "folder worker account and remote folder ids must be non-empty",
+        });
+    }
+
+    if config.idle_timeout == Duration::ZERO || config.poll_interval == Duration::ZERO {
+        return Err(SyncError::InvalidRemoteState {
+            reason: "folder worker intervals must be non-zero",
+        });
+    }
+
+    Ok(())
+}
+
+fn stop_worker_or_error(
+    report: FolderWorkerReport,
+    error: SyncError,
+) -> Result<FolderWorkerReport, SyncError> {
+    match error {
+        SyncError::Cancelled => Ok(report.stopped(FolderWorkerStopReason::Cancelled)),
+        SyncError::UnknownAccount => Ok(report.stopped(FolderWorkerStopReason::AccountRemoved)),
+        other => Err(other),
     }
 }
 
@@ -1334,14 +1758,37 @@ mod tests {
         ListTransient(String),
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     struct FakeImapServer {
         folders: BTreeMap<String, FakeMailboxFolder>,
         failures: VecDeque<FakeFailure>,
+        idle_capability: IdleCapability,
+        idle_capability_errors: VecDeque<SyncError>,
+        idle_events: VecDeque<Result<IdleWaitOutcome, SyncError>>,
+        idle_capability_calls: usize,
+        idle_wait_calls: usize,
         reconnects: usize,
         list_calls: usize,
         fetch_message_calls: Vec<Vec<u64>>,
         fetch_flag_calls: Vec<Vec<u64>>,
+    }
+
+    impl Default for FakeImapServer {
+        fn default() -> Self {
+            Self {
+                folders: BTreeMap::new(),
+                failures: VecDeque::new(),
+                idle_capability: IdleCapability::Available,
+                idle_capability_errors: VecDeque::new(),
+                idle_events: VecDeque::new(),
+                idle_capability_calls: 0,
+                idle_wait_calls: 0,
+                reconnects: 0,
+                list_calls: 0,
+                fetch_message_calls: Vec::new(),
+                fetch_flag_calls: Vec::new(),
+            }
+        }
     }
 
     impl FakeImapServer {
@@ -1396,6 +1843,22 @@ mod tests {
         fn fail_next_list_transient(&mut self, reason: impl Into<String>) {
             self.failures
                 .push_back(FakeFailure::ListTransient(reason.into()));
+        }
+
+        fn set_idle_capability(&mut self, capability: IdleCapability) {
+            self.idle_capability = capability;
+        }
+
+        fn enqueue_idle_capability_error(&mut self, error: SyncError) {
+            self.idle_capability_errors.push_back(error);
+        }
+
+        fn enqueue_idle_outcome(&mut self, outcome: IdleWaitOutcome) {
+            self.idle_events.push_back(Ok(outcome));
+        }
+
+        fn enqueue_idle_error(&mut self, error: SyncError) {
+            self.idle_events.push_back(Err(error));
         }
     }
 
@@ -1509,13 +1972,43 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
-    struct RecordingBackoffWaiter {
-        delays: Vec<Duration>,
-        cancel_during_wait: Option<SyncCancellationToken>,
+    impl ImapIdleServer for FakeImapServer {
+        fn idle_capability(
+            &mut self,
+            _account_id: &str,
+            _remote_id: &str,
+        ) -> Result<IdleCapability, SyncError> {
+            self.idle_capability_calls += 1;
+            if let Some(error) = self.idle_capability_errors.pop_front() {
+                return Err(error);
+            }
+
+            Ok(self.idle_capability)
+        }
+
+        fn idle_wait(
+            &mut self,
+            _account_id: &str,
+            _remote_id: &str,
+            _timeout: Duration,
+            cancellation: &SyncCancellationToken,
+        ) -> Result<IdleWaitOutcome, SyncError> {
+            cancellation.ensure_not_cancelled()?;
+            self.idle_wait_calls += 1;
+            self.idle_events
+                .pop_front()
+                .unwrap_or(Ok(IdleWaitOutcome::Timeout))
+        }
     }
 
-    impl BackoffWaiter for RecordingBackoffWaiter {
+    #[derive(Debug, Default)]
+    struct RecordingBackoffWaiter<'connection> {
+        delays: Vec<Duration>,
+        cancel_during_wait: Option<SyncCancellationToken>,
+        remove_account_on_wait: Option<&'connection Connection>,
+    }
+
+    impl BackoffWaiter for RecordingBackoffWaiter<'_> {
         fn wait(
             &mut self,
             delay: Duration,
@@ -1524,6 +2017,11 @@ mod tests {
             self.delays.push(delay);
             if let Some(token) = &self.cancel_during_wait {
                 token.cancel();
+            }
+            if let Some(connection) = self.remove_account_on_wait.take() {
+                connection
+                    .execute("DELETE FROM accounts WHERE id = ?1", [ACCOUNT_ID])
+                    .map_err(SyncError::from)?;
             }
             cancellation.ensure_not_cancelled()
         }
@@ -1607,6 +2105,38 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap()
+    }
+
+    fn worker_config(max_cycles: Option<usize>) -> FolderWorkerConfig<'static> {
+        FolderWorkerConfig {
+            account_id: ACCOUNT_ID,
+            remote_id: INBOX_REMOTE,
+            idle_timeout: Duration::from_millis(30),
+            poll_interval: Duration::from_millis(20),
+            max_cycles,
+        }
+    }
+
+    fn run_worker(
+        server: &mut FakeImapServer,
+        connection: &Connection,
+        waiter: &mut RecordingBackoffWaiter<'_>,
+        max_cycles: Option<usize>,
+    ) -> Result<FolderWorkerReport, SyncError> {
+        let mut cache = SqliteSyncCache::new(connection);
+        ImapSyncEngine::new(BackoffPolicy {
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(5),
+            max_delay: Duration::from_millis(50),
+            multiplier: 2,
+        })
+        .run_folder_worker(
+            server,
+            &mut cache,
+            worker_config(max_cycles),
+            &SyncCancellationToken::new(),
+            waiter,
+        )
     }
 
     #[test]
@@ -1815,6 +2345,150 @@ mod tests {
         assert_eq!(error, SyncError::Cancelled);
         assert_eq!(server.reconnects, 1);
         assert_eq!(server.list_calls, 1);
+        assert_eq!(message_count(&connection), 0);
+    }
+
+    #[test]
+    fn idle_mailbox_change_wakes_folder_worker_and_refreshes_cache() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server =
+            FakeImapServer::with_inbox(vec![message(77, 1, "Arrived during IDLE", &[])]);
+        server.enqueue_idle_outcome(IdleWaitOutcome::MailboxChanged);
+        let mut waiter = RecordingBackoffWaiter::default();
+
+        let report = run_worker(&mut server, &connection, &mut waiter, Some(1)).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::MaxCyclesReached);
+        assert_eq!(report.cycles_completed, 1);
+        assert_eq!(report.idle_waits, 1);
+        assert_eq!(report.idle_change_refreshes, 1);
+        assert_eq!(report.poll_refreshes, 0);
+        assert_eq!(report.sync_runs, 1);
+        assert_eq!(message_count(&connection), 1);
+        assert_eq!(
+            search_messages_fts(&connection, "Arrived", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn idle_timeout_periodically_refreshes_folder() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server = FakeImapServer::with_inbox(vec![message(77, 1, "Periodic refresh", &[])]);
+        server.enqueue_idle_outcome(IdleWaitOutcome::Timeout);
+        let mut waiter = RecordingBackoffWaiter::default();
+
+        let report = run_worker(&mut server, &connection, &mut waiter, Some(1)).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::MaxCyclesReached);
+        assert_eq!(report.idle_waits, 1);
+        assert_eq!(report.idle_timeout_refreshes, 1);
+        assert_eq!(report.sync_runs, 1);
+        assert_eq!(message_count(&connection), 1);
+    }
+
+    #[test]
+    fn polling_fallback_runs_when_idle_is_unavailable() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server =
+            FakeImapServer::with_inbox(vec![message(77, 1, "Fetched by polling", &[])]);
+        server.set_idle_capability(IdleCapability::Unavailable);
+        let mut waiter = RecordingBackoffWaiter::default();
+
+        let report = run_worker(&mut server, &connection, &mut waiter, Some(1)).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::MaxCyclesReached);
+        assert_eq!(report.idle_waits, 0);
+        assert_eq!(report.idle_fallbacks, 1);
+        assert_eq!(report.poll_refreshes, 1);
+        assert_eq!(report.sync_runs, 1);
+        assert_eq!(waiter.delays, vec![Duration::from_millis(20)]);
+        assert_eq!(message_count(&connection), 1);
+    }
+
+    #[test]
+    fn idle_worker_recovers_from_network_drop_with_reconnect_and_backoff() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server =
+            FakeImapServer::with_inbox(vec![message(77, 1, "After idle reconnect", &[])]);
+        server.enqueue_idle_error(SyncError::transient("idle connection dropped"));
+        server.enqueue_idle_outcome(IdleWaitOutcome::MailboxChanged);
+        let mut waiter = RecordingBackoffWaiter::default();
+
+        let report = run_worker(&mut server, &connection, &mut waiter, Some(1)).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::MaxCyclesReached);
+        assert_eq!(report.idle_waits, 2);
+        assert_eq!(report.reconnects, 1);
+        assert_eq!(report.backoff_delays, vec![Duration::from_millis(5)]);
+        assert_eq!(waiter.delays, vec![Duration::from_millis(5)]);
+        assert_eq!(server.reconnects, 1);
+        assert_eq!(report.sync_runs, 1);
+        assert_eq!(message_count(&connection), 1);
+    }
+
+    #[test]
+    fn idle_worker_recovers_when_capability_probe_drops() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server =
+            FakeImapServer::with_inbox(vec![message(77, 1, "After capability reconnect", &[])]);
+        server.enqueue_idle_capability_error(SyncError::transient("capability probe dropped"));
+        server.enqueue_idle_outcome(IdleWaitOutcome::MailboxChanged);
+        let mut waiter = RecordingBackoffWaiter::default();
+
+        let report = run_worker(&mut server, &connection, &mut waiter, Some(1)).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::MaxCyclesReached);
+        assert_eq!(server.idle_capability_calls, 2);
+        assert_eq!(report.idle_waits, 1);
+        assert_eq!(report.reconnects, 1);
+        assert_eq!(server.reconnects, 1);
+        assert_eq!(report.sync_runs, 1);
+        assert_eq!(message_count(&connection), 1);
+    }
+
+    #[test]
+    fn idle_worker_stops_cleanly_on_app_exit_cancellation() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server =
+            FakeImapServer::with_inbox(vec![message(77, 1, "Should remain remote", &[])]);
+        server.enqueue_idle_error(SyncError::Cancelled);
+        let mut waiter = RecordingBackoffWaiter::default();
+
+        let report = run_worker(&mut server, &connection, &mut waiter, None).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::Cancelled);
+        assert_eq!(report.idle_waits, 1);
+        assert_eq!(report.sync_runs, 0);
+        assert_eq!(message_count(&connection), 0);
+    }
+
+    #[test]
+    fn polling_worker_stops_cleanly_when_account_is_removed() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let mut server =
+            FakeImapServer::with_inbox(vec![message(77, 1, "Removed account message", &[])]);
+        server.set_idle_capability(IdleCapability::Unavailable);
+        let mut waiter = RecordingBackoffWaiter {
+            remove_account_on_wait: Some(&connection),
+            ..RecordingBackoffWaiter::default()
+        };
+
+        let report = run_worker(&mut server, &connection, &mut waiter, None).unwrap();
+
+        assert_eq!(report.stop_reason, FolderWorkerStopReason::AccountRemoved);
+        assert_eq!(report.idle_waits, 0);
+        assert_eq!(report.poll_refreshes, 0);
+        assert_eq!(report.sync_runs, 0);
         assert_eq!(message_count(&connection), 0);
     }
 
