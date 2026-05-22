@@ -24,7 +24,7 @@ The sanitizer output may be inserted into React only by `SafeEmailBody`.
 
 Remote and inline-resource loading is blocked by default. The renderer removes `src`, `srcset`, `poster`, and `background`, including `http`, `https`, protocol-relative, `cid`, and `data` resource references.
 
-Future inline CID image support must map a parsed MIME attachment to an app-generated local preview URL through a typed Rust command. Sender-provided URLs and filenames must never become resource URLs directly.
+Future inline CID image support must map a parsed MIME attachment to an app-generated local preview URL through a typed Rust command and `docs/architecture/attachment-safety.md`. Sender-provided URLs and filenames must never become resource URLs directly.
 
 Remote-content preferences, if added, must be scoped narrowly to the sender or message and must not weaken sanitizer rules.
 

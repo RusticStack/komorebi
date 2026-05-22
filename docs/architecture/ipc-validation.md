@@ -34,6 +34,7 @@ Validation errors must be safe for React. Do not echo credentials, email address
 - `reject_unsanitized_html` for rejecting raw markup until a sanitizer-backed type exists.
 - `validate_entity_id` for internal id shape.
 - `validate_message_scope` plus `EntityLookup` for account/folder/message existence and ownership checks.
+- Attachment-specific path, filename, type, size, and preview validation lives in `src-tauri/src/attachment_safety.rs`.
 
 These helpers are not a substitute for command-specific validation. They are the minimum shared policy.
 

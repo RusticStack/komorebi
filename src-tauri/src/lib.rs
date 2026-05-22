@@ -1,3 +1,4 @@
+pub mod attachment_safety;
 pub mod auth;
 pub mod ipc_boundary;
 pub mod ipc_validation;

@@ -18,7 +18,7 @@ These operations must be typed Rust commands or internal Rust worker calls:
 
 - Server-affecting mail actions: send, move, archive, delete, mark read/unread, flag, draft upload, Sent upload, folder rename/delete, and any IMAP/SMTP command that changes provider state.
 - Credential access: account creation, reauthentication, token refresh, credential lookup, credential rotation, credential deletion, and OAuth revocation.
-- Attachment writes: downloading, saving, moving, deleting, preview preparation, inline CID materialization, and any file-path selection after a message is parsed.
+- Attachment writes: downloading, saving, moving, deleting, preview preparation, inline CID materialization, and any file-path selection after a message is parsed. Use `docs/architecture/attachment-safety.md` for path, filename, type, size, and preview rules.
 - Destructive deletes: account removal, cache deletion, attachment cleanup, local message purge, folder cache reset, and provider delete/expunge.
 - Migrations: schema creation, schema upgrades, FTS setup/rebuild, trigger creation, integrity checks, and rollback/recovery.
 - Sync cache mutation: folder discovery, UID/UIDVALIDITY state, message upsert, flag update, expunge handling, body/attachment metadata persistence, search index updates, and retry bookkeeping.

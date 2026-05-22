@@ -46,6 +46,8 @@ IPC input validation is documented in [docs/architecture/ipc-validation.md](docs
 
 Safe email rendering is documented in [docs/architecture/message-rendering.md](docs/architecture/message-rendering.md). Untrusted email HTML is sanitized through a single React boundary, remote resources are blocked by default, links are rewritten for delegated opening, and plain-text fallback is preserved.
 
+Attachment safety is documented in [docs/architecture/attachment-safety.md](docs/architecture/attachment-safety.md). Attachment storage paths are app-generated in Rust, sender filenames are display-only, path traversal is rejected, size/type limits are enforced, previews are opt-in and type-checked, and auto-open is forbidden.
+
 ## Setup
 
 ```powershell
