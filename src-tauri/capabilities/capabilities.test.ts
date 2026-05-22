@@ -85,14 +85,14 @@ describe("Tauri capabilities", () => {
     expect(capabilityFileNames).toEqual(["default.json"]);
   });
 
-  it("keeps the main window without frontend Tauri permissions", () => {
+  it("keeps the main window limited to the reviewed mail-shell read command", () => {
     const defaultCapability = readCapability("default.json");
 
     expect(defaultCapability.identifier).toBe("default");
     expect(defaultCapability.windows).toEqual(["main"]);
     expect(defaultCapability.webviews).toBeUndefined();
     expect(defaultCapability.remote).toBeUndefined();
-    expect(defaultCapability.permissions).toEqual([]);
+    expect(defaultCapability.permissions).toEqual(["allow-load-mail-shell"]);
   });
 
   it("denies broad local-system and network plugin permissions by absence", () => {
@@ -117,7 +117,7 @@ describe("Tauri capabilities", () => {
     }
   });
 
-  it("does not register forbidden plugins or custom commands", () => {
+  it("does not register forbidden plugins or unreviewed custom commands", () => {
     const cargoToml = readFileSync(cargoTomlPath, "utf8");
     const buildScript = readFileSync(buildScriptPath, "utf8");
     const libRs = readFileSync(libRsPath, "utf8");
@@ -127,10 +127,14 @@ describe("Tauri capabilities", () => {
       expect(rustSurface).not.toContain(plugin);
     }
 
-    expect(buildScript).toContain("const APP_COMMANDS: &[&str] = &[];");
+    expect(buildScript).toContain(
+      'const APP_COMMANDS: &[&str] = &["load_mail_shell"];',
+    );
     expect(buildScript).toContain(".commands(APP_COMMANDS)");
-    expect(libRs).not.toMatch(/invoke_handler\s*\(/);
-    expect(libRs).not.toContain("tauri::generate_handler!");
+    expect(libRs).toContain(
+      ".invoke_handler(tauri::generate_handler![mail_shell::load_mail_shell])",
+    );
+    expect(libRs.match(/generate_handler!\[/g)).toHaveLength(1);
   });
 
   it("keeps frontend SQL unavailable until a read-only policy is implemented", () => {

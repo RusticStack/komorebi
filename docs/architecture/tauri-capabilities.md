@@ -4,11 +4,11 @@ Last updated: 2026-05-22
 
 ## Current Policy
 
-Komorebi's main webview starts with no frontend Tauri permissions. The enabled capability set is explicit in `src-tauri/tauri.conf.json`:
+Komorebi's main webview grants only reviewed feature-specific Tauri permissions. The enabled capability set is explicit in `src-tauri/tauri.conf.json`:
 
 - `app.security.capabilities` must be `["default"]` until another window or capability is intentionally introduced.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
-- `default.permissions` is empty because the current React shell does not call Tauri APIs.
+- `default.permissions` contains only `allow-load-mail-shell`, the read-only local-cache snapshot command for the first screen.
 - No remote origins are allowed to use Tauri APIs.
 
 Tauri capability files are kept as standalone files and referenced by identifier in `tauri.conf.json`. This avoids the Tauri default where every file in `src-tauri/capabilities` is enabled automatically when `security.capabilities` is omitted.
@@ -23,13 +23,17 @@ The main webview must not receive these permissions by default:
 - Shell or process permissions.
 - HTTP client permissions.
 - Wildcard, `allow-all`, or broad plugin default permissions.
-- Custom application command access before the command is added to the app ACL manifest and a capability with a narrow permission.
+- Custom application command access before the command is added to the app ACL manifest, covered by tests, and granted through a narrow capability permission.
 
 Absence of a permission is the denial mechanism. Do not add broad explicit deny lists to make unsafe capability growth look reviewed.
 
 ## Custom Commands
 
-`src-tauri/build.rs` keeps the application command ACL list as `APP_COMMANDS`. It is currently empty. `src-tauri/src/lib.rs` must not register `invoke_handler` until a command is added to `APP_COMMANDS`, assigned a generated or manual permission, and referenced from the appropriate capability.
+`src-tauri/build.rs` keeps the application command ACL list as `APP_COMMANDS`. The reviewed command list is currently:
+
+- `load_mail_shell`: read-only app-data SQLite snapshot for accounts, folders, unread counts, and a bounded recent-message list.
+
+`src-tauri/src/lib.rs` must not register any command outside `APP_COMMANDS`, and every registered command must have a matching capability permission.
 
 Each future command needs:
 
@@ -56,8 +60,8 @@ Rules for likely future plugins:
 
 - `tauri.conf.json` explicitly enables only `default`.
 - All capability files are parseable and reviewed by the test.
-- The default capability targets only the main window and grants no permissions.
-- Forbidden plugin permissions, remote origins, wildcard windows, and custom-command registrations are absent.
+- The default capability targets only the main window and grants only `allow-load-mail-shell`.
+- Forbidden plugin permissions, remote origins, wildcard windows, and unreviewed custom-command registrations are absent.
 - Rust does not register forbidden Tauri plugins.
 
 Run `pnpm tauri build --no-bundle` after capability, Tauri config, or build script changes to make Tauri validate the configuration without requiring installer tooling.

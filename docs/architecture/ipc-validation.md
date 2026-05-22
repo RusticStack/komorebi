@@ -4,13 +4,13 @@ Last updated: 2026-05-22
 
 ## Current State
 
-Komorebi still has no frontend-callable IPC commands. The validation layer exists first so future commands have a shared denial policy before they can touch credentials, files, SQL, network URLs, or mailbox state.
+Komorebi has one frontend-callable IPC command: `load_mail_shell`. It is inputless and read-only from React's perspective, so it has no frontend-supplied IDs, paths, URLs, SQL, HTML, or payloads to validate. The validation layer exists so future commands have a shared denial policy before they can touch credentials, files, SQL, network URLs, or mailbox state.
 
 The code source of truth is `src-tauri/src/ipc_validation.rs`.
 
 ## Required Validation Before Side Effects
 
-Every future IPC command must validate inputs before credential lookup, filesystem access, SQL access, network calls, local cache mutation, or server-affecting mail actions.
+Every IPC command with frontend-supplied input must validate that input before credential lookup, filesystem access, SQL access, network calls, local cache mutation, or server-affecting mail actions. Commands with no input, such as `load_mail_shell`, must stay inputless unless this document and denial tests are updated first.
 
 The command must reject:
 

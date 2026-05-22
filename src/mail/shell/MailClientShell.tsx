@@ -1,12 +1,18 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import { AccountSignatureSettings } from "../../settings/AccountSignatureSettings";
 import {
   createMailShellState,
   emptyMailShellData,
+  errorMailShellLoadState,
   foldersForScope,
+  loadingMailShellLoadState,
+  mergeMailShellData,
   messagesForScope,
   readyMailShellLoadState,
+  selectAccountScope,
+  selectFolderScope,
+  selectUnifiedScope,
   selectedAccount,
   selectedFolder,
   selectedMessage,
@@ -18,6 +24,7 @@ import {
 export type MailClientShellProps = {
   initialData?: MailShellData;
   initialLoadState?: MailShellLoadState;
+  loadMailShellData?: () => Promise<MailShellData>;
 };
 
 type Drawer = "composer" | "settings" | null;
@@ -25,9 +32,13 @@ type Drawer = "composer" | "settings" | null;
 export function MailClientShell({
   initialData = emptyMailShellData,
   initialLoadState = readyMailShellLoadState,
+  loadMailShellData,
 }: MailClientShellProps) {
   const [state, setState] = useState<MailShellState>(() =>
-    createMailShellState(initialData, initialLoadState),
+    createMailShellState(
+      initialData,
+      loadMailShellData ? loadingMailShellLoadState() : initialLoadState,
+    ),
   );
   const [drawer, setDrawer] = useState<Drawer>(null);
   const visibleFolders = useMemo(() => foldersForScope(state), [state]);
@@ -47,6 +58,62 @@ export function MailClientShell({
       ...update,
     }));
   }
+
+  async function reloadMailShell() {
+    if (!loadMailShellData) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      loadState: loadingMailShellLoadState(),
+    }));
+
+    try {
+      const data = await loadMailShellData();
+      setState((current) =>
+        mergeMailShellData(current, data, readyMailShellLoadState),
+      );
+    } catch {
+      setState((current) => ({
+        ...current,
+        loadState: errorMailShellLoadState(),
+      }));
+    }
+  }
+
+  useEffect(() => {
+    if (!loadMailShellData) {
+      return;
+    }
+
+    let cancelled = false;
+
+    loadMailShellData()
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+
+        setState((current) =>
+          mergeMailShellData(current, data, readyMailShellLoadState),
+        );
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setState((current) => ({
+          ...current,
+          loadState: errorMailShellLoadState(),
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadMailShellData]);
 
   return (
     <main className="app-shell">
@@ -80,14 +147,16 @@ export function MailClientShell({
               checked={state.unifiedInbox}
               disabled={!hasAccounts}
               onChange={(event) =>
-                patchState({
-                  unifiedInbox: event.target.checked,
-                  selectedAccountId: event.target.checked
-                    ? state.data.accounts[0]?.id ?? null
-                    : state.selectedAccountId ?? state.data.accounts[0]?.id ?? null,
-                  selectedFolderId: null,
-                  selectedMessageId: null,
-                })
+                setState((current) =>
+                  event.target.checked
+                    ? selectUnifiedScope(current)
+                    : selectAccountScope(
+                        current,
+                        current.selectedAccountId ??
+                          current.data.accounts[0]?.id ??
+                          "",
+                      ),
+                )
               }
             />
             <span>Unified inbox</span>
@@ -99,6 +168,7 @@ export function MailClientShell({
             errorLabel="Account list unavailable"
             empty={state.data.accounts.length === 0}
             emptyLabel="No accounts configured."
+            onRetry={loadMailShellData ? reloadMailShell : undefined}
           >
             {state.data.accounts.map((account) => (
               <button
@@ -110,17 +180,15 @@ export function MailClientShell({
                 type="button"
                 key={account.id}
                 onClick={() =>
-                  patchState({
-                    unifiedInbox: false,
-                    selectedAccountId: account.id,
-                    selectedFolderId: null,
-                    selectedMessageId: null,
-                  })
+                  setState((current) => selectAccountScope(current, account.id))
                 }
               >
                 <span>{account.label}</span>
                 <small>{account.email}</small>
-                <strong>{account.status}</strong>
+                <span className="account-meta">
+                  <strong>{account.status}</strong>
+                  <span>{account.unreadCount} unread</span>
+                </span>
               </button>
             ))}
           </StatusList>
@@ -134,16 +202,12 @@ export function MailClientShell({
             errorLabel="Folder list unavailable"
             empty={visibleFolders.length === 0}
             emptyLabel="Folders appear after an account is added."
+            onRetry={loadMailShellData ? reloadMailShell : undefined}
           >
             <button
               className={!state.selectedFolderId ? "folder is-active" : "folder"}
               type="button"
-              onClick={() =>
-                patchState({
-                  selectedFolderId: null,
-                  selectedMessageId: null,
-                })
-              }
+              onClick={() => setState((current) => selectFolderScope(current, null))}
             >
               <span>{state.unifiedInbox ? "Unified Inbox" : "All mail"}</span>
               <span>{unreadCountForScope(state)}</span>
@@ -158,10 +222,7 @@ export function MailClientShell({
                 type="button"
                 key={folder.id}
                 onClick={() =>
-                  patchState({
-                    selectedFolderId: folder.id,
-                    selectedMessageId: null,
-                  })
+                  setState((current) => selectFolderScope(current, folder.id))
                 }
               >
                 <span>{folder.name}</span>
@@ -219,6 +280,7 @@ export function MailClientShell({
           <MessageListState
             state={state}
             visibleMessages={visibleMessages}
+            onRetry={loadMailShellData ? reloadMailShell : undefined}
             onSelectMessage={(messageId) =>
               patchState({
                 selectedMessageId: messageId,
@@ -233,6 +295,7 @@ export function MailClientShell({
           state={state}
           message={activeMessage}
           hasVisibleMessages={visibleMessages.length > 0}
+          onRetry={loadMailShellData ? reloadMailShell : undefined}
         />
       </section>
 
@@ -281,6 +344,7 @@ function StatusList({
   empty,
   emptyLabel,
   children,
+  onRetry,
 }: {
   status: MailShellLoadState[keyof MailShellLoadState];
   loadingLabel: string;
@@ -288,6 +352,7 @@ function StatusList({
   empty: boolean;
   emptyLabel: string;
   children: ReactNode;
+  onRetry?: () => void;
 }) {
   if (status === "loading") {
     return <p className="empty-note status-note">{loadingLabel}</p>;
@@ -297,7 +362,9 @@ function StatusList({
     return (
       <div className="status-note status-note--error" role="status">
         <p>{errorLabel}</p>
-        <button type="button">Retry</button>
+        <button type="button" onClick={onRetry} disabled={!onRetry}>
+          Retry
+        </button>
       </div>
     );
   }
@@ -312,10 +379,12 @@ function StatusList({
 function MessageListState({
   state,
   visibleMessages,
+  onRetry,
   onSelectMessage,
 }: {
   state: MailShellState;
   visibleMessages: ReturnType<typeof messagesForScope>;
+  onRetry?: () => void;
   onSelectMessage: (messageId: string) => void;
 }) {
   if (state.loadState.messages === "loading") {
@@ -332,7 +401,9 @@ function MessageListState({
       <section className="empty-panel error-panel" aria-label="Message error">
         <h3>Mail unavailable</h3>
         <p>The local message cache could not be opened.</p>
-        <button type="button">Retry</button>
+        <button type="button" onClick={onRetry} disabled={!onRetry}>
+          Retry
+        </button>
       </section>
     );
   }
@@ -386,10 +457,12 @@ function ReaderPane({
   state,
   message,
   hasVisibleMessages,
+  onRetry,
 }: {
   state: MailShellState;
   message: ReturnType<typeof selectedMessage>;
   hasVisibleMessages: boolean;
+  onRetry?: () => void;
 }) {
   if (state.loadState.messages === "loading") {
     return (
@@ -411,6 +484,9 @@ function ReaderPane({
           <p className="eyebrow">Reader</p>
           <h2>Message view unavailable</h2>
           <p>Resolve the cache error before opening messages.</p>
+          <button type="button" onClick={onRetry} disabled={!onRetry}>
+            Retry
+          </button>
         </section>
         <ReaderStatus text="Error state" />
       </>
@@ -520,9 +596,20 @@ function ComposerDrawer({
 }
 
 function unreadCountForScope(state: MailShellState) {
-  return messagesForScope({
-    ...state,
-    selectedFolderId: null,
-    searchQuery: "",
-  }).filter((message) => message.unread).length;
+  const visibleFolders = foldersForScope(state);
+
+  if (state.selectedFolderId) {
+    return (
+      visibleFolders.find((folder) => folder.id === state.selectedFolderId)
+        ?.unreadCount ?? 0
+    );
+  }
+
+  if (state.unifiedInbox) {
+    return visibleFolders
+      .filter((folder) => folder.kind === "inbox")
+      .reduce((total, folder) => total + folder.unreadCount, 0);
+  }
+
+  return visibleFolders.reduce((total, folder) => total + folder.unreadCount, 0);
 }

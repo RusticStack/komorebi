@@ -4,13 +4,26 @@ Last updated: 2026-05-22
 
 ## Current State
 
-Komorebi has no frontend-callable Rust commands and no frontend SQL access yet. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, local draft/Sent persistence, and account signature persistence now exist; frontend command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
+Komorebi has one frontend-callable Rust command and no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, local draft/Sent persistence, and account signature persistence now exist; mutating command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
 
 The accepted boundary is:
 
 - React may own presentation, selection, form state, and read-only query composition.
 - Rust owns every operation that can mutate credentials, local cache, account metadata, attachment files, migrations, or remote mailbox state.
 - Direct frontend SQL is disabled today. If it is introduced later, it is read-only only and must be justified by a documented table/query scope.
+
+## Current Frontend-Callable Command
+
+`load_mail_shell` lives in `src-tauri/src/mail_shell.rs`. It:
+
+- accepts no frontend-supplied request fields
+- opens the app-data SQLite cache through Rust
+- applies Rust-owned migrations before reading
+- returns only redacted account metadata, folder counts, and a bounded recent-message snapshot
+- excludes removed accounts
+- does not expose raw SQL, filesystem paths, credential refs, passwords, tokens, or attachment storage paths
+
+This command is listed in `src-tauri/build.rs`, granted only by `allow-load-mail-shell` in `src-tauri/capabilities/default.json`, and covered by Rust and capability tests.
 
 ## Rust-Only Privileged Operations
 
@@ -61,7 +74,7 @@ Do not expose commands that accept raw SQL, arbitrary filesystem paths, arbitrar
 - `src-tauri/src/draft_persistence.rs` tests enforce backend-owned draft autosave/discard/sent conversion and provider-aware Sent-copy state before any frontend command is registered.
 - `src-tauri/src/account_signatures.rs` tests enforce backend-owned per-account signature storage, sanitization, clearing, and deterministic insertion before any frontend command is registered.
 - `src-tauri/src/ipc_validation.rs` tests enforce the shared IPC denial policy before any command is registered.
-- `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, and unregistered custom commands.
+- `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, and unreviewed custom commands.
 - `docs/architecture/tauri-capabilities.md` defines the capability permission policy.
 - `pnpm check` runs these tests through Vitest and Rust.
 

@@ -49,6 +49,7 @@ textarea:disabled {
 }
 
 .list-toolbar button:disabled,
+.reader-empty button:disabled,
 .composer-panel button:disabled,
 .settings-panel button:disabled {
   background: #d8d0c4;
@@ -154,6 +155,7 @@ textarea:disabled {
 .folder,
 .list-toolbar button,
 .reader-actions button,
+.reader-empty button,
 .icon-command,
 .settings-button,
 .settings-panel button,
@@ -194,10 +196,21 @@ textarea:disabled {
   text-overflow: ellipsis;
 }
 
+.account-meta,
 .account-button strong,
 .account-button small {
   color: #5d7567;
   font-size: 0.78rem;
+}
+
+.account-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.account-meta span {
+  color: #716d66;
 }
 
 .account-button small {
@@ -300,7 +313,8 @@ textarea:disabled {
 }
 
 .list-toolbar button,
-.reader-actions button {
+.reader-actions button,
+.reader-empty button {
   min-height: 38px;
   padding: 7px 12px;
   background: #9a624f;
@@ -455,6 +469,10 @@ textarea:disabled {
   background: #f2eee6;
   color: #2d2d2d;
   border-color: #ddd4c8;
+}
+
+.reader-empty button {
+  justify-self: start;
 }
 
 .reader-body {

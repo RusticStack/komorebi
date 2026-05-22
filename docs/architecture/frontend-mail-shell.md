@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: state-driven 3-pane shell implemented; live account/query IPC is not registered.
+Status: 3-pane shell and multi-account local-cache navigation implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-22.
 
 ## Current Scope
@@ -8,9 +8,11 @@ Last reviewed: 2026-05-22.
 The code source of truth is:
 
 - `src/mail/shell/mailShellState.ts`
+- `src/mail/shell/mailShellDataSource.ts`
 - `src/mail/shell/MailClientShell.tsx`
 - `src/App.tsx`
 - `src/App.css`
+- `src-tauri/src/mail_shell.rs`
 
 The shell is the first screen of the app. It is not a landing page and it does not seed fake mailbox data in production/default render.
 
@@ -27,7 +29,7 @@ The default state is an accountless local shell with:
 - settings entry
 - empty states
 
-Tests may inject fixture mail through `initialData` to verify workflows, but runtime defaults stay empty until real account setup/query commands exist.
+Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
 
 ## State Model
 
@@ -43,7 +45,20 @@ Tests may inject fixture mail through `initialData` to verify workflows, but run
 - selected message
 - search query
 
-The state model is frontend-local only. It does not mutate SQLite, sync state, credentials, attachments, or provider state.
+The navigation state is frontend-local only. Cache reads come from the Rust `load_mail_shell` command. The shell does not mutate SQLite, sync state, credentials, attachments, or provider state.
+
+## Local Cache Read Model
+
+`src-tauri/src/mail_shell.rs` owns the shell read model. The command:
+
+- opens `mail-cache.sqlite3` under the Tauri app data directory
+- applies Rust-owned migrations before reading
+- excludes removed accounts
+- returns redacted account metadata, folder counts, and a bounded recent-message snapshot
+- maps folder unread counts from sync state into account/folder/unified unread badges
+- never returns `credential_ref`, passwords, tokens, attachment storage paths, or raw SQL results
+
+The command has no frontend-supplied arguments. It is exposed only through `load_mail_shell`, `src-tauri/build.rs`, and the `allow-load-mail-shell` capability permission.
 
 ## Navigation Behavior
 
@@ -58,7 +73,8 @@ In account mode:
 
 - account selection scopes folders and messages to that account
 - folder selection scopes messages to that folder
-- selecting a different account or folder clears the selected message
+- selecting a different account or folder preserves the selected message when it still belongs to the new scope
+- selecting a scope that does not contain the selected message clears the selection
 
 Search filters the current account/folder scope by sender, sender email, subject, preview, and plain body text.
 
@@ -94,29 +110,32 @@ The shell exposes loading/empty/error states for:
 - message list
 - reader pane
 
-These states are UI contract states for future Rust command/query wiring.
+These states are wired to the local-cache command when running in Tauri. Retry buttons reload the same read-only cache snapshot.
 
 ## Tests
 
 `src/App.test.tsx` covers:
 
 - accountless default render without fake mailbox data
+- local-cache loader behavior through an injected data source
 - unified inbox visibility
 - account navigation
 - folder navigation
+- selected-message preservation for compatible scope changes
 - message search
 - message selection and reader rendering
 - composer drawer entry
 - settings drawer entry
 - loading/error shell states
 
-No test uses real mailbox data, real credentials, live IPC, or SQLite.
+Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, removed-account exclusion, and credential-reference redaction from disposable SQLite databases.
+
+No test uses real mailbox data, real credentials, or live provider connections.
 
 ## Not Implemented
 
-- Real account setup/query commands.
+- Real account setup commands.
 - TanStack Query integration.
-- Backend read models for accounts/folders/messages.
 - TipTap composer.
 - Draft autosave command wiring.
 - SMTP send command wiring.

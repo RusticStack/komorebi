@@ -13,6 +13,8 @@ export type FolderKind =
   | "archive"
   | "trash"
   | "junk"
+  | "all"
+  | "important"
   | "custom";
 
 export type MailAccount = {
@@ -97,6 +99,22 @@ export function createMailShellState(
   };
 }
 
+export function loadingMailShellLoadState(): MailShellLoadState {
+  return {
+    accounts: "loading",
+    folders: "loading",
+    messages: "loading",
+  };
+}
+
+export function errorMailShellLoadState(): MailShellLoadState {
+  return {
+    accounts: "error",
+    folders: "error",
+    messages: "error",
+  };
+}
+
 export function foldersForScope(state: MailShellState) {
   if (state.unifiedInbox || !state.selectedAccountId) {
     return state.data.folders;
@@ -105,6 +123,89 @@ export function foldersForScope(state: MailShellState) {
   return state.data.folders.filter(
     (folder) => folder.accountId === state.selectedAccountId,
   );
+}
+
+export function selectUnifiedScope(state: MailShellState): MailShellState {
+  return withPreservedSelection({
+    ...state,
+    unifiedInbox: true,
+    selectedAccountId: state.selectedAccountId ?? state.data.accounts[0]?.id ?? null,
+    selectedFolderId: null,
+  });
+}
+
+export function selectAccountScope(
+  state: MailShellState,
+  selectedAccountId: string,
+): MailShellState {
+  const selectedFolderBelongsToAccount = state.data.folders.some(
+    (folder) =>
+      folder.id === state.selectedFolderId &&
+      folder.accountId === selectedAccountId,
+  );
+
+  return withPreservedSelection({
+    ...state,
+    unifiedInbox: false,
+    selectedAccountId,
+    selectedFolderId: selectedFolderBelongsToAccount
+      ? state.selectedFolderId
+      : null,
+  });
+}
+
+export function selectFolderScope(
+  state: MailShellState,
+  selectedFolderId: string | null,
+): MailShellState {
+  return withPreservedSelection({
+    ...state,
+    selectedFolderId,
+  });
+}
+
+export function mergeMailShellData(
+  state: MailShellState,
+  data: MailShellData,
+  loadState: MailShellLoadState = readyMailShellLoadState,
+): MailShellState {
+  const selectedAccountExists = data.accounts.some(
+    (account) => account.id === state.selectedAccountId,
+  );
+  const selectedFolderExists = data.folders.some(
+    (folder) => folder.id === state.selectedFolderId,
+  );
+
+  return withPreservedSelection({
+    ...state,
+    data,
+    loadState,
+    selectedAccountId: selectedAccountExists
+      ? state.selectedAccountId
+      : data.accounts[0]?.id ?? null,
+    selectedFolderId: selectedFolderExists ? state.selectedFolderId : null,
+  });
+}
+
+export function messageIsVisibleInScope(
+  state: MailShellState,
+  messageId: string,
+) {
+  return messagesForScope(state).some((message) => message.id === messageId);
+}
+
+function withPreservedSelection(state: MailShellState): MailShellState {
+  if (
+    state.selectedMessageId &&
+    !messageIsVisibleInScope(state, state.selectedMessageId)
+  ) {
+    return {
+      ...state,
+      selectedMessageId: null,
+    };
+  }
+
+  return state;
 }
 
 export function messagesForScope(state: MailShellState) {

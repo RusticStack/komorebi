@@ -2,7 +2,7 @@
 
 Komorebi is a privacy-first Windows 10/11 desktop email client built with Tauri v2, React, TypeScript, Vite, and Rust.
 
-The current implementation is an executable, state-driven first-run mail shell with no seeded mailbox data. It does not connect to real mail accounts yet.
+The current implementation is an executable, state-driven first-run mail shell with no seeded mailbox data. In Tauri runtime it reads account, folder, unread-count, and recent-message navigation data from the local SQLite cache; it does not connect to real mail providers yet.
 
 ## Toolchain
 
@@ -38,11 +38,11 @@ Provider authentication policy is documented in [docs/architecture/provider-auth
 
 Token refresh, reconnect-needed state, provider revocation, and account-removal cleanup are documented in [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md). React receives redacted auth status only; token refresh and revocation handling stay in Rust.
 
-Tauri capability policy is documented in [docs/architecture/tauri-capabilities.md](docs/architecture/tauri-capabilities.md). The main webview currently has no frontend Tauri permissions; SQL, filesystem, opener, shell/process, HTTP, and custom-command access are denied unless a future feature adds a scoped capability and test coverage.
+Tauri capability policy is documented in [docs/architecture/tauri-capabilities.md](docs/architecture/tauri-capabilities.md). The main webview currently grants only the reviewed `allow-load-mail-shell` command permission; SQL, filesystem, opener, shell/process, HTTP, and additional custom-command access are denied unless a future feature adds a scoped capability and test coverage.
 
 IPC and mutation boundaries are documented in [docs/architecture/ipc-and-mutation-boundaries.md](docs/architecture/ipc-and-mutation-boundaries.md). Server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation stay in typed Rust commands or internal Rust workers. Frontend SQL is disabled until a read-only policy is implemented and tested.
 
-Frontend mail-shell behavior is documented in [docs/architecture/frontend-mail-shell.md](docs/architecture/frontend-mail-shell.md). The React shell now has account/folder/message state, unified inbox scoping, search state, reader states, composer/settings drawers, and loading/empty/error states. Live account data queries and command wiring remain future work.
+Frontend mail-shell behavior is documented in [docs/architecture/frontend-mail-shell.md](docs/architecture/frontend-mail-shell.md). The React shell now has local-cache account/folder/message loading, unified inbox scoping, unread counts from sync state, search state, reader states, composer/settings drawers, loading/empty/error states, and selection preservation across compatible navigation changes. Account add/remove, live provider adapters, and mutating command wiring remain future work.
 
 SQLite schema and migrations are documented in [docs/architecture/schema.md](docs/architecture/schema.md). The migrations define settings, accounts, folders, preserved folder attributes, messages, attachments, templates, template versions, FTS5 message search, primary/foreign keys, uniqueness rules, indexes, timestamps, and schema-version tracking.
 

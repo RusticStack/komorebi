@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window capability. Grants no frontend access until a feature-specific permission is reviewed and tested.",
+  "description": "Main window capability. Grants only the reviewed read-only mail-shell cache snapshot command.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["allow-load-mail-shell"]
 }

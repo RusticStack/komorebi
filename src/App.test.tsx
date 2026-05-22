@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { vi } from "vitest";
 import App from "./App";
 import type {
   MailShellData,
@@ -109,6 +110,7 @@ describe("App", () => {
       screen.getByRole("region", { name: "Selected message" }),
     ).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "Unified inbox" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add account" })).toBeDisabled();
     expect(screen.getByText("No accounts configured.")).toBeVisible();
     expect(screen.getByRole("region", { name: "Empty inbox" })).toBeVisible();
     expect(
@@ -135,6 +137,8 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Unified Inbox" })).toBeVisible();
     expect(screen.getByText("Roadmap review")).toBeVisible();
     expect(screen.getByText("Invoice question")).toBeVisible();
+    expect(screen.getAllByText("2 unread").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 unread")).toBeVisible();
     expect(screen.queryByText("Archived receipt")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Roadmap review/ }));
@@ -179,6 +183,39 @@ describe("App", () => {
     expect(settings).toBeVisible();
     expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
     expect(within(settings).getByLabelText("Account")).toHaveValue("acct_personal");
+  });
+
+  it("loads real shell data through the cache data source and preserves selection when scope still contains it", async () => {
+    const loadMailShellData = vi.fn().mockResolvedValue(fixtureMail);
+
+    render(<App loadMailShellData={loadMailShellData} />);
+
+    expect(screen.getByText("Loading accounts")).toBeVisible();
+    expect(await screen.findByText("Roadmap review")).toBeVisible();
+    expect(loadMailShellData).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Roadmap review/ }));
+    expect(
+      within(screen.getByRole("region", { name: "Selected message" })).getByRole(
+        "heading",
+        { name: "Roadmap review" },
+      ),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+    expect(
+      within(screen.getByRole("region", { name: "Selected message" })).getByRole(
+        "heading",
+        { name: "Roadmap review" },
+      ),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /Work/ }));
+    expect(screen.getByText("Invoice question")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Roadmap review" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "No selected message" }),
+    ).toBeVisible();
   });
 
   it("renders loading and error states for the shell surfaces", () => {
