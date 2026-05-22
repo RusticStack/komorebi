@@ -4,13 +4,13 @@ Last audit refresh: 2026-05-22
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, and `docs/architecture/tauri-capabilities.md`.
-- Local code inspected: scaffolded React app in `src/`, Tauri/Rust shell in `src-tauri/`, Rust auth policy in `src-tauri/src/auth.rs`, and Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`.
-- Local tests inspected: `src/App.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, and `docs/architecture/ipc-validation.md`.
+- Local code inspected: scaffolded React app in `src/`, Tauri/Rust shell in `src-tauri/`, Rust auth policy in `src-tauri/src/auth.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, and Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`.
+- Local tests inspected: `src/App.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths.
 - Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Rust format check, and root `check`.
 - Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
 - Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, and `src-tauri/gen/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; token lifecycle and capability architecture docs/tests/code/config are untracked or modified until committed.
+- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; scaffold, README, toolchain pins, docs, and ignore rules are tracked; IPC boundary and validation architecture docs/tests/code are modified until committed.
 - Generated docs from this audit: `AGENTS.md` and `TODO.md`.
 - External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, `async-imap`, `lettre`, `mail-parser`, SQLite FTS5 docs, Gmail IMAP/SMTP OAuth docs, Microsoft Exchange Online OAuth/basic-auth docs, OWASP XSS/file-upload guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
 
@@ -54,12 +54,10 @@ Purpose: prevent the earliest design choices from leaking credentials, exposing 
 
 - [x] Define least-privilege Tauri capabilities.
   Evidence: `src-tauri/tauri.conf.json` explicitly enables only the `default` capability; `src-tauri/capabilities/default.json` targets only the `main` window and grants no frontend Tauri permissions; `docs/architecture/tauri-capabilities.md` documents the denial policy for SQL, filesystem, opener, shell/process, HTTP, remote-origin, wildcard, and custom-command access. `src-tauri/build.rs` keeps the app command ACL list explicit and empty. `src-tauri/capabilities/capabilities.test.ts` reviews all capability JSON files plus Tauri config, forbidden Rust plugin registrations, and custom-command registration. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
-- [ ] Keep privileged mutations in Rust commands.
-  Evidence: the plan allows frontend database queries through the SQL plugin, but write boundaries are not specified.
-  Acceptance: server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation are typed Rust commands; frontend SQL is read-only or narrowly justified.
-- [ ] Add input validation for every IPC command.
-  Evidence: no commands exist.
-  Acceptance: commands reject arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, unbounded payloads, and unknown account/folder/message IDs; denial paths are covered by tests.
+- [x] Keep privileged mutations in Rust commands.
+  Evidence: `docs/architecture/ipc-and-mutation-boundaries.md` defines Rust-only ownership for server-affecting mail actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation. `src-tauri/src/ipc_boundary.rs` encodes the same categories as `BoundaryOwner::RustCommand` and sets `FRONTEND_SQL_POLICY` to disabled. Rust tests prove every required privileged category has a boundary and frontend SQL remains disabled until a read-only scope is documented. `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependency/imports, frontend SQL loading, `sql:*` capability grants, forbidden local-system plugins, and unregistered custom commands. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
+- [x] Add input validation for every IPC command.
+  Evidence: no frontend-callable IPC commands are registered yet, and the validation layer now exists before command exposure. `docs/architecture/ipc-validation.md` defines the command validation contract. `src-tauri/src/ipc_validation.rs` provides shared validators for payload bounds, client-supplied path rejection, raw SQL rejection, checked `http`/`https` URLs without embedded credentials, raw HTML rejection, entity-id shape, and account/folder/message scope lookup. Rust tests cover denial paths for arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, oversized payloads, invalid ids, unknown account/folder/message IDs, and redacted validation errors. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
 
 ### Message Rendering And Attachments
 
@@ -175,7 +173,7 @@ Purpose: create evidence that the client works without risking real mailboxes. R
 ### Test Infrastructure
 
 - [ ] Add Rust unit and integration tests.
-  Evidence: only the Tauri shell Rust code exists, and `cargo test --manifest-path src-tauri/Cargo.toml --all-features` currently runs 0 Rust tests.
+  Evidence: Rust unit tests now cover provider auth policy, token lifecycle, IPC mutation-boundary policy, and shared IPC input validation, but no sync, schema, real command, MIME, attachment, or credential-backend integration tests exist yet.
   Acceptance: `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs sync, schema, command validation, MIME, attachment, and credential-boundary tests.
 - [ ] Add frontend tests.
   Evidence: `src/App.test.tsx` is a smoke test for the placeholder shell only; no state/query, renderer-safety, i18n, or composer tests exist yet.

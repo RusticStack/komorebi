@@ -44,7 +44,7 @@ Plugin permissions must be introduced feature-by-feature. A future permission en
 
 Rules for likely future plugins:
 
-- SQL: frontend access is read-only or narrowly scoped. Raw execute/write access stays denied unless a separate architecture decision approves it.
+- SQL: frontend access is disabled today. If introduced later, it must follow `docs/architecture/ipc-and-mutation-boundaries.md`: read-only, narrowly scoped, and never `sql:allow-execute`.
 - Filesystem: prefer Rust commands using app-generated paths. Frontend filesystem access requires scoped app-data paths only.
 - Opener: avoid broad URL/file opening. Links and attachments need validation and explicit user intent.
 - Shell/process: denied for this product unless a future release task explicitly approves a constrained sidecar.

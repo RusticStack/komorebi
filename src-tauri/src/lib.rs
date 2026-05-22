@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod ipc_boundary;
+pub mod ipc_validation;
 pub mod token_lifecycle;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

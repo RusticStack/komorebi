@@ -40,6 +40,10 @@ Token refresh, reconnect-needed state, and account-removal cleanup are documente
 
 Tauri capability policy is documented in [docs/architecture/tauri-capabilities.md](docs/architecture/tauri-capabilities.md). The main webview currently has no frontend Tauri permissions; SQL, filesystem, opener, shell/process, HTTP, and custom-command access are denied unless a future feature adds a scoped capability and test coverage.
 
+IPC and mutation boundaries are documented in [docs/architecture/ipc-and-mutation-boundaries.md](docs/architecture/ipc-and-mutation-boundaries.md). Server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation stay in typed Rust commands or internal Rust workers. Frontend SQL is disabled until a read-only policy is implemented and tested.
+
+IPC input validation is documented in [docs/architecture/ipc-validation.md](docs/architecture/ipc-validation.md). Future commands must reject arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, unbounded payloads, and unknown or unowned account/folder/message IDs before side effects.
+
 ## Setup
 
 ```powershell

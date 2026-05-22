@@ -30,6 +30,8 @@ const tauriConfigPath = resolve("src-tauri", "tauri.conf.json");
 const cargoTomlPath = resolve("src-tauri", "Cargo.toml");
 const buildScriptPath = resolve("src-tauri", "build.rs");
 const libRsPath = resolve("src-tauri", "src", "lib.rs");
+const packageJsonPath = resolve("package.json");
+const frontendSourceDir = resolve("src");
 
 const forbiddenPermissionPrefixes = [
   "sql:",
@@ -59,6 +61,9 @@ const forbiddenRustPlugins = [
 const capabilityFileNames = readdirSync(capabilityDir).filter((fileName) =>
   fileName.endsWith(".json"),
 );
+const frontendSourceFileNames = readdirSync(frontendSourceDir, {
+  recursive: true,
+}).filter((fileName) => String(fileName).match(/\.(ts|tsx)$/));
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -126,5 +131,19 @@ describe("Tauri capabilities", () => {
     expect(buildScript).toContain(".commands(APP_COMMANDS)");
     expect(libRs).not.toMatch(/invoke_handler\s*\(/);
     expect(libRs).not.toContain("tauri::generate_handler!");
+  });
+
+  it("keeps frontend SQL unavailable until a read-only policy is implemented", () => {
+    const packageJson = readFileSync(packageJsonPath, "utf8");
+
+    expect(packageJson).not.toContain("@tauri-apps/plugin-sql");
+
+    for (const fileName of frontendSourceFileNames) {
+      const source = readFileSync(resolve(frontendSourceDir, String(fileName)), "utf8");
+
+      expect(source).not.toContain("@tauri-apps/plugin-sql");
+      expect(source).not.toContain("window.__TAURI__.sql");
+      expect(source).not.toMatch(/\bDatabase\.load\s*\(/);
+    }
   });
 });
