@@ -23,6 +23,7 @@
     "check": "pnpm fmt:check && pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.25",
     "@tauri-apps/api": "^2",
     "dompurify": "^3.4.5",
     "react": "^19.1.0",

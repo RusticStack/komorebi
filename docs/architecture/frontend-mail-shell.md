@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, and keyboard/accessibility workflows implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, keyboard/accessibility workflows, and virtualized message rendering implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -78,6 +78,17 @@ In account mode:
 
 Search filters the current account/folder scope by sender, sender email, subject, preview, and plain body text.
 
+## Message List Virtualization
+
+The message list uses `@tanstack/react-virtual` in `MailClientShell.tsx`.
+
+- Rows use deterministic message IDs as virtual item keys.
+- Row height is fixed at `136px`; sender, subject, date, flag state, and snippet are clamped so scrolling does not shift row geometry.
+- The virtualizer overscans a small row window instead of mounting every visible-scope message.
+- Message rows keep `aria-setsize`, `aria-posinset`, `aria-current`, unread styling, visible flagged state, sender, subject, date, and snippet while scrolling.
+- Keyboard navigation scrolls off-screen targets into the virtual window before focus is restored.
+- Tests inject 10,000 messages and assert the DOM stays bounded while first/last row state, selection, focus, and reader state remain stable.
+
 ## Keyboard And Accessibility
 
 The shell must remain usable from the keyboard before live account setup exists:
@@ -137,6 +148,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - message search
 - message selection and reader rendering
 - keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
+- 10,000-message virtualized rendering with bounded DOM row count and stable row state during scroll
 - composer drawer entry
 - settings drawer entry
 - loading/error shell states
@@ -152,7 +164,6 @@ No test uses real mailbox data, real credentials, or live provider connections.
 - TipTap composer.
 - Draft autosave command wiring.
 - SMTP send command wiring.
-- Virtualized large message list.
 - i18n dictionaries.
 - E2E accessibility, axe, or real screen-reader harness.
 

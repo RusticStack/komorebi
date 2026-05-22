@@ -97,6 +97,51 @@ const fixtureMail: MailShellData = {
   ],
 };
 
+function createLargeMailFixture(messageCount: number): MailShellData {
+  return {
+    accounts: [
+      {
+        id: "acct_bulk",
+        label: "Bulk",
+        email: "bulk@example.com",
+        status: "connected",
+        unreadCount: Math.ceil(messageCount / 2),
+        signatureHtml: null,
+      },
+    ],
+    folders: [
+      {
+        id: "folder_bulk_inbox",
+        accountId: "acct_bulk",
+        name: "Inbox",
+        kind: "inbox",
+        unreadCount: Math.ceil(messageCount / 2),
+        totalCount: messageCount,
+      },
+    ],
+    messages: Array.from({ length: messageCount }, (_, index) => {
+      const paddedIndex = index.toString().padStart(5, "0");
+
+      return {
+        id: `msg_bulk_${paddedIndex}`,
+        accountId: "acct_bulk",
+        folderId: "folder_bulk_inbox",
+        sender: `Sender ${index}`,
+        senderEmail: `sender${index}@example.com`,
+        subject: `Bulk message ${paddedIndex}`,
+        preview: `Snippet for bulk message ${paddedIndex} remains stable while scrolling.`,
+        receivedAt: `${Math.floor(index / 60)
+          .toString()
+          .padStart(2, "0")}:${(index % 60).toString().padStart(2, "0")}`,
+        unread: index % 2 === 0,
+        flagged: index % 10 === 0 || index === messageCount - 1,
+        bodyText: `Body for bulk message ${paddedIndex}.`,
+        bodyHtml: null,
+      };
+    }),
+  };
+}
+
 describe("App", () => {
   it("renders the accountless mail client shell without fake mailbox data", () => {
     render(<App />);
@@ -257,6 +302,58 @@ describe("App", () => {
     fireEvent.keyDown(settings, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
     expect(settingsButton).toHaveFocus();
+  });
+
+  it("virtualizes 10,000 message rows while preserving row state during scroll", async () => {
+    render(<App initialData={createLargeMailFixture(10_000)} />);
+
+    const messageList = screen.getByTestId("message-virtual-list");
+    expect(messageList).toHaveAttribute("data-message-count", "10000");
+
+    const initiallyRenderedMessages = within(messageList).getAllByRole("button", {
+      name: /message from Sender/,
+    });
+    expect(initiallyRenderedMessages.length).toBeGreaterThan(0);
+    expect(initiallyRenderedMessages.length).toBeLessThan(80);
+
+    const firstMessage = screen.getByRole("button", {
+      name: /Bulk message 00000/,
+    });
+    expect(firstMessage).toHaveTextContent("Sender 0");
+    expect(firstMessage).toHaveTextContent("Flagged");
+    expect(firstMessage).toHaveTextContent("00:00");
+    expect(firstMessage).toHaveTextContent(
+      "Snippet for bulk message 00000 remains stable while scrolling.",
+    );
+
+    fireEvent.click(firstMessage);
+    expect(firstMessage).toHaveAttribute("aria-current", "true");
+
+    fireEvent.keyDown(firstMessage, { key: "End" });
+
+    const lastMessage = await screen.findByRole("button", {
+      name: /Bulk message 09999/,
+    });
+    await waitFor(() => expect(lastMessage).toHaveFocus());
+    expect(lastMessage).toHaveAttribute("aria-current", "true");
+    expect(lastMessage).toHaveTextContent("Sender 9999");
+    expect(lastMessage).toHaveTextContent("Flagged");
+    expect(lastMessage).toHaveTextContent("166:39");
+    expect(lastMessage).toHaveTextContent(
+      "Snippet for bulk message 09999 remains stable while scrolling.",
+    );
+    expect(
+      within(screen.getByRole("region", { name: "Selected message" })).getByRole(
+        "heading",
+        { name: "Bulk message 09999" },
+      ),
+    ).toBeVisible();
+    expect(
+      within(messageList).getAllByRole("button", {
+        name: /message from Sender/,
+      }).length,
+    ).toBeLessThan(80);
+    expect(screen.queryByText("Bulk message 05000")).not.toBeInTheDocument();
   });
 
   it("loads real shell data through the cache data source and preserves selection when scope still contains it", async () => {

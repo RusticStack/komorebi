@@ -350,14 +350,28 @@ textarea:disabled {
 }
 
 .messages {
-  display: grid;
+  position: relative;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+
+.messages-virtual-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.message-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
 }
 
 .message {
   display: grid;
   gap: 6px;
+  height: 136px;
   width: 100%;
   border: 0;
   padding: 16px 22px;
@@ -385,6 +399,34 @@ textarea:disabled {
   gap: 12px;
 }
 
+.message-row {
+  min-width: 0;
+}
+
+.message-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-row-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-flag {
+  padding: 2px 6px;
+  border: 1px solid #d7c7b6;
+  border-radius: 6px;
+  color: #774331;
+  background: #fff7f3;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .message-row time,
 .sender-line time {
   flex: 0 0 auto;
@@ -393,7 +435,10 @@ textarea:disabled {
 }
 
 .message h3 {
+  overflow: hidden;
   font-size: 0.98rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message p {

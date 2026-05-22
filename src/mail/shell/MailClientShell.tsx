@@ -6,6 +6,11 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import {
+  useVirtualizer,
+  type Rect,
+  type Virtualizer,
+} from "@tanstack/react-virtual";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import { AccountSignatureSettings } from "../../settings/AccountSignatureSettings";
 import {
@@ -25,6 +30,7 @@ import {
   selectedMessage,
   type MailShellData,
   type MailShellLoadState,
+  type MailMessage,
   type MailShellState,
 } from "./mailShellState";
 
@@ -35,6 +41,13 @@ export type MailClientShellProps = {
 };
 
 type Drawer = "composer" | "settings" | null;
+
+const MESSAGE_ROW_HEIGHT_PX = 136;
+const MESSAGE_LIST_OVERSCAN = 8;
+const MESSAGE_LIST_FALLBACK_RECT: Rect = {
+  width: 420,
+  height: 640,
+};
 
 export function MailClientShell({
   initialData = emptyMailShellData,
@@ -50,7 +63,6 @@ export function MailClientShell({
   const [drawer, setDrawer] = useState<Drawer>(null);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const messageButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const readerRef = useRef<HTMLElement | null>(null);
   const composeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -163,40 +175,6 @@ export function MailClientShell({
 
     event.preventDefault();
     moveFolderFocus(nextIndex);
-  }
-
-  function selectMessageAndFocusButton(messageIndex: number) {
-    const message = visibleMessages[messageIndex];
-    if (!message) {
-      return;
-    }
-
-    patchState({ selectedMessageId: message.id });
-    messageButtonRefs.current[messageIndex]?.focus();
-  }
-
-  function handleMessageKeyDown(
-    event: KeyboardEvent<HTMLButtonElement>,
-    currentIndex: number,
-    messageId: string,
-  ) {
-    const nextIndex = nextIndexForKey(
-      event.key,
-      currentIndex,
-      visibleMessages.length,
-    );
-
-    if (nextIndex !== null) {
-      event.preventDefault();
-      selectMessageAndFocusButton(nextIndex);
-      return;
-    }
-
-    if (isActivationKey(event.key)) {
-      event.preventDefault();
-      patchState({ selectedMessageId: messageId });
-      readerRef.current?.focus();
-    }
   }
 
   function handleDrawerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -483,22 +461,22 @@ export function MailClientShell({
           />
         </label>
 
-        <div className="messages">
-          <MessageListState
-            state={state}
-            visibleMessages={visibleMessages}
-            onRetry={loadMailShellData ? reloadMailShell : undefined}
-            onSelectMessage={(messageId) =>
-              patchState({
-                selectedMessageId: messageId,
-              })
-            }
-            onMessageKeyDown={handleMessageKeyDown}
-            setMessageButtonRef={(index, element) => {
-              messageButtonRefs.current[index] = element;
-            }}
-          />
-        </div>
+        <MessageListState
+          state={state}
+          visibleMessages={visibleMessages}
+          onRetry={loadMailShellData ? reloadMailShell : undefined}
+          onSelectMessage={(messageId) =>
+            patchState({
+              selectedMessageId: messageId,
+            })
+          }
+          onReadMessage={(messageId) => {
+            patchState({
+              selectedMessageId: messageId,
+            });
+            readerRef.current?.focus();
+          }}
+        />
       </section>
 
       <section
@@ -617,94 +595,240 @@ function MessageListState({
   visibleMessages,
   onRetry,
   onSelectMessage,
-  onMessageKeyDown,
-  setMessageButtonRef,
+  onReadMessage,
 }: {
   state: MailShellState;
   visibleMessages: ReturnType<typeof messagesForScope>;
   onRetry?: () => void;
   onSelectMessage: (messageId: string) => void;
-  onMessageKeyDown: (
-    event: KeyboardEvent<HTMLButtonElement>,
-    index: number,
-    messageId: string,
-  ) => void;
-  setMessageButtonRef: (
-    index: number,
-    element: HTMLButtonElement | null,
-  ) => void;
+  onReadMessage: (messageId: string) => void;
 }) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const messageButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pendingFocusIndexRef = useRef<number | null>(null);
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual owns scroll math locally; the virtualizer is not passed to memoized children.
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
+    count: visibleMessages.length,
+    estimateSize: () => MESSAGE_ROW_HEIGHT_PX,
+    getItemKey: (index) => visibleMessages[index]?.id ?? index,
+    getScrollElement: () => listRef.current,
+    initialRect: MESSAGE_LIST_FALLBACK_RECT,
+    observeElementRect: observeMessageListRect,
+    overscan: MESSAGE_LIST_OVERSCAN,
+    scrollToFn: scrollMessageListToOffset,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+
+  function focusMessageAtIndex(messageIndex: number) {
+    const boundedIndex = clampIndex(messageIndex, visibleMessages.length);
+    const message = visibleMessages[boundedIndex];
+    if (!message) {
+      return;
+    }
+
+    pendingFocusIndexRef.current = boundedIndex;
+    onSelectMessage(message.id);
+    rowVirtualizer.scrollToIndex(boundedIndex, { align: "auto" });
+    if (!messageButtonRefs.current[boundedIndex]) {
+      scrollElementToMessageOffset(
+        listRef.current,
+        boundedIndex * MESSAGE_ROW_HEIGHT_PX,
+      );
+    }
+    messageButtonRefs.current[boundedIndex]?.focus();
+  }
+
+  function handleVirtualMessageKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+    messageId: string,
+  ) {
+    const nextIndex = nextIndexForKey(
+      event.key,
+      currentIndex,
+      visibleMessages.length,
+    );
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusMessageAtIndex(nextIndex);
+      return;
+    }
+
+    if (isActivationKey(event.key)) {
+      event.preventDefault();
+      onReadMessage(messageId);
+    }
+  }
+
+  useEffect(() => {
+    const pendingFocusIndex = pendingFocusIndexRef.current;
+    if (pendingFocusIndex === null) {
+      return;
+    }
+
+    const messageButton = messageButtonRefs.current[pendingFocusIndex];
+    if (!messageButton) {
+      return;
+    }
+
+    messageButton.focus();
+    pendingFocusIndexRef.current = null;
+  }, [state.selectedMessageId, virtualRows]);
+
   if (state.loadState.messages === "loading") {
     return (
-      <section className="empty-panel" aria-label="Loading messages">
-        <h3>Loading mail</h3>
-        <p>Reading the local cache.</p>
-      </section>
+      <div className="messages">
+        <section className="empty-panel" aria-label="Loading messages">
+          <h3>Loading mail</h3>
+          <p>Reading the local cache.</p>
+        </section>
+      </div>
     );
   }
 
   if (state.loadState.messages === "error") {
     return (
-      <section className="empty-panel error-panel" aria-label="Message error">
-        <h3>Mail unavailable</h3>
-        <p>The local message cache could not be opened.</p>
-        <button type="button" onClick={onRetry} disabled={!onRetry}>
-          Retry
-        </button>
-      </section>
+      <div className="messages">
+        <section className="empty-panel error-panel" aria-label="Message error">
+          <h3>Mail unavailable</h3>
+          <p>The local message cache could not be opened.</p>
+          <button type="button" onClick={onRetry} disabled={!onRetry}>
+            Retry
+          </button>
+        </section>
+      </div>
     );
   }
 
   if (state.data.accounts.length === 0) {
     return (
-      <section className="empty-panel" aria-label="Empty inbox">
-        <h3>No mail loaded</h3>
-        <p>Add an account to sync folders and messages into the local cache.</p>
-      </section>
+      <div className="messages">
+        <section className="empty-panel" aria-label="Empty inbox">
+          <h3>No mail loaded</h3>
+          <p>Add an account to sync folders and messages into the local cache.</p>
+        </section>
+      </div>
     );
   }
 
   if (visibleMessages.length === 0 && state.searchQuery.trim()) {
     return (
-      <section className="empty-panel" aria-label="No search results">
-        <h3>No matches</h3>
-        <p>Search found no local messages in the selected scope.</p>
-      </section>
+      <div className="messages">
+        <section className="empty-panel" aria-label="No search results">
+          <h3>No matches</h3>
+          <p>Search found no local messages in the selected scope.</p>
+        </section>
+      </div>
     );
   }
 
   if (visibleMessages.length === 0) {
     return (
-      <section className="empty-panel" aria-label="Empty folder">
-        <h3>No messages</h3>
-        <p>This folder has no local mail yet.</p>
-      </section>
+      <div className="messages">
+        <section className="empty-panel" aria-label="Empty folder">
+          <h3>No messages</h3>
+          <p>This folder has no local mail yet.</p>
+        </section>
+      </div>
     );
   }
 
-  return visibleMessages.map((message, index) => (
+  return (
+    <div
+      className="messages"
+      data-message-count={visibleMessages.length}
+      data-testid="message-virtual-list"
+      ref={listRef}
+    >
+      <div
+        className="messages-virtual-spacer"
+        style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+      >
+        {virtualRows.map((virtualRow) => {
+          const message = visibleMessages[virtualRow.index];
+          if (!message) {
+            return null;
+          }
+
+          return (
+            <div
+              className="message-virtual-row"
+              key={virtualRow.key}
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+            >
+              <MessageRow
+                index={virtualRow.index}
+                isSelected={message.id === state.selectedMessageId}
+                message={message}
+                refCallback={(element) => {
+                  messageButtonRefs.current[virtualRow.index] = element;
+                }}
+                onClick={() => onSelectMessage(message.id)}
+                onKeyDown={(event) =>
+                  handleVirtualMessageKeyDown(
+                    event,
+                    virtualRow.index,
+                    message.id,
+                  )
+                }
+                rowCount={visibleMessages.length}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MessageRow({
+  index,
+  isSelected,
+  message,
+  onClick,
+  onKeyDown,
+  refCallback,
+  rowCount,
+}: {
+  index: number;
+  isSelected: boolean;
+  message: MailMessage;
+  onClick: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  refCallback: (element: HTMLButtonElement | null) => void;
+  rowCount: number;
+}) {
+  return (
     <button
       className={message.unread ? "message is-unread" : "message"}
-      key={message.id}
       type="button"
-      aria-current={message.id === state.selectedMessageId ? "true" : undefined}
+      aria-current={isSelected ? "true" : undefined}
       aria-label={`${message.unread ? "Unread" : "Read"}${
         message.flagged ? ", flagged" : ""
       } message from ${message.sender}, ${message.subject || "no subject"}, ${
         message.receivedAt
       }`}
-      ref={(element) => setMessageButtonRef(index, element)}
-      onKeyDown={(event) => onMessageKeyDown(event, index, message.id)}
-      onClick={() => onSelectMessage(message.id)}
+      aria-posinset={index + 1}
+      aria-setsize={rowCount}
+      data-message-index={index}
+      ref={refCallback}
+      onKeyDown={onKeyDown}
+      onClick={onClick}
     >
       <div className="message-row">
         <strong>{message.sender}</strong>
-        <time>{message.receivedAt}</time>
+        <span className="message-row-meta">
+          {message.flagged ? (
+            <span className="message-flag">Flagged</span>
+          ) : null}
+          <time>{message.receivedAt}</time>
+        </span>
       </div>
       <h3>{message.subject || "(no subject)"}</h3>
       <p>{message.preview}</p>
     </button>
-  ));
+  );
 }
 
 function ReaderPane({
@@ -940,4 +1064,85 @@ function getFocusableElements(container: HTMLElement | null) {
       !element.hidden &&
       !element.closest("[hidden], [aria-hidden='true']"),
   );
+}
+
+function observeMessageListRect(
+  instance: Virtualizer<HTMLDivElement, HTMLButtonElement>,
+  callback: (rect: Rect) => void,
+) {
+  const element = instance.scrollElement;
+  if (!element) {
+    return;
+  }
+
+  const readRect = () => {
+    const rect = element.getBoundingClientRect();
+    callback({
+      width:
+        Math.round(rect.width) ||
+        element.clientWidth ||
+        MESSAGE_LIST_FALLBACK_RECT.width,
+      height:
+        Math.round(rect.height) ||
+        element.clientHeight ||
+        MESSAGE_LIST_FALLBACK_RECT.height,
+    });
+  };
+
+  readRect();
+
+  const ownerWindow = element.ownerDocument.defaultView;
+  if (!ownerWindow?.ResizeObserver) {
+    return undefined;
+  }
+
+  const observer = new ownerWindow.ResizeObserver(readRect);
+  observer.observe(element);
+
+  return () => {
+    observer.disconnect();
+  };
+}
+
+function scrollMessageListToOffset(
+  offset: number,
+  {
+    adjustments = 0,
+    behavior,
+  }: {
+    adjustments?: number;
+    behavior?: ScrollBehavior | "instant";
+  },
+  instance: Virtualizer<HTMLDivElement, HTMLButtonElement>,
+) {
+  const element = instance.scrollElement;
+  if (!element) {
+    return;
+  }
+
+  const top = offset + adjustments;
+  scrollElementToMessageOffset(element, top, behavior);
+}
+
+function scrollElementToMessageOffset(
+  element: HTMLDivElement | null,
+  top: number,
+  behavior?: ScrollBehavior | "instant",
+) {
+  if (!element) {
+    return;
+  }
+
+  if (typeof element.scrollTo === "function") {
+    element.scrollTo({ top, behavior });
+  }
+
+  if (element.scrollTop !== top) {
+    element.scrollTop = top;
+    element.dispatchEvent(
+      new (element.ownerDocument.defaultView?.Event ?? Event)("scroll", {
+        bubbles: true,
+      }),
+    );
+  }
 }
