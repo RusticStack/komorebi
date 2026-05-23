@@ -1922,6 +1922,51 @@ mod tests {
     }
 
     #[test]
+    fn rich_composer_html_serializes_to_outgoing_mime() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        let mut account_store = SqliteSmtpAccountStore::new(&connection);
+        let mut auth_resolver = FakeAuthResolver {
+            auth: SmtpAuth::Plain {
+                username: "sender@example.com".into(),
+                password: SecretString::new("app-password"),
+            },
+        };
+        let mut attachments = FakeAttachmentStore::default();
+        let mut smtp = FakeSmtpSender::default();
+        let mut request = request();
+        request.attachments.clear();
+        request.body_text = Some("Rich formatting fallback".into());
+        request.body_html = Some(
+            SanitizedHtml::new_sanitized(
+                r#"<p style="text-align: center"><s><span style="font-family: Georgia; font-size: 18px; color: #9a624f; background-color: #fff2a8">Rich formatting</span></s></p><table><tbody><tr><th><p>Item</p></th><th><p>Status</p></th></tr><tr><td><p>Sync</p></td><td><p>Ready</p></td></tr></tbody></table><pre><code>const ok = true;</code></pre>"#,
+            )
+            .unwrap(),
+        );
+
+        send_email(
+            request,
+            &mut account_store,
+            &mut auth_resolver,
+            &mut attachments,
+            &mut smtp,
+        )
+        .expect("send rich html message");
+
+        let sent = smtp.sent_messages[0].clone();
+        let normalized_sent = sent
+            .replace("=\r\n", "")
+            .replace("=\n", "")
+            .replace("=3D", "=");
+        assert!(normalized_sent.contains("<table>"), "{sent}");
+        assert!(normalized_sent.contains("<s>"), "{sent}");
+        assert!(normalized_sent.contains("<pre><code>"), "{sent}");
+        assert!(normalized_sent.contains("</code></pre>"), "{sent}");
+        assert!(normalized_sent.contains("font-family: Georgia"), "{sent}");
+        assert!(normalized_sent.contains("background-color:"), "{sent}");
+    }
+
+    #[test]
     fn confirmed_send_marks_source_draft_sent_and_clears_draft_content() {
         let connection = migrated_connection();
         seed_generic_account(&connection);

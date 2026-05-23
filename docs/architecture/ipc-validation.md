@@ -18,6 +18,8 @@ Komorebi has reviewed frontend-callable IPC commands:
 
 Composer commands validate account/draft/attachment ids, payload sizes, address shapes on send, sanitized body wrappers, staged attachment ownership, MIME type/size, local recent-recipient account scope, and app-data storage scope before side effects. They never accept frontend-supplied filesystem paths, raw SQL, credential material, or arbitrary provider commands. `stage_composer_attachment` accepts bytes from a browser `File` selected by the user and writes only to a Rust-generated app-data path.
 
+The composer frontend sanitizer is `src/mail/composer/composerRichText.ts`. It is the reviewed source for rich HTML that may cross IPC: only the supported TipTap subset is preserved, and inline styles are reduced to whitelisted alignment, color, background-color, font-size, and font-family values before Rust accepts `DraftHtml` or `SanitizedHtml` wrappers.
+
 The code source of truth is `src-tauri/src/ipc_validation.rs`.
 
 ## Required Validation Before Side Effects
@@ -29,7 +31,7 @@ The command must reject:
 - Arbitrary paths: React must not provide local file paths for cache, attachment, database, diagnostics, or config writes. Backend code generates and scopes paths.
 - Raw SQL: commands must not accept SQL strings from React. Query helpers, when added, must be typed and scoped.
 - Unchecked URLs: URLs must be parsed and limited to approved schemes and hosts for the command's purpose. The shared validator currently allows only absolute `http` and `https` URLs with a host and no embedded credentials.
-- Unsanitized HTML: no command may persist or send raw HTML from React until a sanitizer is implemented and the command accepts a sanitized wrapper type. Current validation rejects markup by default.
+- Unsanitized HTML: no command may persist or send raw HTML from React unless it uses a reviewed sanitizer and the command accepts a sanitized wrapper type. Current non-composer validation rejects markup by default.
 - Unbounded payloads: commands must set byte limits for each text, binary, HTML, MIME, attachment, and diagnostics payload.
 - Unknown or unowned ids: account, folder, message, attachment, and draft ids must be format-checked and resolved against backend ownership before work begins.
 
@@ -67,7 +69,7 @@ Do not add a command if validation depends on real mailboxes, real credentials, 
 
 `search_mail` is the read-only example of an accepted input-bearing command: request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
 
-Composer commands are the mutating examples: request fields are typed, HTML is accepted only through sanitizer-backed frontend output plus backend `DraftHtml`/`SanitizedHtml` wrappers, attachments are staged by bytes rather than paths, staged ids are ownership-checked, duplicate recipients are normalized before persistence/send, recent-recipient lookup is account-scoped and read-only, and send calls the existing SMTP boundary instead of exposing credentials or transport details to React.
+Composer commands are the mutating examples: request fields are typed, HTML is accepted only through sanitizer-backed frontend output plus backend `DraftHtml`/`SanitizedHtml` wrappers, rich formatting is constrained to the reviewed TipTap/sanitizer whitelist, attachments are staged by bytes rather than paths, staged ids are ownership-checked, duplicate recipients are normalized before persistence/send, recent-recipient lookup is account-scoped and read-only, and send calls the existing SMTP boundary instead of exposing credentials or transport details to React.
 
 ## Current Denial Tests
 
@@ -82,7 +84,7 @@ Rust tests cover:
 - Invalid id shapes before lookup.
 - Validation errors not echoing sensitive input values.
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
-- Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, and send validation before SMTP work.
+- Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, sanitized rich-HTML handling, and send validation before SMTP work.
 
 `pnpm check` runs the validation tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

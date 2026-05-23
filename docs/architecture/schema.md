@@ -21,7 +21,7 @@ Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.r
 
 Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
 
-Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs` and exposed to the composer through `src-tauri/src/composer.rs`. Active drafts autosave locally; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
+Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs` and exposed to the composer through `src-tauri/src/composer.rs`. Active drafts autosave sanitized composer HTML, including the reviewed rich-formatting subset; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
 
 Staged composer attachment persistence is implemented by migration `006_composer_attachments.sql` and `src-tauri/src/composer.rs`. User-selected outbound bytes are written to backend-generated app-data paths and linked to active draft ids until discard or confirmed send cleanup.
 

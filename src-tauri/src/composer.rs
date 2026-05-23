@@ -1447,6 +1447,31 @@ mod tests {
     }
 
     #[test]
+    fn autosave_command_persists_rich_composer_html() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        let mut request = draft_save_request();
+        request.body_html = Some(
+            r#"<p style="text-align: center"><s><span style="font-family: Georgia; font-size: 18px; color: #9a624f">Rich</span></s></p><table><tbody><tr><th><p>Item</p></th><th><p>Status</p></th></tr><tr><td><p>Sync</p></td><td><p>Ready</p></td></tr></tbody></table><pre><code>const ok = true;</code></pre>"#
+                .into(),
+        );
+
+        autosave_composer_draft_from_connection(&connection, request).unwrap();
+
+        let body_html: String = connection
+            .query_row(
+                "SELECT body_html FROM composer_drafts WHERE id = 'draft_composer'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(body_html.contains("<table>"));
+        assert!(body_html.contains("<s>"));
+        assert!(body_html.contains("<pre><code>const ok = true;</code></pre>"));
+        assert!(body_html.contains("font-family: Georgia"));
+    }
+
+    #[test]
     fn stages_composer_attachment_under_generated_app_data_path() {
         let connection = migrated_connection();
         seed_generic_account(&connection);

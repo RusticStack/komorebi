@@ -8,10 +8,19 @@ import {
   type KeyboardEvent,
 } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
-import Image from "@tiptap/extension-image";
-import DOMPurify, { type Config } from "dompurify";
+import {
+  FONT_FAMILIES,
+  FONT_SIZES,
+  HIGHLIGHT_COLORS,
+  TEXT_COLORS,
+  allowedFontFamilies,
+  allowedFontSizes,
+  allowedStyleColors,
+  composerEditorExtensions,
+  safeComposerLink,
+  sanitizeComposerHtml,
+  type AlignmentValue,
+} from "./composerRichText";
 import {
   insertSignatureIntoComposerHtml,
 } from "../signatures/signatureHtml";
@@ -79,40 +88,6 @@ type ParsedRecipientFields = {
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
 const RECIPIENT_AUTOCOMPLETE_DEBOUNCE_MS = 150;
-const composerSanitizerConfig: Config = {
-  SANITIZE_NAMED_PROPS: true,
-  ALLOW_ARIA_ATTR: true,
-  ALLOW_DATA_ATTR: false,
-  ALLOWED_TAGS: [
-    "a",
-    "blockquote",
-    "br",
-    "em",
-    "img",
-    "li",
-    "ol",
-    "p",
-    "s",
-    "strong",
-    "u",
-    "ul",
-  ],
-  ALLOWED_ATTR: ["alt", "href", "rel", "src", "title"],
-  FORBID_ATTR: [
-    "background",
-    "form",
-    "formaction",
-    "onerror",
-    "onload",
-    "onclick",
-    "poster",
-    "srcdoc",
-    "srcset",
-    "style",
-    "target",
-    "xlink:href",
-  ],
-};
 
 export function TipTapComposer({
   accounts,
@@ -149,24 +124,7 @@ export function TipTapComposer({
   const activeAccount = accounts.find((account) => account.id === accountId);
   const canUseBackend = Boolean(saveDraft && stageAttachment && sendMail);
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        code: false,
-        codeBlock: false,
-        heading: false,
-        horizontalRule: false,
-        link: false,
-      }),
-      Link.configure({
-        autolink: false,
-        openOnClick: false,
-        linkOnPaste: true,
-        defaultProtocol: "https",
-      }),
-      Image.configure({
-        allowBase64: true,
-      }),
-    ],
+    extensions: composerEditorExtensions,
     content: bodyHtml,
     editorProps: {
       attributes: {
@@ -367,6 +325,62 @@ export function TipTapComposer({
     setValidationErrors([]);
   }
 
+  function applyFontFamily(value: string) {
+    if (!editor) {
+      return;
+    }
+    if (!value) {
+      editor.chain().focus().unsetFontFamily().run();
+      return;
+    }
+    if (allowedFontFamilies.has(value)) {
+      editor.chain().focus().setFontFamily(value).run();
+    }
+  }
+
+  function applyFontSize(value: string) {
+    if (!editor) {
+      return;
+    }
+    if (!value) {
+      editor.chain().focus().unsetFontSize().run();
+      return;
+    }
+    if (allowedFontSizes.has(value)) {
+      editor.chain().focus().setFontSize(value).run();
+    }
+  }
+
+  function applyTextColor(value: string) {
+    if (!editor) {
+      return;
+    }
+    if (!value) {
+      editor.chain().focus().unsetColor().run();
+      return;
+    }
+    if (allowedStyleColors.has(value)) {
+      editor.chain().focus().setColor(value).run();
+    }
+  }
+
+  function applyHighlight(value: string) {
+    if (!editor) {
+      return;
+    }
+    if (!value) {
+      editor.chain().focus().unsetHighlight().run();
+      return;
+    }
+    if (allowedStyleColors.has(value)) {
+      editor.chain().focus().setHighlight({ color: value }).run();
+    }
+  }
+
+  function applyAlignment(value: AlignmentValue) {
+    editor?.chain().focus().setTextAlign(value).run();
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!sendMail) {
@@ -563,9 +577,119 @@ export function TipTapComposer({
         <div className="composer-toolbar" aria-label="Formatting controls">
           <FormatButton editor={editor} command="bold" label="Bold" />
           <FormatButton editor={editor} command="italic" label="Italic" />
+          <FormatButton editor={editor} command="strike" label="Strikethrough" />
+          <FormatButton editor={editor} command="code" label="Inline code" />
+          <FormatButton editor={editor} command="codeBlock" label="Code block" />
           <FormatButton editor={editor} command="bulletList" label="Bulleted list" />
           <FormatButton editor={editor} command="orderedList" label="Numbered list" />
           <FormatButton editor={editor} command="blockquote" label="Block quote" />
+          <label className="composer-compact-control">
+            <span>Font family</span>
+            <select
+              value=""
+              onChange={(event) => applyFontFamily(event.target.value)}
+              disabled={!editor}
+            >
+              <option value="">Default</option>
+              {FONT_FAMILIES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="composer-compact-control">
+            <span>Font size</span>
+            <select
+              value=""
+              onChange={(event) => applyFontSize(event.target.value)}
+              disabled={!editor}
+            >
+              <option value="">Default</option>
+              {FONT_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="composer-compact-control">
+            <span>Text color</span>
+            <select
+              value=""
+              onChange={(event) => applyTextColor(event.target.value)}
+              disabled={!editor}
+            >
+              <option value="">Default</option>
+              {TEXT_COLORS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="composer-compact-control">
+            <span>Highlight</span>
+            <select
+              value=""
+              onChange={(event) => applyHighlight(event.target.value)}
+              disabled={!editor}
+            >
+              <option value="">None</option>
+              {HIGHLIGHT_COLORS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="composer-button-group" aria-label="Text alignment">
+            <button type="button" onClick={() => applyAlignment("left")} disabled={!editor}>
+              Align left
+            </button>
+            <button type="button" onClick={() => applyAlignment("center")} disabled={!editor}>
+              Align center
+            </button>
+            <button type="button" onClick={() => applyAlignment("right")} disabled={!editor}>
+              Align right
+            </button>
+          </div>
+          <div className="composer-button-group" aria-label="Table controls">
+            <button
+              type="button"
+              onClick={() =>
+                editor
+                  ?.chain()
+                  .focus()
+                  .insertTable({ cols: 2, rows: 2, withHeaderRow: true })
+                  .run()
+              }
+              disabled={!editor}
+            >
+              Insert table
+            </button>
+            <button
+              type="button"
+              onClick={() => editor?.chain().focus().addRowAfter().run()}
+              disabled={!editor || !editor.isActive("table")}
+            >
+              Add row
+            </button>
+            <button
+              type="button"
+              onClick={() => editor?.chain().focus().addColumnAfter().run()}
+              disabled={!editor || !editor.isActive("table")}
+            >
+              Add column
+            </button>
+            <button
+              type="button"
+              onClick={() => editor?.chain().focus().deleteTable().run()}
+              disabled={!editor || !editor.isActive("table")}
+            >
+              Delete table
+            </button>
+          </div>
           <label className="composer-link-control">
             <span>Link URL</span>
             <input
@@ -690,7 +814,15 @@ function FormatButton({
   editor,
   label,
 }: {
-  command: "bold" | "italic" | "bulletList" | "orderedList" | "blockquote";
+  command:
+    | "bold"
+    | "italic"
+    | "strike"
+    | "code"
+    | "codeBlock"
+    | "bulletList"
+    | "orderedList"
+    | "blockquote";
   editor: Editor | null;
   label: string;
 }) {
@@ -704,6 +836,15 @@ function FormatButton({
         break;
       case "italic":
         chain?.toggleItalic().run();
+        break;
+      case "strike":
+        chain?.toggleStrike().run();
+        break;
+      case "code":
+        chain?.toggleCode().run();
+        break;
+      case "codeBlock":
+        chain?.toggleCodeBlock().run();
         break;
       case "bulletList":
         chain?.toggleBulletList().run();
@@ -1088,81 +1229,11 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function sanitizeComposerHtml(
-  input: string,
-  inlineImageSources: Map<string, string>,
-) {
-  const withCidImages = Array.from(inlineImageSources.entries()).reduce(
-    (html, [dataUrl, contentId]) => html.split(dataUrl).join(`cid:${contentId}`),
-    input,
-  );
-
-  if (!DOMPurify.isSupported) {
-    return "";
-  }
-
-  const sanitized = DOMPurify.sanitize(
-    withCidImages,
-    composerSanitizerConfig,
-  ) as string;
-  const document = new DOMParser().parseFromString(sanitized, "text/html");
-
-  for (const anchor of document.querySelectorAll("a[href]")) {
-    const parsed = safeComposerLink(anchor.getAttribute("href") ?? "");
-    if (!parsed) {
-      anchor.removeAttribute("href");
-      anchor.removeAttribute("rel");
-      continue;
-    }
-    anchor.setAttribute("href", parsed.href);
-    anchor.setAttribute("rel", "noreferrer noopener nofollow");
-  }
-
-  for (const image of document.querySelectorAll("img[src]")) {
-    const src = image.getAttribute("src") ?? "";
-    if (!isSafeComposerImageSrc(src)) {
-      image.remove();
-    }
-  }
-
-  return DOMPurify.sanitize(
-    document.body.innerHTML,
-    composerSanitizerConfig,
-  ) as string;
-}
-
-function safeComposerLink(value: string): URL | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
-
-  if (!["http:", "https:", "mailto:"].includes(parsed.protocol)) {
-    return null;
-  }
-  if (parsed.username || parsed.password) {
-    return null;
-  }
-  if (parsed.protocol !== "mailto:" && !parsed.hostname) {
-    return null;
-  }
-
-  return parsed;
-}
-
-function isSafeComposerImageSrc(value: string) {
-  return (
-    /^cid:[A-Za-z0-9_.@-]+$/.test(value) ||
-    /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(value)
-  );
-}
-
 function composerHtmlHasContent(html: string) {
   const document = new DOMParser().parseFromString(html, "text/html");
   return Boolean(
-    document.body.textContent?.trim() || document.querySelector("img[src]"),
+    document.body.textContent?.trim() ||
+      document.querySelector("img[src], table, pre"),
   );
 }
 

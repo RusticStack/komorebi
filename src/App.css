@@ -849,14 +849,30 @@ textarea:disabled {
   padding: 6px 10px;
 }
 
+.composer-toolbar select {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
 .composer-toolbar button.is-active {
   border-color: #5d7567;
   background: #e7eee6;
   color: #2f4d3d;
 }
 
+.composer-compact-control {
+  width: min(140px, 100%);
+}
+
 .composer-link-control {
   width: min(180px, 100%);
+}
+
+.composer-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px;
 }
 
 .composer-editor {
@@ -886,6 +902,60 @@ textarea:disabled {
   padding-left: 12px;
   border-left: 3px solid #9a624f;
   color: #5c5750;
+}
+
+.composer-editor pre {
+  overflow: auto;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #2d2d2d;
+  color: #fffdf9;
+  font-family:
+    "Cascadia Mono",
+    "Consolas",
+    monospace;
+  font-size: 0.86rem;
+}
+
+.composer-editor code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #eee7dc;
+  font-family:
+    "Cascadia Mono",
+    "Consolas",
+    monospace;
+}
+
+.composer-editor pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.composer-editor table {
+  width: 100%;
+  margin: 8px 0 12px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.composer-editor th,
+.composer-editor td {
+  min-width: 64px;
+  padding: 8px;
+  border: 1px solid #d8d0c4;
+  vertical-align: top;
+}
+
+.composer-editor th {
+  background: #f3eee6;
+  font-weight: 700;
+}
+
+.composer-editor mark {
+  border-radius: 3px;
+  padding: 0 2px;
 }
 
 .composer-editor img {

@@ -39,7 +39,7 @@ Migration `005_drafts_and_sent_mail.sql` adds:
 - account id
 - subject
 - To/CC/BCC/Reply-To JSON
-- text and sanitized HTML bodies
+- text and sanitized HTML bodies, including the reviewed composer rich-formatting subset
 - attachment id JSON
 - reply/reference metadata
 - autosave revision and timestamps
@@ -70,7 +70,7 @@ Discarded or sent drafts intentionally clear private content. The row remains on
 
 Autosave never accepts raw filesystem paths or attachment filenames; only backend attachment ids can be persisted.
 
-The frontend TipTap composer debounces autosave and also exposes a manual Save draft action. It sends sanitized editor HTML and plain text to Rust; the backend wraps HTML in `DraftHtml` and rejects script tags, JavaScript URLs, inline event handlers, oversized payloads, invalid ids, unknown accounts, and unknown staged attachment ids.
+The frontend TipTap composer debounces autosave and also exposes a manual Save draft action. It sends sanitized editor HTML and plain text to Rust; the backend wraps HTML in `DraftHtml` and rejects script tags, JavaScript URLs, inline event handlers, oversized payloads, invalid ids, unknown accounts, and unknown staged attachment ids. Rich formatting is allowed only after `src/mail/composer/composerRichText.ts` reduces it to the supported table, code, alignment, font, color, and highlight subset.
 
 The same draft id can be autosaved repeatedly while active. Autosaving a discarded or sent draft is rejected instead of reviving stale private content.
 
@@ -139,6 +139,7 @@ Microsoft Support also documents that duplicate Sent items happen when a server 
 `src-tauri/src/composer.rs` tests cover:
 
 - Autosave command mapping.
+- Rich composer HTML autosave persistence.
 - Staged attachment storage under backend-generated app-data paths.
 - Unsafe attachment content denial.
 - Fake SMTP send through the typed composer wrapper.
@@ -177,6 +178,7 @@ Keep this document synchronized with:
 - `src-tauri/migrations/006_composer_attachments.sql`
 - `src-tauri/migrations/007_recent_recipients.sql`
 - `src/mail/composer/TipTapComposer.tsx`
+- `src/mail/composer/composerRichText.ts`
 - `docs/architecture/smtp-send.md`
 - `docs/architecture/schema.md`
 - `README.md`

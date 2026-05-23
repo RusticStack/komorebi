@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, TipTap composer MVP, and local recent-recipient autocomplete implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, TipTap composer with tested rich formatting, and local recent-recipient autocomplete implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -11,6 +11,7 @@ The code source of truth is:
 - `src/mail/shell/mailShellDataSource.ts`
 - `src/mail/shell/MailClientShell.tsx`
 - `src/mail/composer/TipTapComposer.tsx`
+- `src/mail/composer/composerRichText.ts`
 - `src/App.tsx`
 - `src/App.css`
 - `src-tauri/src/mail_shell.rs`
@@ -147,7 +148,7 @@ The composer drawer uses TipTap through `src/mail/composer/TipTapComposer.tsx`. 
 - address parsing/validation for send
 - duplicate-recipient normalization across To/CC/BCC before draft save or send
 - keyboard-accessible local recent-recipient autocomplete for To/CC/BCC
-- basic formatting: bold, italic, bullet list, numbered list, block quote
+- formatting controls: bold, italic, strikethrough, inline code, code block, bullet list, numbered list, block quote, alignment, tables, font family, font size, text color, and highlights
 - safe link application/removal for `http`, `https`, and `mailto` URLs without embedded credentials
 - attachment picker using the browser `File` API
 - inline image picker for raster image types, inserted into the editor as a data URL and persisted/sent as a backend staged attachment CID
@@ -165,6 +166,8 @@ The Tauri runtime wiring is:
 - `list_recent_recipients` for account-scoped local autocomplete suggestions from SQLite
 
 The frontend never receives attachment storage paths and never sends local filesystem paths to Rust. It sends user-selected bytes from the WebView file input to the staging command. The backend validates MIME/type/size and owns the final app-data path.
+
+Rich composer HTML is centralized in `src/mail/composer/composerRichText.ts`. The TipTap extension list and sanitizer allow only the supported strikethrough/table/code/span/mark/link/image subset, restrict inline styles to whitelisted `text-align`, `color`, `background-color`, `font-size`, and `font-family` values, normalize table span attributes, rewrite staged inline image data URLs to CIDs, and remove unsafe links, event handlers, scripts, remote image URLs, and unsupported CSS before autosave or send.
 
 Recent-recipient autocomplete is local-only. Confirmed sends update the `recent_recipients` table in the local cache after SMTP acceptance; suggestions expose only display name, email address, use count, and last-used timestamp. Duplicate recipients are removed with first occurrence winning in To, then CC, then BCC order, and the composer shows a non-error notice while preserving malformed-address validation errors.
 
@@ -206,6 +209,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - safe message detail rendering with sanitized HTML, remote image blocking, inert attachment metadata, and disabled reply/forward/remote-content controls
 - local fixture search and FTS-backed search with debounce, cancellation, result origin labels, no-match state, no-index state, and retryable error state
 - TipTap composer address validation, duplicate recipient handling, keyboard autocomplete from recent recipients, signature insertion, draft save, attachment staging, inline image CID conversion, send command request shape, send progress, and validation errors
+- TipTap rich formatting extension output and sanitizer behavior in `src/mail/composer/TipTapComposer.test.tsx`
 - message selection and reader rendering
 - keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
 - 10,000-message virtualized rendering with bounded DOM row count and stable row state during scroll
@@ -214,6 +218,8 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - loading/error shell states
 
 Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
+
+Rust composer and SMTP tests cover sanitized rich composer HTML persistence and outgoing MIME serialization for strikethrough, tables, code blocks, font styles, colors, highlights, and alignment.
 
 No test uses real mailbox data, real credentials, or live provider connections.
 
@@ -235,6 +241,7 @@ Keep this document synchronized with:
 - `src/mail/shell/mailShellDataSource.ts`
 - `src/mail/shell/MailClientShell.tsx`
 - `src/mail/composer/TipTapComposer.tsx`
+- `src/mail/composer/composerRichText.ts`
 - `src-tauri/src/composer.rs`
 - `src/App.test.tsx`
 - `docs/architecture/message-rendering.md`
