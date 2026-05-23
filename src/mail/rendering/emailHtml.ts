@@ -52,7 +52,8 @@ const EMAIL_SANITIZER_CONFIG: Config = {
 };
 
 const REMOTE_RESOURCE_PATTERN =
-  /\b(?:background|poster|src|srcset)\s*=\s*["']?\s*(?:https?:|\/\/|cid:|data:)/gi;
+  /\b(?:background|poster|src|srcset)\s*=\s*["']?\s*(?:https?:|\/\/|cid:|data:)|(?:@import\s+(?:url\()?["']?\s*(?:https?:|\/\/|cid:|data:)|url\s*\(\s*["']?\s*(?:https?:|\/\/|cid:|data:))/gi;
+const RESERVED_KOMOREBI_DATA_ATTRIBUTE = /^data-komorebi-/i;
 
 export function sanitizeEmailHtml(input: string): SanitizedEmailHtml {
   const blockedRemoteResourceCount = countBlockedResourceReferences(input);
@@ -69,6 +70,7 @@ export function sanitizeEmailHtml(input: string): SanitizedEmailHtml {
 
   const sanitized = DOMPurify.sanitize(input, EMAIL_SANITIZER_CONFIG) as string;
   const document = new DOMParser().parseFromString(sanitized, "text/html");
+  stripReservedKomorebiDataAttributes(document);
   const links = rewriteLinks(document);
 
   const html = DOMPurify.sanitize(
@@ -83,6 +85,16 @@ export function sanitizeEmailHtml(input: string): SanitizedEmailHtml {
     remoteContentBlocked: blockedRemoteResourceCount > 0,
     blockedRemoteResourceCount,
   };
+}
+
+function stripReservedKomorebiDataAttributes(document: Document) {
+  for (const element of document.querySelectorAll("*")) {
+    for (const attribute of Array.from(element.attributes)) {
+      if (RESERVED_KOMOREBI_DATA_ATTRIBUTE.test(attribute.name)) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  }
 }
 
 export function isSafeOpenableUrl(value: string): URL | null {

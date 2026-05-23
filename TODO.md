@@ -183,9 +183,9 @@ Purpose: create evidence that the client works without risking real mailboxes. R
 
 ### Security Regression Tests
 
-- [ ] Test HTML sanitization bypass cases.
-  Evidence: `src/mail/rendering/SafeEmailBody.test.tsx` covers current XSS fixtures, but there is no broader bypass corpus for CSS abuse variants, SVG/MathML edge cases beyond the current fixtures, malformed parser cases, and post-sanitization mutation cases.
-  Acceptance: script tags, event handlers, `javascript:` URLs, data URLs where disallowed, CSS abuse, SVG/MathML abuse, and post-sanitization mutation cases are covered.
+- [x] Test HTML sanitization bypass cases.
+  Evidence: `src/mail/rendering/xssFixtures.ts` now includes a categorized sanitizer bypass corpus for mixed-case and broken script tags, mixed-case event handlers, encoded and null-split `javascript:` URLs, disallowed `data:` URLs, CSS `@import` and `url(...)` abuse, SVG `foreignObject`/`xlink` payloads, MathML annotation payloads, malformed unclosed markup, known post-sanitization mutation shapes, and attacker-supplied `data-komorebi-*` metadata. `src/mail/rendering/emailHtml.ts` strips reserved Komorebi link metadata before link rewriting and counts remote CSS imports/URLs before style removal. `src/mail/rendering/SafeEmailBody.test.tsx` asserts the corpus removes hostile tags/attributes/values, remains safe after browser insertion and serialization, blocks CSS-hidden remote resources, and refuses to delegate clicks from attacker-supplied internal link metadata.
+  Acceptance: complete as of 2026-05-23. Script tags, event handlers, `javascript:` URLs, data URLs where disallowed, CSS abuse, SVG/MathML abuse, malformed parser cases, and post-sanitization mutation cases are covered.
 - [ ] Test attachment path traversal and unsafe open paths.
   Evidence: `src-tauri/src/attachment_safety.rs` unit tests cover malicious sender filenames, path traversal in storage IDs, and auto-open denial. Real download/open commands and archive extraction do not exist yet, so integration tests for filesystem writes and opener denial remain missing.
   Acceptance: when attachment commands exist, malicious filenames cannot escape the app directory, overwrite existing files unexpectedly, or auto-open executable content.
