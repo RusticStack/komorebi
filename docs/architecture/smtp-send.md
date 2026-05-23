@@ -135,13 +135,19 @@ This is not full Sent-folder synchronization. Provider-aware Sent-copy planning 
 `src-tauri/src/composer.rs` tests cover the frontend-callable send wrapper with fake SMTP/auth and staged attachments.
 They also cover duplicate recipient normalization and local recent-recipient persistence after confirmed fake SMTP send.
 
+`src-tauri/tests/protocol_fixtures.rs` tests cover a socket-level SMTP fixture for future transport-adapter work:
+
+- EHLO capability advertisement.
+- AUTH success and AUTH failure denial.
+- MAIL FROM, RCPT TO, DATA, and QUIT command flow.
+- Captured message DATA payloads for assertions without a live SMTP server.
+
 No test uses a live mailbox, live SMTP server, real account, or real credential.
 
 ## Not Implemented
 
 - Draft reload/reopen UI after restart.
 - IMAP APPEND worker for pending Sent uploads.
-- SMTP protocol-level fake server.
 - Live account setup and live SMTP integration tests.
 
 ## Documentation Sync

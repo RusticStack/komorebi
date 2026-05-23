@@ -27,6 +27,7 @@ Implemented now:
 - Periodic folder refresh after IDLE timeout.
 - Clean stop reports for app-exit cancellation and account removal.
 - Fake IMAP server fixtures that simulate initial sync, incremental sync, flag changes, expunges, UIDVALIDITY reset, IDLE wakeups, IDLE timeout refresh, polling fallback, reconnect, backoff, account removal, and cancellation.
+- Local-loopback protocol IMAP fixtures in `src-tauri/tests/protocol_fixtures.rs` that simulate forced reconnect after greeting, LOGIN auth failure, SELECT metadata, expunge notifications, IDLE EXISTS/EXPUNGE updates, and a 10,000 UID mailbox without a real account.
 - Stable message ids shared with the MIME normalization boundary.
 - Server flag normalization for `\Seen`, `\Flagged`, `\Answered`, `\Draft`, `\Deleted`, `\Recent`, and provider/custom keywords.
 - Folder attribute normalization for IMAP LIST/XLIST/SPECIAL-USE style attributes, including supported special-use detection and preservation of unknown provider attributes.
@@ -35,7 +36,6 @@ Not implemented by this task:
 
 - Live `async-imap` network adapter.
 - Live adapter calls into MIME normalization and attachment extraction/storage writes.
-- SMTP send fixtures.
 - Frontend account setup or sync-status UI.
 
 ## State Flow
@@ -145,6 +145,14 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - Unknown account rejection before server access.
 - Standard and custom IMAP flag normalization/preservation.
 - Special-use folder detection, unknown provider attribute preservation, and sync of messages in custom folders.
+
+`src-tauri/tests/protocol_fixtures.rs` tests cover a socket-level IMAP fixture for future adapter work:
+
+- Forced reconnect after the server drops a connection post-greeting.
+- LOGIN auth failure without credential leakage.
+- Large mailbox SEARCH over 10,000 UIDs and high-UID FETCH.
+- SELECT metadata with UIDVALIDITY, UIDNEXT, EXISTS, and EXPUNGE.
+- IDLE continuation, EXISTS wakeup, EXPUNGE notification, and clean DONE completion.
 
 No test uses a real mailbox or real credentials.
 
