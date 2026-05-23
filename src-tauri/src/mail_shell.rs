@@ -34,6 +34,10 @@ pub struct MailShellAccount {
     pub provider_kind: String,
     pub auth_kind: String,
     pub status: String,
+    pub status_updated_at: Option<String>,
+    pub last_successful_sync_at: Option<String>,
+    pub status_message: Option<String>,
+    pub status_action: Option<String>,
     pub unread_count: u32,
     pub signature_html: Option<String>,
     pub local_preferences: MailShellAccountLocalPreferences,
@@ -234,7 +238,8 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
            CASE
              WHEN accounts.auth_status = 'reconnect_needed' THEN 'reconnect-needed'
              WHEN json_extract(sync_worker_status.value_json, '$.state') = 'syncing' THEN 'syncing'
-             WHEN json_extract(sync_worker_status.value_json, '$.state') = 'error' THEN 'offline'
+             WHEN json_extract(sync_worker_status.value_json, '$.state') = 'error' THEN 'error'
+             WHEN json_extract(sync_worker_status.value_json, '$.state') = 'idle' THEN 'idle'
              WHEN accounts.auth_status = 'connected'
               AND EXISTS (
                 SELECT 1
@@ -242,9 +247,21 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
                 WHERE folders.account_id = accounts.id
                   AND folders.sync_state = 'syncing'
               ) THEN 'syncing'
-             WHEN accounts.auth_status = 'connected' THEN 'connected'
+             WHEN accounts.auth_status = 'connected' THEN 'idle'
              ELSE 'offline'
            END AS shell_status,
+           CASE
+             WHEN json_type(sync_worker_status.value_json, '$.updatedAt') IN ('integer', 'real')
+             THEN strftime('%Y-%m-%dT%H:%M:%SZ', json_extract(sync_worker_status.value_json, '$.updatedAt'), 'unixepoch')
+             ELSE NULL
+           END AS status_updated_at,
+           CASE
+             WHEN json_type(sync_worker_status.value_json, '$.lastSuccessfulSyncAt') IN ('integer', 'real')
+             THEN strftime('%Y-%m-%dT%H:%M:%SZ', json_extract(sync_worker_status.value_json, '$.lastSuccessfulSyncAt'), 'unixepoch')
+             ELSE NULL
+           END AS last_successful_sync_at,
+           json_extract(sync_worker_status.value_json, '$.message') AS status_message,
+           json_extract(sync_worker_status.value_json, '$.action') AS status_action,
            COALESCE(
              (
                SELECT SUM(folders.unread_count)
@@ -280,10 +297,14 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
             provider_kind: row.get(4)?,
             auth_kind: row.get(5)?,
             status: row.get(6)?,
-            unread_count: checked_u32(row.get::<_, i64>(7)?, "account unread count")?,
-            signature_html: row.get(8)?,
+            status_updated_at: row.get(7)?,
+            last_successful_sync_at: row.get(8)?,
+            status_message: row.get(9)?,
+            status_action: row.get(10)?,
+            unread_count: checked_u32(row.get::<_, i64>(11)?, "account unread count")?,
+            signature_html: row.get(12)?,
             local_preferences: MailShellAccountLocalPreferences {
-                include_in_unified_inbox: row.get::<_, i64>(9)? != 0,
+                include_in_unified_inbox: row.get::<_, i64>(13)? != 0,
             },
         })
     })?;
@@ -783,7 +804,11 @@ mod tests {
                     display_name: Some("Personal".to_string()),
                     provider_kind: "gmail".to_string(),
                     auth_kind: "oauth2".to_string(),
-                    status: "connected".to_string(),
+                    status: "idle".to_string(),
+                    status_updated_at: None,
+                    last_successful_sync_at: None,
+                    status_message: None,
+                    status_action: None,
                     unread_count: 1,
                     signature_html: Some("<p>Personal signature</p>".to_string()),
                     local_preferences: MailShellAccountLocalPreferences {
@@ -798,6 +823,10 @@ mod tests {
                     provider_kind: "microsoft".to_string(),
                     auth_kind: "oauth2".to_string(),
                     status: "syncing".to_string(),
+                    status_updated_at: None,
+                    last_successful_sync_at: None,
+                    status_message: None,
+                    status_action: None,
                     unread_count: 2,
                     signature_html: None,
                     local_preferences: MailShellAccountLocalPreferences {
@@ -859,6 +888,49 @@ mod tests {
             .unwrap();
 
         assert_eq!(personal.status, "syncing");
+        assert_eq!(
+            personal.status_updated_at.as_deref(),
+            Some("2026-05-23T16:00:00Z")
+        );
+    }
+
+    #[test]
+    fn account_sync_worker_status_exposes_redacted_detail_and_last_success() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+        connection
+            .execute(
+                "INSERT INTO settings (key, value_type, value_json)
+                 VALUES (
+                   'account:acct_personal:sync_worker_status',
+                   'object',
+                   '{\"state\":\"error\",\"updatedAt\":1779552060,\"lastSuccessfulSyncAt\":1779548400,\"message\":\"Reauthentication is required for this account.\",\"action\":\"reauthenticate\"}'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let snapshot = load_mail_shell_from_connection(&connection).unwrap();
+        let personal = snapshot
+            .accounts
+            .iter()
+            .find(|account| account.id == "acct_personal")
+            .unwrap();
+
+        assert_eq!(personal.status, "error");
+        assert_eq!(
+            personal.status_updated_at.as_deref(),
+            Some("2026-05-23T16:01:00Z")
+        );
+        assert_eq!(
+            personal.last_successful_sync_at.as_deref(),
+            Some("2026-05-23T15:00:00Z")
+        );
+        assert_eq!(
+            personal.status_message.as_deref(),
+            Some("Reauthentication is required for this account.")
+        );
+        assert_eq!(personal.status_action.as_deref(), Some("reauthenticate"));
     }
 
     #[test]

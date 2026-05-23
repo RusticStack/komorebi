@@ -191,7 +191,7 @@ describe("Tauri capabilities", () => {
     expect(devCsp).toContain("frame-ancestors 'none'");
   });
 
-  it("keeps the main window limited to reviewed mail-shell, composer, and account commands", () => {
+  it("keeps the main window limited to reviewed mail-shell, composer, account commands, and sync status events", () => {
     const defaultCapability = readCapability("default.json");
 
     expect(defaultCapability.identifier).toBe("default");
@@ -199,6 +199,8 @@ describe("Tauri capabilities", () => {
     expect(defaultCapability.webviews).toBeUndefined();
     expect(defaultCapability.remote).toBeUndefined();
     expect(defaultCapability.permissions).toEqual([
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
       "allow-load-mail-shell",
       "allow-search-mail",
       "allow-autosave-composer-draft",

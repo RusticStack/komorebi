@@ -35,13 +35,42 @@
   },
   "mail": {
     "account": {
+      "actions": {
+        "details": "Detalhes",
+        "reconnect": "Religar"
+      },
       "add": "Adicionar conta",
       "aria": "Conta {{label}}, {{email}}, {{unread}} por ler, {{status}}",
+      "detailsAria": "Detalhes de sincronizacao",
+      "lastSync": "Ultima sincronizacao: {{time}}",
+      "lastSyncNever": "nunca",
       "status": {
         "connected": "ligada",
+        "error": "erro",
+        "idle": "em espera",
         "offline": "offline",
         "reconnect-needed": "reautenticacao necessaria",
         "syncing": "a sincronizar"
+      },
+      "statusDrawer": {
+        "aria": "Estado da conta",
+        "detailAria": "Detalhe do estado de sincronizacao",
+        "errorMessage": "A sincronizacao nao terminou. Reveja as definicoes da conta ou tente depois de verificar a ligacao.",
+        "eyebrow": "Estado da conta",
+        "genericReconnectHint": "Introduza a palavra-passe ou palavra-passe de aplicacao de substituicao para religar esta conta IMAP/SMTP generica.",
+        "idleMessage": "Esta conta esta ligada e aguarda o proximo ciclo de sincronizacao.",
+        "lastStatusUpdate": "Ultima atualizacao de estado",
+        "lastSuccessfulSync": "Ultima sincronizacao com sucesso",
+        "oauthReconnectHint": "Religar abre o fluxo OAuth do fornecedor no navegador. Os tokens ficam no cofre de credenciais do backend.",
+        "offlineMessage": "Esta conta esta offline. Verifique a rede ou as definicoes da conta.",
+        "reconnectHeading": "Religar conta",
+        "reconnectNeededMessage": "E necessaria reautenticacao antes de a sincronizacao continuar.",
+        "reconnectStarted": "Religacao concluida. A sincronizacao de correio vai reiniciar para esta conta.",
+        "reconnecting": "A religar",
+        "secretRequired": "Introduza o segredo de substituicao antes de religar.",
+        "status": "Estado",
+        "statusUpdateUnavailable": "nao reportado",
+        "syncingMessage": "Esta conta esta a sincronizar agora."
       }
     },
     "attachments": {

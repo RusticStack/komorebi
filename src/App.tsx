@@ -18,6 +18,7 @@ import {
   stageComposerAttachmentFromTauri,
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
+  subscribeToSyncStatusFromTauri,
   testAccountConnectionFromTauri,
   updateAccountSettingsFromTauri,
 } from "./mail/shell/mailShellDataSource";
@@ -55,6 +56,9 @@ function App(props: MailClientShellProps) {
   const runtimeGetAccountAuthStatus = isRuntime
     ? getAccountAuthStatusFromTauri
     : undefined;
+  const runtimeSyncStatusSubscription = isRuntime
+    ? subscribeToSyncStatusFromTauri
+    : undefined;
 
   return (
     <MailClientShell
@@ -85,6 +89,9 @@ function App(props: MailClientShellProps) {
       testAccountConnection={props.testAccountConnection ?? runtimeTestAccount}
       getAccountAuthStatus={
         props.getAccountAuthStatus ?? runtimeGetAccountAuthStatus
+      }
+      subscribeToSyncStatus={
+        props.subscribeToSyncStatus ?? runtimeSyncStatusSubscription
       }
     />
   );

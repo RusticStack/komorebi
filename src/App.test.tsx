@@ -843,6 +843,122 @@ describe("App", () => {
     expect(screen.queryByText("Bulk message 05000")).not.toBeInTheDocument();
   });
 
+  it("shows account sync detail and launches OAuth reconnect from the status surface", async () => {
+    const statusMail: MailShellData = {
+      ...fixtureMail,
+      accounts: [
+        {
+          ...fixtureMail.accounts[0],
+          authKind: "oauth2",
+          lastSuccessfulSyncAt: "2026-05-23T15:00:00Z",
+          providerKind: "gmail",
+          status: "reconnect-needed",
+          statusAction: "reauthenticate",
+          statusMessage: "Reauthentication is required for this account.",
+          statusUpdatedAt: "2026-05-23T16:01:00Z",
+        },
+      ],
+      folders: fixtureMail.folders.filter(
+        (folder) => folder.accountId === "acct_personal",
+      ),
+      messages: fixtureMail.messages.filter(
+        (message) => message.accountId === "acct_personal",
+      ),
+    };
+    const startOAuthAccountReauth = vi.fn().mockResolvedValue({
+      account: {
+        authKind: "oauth2",
+        authStatus: "connected",
+        displayEmail: "person@example.com",
+        displayName: "Personal",
+        id: "acct_personal",
+        providerKind: "gmail",
+        username: "person@example.com",
+      },
+      credentialStored: true,
+    });
+
+    render(
+      <App
+        initialData={statusMail}
+        startOAuthAccountReauth={startOAuthAccountReauth}
+      />,
+    );
+
+    expect(screen.getAllByText(/Last sync:/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+    const statusDialog = screen.getByRole("dialog", { name: "Account status" });
+    expect(
+      within(statusDialog).getByText(
+        "Reauthentication is required for this account.",
+      ),
+    ).toBeVisible();
+    expect(within(statusDialog).getByText("Last successful sync")).toBeVisible();
+
+    fireEvent.click(
+      within(statusDialog).getByRole("button", { name: "Reconnect" }),
+    );
+
+    await waitFor(() =>
+      expect(startOAuthAccountReauth).toHaveBeenCalledWith({
+        accountId: "acct_personal",
+        clientId: null,
+      }),
+    );
+  });
+
+  it("uses the generic credential path when reconnecting a generic account from status detail", async () => {
+    const statusMail: MailShellData = {
+      accounts: [
+        {
+          authKind: "app_password",
+          email: "generic@example.com",
+          id: "acct_generic",
+          label: "Generic",
+          providerKind: "generic_imap_smtp",
+          signatureHtml: null,
+          status: "error",
+          statusAction: "reauthenticate",
+          statusMessage: "Reauthentication is required for this account.",
+          unreadCount: 0,
+        },
+      ],
+      folders: [],
+      messages: [],
+    };
+    const reauthAccount = vi.fn().mockResolvedValue({
+      account: {
+        authKind: "app_password",
+        authStatus: "connected",
+        displayEmail: "generic@example.com",
+        displayName: "Generic",
+        id: "acct_generic",
+        providerKind: "generic_imap_smtp",
+        username: "generic@example.com",
+      },
+      credentialStored: true,
+    });
+
+    render(<App initialData={statusMail} reauthAccount={reauthAccount} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    const statusDialog = screen.getByRole("dialog", { name: "Account status" });
+    fireEvent.change(within(statusDialog).getByLabelText("Replacement secret"), {
+      target: { value: "new-app-password" },
+    });
+    fireEvent.click(
+      within(statusDialog).getByRole("button", { name: "Reconnect" }),
+    );
+
+    await waitFor(() =>
+      expect(reauthAccount).toHaveBeenCalledWith({
+        accountId: "acct_generic",
+        secret: "new-app-password",
+      }),
+    );
+  });
+
   it("loads real shell data through the cache data source and preserves selection when scope still contains it", async () => {
     const loadMailShellData = vi.fn().mockResolvedValue(fixtureMail);
 
@@ -874,6 +990,54 @@ describe("App", () => {
     expect(
       screen.getByRole("region", { name: "No selected message" }),
     ).toBeVisible();
+  });
+
+  it("refreshes the shell snapshot when the backend sync status event stream updates", async () => {
+    let statusHandler: ((payload: unknown) => void) | null = null;
+    const updatedMail: MailShellData = {
+      ...fixtureMail,
+      accounts: fixtureMail.accounts.map((account) =>
+        account.id === "acct_personal"
+          ? {
+              ...account,
+              lastSuccessfulSyncAt: "2026-05-23T15:00:00Z",
+              status: "reconnect-needed",
+              statusAction: "reauthenticate",
+              statusMessage: "Reauthentication is required for this account.",
+              statusUpdatedAt: "2026-05-23T16:01:00Z",
+            }
+          : account,
+      ),
+    };
+    const loadMailShellData = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureMail)
+      .mockResolvedValueOnce(updatedMail);
+    const unsubscribe = vi.fn();
+    const subscribeToSyncStatus = vi.fn((handler: (payload: unknown) => void) => {
+      statusHandler = handler;
+      return unsubscribe;
+    });
+
+    render(
+      <App
+        loadMailShellData={loadMailShellData}
+        subscribeToSyncStatus={subscribeToSyncStatus}
+      />,
+    );
+
+    expect(await screen.findByText("Roadmap review")).toBeVisible();
+    expect(subscribeToSyncStatus).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      statusHandler?.({
+        accountId: "acct_personal",
+        status: { state: "error", updatedAt: 1779552060 },
+      });
+    });
+
+    await waitFor(() => expect(loadMailShellData).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText(/Last sync:/).length).toBeGreaterThan(0);
   });
 
   it("saves account settings through the typed command and reloads the cache snapshot", async () => {

@@ -29,7 +29,10 @@ use crate::{
         OAuthHttpClient, ReqwestOAuthHttpClient,
     },
     schema::{apply_migrations, SchemaMigrationError},
-    sync_scheduler::{store_account_oauth_client_config, BackgroundSyncScheduler},
+    sync_scheduler::{
+        load_account_oauth_client_config, store_account_oauth_client_config,
+        BackgroundSyncScheduler,
+    },
     token_lifecycle::SecretString,
 };
 
@@ -55,7 +58,7 @@ pub struct OAuthAccountSetupRequest {
 #[serde(rename_all = "camelCase")]
 pub struct OAuthAccountReauthRequest {
     pub account_id: String,
-    pub client_id: String,
+    pub client_id: Option<String>,
     pub timeout_seconds: Option<u64>,
 }
 
@@ -294,9 +297,9 @@ pub fn start_oauth_account_reauth_from_connection(
     now: u64,
 ) -> Result<AccountSetupResponse, OAuthAccountCommandError> {
     validate_entity_id("account_id", &request.account_id)?;
-    let client_id = normalize_client_id(request.client_id)?;
     let timeout = validate_timeout(request.timeout_seconds)?;
     let account = load_oauth_reauth_context(connection, &request.account_id)?;
+    let client_id = resolve_reauth_client_id(connection, &request.account_id, request.client_id)?;
     let refresh_token = run_loopback_token_flow(
         receiver,
         browser,
@@ -324,6 +327,28 @@ pub fn start_oauth_account_reauth_from_connection(
     )
     .map_err(|error| OAuthAccountCommandError::new(error.reason))?;
     Ok(response)
+}
+
+fn resolve_reauth_client_id(
+    connection: &Connection,
+    account_id: &str,
+    requested_client_id: Option<String>,
+) -> Result<String, OAuthAccountCommandError> {
+    if let Some(client_id) = requested_client_id {
+        if !client_id.trim().is_empty() {
+            return normalize_client_id(client_id);
+        }
+    }
+
+    let stored = load_account_oauth_client_config(connection, account_id)
+        .map_err(|error| OAuthAccountCommandError::new(error.reason))?
+        .ok_or_else(|| {
+            OAuthAccountCommandError::new(
+                "OAuth client configuration is missing; enter the OAuth client ID in settings",
+            )
+        })?;
+
+    normalize_client_id(stored.client_id)
 }
 
 fn run_loopback_token_flow(
@@ -1027,7 +1052,7 @@ mod tests {
             &http,
             OAuthAccountReauthRequest {
                 account_id: "acct_microsoft".into(),
-                client_id: "microsoft-client-id".into(),
+                client_id: Some("microsoft-client-id".into()),
                 timeout_seconds: Some(10),
             },
             NOW,
@@ -1041,6 +1066,42 @@ mod tests {
                 .map(String::as_str),
             Some("refresh-token"),
         );
+    }
+
+    #[test]
+    fn oauth_reauth_can_reuse_stored_client_id_for_status_reconnect() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        let (receiver, browser, http) = fake_flow(FakeCallback::Code);
+        start_oauth_account_setup_from_connection(
+            &connection,
+            &mut credentials,
+            &receiver,
+            &browser,
+            &http,
+            setup_request("gmail"),
+            NOW,
+        )
+        .expect("seed oauth account");
+
+        let (receiver, browser, http) = fake_flow(FakeCallback::Code);
+        start_oauth_account_reauth_from_connection(
+            &connection,
+            &mut credentials,
+            &receiver,
+            &browser,
+            &http,
+            OAuthAccountReauthRequest {
+                account_id: "acct_gmail".into(),
+                client_id: None,
+                timeout_seconds: Some(10),
+            },
+            NOW,
+        )
+        .expect("reauth succeeds with stored client id");
+
+        assert_eq!(browser.opened_urls.borrow().len(), 1);
+        assert!(browser.opened_urls.borrow()[0].contains("gmail-client-id"));
     }
 
     #[test]

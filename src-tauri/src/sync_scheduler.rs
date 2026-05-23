@@ -10,6 +10,7 @@ use std::{
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 use crate::{
     account_connection::{AccountConnectionTestError, MailTransportSecurity},
@@ -39,6 +40,7 @@ const DEFAULT_MAX_FOLDER_WORKERS_PER_ACCOUNT: usize = 6;
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(29 * 60);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const WORKER_JOIN_POLL: Duration = Duration::from_millis(250);
+pub const SYNC_STATUS_EVENT_NAME: &str = "komorebi://sync-status";
 
 #[derive(Debug, Clone, Copy)]
 pub struct SyncSchedulerOptions {
@@ -74,7 +76,20 @@ pub struct StoredSyncWorkerStatus {
     pub state: String,
     pub updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_successful_sync_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusEvent {
+    pub account_id: String,
+    pub status: StoredSyncWorkerStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +108,33 @@ impl SyncWorkerState {
             Self::Error => "error",
             Self::Stopped => "stopped",
         }
+    }
+}
+
+pub trait SyncStatusEventEmitter: Send + Sync {
+    fn emit_sync_status(&self, event: SyncStatusEvent);
+}
+
+#[derive(Default)]
+struct NoopSyncStatusEventEmitter;
+
+impl SyncStatusEventEmitter for NoopSyncStatusEventEmitter {
+    fn emit_sync_status(&self, _event: SyncStatusEvent) {}
+}
+
+pub struct TauriSyncStatusEventEmitter {
+    app: tauri::AppHandle,
+}
+
+impl TauriSyncStatusEventEmitter {
+    pub fn new(app: tauri::AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+impl SyncStatusEventEmitter for TauriSyncStatusEventEmitter {
+    fn emit_sync_status(&self, event: SyncStatusEvent) {
+        let _ = self.app.emit(SYNC_STATUS_EVENT_NAME, event);
     }
 }
 
@@ -181,6 +223,7 @@ pub struct BackgroundSyncScheduler {
     inner: Arc<Mutex<SchedulerState>>,
     options: SyncSchedulerOptions,
     account_limiter: Arc<ConcurrencyLimiter>,
+    status_emitter: Arc<Mutex<Arc<dyn SyncStatusEventEmitter>>>,
 }
 
 impl Default for BackgroundSyncScheduler {
@@ -195,7 +238,15 @@ impl BackgroundSyncScheduler {
             inner: Arc::new(Mutex::new(SchedulerState::default())),
             options,
             account_limiter: Arc::new(ConcurrencyLimiter::new(options.max_account_workers)),
+            status_emitter: Arc::new(Mutex::new(Arc::new(NoopSyncStatusEventEmitter))),
         }
+    }
+
+    pub fn set_status_emitter(&self, emitter: Arc<dyn SyncStatusEventEmitter>) {
+        *self
+            .status_emitter
+            .lock()
+            .expect("sync status emitter lock poisoned") = emitter;
     }
 
     pub fn start_all_configured_accounts(
@@ -283,12 +334,13 @@ impl BackgroundSyncScheduler {
         let mut connection = Connection::open(&cache_path)?;
         apply_migrations(&mut connection)?;
         if !account_is_sync_eligible(&connection, account_id)? {
-            write_sync_worker_status(
+            let status = write_sync_worker_status(
                 &connection,
                 account_id,
                 SyncWorkerState::Stopped,
                 Some("account is not active"),
             )?;
+            emit_sync_status(self.status_emitter().as_ref(), account_id, status);
             return Ok(false);
         }
 
@@ -299,6 +351,7 @@ impl BackgroundSyncScheduler {
             cancellation: cancellation.clone(),
             options: self.options,
             account_limiter: Arc::clone(&self.account_limiter),
+            status_emitter: self.status_emitter(),
         };
         let handle = launcher.spawn(job);
 
@@ -358,6 +411,14 @@ impl BackgroundSyncScheduler {
             .workers
             .len()
     }
+
+    fn status_emitter(&self) -> Arc<dyn SyncStatusEventEmitter> {
+        let emitter = self
+            .status_emitter
+            .lock()
+            .expect("sync status emitter lock poisoned");
+        Arc::clone(&*emitter)
+    }
 }
 
 #[derive(Default)]
@@ -394,6 +455,7 @@ struct AccountWorkerJob {
     cancellation: SyncCancellationToken,
     options: SyncSchedulerOptions,
     account_limiter: Arc<ConcurrencyLimiter>,
+    status_emitter: Arc<dyn SyncStatusEventEmitter>,
 }
 
 fn run_live_account_worker(job: AccountWorkerJob) {
@@ -405,6 +467,7 @@ fn run_live_account_worker(job: AccountWorkerJob) {
                 &job.account_id,
                 SyncWorkerState::Stopped,
                 Some("sync worker was cancelled before start"),
+                job.status_emitter.as_ref(),
             );
             return;
         }
@@ -414,6 +477,7 @@ fn run_live_account_worker(job: AccountWorkerJob) {
                 &job.account_id,
                 SyncWorkerState::Error,
                 Some(&error.to_string()),
+                job.status_emitter.as_ref(),
             );
             return;
         }
@@ -425,6 +489,7 @@ fn run_live_account_worker(job: AccountWorkerJob) {
         &job.account_id,
         SyncWorkerState::Syncing,
         None,
+        job.status_emitter.as_ref(),
     );
 
     let result = run_live_account_worker_inner(&job);
@@ -435,6 +500,7 @@ fn run_live_account_worker(job: AccountWorkerJob) {
                 &job.account_id,
                 SyncWorkerState::Idle,
                 None,
+                job.status_emitter.as_ref(),
             );
         }
         Err(SyncSchedulerError { reason }) if job.cancellation.is_cancelled() => {
@@ -443,6 +509,7 @@ fn run_live_account_worker(job: AccountWorkerJob) {
                 &job.account_id,
                 SyncWorkerState::Stopped,
                 Some(&reason),
+                job.status_emitter.as_ref(),
             );
         }
         Err(error) => {
@@ -451,6 +518,7 @@ fn run_live_account_worker(job: AccountWorkerJob) {
                 &job.account_id,
                 SyncWorkerState::Error,
                 Some(&error.reason),
+                job.status_emitter.as_ref(),
             );
         }
     }
@@ -492,7 +560,9 @@ fn run_live_account_worker_inner(job: &AccountWorkerJob) -> Result<(), SyncSched
         &job.account_id,
         job.options.max_folder_workers_per_account,
     )?;
-    write_sync_worker_status(&connection, &job.account_id, SyncWorkerState::Idle, None)?;
+    let status =
+        write_sync_worker_status(&connection, &job.account_id, SyncWorkerState::Idle, None)?;
+    emit_sync_status(job.status_emitter.as_ref(), &job.account_id, status);
     drop(connection);
 
     let mut handles = folder_remote_ids
@@ -530,6 +600,7 @@ fn spawn_live_folder_worker(job: &AccountWorkerJob, remote_id: String) -> JoinHa
     let account_id = job.account_id.clone();
     let cancellation = job.cancellation.clone();
     let options = job.options;
+    let status_emitter = Arc::clone(&job.status_emitter);
 
     thread::Builder::new()
         .name(format!("komorebi-sync-{}-{}", account_id, remote_id))
@@ -544,6 +615,7 @@ fn spawn_live_folder_worker(job: &AccountWorkerJob, remote_id: String) -> JoinHa
                         &account_id,
                         SyncWorkerState::Error,
                         Some(&error.reason),
+                        status_emitter.as_ref(),
                     );
                 }
             }
@@ -761,6 +833,7 @@ fn refresh_oauth_access_token(
     provider: ProviderKind,
 ) -> Result<SecretString, SyncSchedulerError> {
     let stored = load_account_oauth_client_config(connection, account_id)?.ok_or_else(|| {
+        let _ = mark_reconnect_needed(connection, account_id);
         SyncSchedulerError::new(
             "OAuth client configuration is missing; reauthentication is required",
         )
@@ -775,9 +848,12 @@ fn refresh_oauth_access_token(
 
     match lifecycle.ensure_access_token(account_id, provider, unix_now()) {
         TokenRefreshResult::Ready { grant, .. } => Ok(grant.access_token().clone()),
-        TokenRefreshResult::ReconnectNeeded { .. } => Err(SyncSchedulerError::new(
-            "OAuth refresh failed; reauthentication is required",
-        )),
+        TokenRefreshResult::ReconnectNeeded { .. } => {
+            mark_reconnect_needed(connection, account_id)?;
+            Err(SyncSchedulerError::new(
+                "OAuth refresh failed; reauthentication is required",
+            ))
+        }
     }
 }
 
@@ -929,7 +1005,7 @@ pub fn store_account_oauth_client_config(
     Ok(())
 }
 
-fn load_account_oauth_client_config(
+pub fn load_account_oauth_client_config(
     connection: &Connection,
     account_id: &str,
 ) -> Result<Option<StoredOAuthClientConfig>, SyncSchedulerError> {
@@ -969,10 +1045,13 @@ fn write_sync_status_for_path(
     account_id: &str,
     state: SyncWorkerState,
     message: Option<&str>,
+    status_emitter: &dyn SyncStatusEventEmitter,
 ) -> Result<(), SyncSchedulerError> {
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
-    write_sync_worker_status(&connection, account_id, state, message)
+    let status = write_sync_worker_status(&connection, account_id, state, message)?;
+    emit_sync_status(status_emitter, account_id, status);
+    Ok(())
 }
 
 fn write_sync_worker_status(
@@ -980,12 +1059,22 @@ fn write_sync_worker_status(
     account_id: &str,
     state: SyncWorkerState,
     message: Option<&str>,
-) -> Result<(), SyncSchedulerError> {
+) -> Result<StoredSyncWorkerStatus, SyncSchedulerError> {
     validate_entity_id("account_id", account_id)?;
+    let now = unix_now();
+    let previous = load_previous_sync_worker_status(connection, account_id)?;
+    let detail = classify_status_detail(state, message);
     let status = StoredSyncWorkerStatus {
         state: state.schema_value().to_string(),
-        updated_at: unix_now(),
-        message: message.map(redact_status_message),
+        updated_at: now,
+        last_successful_sync_at: if state == SyncWorkerState::Idle {
+            Some(now)
+        } else {
+            previous.and_then(|status| status.last_successful_sync_at)
+        },
+        message: detail.message,
+        action: detail.action,
+        code: detail.code,
     };
     let value_json = serde_json::to_string(&status)?;
     upsert_setting(
@@ -994,7 +1083,35 @@ fn write_sync_worker_status(
         "object",
         &value_json,
     )?;
-    Ok(())
+    Ok(status)
+}
+
+fn load_previous_sync_worker_status(
+    connection: &Connection,
+    account_id: &str,
+) -> Result<Option<StoredSyncWorkerStatus>, SyncSchedulerError> {
+    let value_json = connection
+        .query_row(
+            "SELECT value_json
+             FROM settings
+             WHERE key = ?1",
+            params![account_sync_worker_status_key(account_id)],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    Ok(value_json.and_then(|value| serde_json::from_str(&value).ok()))
+}
+
+fn emit_sync_status(
+    status_emitter: &dyn SyncStatusEventEmitter,
+    account_id: &str,
+    status: StoredSyncWorkerStatus,
+) {
+    status_emitter.emit_sync_status(SyncStatusEvent {
+        account_id: account_id.to_string(),
+        status,
+    });
 }
 
 fn upsert_setting(
@@ -1022,6 +1139,77 @@ fn redact_status_message(value: &str) -> String {
         redacted.truncate(MAX_STATUS_MESSAGE_BYTES);
     }
     redacted
+}
+
+struct StatusDetail {
+    message: Option<String>,
+    action: Option<String>,
+    code: Option<String>,
+}
+
+fn classify_status_detail(state: SyncWorkerState, raw_message: Option<&str>) -> StatusDetail {
+    let Some(raw_message) = raw_message else {
+        return StatusDetail {
+            message: None,
+            action: None,
+            code: None,
+        };
+    };
+    let lower = raw_message.to_ascii_lowercase();
+
+    if lower.contains("credential")
+        || lower.contains("oauth")
+        || lower.contains("reauthentication")
+        || lower.contains("invalid grant")
+        || lower.contains("token")
+    {
+        return StatusDetail {
+            message: Some("Reauthentication is required for this account.".to_string()),
+            action: Some("reauthenticate".to_string()),
+            code: Some("auth_reconnect_required".to_string()),
+        };
+    }
+
+    if lower.contains("cancel") || lower.contains("not active") || state == SyncWorkerState::Stopped
+    {
+        return StatusDetail {
+            message: Some("Sync is stopped for this account.".to_string()),
+            action: None,
+            code: Some("sync_stopped".to_string()),
+        };
+    }
+
+    if lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("network")
+        || lower.contains("connection")
+        || lower.contains("connect")
+        || lower.contains("tls")
+        || lower.contains("server")
+        || lower.contains("imap")
+    {
+        return StatusDetail {
+            message: Some(
+                "Mail server connection failed. Check the network or account settings.".to_string(),
+            ),
+            action: Some("check_connection".to_string()),
+            code: Some("network_or_server".to_string()),
+        };
+    }
+
+    if state == SyncWorkerState::Error {
+        return StatusDetail {
+            message: Some("Sync failed. Review the account settings or retry later.".to_string()),
+            action: Some("retry_later".to_string()),
+            code: Some("sync_failed".to_string()),
+        };
+    }
+
+    StatusDetail {
+        message: Some(redact_status_message(raw_message)),
+        action: None,
+        code: None,
+    }
 }
 
 fn provider_from_schema(value: &str) -> Result<ProviderKind, SyncSchedulerError> {
@@ -1112,6 +1300,23 @@ mod tests {
         fs,
         sync::atomic::{AtomicUsize, Ordering},
     };
+
+    #[derive(Clone, Default)]
+    struct RecordingStatusEmitter {
+        events: Arc<Mutex<Vec<SyncStatusEvent>>>,
+    }
+
+    impl SyncStatusEventEmitter for RecordingStatusEmitter {
+        fn emit_sync_status(&self, event: SyncStatusEvent) {
+            self.events.lock().expect("events lock").push(event);
+        }
+    }
+
+    impl RecordingStatusEmitter {
+        fn events(&self) -> Vec<SyncStatusEvent> {
+            self.events.lock().expect("events lock").clone()
+        }
+    }
 
     #[derive(Clone, Default)]
     struct FakeLauncher {
@@ -1329,6 +1534,64 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn sync_status_preserves_last_success_and_redacts_actionable_error_detail() {
+        let connection = migrated_connection();
+        insert_account(&connection, "acct_oauth", "connected", None);
+
+        let idle = write_sync_worker_status(&connection, "acct_oauth", SyncWorkerState::Idle, None)
+            .expect("write idle status");
+        let error = write_sync_worker_status(
+            &connection,
+            "acct_oauth",
+            SyncWorkerState::Error,
+            Some("OAuth refresh failed for token super-secret-value"),
+        )
+        .expect("write error status");
+
+        assert_eq!(error.last_successful_sync_at, idle.last_successful_sync_at);
+        assert_eq!(
+            error.message.as_deref(),
+            Some("Reauthentication is required for this account.")
+        );
+        assert_eq!(error.action.as_deref(), Some("reauthenticate"));
+        assert_eq!(error.code.as_deref(), Some("auth_reconnect_required"));
+        let status_json: String = connection
+            .query_row(
+                "SELECT value_json FROM settings WHERE key = ?1",
+                [account_sync_worker_status_key("acct_oauth")],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!status_json.contains("super-secret-value"));
+    }
+
+    #[test]
+    fn scheduler_emits_status_events_for_non_started_accounts() {
+        let cache_path = migrated_file_database();
+        {
+            let connection = Connection::open(&cache_path).unwrap();
+            insert_account(&connection, "acct_reconnect", "reconnect_needed", None);
+        }
+
+        let scheduler = BackgroundSyncScheduler::new(test_options(1));
+        let emitter = RecordingStatusEmitter::default();
+        scheduler.set_status_emitter(Arc::new(emitter.clone()));
+        let launcher = FakeLauncher::default();
+
+        let started = scheduler
+            .refresh_account_with_launcher(cache_path.clone(), "acct_reconnect", &launcher)
+            .expect("refresh account");
+
+        assert!(!started);
+        let events = emitter.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].account_id, "acct_reconnect");
+        assert_eq!(events[0].status.state, "stopped");
+        assert_eq!(events[0].status.code.as_deref(), Some("sync_stopped"));
+        let _ = fs::remove_file(cache_path);
     }
 
     fn test_options(max_account_workers: usize) -> SyncSchedulerOptions {

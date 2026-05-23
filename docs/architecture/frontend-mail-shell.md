@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync worker status projection implemented.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -62,7 +62,8 @@ The navigation state is frontend-local. Cache reads come from the Rust `load_mai
 - returns redacted account metadata, folder counts, and a bounded recent-message snapshot
 - returns only display-safe attachment metadata for snapshot messages: id, sanitized display filename, MIME type, byte size, and disposition
 - maps folder unread counts from sync state into account/folder/unified unread badges
-- maps `account:{account_id}:sync_worker_status` rows plus folder `sync_state` into account status values for the shell
+- maps `account:{account_id}:sync_worker_status` rows plus folder `sync_state` into account `syncing`, `idle`, `offline`, `reconnect-needed`, and `error` status values for the shell
+- returns redacted sync status metadata only: status update time, last successful sync time, safe user-facing status message, and safe action code
 - never returns `credential_ref`, passwords, tokens, attachment storage paths, storage-relative filenames, checksums, or raw SQL results
 
 `load_mail_shell` has no frontend-supplied arguments. It is exposed through `load_mail_shell`, `src-tauri/build.rs`, and the `allow-load-mail-shell` capability permission.
@@ -98,6 +99,28 @@ Search UI states:
 - ready with no results: no-match state
 - unavailable index: no-index state
 - backend error: retryable search error state
+
+## Sync And Auth Status
+
+Account rows show the current account status, unread count, and last successful sync time using the active locale. The Rust read model derives status from account auth state, scheduler status rows, and folder sync state:
+
+- `syncing`: account worker or folder sync is active.
+- `idle`: the account is connected and no current sync work is reported.
+- `offline`: the account is disconnected or stopped without an active auth error.
+- `reconnect-needed`: backend credential or token refresh state requires reauthentication.
+- `error`: a sync worker reported a redacted non-auth failure.
+
+`src-tauri/src/sync_scheduler.rs` emits `komorebi://sync-status` when a worker status row changes. The frontend data source subscribes through Tauri's listen-only event permission and reloads `load_mail_shell`; it does not trust event payloads as the durable account model.
+
+The account status drawer shows:
+
+- status
+- last successful sync
+- last status update
+- redacted actionable error detail
+- provider-specific reconnect controls
+
+OAuth reconnect for Gmail/Microsoft calls `start_oauth_account_reauth` with the account id and no secret; Rust reuses the stored non-secret OAuth client configuration and opens the system browser. Generic IMAP/SMTP reconnect asks for a replacement password/app-password and calls `reauth_account`. React never receives passwords after submission, OAuth codes, access tokens, refresh tokens, or credential target names.
 
 ## Localization
 
@@ -213,7 +236,7 @@ The Settings drawer uses `AccountSignatureSettings` for account management and s
 
 With no accounts it still shows the accountless settings state plus the add-account form. With account data it edits persisted account display metadata, local unified-inbox preferences, and sanitized signatures through typed account commands. Signature previews continue to use `SafeEmailBody`.
 
-The Gmail/Microsoft setup and reauth controls never ask for passwords, app passwords, refresh tokens, authorization codes, or access tokens. The backend command opens the system browser and returns only a redacted setup response or error reason. The generic Test setup button is disabled for OAuth providers because provider consent is validated by the loopback flow, not by a secret-bearing configuration test.
+The Gmail/Microsoft setup and reauth controls never ask for passwords, app passwords, refresh tokens, authorization codes, or access tokens. The backend command opens the system browser and returns only a redacted setup response or error reason. Status-drawer OAuth reconnect reuses the stored non-secret OAuth client id from Rust so the status surface can launch the provider-specific flow without adding a secret field. The generic Test setup button is disabled for OAuth providers because provider consent is validated by the loopback flow, not by a secret-bearing configuration test.
 
 ## Loading, Empty, And Error States
 
@@ -247,12 +270,13 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - composer drawer entry
 - settings drawer entry
 - settings account preference/signature save command and cache reload
+- account sync status drawer, last-successful-sync display, generic reconnect, OAuth reconnect, and backend sync-status event refresh
 - loading/error shell states
 - first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
 
 `src/mail/shell/mailShellState.test.ts` covers pure shell state rules: unified/account/folder scope filtering, local search fallback behavior, cache-reload selection preservation, and stale backend row clearing.
 
-`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup, composer autosave, generic account commands, OAuth loopback commands, and cancellation before invoke or after a stale response.
+`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup, composer autosave, generic account commands, OAuth loopback commands, sync-status event subscription, and cancellation before invoke or after a stale response.
 
 `e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, runs backend-shaped search, opens a search result in the reader, opens the composer, sends through typed fixture handlers, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
 

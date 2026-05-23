@@ -2,7 +2,9 @@ export type LoadStatus = "ready" | "loading" | "error";
 
 export type AccountStatus =
   | "connected"
+  | "idle"
   | "syncing"
+  | "error"
   | "reconnect-needed"
   | "offline";
 
@@ -25,10 +27,19 @@ export type MailAccount = {
   providerKind?: AccountProviderKind;
   authKind?: AccountAuthKind;
   status: AccountStatus;
+  statusUpdatedAt?: string | null;
+  lastSuccessfulSyncAt?: string | null;
+  statusMessage?: string | null;
+  statusAction?: AccountStatusAction | null;
   unreadCount: number;
   signatureHtml: string | null;
   localPreferences?: AccountLocalPreferences;
 };
+
+export type AccountStatusAction =
+  | "reauthenticate"
+  | "check_connection"
+  | "retry_later";
 
 export type AccountLocalPreferences = {
   includeInUnifiedInbox: boolean;
@@ -222,7 +233,7 @@ export type OAuthAccountSetupRequest = {
 
 export type OAuthAccountReauthRequest = {
   accountId: string;
-  clientId: string;
+  clientId?: string | null;
   timeoutSeconds?: number | null;
 };
 

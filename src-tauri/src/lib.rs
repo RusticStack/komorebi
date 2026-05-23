@@ -20,6 +20,8 @@ pub mod smtp_send;
 pub mod sync_scheduler;
 pub mod token_lifecycle;
 
+use std::sync::Arc;
+
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,6 +34,9 @@ pub fn run() {
                 .state::<sync_scheduler::BackgroundSyncScheduler>()
                 .inner()
                 .clone();
+            scheduler.set_status_emitter(Arc::new(
+                sync_scheduler::TauriSyncStatusEventEmitter::new(app.handle().clone()),
+            ));
             let _ = scheduler.start_all_configured_accounts(cache_path);
             Ok(())
         })

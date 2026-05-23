@@ -43,6 +43,7 @@ import {
   selectedMessage,
   type MailShellData,
   type MailShellLoadState,
+  type MailAccount,
   type MailAttachment,
   type MailSearchRequest,
   type MailSearchResponse,
@@ -91,6 +92,10 @@ export type AccountAuthStatusFunction = (
 export type AccountSettingsUpdateFunction = (
   request: AccountSettingsUpdateRequest,
 ) => Promise<AccountSettingsUpdateResponse>;
+export type SyncStatusUnsubscribeFunction = () => void | Promise<void>;
+export type SyncStatusSubscribeFunction = (
+  handler: (payload: unknown) => void,
+) => SyncStatusUnsubscribeFunction | Promise<SyncStatusUnsubscribeFunction>;
 
 export type MailClientShellProps = {
   initialData?: MailShellData;
@@ -111,9 +116,10 @@ export type MailClientShellProps = {
   updateAccountSettings?: AccountSettingsUpdateFunction;
   testAccountConnection?: AccountConnectionTestFunction;
   getAccountAuthStatus?: AccountAuthStatusFunction;
+  subscribeToSyncStatus?: SyncStatusSubscribeFunction;
 };
 
-type Drawer = "composer" | "settings" | null;
+type Drawer = "composer" | "settings" | "account-status" | null;
 type MailSearchUiStatus =
   | "idle"
   | "debouncing"
@@ -160,6 +166,7 @@ export function MailClientShell({
   updateAccountSettings,
   testAccountConnection,
   getAccountAuthStatus,
+  subscribeToSyncStatus,
 }: MailClientShellProps) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
@@ -173,6 +180,7 @@ export function MailClientShell({
     useState<MailSearchUiState>(emptySearchState);
   const [searchRetryNonce, setSearchRetryNonce] = useState(0);
   const [drawer, setDrawer] = useState<Drawer>(null);
+  const [statusAccountId, setStatusAccountId] = useState<string | null>(null);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -218,6 +226,9 @@ export function MailClientShell({
   );
   const hasAccounts = state.data.accounts.length > 0;
   const canCompose = hasAccounts && state.loadState.accounts === "ready";
+  const statusAccount = statusAccountId
+    ? accountById.get(statusAccountId) ?? null
+    : null;
   const listTitle = state.unifiedInbox
     ? t("mail.folders.unifiedInbox")
     : activeFolder?.name ?? activeAccount?.label ?? t("mail.folders.allMail");
@@ -353,15 +364,17 @@ export function MailClientShell({
     }
   }
 
-  async function reloadMailShell() {
+  async function reloadMailShell(options: { showLoading?: boolean } = {}) {
     if (!loadMailShellData) {
       return;
     }
 
-    setState((current) => ({
-      ...current,
-      loadState: loadingMailShellLoadState(),
-    }));
+    if (options.showLoading ?? true) {
+      setState((current) => ({
+        ...current,
+        loadState: loadingMailShellLoadState(),
+      }));
+    }
 
     try {
       const data = await loadMailShellData();
@@ -374,6 +387,14 @@ export function MailClientShell({
         loadState: errorMailShellLoadState(),
       }));
     }
+  }
+
+  function openAccountStatusDrawer(
+    accountId: string,
+    restoreFocus: HTMLElement | null,
+  ) {
+    setStatusAccountId(accountId);
+    openDrawer("account-status", restoreFocus);
   }
 
   async function saveAccountSettings(
@@ -471,6 +492,63 @@ export function MailClientShell({
       cancelled = true;
     };
   }, [loadMailShellData]);
+
+  useEffect(() => {
+    if (!subscribeToSyncStatus || !loadMailShellData) {
+      return;
+    }
+
+    let cancelled = false;
+    let reloadHandle: number | null = null;
+    let unsubscribe: SyncStatusUnsubscribeFunction | null = null;
+
+    const refreshFromEvent = () => {
+      if (reloadHandle !== null) {
+        window.clearTimeout(reloadHandle);
+      }
+      reloadHandle = window.setTimeout(() => {
+        reloadHandle = null;
+        loadMailShellData()
+          .then((data) => {
+            if (cancelled) {
+              return;
+            }
+            setState((current) =>
+              mergeMailShellData(current, data, readyMailShellLoadState),
+            );
+          })
+          .catch(() => {
+            if (cancelled) {
+              return;
+            }
+            setState((current) => ({
+              ...current,
+              loadState: errorMailShellLoadState(),
+            }));
+          });
+      }, 75);
+    };
+
+    Promise.resolve(subscribeToSyncStatus(refreshFromEvent))
+      .then((nextUnsubscribe) => {
+        if (cancelled) {
+          void nextUnsubscribe();
+          return;
+        }
+        unsubscribe = nextUnsubscribe;
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      if (reloadHandle !== null) {
+        window.clearTimeout(reloadHandle);
+      }
+      if (unsubscribe) {
+        void unsubscribe();
+      }
+    };
+  }, [loadMailShellData, subscribeToSyncStatus]);
 
   useEffect(() => {
     if (
@@ -605,37 +683,57 @@ export function MailClientShell({
             onRetry={loadMailShellData ? reloadMailShell : undefined}
           >
             {state.data.accounts.map((account, index) => (
-              <button
-                className={
-                  !state.unifiedInbox && account.id === state.selectedAccountId
-                    ? "account-button is-active"
-                    : "account-button"
-                }
-                type="button"
-                key={account.id}
-                aria-label={t("mail.account.aria", {
-                  email: account.email,
-                  label: account.label,
-                  status: accountStatusLabel(account.status, t),
-                  unread: localeFormat.count(account.unreadCount),
-                })}
-                ref={(element) => {
-                  accountButtonRefs.current[index] = element;
-                }}
-                onKeyDown={(event) =>
-                  handleAccountKeyDown(event, index)
-                }
-                onClick={() =>
-                  setState((current) => selectAccountScope(current, account.id))
-                }
-              >
-                <span>{account.label}</span>
-                <small>{account.email}</small>
-                <span className="account-meta">
-                  <strong>{accountStatusLabel(account.status, t)}</strong>
-                  <span>{localeFormat.unreadCount(account.unreadCount)}</span>
-                </span>
-              </button>
+              <div className="account-row" key={account.id}>
+                <button
+                  className={
+                    !state.unifiedInbox &&
+                    account.id === state.selectedAccountId
+                      ? "account-button is-active"
+                      : "account-button"
+                  }
+                  type="button"
+                  aria-label={t("mail.account.aria", {
+                    email: account.email,
+                    label: account.label,
+                    status: accountStatusLabel(account.status, t),
+                    unread: localeFormat.count(account.unreadCount),
+                  })}
+                  ref={(element) => {
+                    accountButtonRefs.current[index] = element;
+                  }}
+                  onKeyDown={(event) => handleAccountKeyDown(event, index)}
+                  onClick={() =>
+                    setState((current) =>
+                      selectAccountScope(current, account.id),
+                    )
+                  }
+                >
+                  <span>{account.label}</span>
+                  <small>{account.email}</small>
+                  <span className="account-meta">
+                    <strong>{accountStatusLabel(account.status, t)}</strong>
+                    <span>{localeFormat.unreadCount(account.unreadCount)}</span>
+                  </span>
+                  <small className="account-sync-time">
+                    {lastSyncLabel(account, localeFormat, t)}
+                  </small>
+                </button>
+                <button
+                  className={
+                    accountNeedsAttention(account)
+                      ? "account-status-command account-status-command--attention"
+                      : "account-status-command"
+                  }
+                  type="button"
+                  onClick={(event) =>
+                    openAccountStatusDrawer(account.id, event.currentTarget)
+                  }
+                >
+                  {accountNeedsAttention(account)
+                    ? t("mail.account.actions.reconnect")
+                    : t("mail.account.actions.details")}
+                </button>
+              </div>
             ))}
           </StatusList>
         </section>
@@ -826,6 +924,56 @@ export function MailClientShell({
             onTestAccountConnection={testAccountConnection}
             onGetAccountAuthStatus={getAccountAuthStatus}
             onClose={closeDrawer}
+          />
+        </div>
+      ) : null}
+
+      {drawer === "account-status" && statusAccount ? (
+        <div
+          className="settings-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("mail.account.statusDrawer.aria")}
+          ref={drawerRef}
+          tabIndex={-1}
+          onKeyDown={handleDrawerKeyDown}
+        >
+          <AccountStatusDrawer
+            account={statusAccount}
+            localeFormat={localeFormat}
+            onClose={closeDrawer}
+            onReconnect={async (secret) => {
+              if (
+                statusAccount.authKind === "oauth2" &&
+                statusAccount.providerKind !== "generic_imap_smtp"
+              ) {
+                if (!startOAuthAccountReauth) {
+                  throw new Error(
+                    t("settings.accounts.errors.oauthReauthUnavailable"),
+                  );
+                }
+                await startOAuthAccountReauth({
+                  accountId: statusAccount.id,
+                  clientId: null,
+                });
+              } else {
+                if (!reauthAccount) {
+                  throw new Error(t("settings.accounts.errors.reauthUnavailable"));
+                }
+                await reauthAccount({
+                  accountId: statusAccount.id,
+                  secret,
+                });
+              }
+
+              if (loadMailShellData) {
+                await reloadMailShell({ showLoading: false });
+              }
+            }}
+            requiresSecret={
+              statusAccount.authKind !== "oauth2" ||
+              statusAccount.providerKind === "generic_imap_smtp"
+            }
           />
         </div>
       ) : null}
@@ -1512,6 +1660,134 @@ function ReaderStatus({ text }: { text: string }) {
 
 const ComposerDrawer = TipTapComposer;
 
+function AccountStatusDrawer({
+  account,
+  localeFormat,
+  onClose,
+  onReconnect,
+  requiresSecret,
+}: {
+  account: MailAccount;
+  localeFormat: ReturnType<typeof useLocaleFormatters>;
+  onClose: () => void;
+  onReconnect: (secret: string) => Promise<void>;
+  requiresSecret: boolean;
+}) {
+  const { t } = useTranslation();
+  const [secret, setSecret] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const statusMessage =
+    account.statusMessage?.trim() || statusMessageFallback(account, t);
+
+  async function handleReconnect() {
+    setNotice(null);
+    setError(null);
+    if (requiresSecret && !secret.trim()) {
+      setError(t("mail.account.statusDrawer.secretRequired"));
+      return;
+    }
+
+    setRunning(true);
+    try {
+      await onReconnect(secret);
+      setSecret("");
+      setNotice(t("mail.account.statusDrawer.reconnectStarted"));
+    } catch (reconnectError) {
+      setError(formatAccountError(reconnectError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <section
+      className="settings-panel account-status-panel"
+      aria-label={t("mail.account.statusDrawer.aria")}
+    >
+      <header className="settings-panel__header">
+        <div>
+          <p className="eyebrow">{t("mail.account.statusDrawer.eyebrow")}</p>
+          <h2>{account.label}</h2>
+        </div>
+        <button type="button" onClick={onClose}>
+          {t("common.actions.close")}
+        </button>
+      </header>
+
+      <section
+        className="account-status-detail"
+        aria-label={t("mail.account.statusDrawer.detailAria")}
+      >
+        <dl>
+          <div>
+            <dt>{t("mail.account.statusDrawer.status")}</dt>
+            <dd>{accountStatusLabel(account.status, t)}</dd>
+          </div>
+          <div>
+            <dt>{t("mail.account.statusDrawer.lastSuccessfulSync")}</dt>
+            <dd>{lastSyncValue(account, localeFormat, t)}</dd>
+          </div>
+          <div>
+            <dt>{t("mail.account.statusDrawer.lastStatusUpdate")}</dt>
+            <dd>
+              {account.statusUpdatedAt
+                ? localeFormat.dateTime(account.statusUpdatedAt)
+                : t("mail.account.statusDrawer.statusUpdateUnavailable")}
+            </dd>
+          </div>
+        </dl>
+        <p>{statusMessage}</p>
+      </section>
+
+      <form
+        className="account-form account-form--compact"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleReconnect();
+        }}
+      >
+        <h3>{t("mail.account.statusDrawer.reconnectHeading")}</h3>
+        <p className="account-form__hint">
+          {requiresSecret
+            ? t("mail.account.statusDrawer.genericReconnectHint")
+            : t("mail.account.statusDrawer.oauthReconnectHint")}
+        </p>
+        {requiresSecret ? (
+          <label>
+            <span>{t("settings.accounts.fields.reauthSecret")}</span>
+            <input
+              data-autofocus="true"
+              type="password"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+            />
+          </label>
+        ) : null}
+        <div className="settings-panel__actions">
+          <button type="submit" disabled={running}>
+            {running
+              ? t("mail.account.statusDrawer.reconnecting")
+              : t("mail.account.actions.reconnect")}
+          </button>
+        </div>
+      </form>
+
+      {notice ? (
+        <p className="settings-notice" role="status">
+          {notice}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="settings-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function accountStatusLabel(
   status: MailShellData["accounts"][number]["status"],
   t: TFunction,
@@ -1519,12 +1795,76 @@ function accountStatusLabel(
   return t(`mail.account.status.${status}`);
 }
 
+function accountNeedsAttention(account: MailAccount) {
+  return (
+    account.status === "reconnect-needed" ||
+    account.status === "error" ||
+    account.statusAction === "reauthenticate"
+  );
+}
+
+function lastSyncLabel(
+  account: MailAccount,
+  localeFormat: ReturnType<typeof useLocaleFormatters>,
+  t: TFunction,
+) {
+  return t("mail.account.lastSync", {
+    time: lastSyncValue(account, localeFormat, t),
+  });
+}
+
+function lastSyncValue(
+  account: MailAccount,
+  localeFormat: ReturnType<typeof useLocaleFormatters>,
+  t: TFunction,
+) {
+  return account.lastSuccessfulSyncAt
+    ? localeFormat.dateTime(account.lastSuccessfulSyncAt)
+    : t("mail.account.lastSyncNever");
+}
+
+function statusMessageFallback(account: MailAccount, t: TFunction) {
+  if (account.status === "reconnect-needed") {
+    return t("mail.account.statusDrawer.reconnectNeededMessage");
+  }
+  if (account.status === "error") {
+    return t("mail.account.statusDrawer.errorMessage");
+  }
+  if (account.status === "offline") {
+    return t("mail.account.statusDrawer.offlineMessage");
+  }
+  if (account.status === "syncing") {
+    return t("mail.account.statusDrawer.syncingMessage");
+  }
+
+  return t("mail.account.statusDrawer.idleMessage");
+}
+
+function formatAccountError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "reason" in error &&
+    typeof error.reason === "string"
+  ) {
+    return error.reason;
+  }
+
+  return String(error);
+}
+
 function authStatusForManagement(
   status: MailShellData["accounts"][number]["status"],
 ): AccountManagementView["authStatus"] {
   switch (status) {
     case "connected":
+    case "idle":
     case "syncing":
+    case "error":
       return "connected";
     case "reconnect-needed":
       return "reconnect_needed";

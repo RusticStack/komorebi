@@ -8,9 +8,14 @@ import type {
 } from "./mailShellState";
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const listenMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: listenMock,
 }));
 
 import {
@@ -25,6 +30,8 @@ import {
   searchMailFromTauri,
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
+  subscribeToSyncStatusFromTauri,
+  SYNC_STATUS_EVENT_NAME,
   testAccountConnectionFromTauri,
   updateAccountSettingsFromTauri,
 } from "./mailShellDataSource";
@@ -45,6 +52,7 @@ const searchRequest: MailSearchRequest = {
 describe("mailShellDataSource", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    listenMock.mockReset();
     delete window.__TAURI_INTERNALS__;
   });
 
@@ -300,6 +308,54 @@ describe("mailShellDataSource", () => {
     });
     expect(invokeMock).toHaveBeenNthCalledWith(8, "start_oauth_account_reauth", {
       request: oauthReauthRequest,
+    });
+  });
+
+  it("subscribes to backend sync status events without exposing emit permissions", async () => {
+    const unlisten = vi.fn();
+    const eventHandlers: Array<(event: { payload: unknown }) => void> = [];
+    listenMock.mockImplementationOnce(
+      (_eventName: string, handler: (event: { payload: unknown }) => void) => {
+        eventHandlers.push(handler);
+        return Promise.resolve(unlisten);
+      },
+    );
+    const handler = vi.fn();
+
+    await expect(subscribeToSyncStatusFromTauri(handler)).resolves.toBe(
+      unlisten,
+    );
+    expect(listenMock).toHaveBeenCalledWith(
+      SYNC_STATUS_EVENT_NAME,
+      expect.any(Function),
+    );
+
+    const eventHandler = eventHandlers[0];
+    if (!eventHandler) {
+      throw new Error("sync status event handler was not registered");
+    }
+    eventHandler({
+      payload: {
+        accountId: "acct_personal",
+        status: {
+          action: "reauthenticate",
+          code: "auth_reconnect_required",
+          message: "Reauthentication is required for this account.",
+          state: "error",
+          updatedAt: 1779552060,
+        },
+      },
+    });
+
+    expect(handler).toHaveBeenCalledWith({
+      accountId: "acct_personal",
+      status: {
+        action: "reauthenticate",
+        code: "auth_reconnect_required",
+        message: "Reauthentication is required for this account.",
+        state: "error",
+        updatedAt: 1779552060,
+      },
     });
   });
 });

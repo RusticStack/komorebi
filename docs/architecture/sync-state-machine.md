@@ -41,7 +41,8 @@ Implemented now:
 - Account worker restart on account setup, reauthentication, and account settings save.
 - Account worker stop on account removal and Tauri window close.
 - Bounded concurrent account workers and capped per-account folder workers.
-- Worker status persisted to `settings` as `account:{account_id}:sync_worker_status`, with `load_mail_shell` projecting active sync/error state into account status.
+- Worker status persisted to `settings` as `account:{account_id}:sync_worker_status`, including state, update time, preserved last successful sync time, redacted user-facing message, action code, and error code. `load_mail_shell` projects active sync/error/auth state into account status.
+- Tauri status events emitted as `komorebi://sync-status` after status-row writes; React listens only to refresh the trusted `load_mail_shell` snapshot.
 - Non-secret OAuth client runtime metadata persisted as `account:{account_id}:oauth_client` so backend sync workers can refresh Gmail/Microsoft access tokens without exposing tokens to React.
 - Scheduler tests for active-account startup, restart, removal stop, concurrency bounds, status persistence, and OAuth runtime metadata cleanup.
 
@@ -49,7 +50,6 @@ Not implemented by this task:
 
 - Tokio/`async-imap` integration or migration.
 - Reader-facing attachment preview/save/export commands.
-- User-visible last-successful-sync/error details beyond current account `connected`/`syncing`/`offline`/`reconnect-needed` projection.
 - Opt-in live-provider smoke tests using user-provided test accounts.
 
 ## State Flow
@@ -112,7 +112,7 @@ Worker behavior:
 4. The worker runs one account-level sync to discover/update folders and messages.
 5. It then starts a capped, priority-ordered set of per-folder IDLE/poll workers, with Inbox prioritized.
 6. Removed or non-connected accounts are rejected before live network work; `SqliteSyncCache::account_exists` also stops worker loops after removal.
-7. Worker errors write a redacted status row; credential/token failures mark the account `reconnect_needed`.
+7. Worker errors write a redacted status row, preserve the previous last-successful-sync timestamp, and emit a status event; credential/token failures mark the account `reconnect_needed`.
 
 Concurrency rules:
 

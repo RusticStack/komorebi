@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ComposerAttachment,
   ComposerAttachmentStageRequest,
@@ -25,6 +26,24 @@ import type {
   AccountSetupRequest,
   AccountSetupResponse,
 } from "./mailShellState";
+
+export const SYNC_STATUS_EVENT_NAME = "komorebi://sync-status";
+
+export type SyncStatusEventPayload = {
+  accountId: string;
+  status: {
+    state: string;
+    updatedAt: number;
+    lastSuccessfulSyncAt?: number | null;
+    message?: string | null;
+    action?: string | null;
+    code?: string | null;
+  };
+};
+
+export type SyncStatusEventHandler = (
+  payload: SyncStatusEventPayload,
+) => void;
 
 const LOAD_MAIL_SHELL_COMMAND = "load_mail_shell";
 const SEARCH_MAIL_COMMAND = "search_mail";
@@ -172,6 +191,14 @@ export async function getAccountAuthStatusFromTauri(
 ): Promise<AccountAuthStatusView> {
   return invoke<AccountAuthStatusView>(GET_ACCOUNT_AUTH_STATUS_COMMAND, {
     request,
+  });
+}
+
+export async function subscribeToSyncStatusFromTauri(
+  handler: SyncStatusEventHandler,
+): Promise<UnlistenFn> {
+  return listen<SyncStatusEventPayload>(SYNC_STATUS_EVENT_NAME, (event) => {
+    handler(event.payload);
   });
 }
 

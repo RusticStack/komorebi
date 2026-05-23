@@ -34,7 +34,7 @@ Reconnect reasons:
 - `CredentialStoreUnavailable`: secret backend cannot be read or updated.
 - `AccountDataUnavailable`: account-state persistence cannot be updated.
 
-UI may show a reconnect prompt using these reason classes. It must not show provider token responses, authorization headers, or raw OAuth error descriptions.
+UI may show a reconnect prompt using these reason classes. The current account status drawer launches Gmail/Microsoft OAuth reauthentication through the backend-owned loopback flow and generic IMAP/SMTP reauthentication through a replacement-secret form. It must not show provider token responses, authorization headers, or raw OAuth error descriptions.
 
 ## Revocation And Account Removal
 

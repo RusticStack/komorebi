@@ -187,6 +187,11 @@ textarea:disabled {
   background: #f7f5f2;
 }
 
+.account-row {
+  display: grid;
+  gap: 6px;
+}
+
 .account-button.is-active {
   border-color: #c2d0c2;
   background: #d8e0d7;
@@ -210,6 +215,10 @@ textarea:disabled {
   gap: 8px;
 }
 
+.account-sync-time {
+  color: #716d66;
+}
+
 .account-meta span {
   color: #716d66;
 }
@@ -219,6 +228,23 @@ textarea:disabled {
   color: #716d66;
   font-weight: 500;
   text-overflow: ellipsis;
+}
+
+.account-status-command {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #d8d0c4;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #5d7567;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.account-status-command--attention {
+  border-color: #c98b75;
+  background: #fff4ef;
+  color: #7a3d2d;
 }
 
 .unified-toggle {
@@ -784,6 +810,49 @@ textarea:disabled {
   margin: 0;
   color: #716d66;
   font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.account-status-panel {
+  grid-template-rows: auto auto auto auto;
+}
+
+.account-status-detail {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e7e1d8;
+}
+
+.account-status-detail dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.account-status-detail dl div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.account-status-detail dt {
+  color: #716d66;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.account-status-detail dd {
+  margin: 0;
+  color: #2d2d2d;
+  font-size: 0.9rem;
+  text-align: right;
+}
+
+.account-status-detail p {
+  margin: 0;
+  color: #4f4840;
   line-height: 1.45;
 }
 

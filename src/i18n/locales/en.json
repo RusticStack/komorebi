@@ -35,13 +35,42 @@
   },
   "mail": {
     "account": {
+      "actions": {
+        "details": "Details",
+        "reconnect": "Reconnect"
+      },
       "add": "Add account",
       "aria": "{{label}} account, {{email}}, {{unread}} unread, {{status}}",
+      "detailsAria": "Sync details",
+      "lastSync": "Last sync: {{time}}",
+      "lastSyncNever": "never",
       "status": {
         "connected": "connected",
+        "error": "error",
+        "idle": "idle",
         "offline": "offline",
         "reconnect-needed": "reconnect needed",
         "syncing": "syncing"
+      },
+      "statusDrawer": {
+        "aria": "Account status",
+        "detailAria": "Sync status detail",
+        "errorMessage": "Sync could not complete. Review account settings or retry after checking the connection.",
+        "eyebrow": "Account status",
+        "genericReconnectHint": "Enter the replacement password or app password to reconnect this generic IMAP/SMTP account.",
+        "idleMessage": "This account is connected and waiting for the next sync cycle.",
+        "lastStatusUpdate": "Last status update",
+        "lastSuccessfulSync": "Last successful sync",
+        "oauthReconnectHint": "Reconnect opens the provider OAuth flow in the browser. Tokens stay in the backend credential store.",
+        "offlineMessage": "This account is offline. Check the network or account settings.",
+        "reconnectHeading": "Reconnect account",
+        "reconnectNeededMessage": "Reauthentication is required before sync can continue.",
+        "reconnectStarted": "Reconnect completed. Mail sync will restart for this account.",
+        "reconnecting": "Reconnecting",
+        "secretRequired": "Enter the replacement secret before reconnecting.",
+        "status": "Status",
+        "statusUpdateUnavailable": "not reported",
+        "syncingMessage": "This account is syncing now."
       }
     },
     "attachments": {

@@ -67,7 +67,7 @@ Rules:
 - `generic-password` stores a provider app password or manual password only for compatible generic IMAP/SMTP providers. Gmail and Microsoft must use OAuth2/XOAUTH2, as defined in `docs/architecture/provider-auth.md`.
 - Credential payloads are serialized by Rust only. React sends generic-provider setup secrets once over a typed command and never receives the stored value back. Gmail/Microsoft setup sends only account metadata plus OAuth client ID; the backend-owned loopback command receives the authorization code, exchanges it, and stores the refresh token without exposing it to React.
 - The Windows credential username may be `provider_kind:account_id`; the display email stays in SQLite metadata.
-- Non-secret OAuth runtime metadata may be stored in SQLite settings as `account:{account_id}:oauth_client` with only the OAuth client id and loopback redirect URI. Tokens, authorization codes, and provider token JSON must never be stored there.
+- Non-secret OAuth runtime metadata may be stored in SQLite settings as `account:{account_id}:oauth_client` with only the OAuth client id and loopback redirect URI. This row may be reused by backend-owned OAuth reauthentication from the account status surface. Tokens, authorization codes, and provider token JSON must never be stored there.
 
 ## Runtime Access Flow
 
