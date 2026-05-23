@@ -26,6 +26,8 @@ Composer-staged outbound files use:
 
 The WebView provides selected bytes through the browser File API, not a local filesystem path. Rust validates type/size, generates the attachment id/path, stores metadata in `composer_attachments`, streams those files during `send_composer_email`, and deletes staged files best-effort after discard or confirmed send.
 
+Composer streaming treats `composer_attachments.storage_relative_path` as untrusted persisted state. Before a staged file is opened, Rust rejects empty, absolute, prefixed, root, or parent-directory paths, canonicalizes the app-data root and target file, and requires the final path to remain under app data.
+
 Path segments are validated internal IDs with only ASCII letters, digits, hyphen, and underscore. The stored filename is derived from the backend attachment id and a canonical extension for the validated content type.
 
 Sender filenames are display-only metadata. They are sanitized for display by stripping path components, replacing Windows-reserved filename characters, removing controls, trimming leading/trailing dots, and bounding length. Sanitized display filenames are not used for storage, preview URLs, download destinations, or opener commands.
@@ -71,6 +73,8 @@ PDF and ZIP can be stored when validated but are not previewable in the current 
 
 `AUTO_OPEN_ATTACHMENTS` is false and must stay false. Opening a file externally is not implemented. If an open/save flow is added, it needs explicit user intent, a typed Rust command, path/type validation, and narrow Tauri capabilities. Do not add the opener plugin broadly to the main webview.
 
+Current Tauri capability tests deny attachment open, preview, save, download, and archive-extraction command names as well as frontend opener APIs. Adding one of these surfaces requires updating the capability tests and this document with the reviewed policy.
+
 ## Tests
 
 `src-tauri/src/attachment_safety.rs` tests cover:
@@ -86,7 +90,9 @@ PDF and ZIP can be stored when validated but are not previewable in the current 
 
 `src-tauri/src/mail_shell.rs` tests cover safe attachment metadata projection, display filename sanitization in the reader snapshot, and storage-path redaction from serialized shell data.
 
-`src-tauri/src/composer.rs` tests cover composer attachment staging under generated app-data paths, unsafe type denial, staged attachment streaming during fake SMTP send, and cleanup after confirmed send.
+`src-tauri/src/composer.rs` tests cover composer attachment staging under generated app-data paths, malicious display filenames not creating or overwriting sibling files, corrupted stored relative paths being rejected before file open/streaming, unsafe type denial, staged attachment streaming during fake SMTP send, and cleanup after confirmed send.
+
+`src-tauri/capabilities/capabilities.test.ts` covers opener/download/preview/extraction denial by absence until typed attachment commands exist.
 
 `pnpm check` runs these tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

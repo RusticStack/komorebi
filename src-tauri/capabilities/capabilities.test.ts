@@ -58,6 +58,14 @@ const forbiddenRustPlugins = [
   "tauri-plugin-http",
 ];
 
+const forbiddenAttachmentOpenCommands = [
+  "open_attachment",
+  "preview_attachment",
+  "save_attachment",
+  "download_attachment",
+  "extract_attachment",
+];
+
 const capabilityFileNames = readdirSync(capabilityDir).filter((fileName) =>
   fileName.endsWith(".json"),
 );
@@ -166,6 +174,26 @@ describe("Tauri capabilities", () => {
       expect(source).not.toContain("@tauri-apps/plugin-sql");
       expect(source).not.toContain("window.__TAURI__.sql");
       expect(source).not.toMatch(/\bDatabase\.load\s*\(/);
+    }
+  });
+
+  it("does not expose attachment open, save, download, or extraction surfaces", () => {
+    const packageJson = readFileSync(packageJsonPath, "utf8");
+    const buildScript = readFileSync(buildScriptPath, "utf8");
+    const libRs = readFileSync(libRsPath, "utf8");
+
+    expect(packageJson).not.toContain("@tauri-apps/plugin-opener");
+    for (const command of forbiddenAttachmentOpenCommands) {
+      expect(buildScript).not.toContain(`"${command}"`);
+      expect(libRs).not.toContain(command);
+    }
+
+    for (const fileName of frontendSourceFileNames) {
+      const source = readFileSync(resolve(frontendSourceDir, String(fileName)), "utf8");
+
+      expect(source).not.toContain("@tauri-apps/plugin-opener");
+      expect(source).not.toMatch(/\bopenPath\s*\(/);
+      expect(source).not.toMatch(/\brevealItemInDir\s*\(/);
     }
   });
 });

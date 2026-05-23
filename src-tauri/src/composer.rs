@@ -1513,6 +1513,112 @@ mod tests {
     }
 
     #[test]
+    fn staged_attachment_write_ignores_sender_path_and_does_not_overwrite_sibling_files() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        autosave_composer_draft_from_connection(&connection, draft_save_request()).unwrap();
+        let app_data_dir = temp_app_data_dir("stage-traversal");
+        let outside_sentinel = app_data_dir.with_file_name(format!(
+            "{}-outside.txt",
+            app_data_dir.file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(&outside_sentinel, b"do not overwrite").unwrap();
+
+        let staged = stage_composer_attachment_from_connection(
+            &connection,
+            &app_data_dir,
+            ComposerAttachmentStageRequest {
+                account_id: "acct_composer".into(),
+                draft_id: "draft_composer".into(),
+                display_filename: "..\\..\\outside.txt".into(),
+                content_type: Some("text/plain".into()),
+                disposition: ComposerAttachmentDisposition::Attachment,
+                bytes: b"safe local bytes".to_vec(),
+            },
+        )
+        .expect("stage attachment with hostile display filename");
+
+        assert_eq!(staged.display_filename, "outside.txt");
+        let stored_path: String = connection
+            .query_row(
+                "SELECT storage_relative_path FROM composer_attachments WHERE id = ?1",
+                [&staged.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!stored_path.contains("outside.txt"));
+        assert!(!stored_path.contains(".."));
+        let full_path = checked_app_data_path_for_read(&app_data_dir, &stored_path).unwrap();
+        assert!(full_path.starts_with(app_data_dir.canonicalize().unwrap()));
+        assert_eq!(fs::read(&full_path).unwrap(), b"safe local bytes");
+        assert_eq!(fs::read(&outside_sentinel).unwrap(), b"do not overwrite");
+
+        fs::remove_dir_all(app_data_dir).unwrap();
+        fs::remove_file(outside_sentinel).unwrap();
+    }
+
+    #[test]
+    fn composer_attachment_streaming_rejects_corrupt_paths_before_file_open() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        autosave_composer_draft_from_connection(&connection, draft_save_request()).unwrap();
+        let app_data_dir = temp_app_data_dir("stream-path-reject");
+        let outside_sentinel = app_data_dir.with_file_name(format!(
+            "{}-outside.txt",
+            app_data_dir.file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(&outside_sentinel, b"secret outside app data").unwrap();
+
+        for (attachment_id, storage_relative_path) in [
+            ("att_parent", "../outside.txt".to_string()),
+            (
+                "att_absolute",
+                outside_sentinel.to_string_lossy().to_string(),
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO composer_attachments (
+                       id,
+                       account_id,
+                       draft_id,
+                       disposition,
+                       display_filename,
+                       canonical_mime,
+                       size_bytes,
+                       storage_relative_path,
+                       sha256
+                     )
+                     VALUES (?1, 'acct_composer', 'draft_composer', 'attachment', 'outside.txt', 'text/plain', 23, ?2, ?3)",
+                    params![attachment_id, storage_relative_path, "0".repeat(64)],
+                )
+                .unwrap();
+
+            let mut store = ComposerAttachmentStore::new(&connection, &app_data_dir);
+            let mut streamed = Vec::new();
+            let error = store
+                .stream_attachment("acct_composer", attachment_id, 1024, 16, &mut |chunk| {
+                    streamed.extend_from_slice(chunk);
+                    Ok(())
+                })
+                .unwrap_err();
+
+            assert!(matches!(
+                error,
+                SendEmailError::AttachmentPathRejected { .. }
+            ));
+            assert!(streamed.is_empty());
+            assert_eq!(
+                fs::read(&outside_sentinel).unwrap(),
+                b"secret outside app data"
+            );
+        }
+
+        fs::remove_dir_all(app_data_dir).unwrap();
+        fs::remove_file(outside_sentinel).unwrap();
+    }
+
+    #[test]
     fn rejects_unsafe_composer_attachment_content() {
         let connection = migrated_connection();
         seed_generic_account(&connection);
