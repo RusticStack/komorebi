@@ -596,6 +596,7 @@ mod tests {
     use super::*;
     use crate::schema::apply_migrations;
     use rusqlite::Connection;
+    use std::{fs, path::PathBuf};
 
     fn request(raw_message: &[u8]) -> ParseInboundMimeRequest<'_> {
         ParseInboundMimeRequest {
@@ -666,6 +667,113 @@ mod tests {
             )
             .expect("seed folder");
         connection
+    }
+
+    fn fixture_bytes(name: &str) -> Vec<u8> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join("mime")
+            .join(name);
+        fs::read(&path)
+            .unwrap_or_else(|error| panic!("read MIME fixture {}: {error}", path.display()))
+    }
+
+    #[test]
+    fn reusable_mime_fixture_corpus_covers_parser_boundaries() {
+        let encoded = fixture_bytes("encoded-portuguese-japanese-alternative.eml");
+        let encoded = parse_inbound_mime(request(&encoded)).expect("encoded fixture parses");
+
+        assert_eq!(
+            encoded.message.subject,
+            "Relat\u{00f3}rio \u{2014} ol\u{00e1} e \u{65e5}\u{672c}\u{8a9e}"
+        );
+        assert_eq!(
+            encoded.message.sender_name.as_deref(),
+            Some("Jos\u{00e9} Silva")
+        );
+        assert_eq!(
+            encoded.message.body_text.as_deref().map(str::trim),
+            Some("Ol\u{00e1}, o relat\u{00f3}rio de seguran\u{00e7}a est\u{00e1} pronto.")
+        );
+        assert!(encoded
+            .message
+            .body_html
+            .as_deref()
+            .is_some_and(|body| body.contains("relat\u{00f3}rio de seguran\u{00e7}a")));
+        let recipients: Vec<MailAddressRecord> =
+            serde_json::from_str(&encoded.message.to_addresses_json).expect("to JSON");
+        assert!(recipients.iter().any(
+            |recipient| recipient.name.as_deref() == Some("\u{5c71}\u{7530} \u{592a}\u{90ce}")
+        ));
+        assert!(recipients.iter().any(|recipient| {
+            recipient.name.as_deref() == Some("Ana Cora\u{00e7}\u{00e3}o")
+                && recipient.address.as_deref() == Some("ana@example.pt")
+        }));
+
+        let nested = fixture_bytes("nested-related-attachments.eml");
+        let nested = parse_inbound_mime(request(&nested)).expect("nested fixture parses");
+
+        assert!(nested
+            .message
+            .body_html
+            .as_deref()
+            .is_some_and(|body| body.contains("cid:logo.fixture@example.test")));
+        assert_eq!(nested.attachments.len(), 2);
+        let inline = &nested.attachments[0];
+        assert_eq!(inline.disposition, AttachmentDisposition::Inline);
+        assert_eq!(
+            inline.content_id.as_deref(),
+            Some("logo.fixture@example.test")
+        );
+        assert_eq!(
+            inline.preview_kind,
+            Some(AttachmentPreviewKind::RasterImage)
+        );
+        let attachment = &nested.attachments[1];
+        assert_eq!(attachment.disposition, AttachmentDisposition::Attachment);
+        assert_eq!(
+            attachment.sender_filename.as_deref(),
+            Some("../../reports/quarterly?.pdf")
+        );
+        assert_eq!(attachment.display_filename, "quarterly_.pdf");
+        assert_eq!(
+            attachment.sniffed_content_type.as_deref(),
+            Some("application/pdf")
+        );
+
+        let malformed = fixture_bytes("malformed-boundary.eml");
+        let malformed =
+            parse_inbound_mime(request(&malformed)).expect("malformed fixture still parses");
+
+        assert_eq!(malformed.message.subject, "Missing closing boundary");
+        assert!(malformed
+            .message
+            .body_text
+            .as_deref()
+            .is_some_and(|body| body.contains("final boundary is absent")));
+        assert!(!malformed.attachments.is_empty());
+
+        let hostile = fixture_bytes("phishing-xss-html-alternative.eml");
+        let hostile = parse_inbound_mime(request(&hostile)).expect("hostile HTML fixture parses");
+
+        assert_eq!(
+            hostile.message.subject,
+            "A\u{00e7}\u{00e3}o necess\u{00e1}ria"
+        );
+        assert!(hostile
+            .message
+            .body_text
+            .as_deref()
+            .is_some_and(|body| body.contains("verifique o portal manualmente")));
+        let html = hostile
+            .message
+            .body_html
+            .as_deref()
+            .expect("hostile fixture keeps HTML for rendering-boundary tests");
+        assert!(html.contains("https://evil.example.test/login"));
+        assert!(html.contains("javascript:alert"));
+        assert!(html.contains("<script>"));
+        assert!(html.contains("onerror="));
     }
 
     #[test]

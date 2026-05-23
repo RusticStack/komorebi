@@ -1,0 +1,44 @@
+From: Sender <sender@example.test>
+To: Reader <reader@example.test>
+Date: Fri, 22 May 2026 11:15:00 +0100
+Message-ID: <fixture-nested@example.test>
+Subject: Nested CID attachments
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="komorebi-mix"
+
+--komorebi-mix
+Content-Type: multipart/related; boundary="komorebi-related"
+
+--komorebi-related
+Content-Type: multipart/alternative; boundary="komorebi-body"
+
+--komorebi-body
+Content-Type: text/plain; charset=utf-8
+
+Logo is referenced from the HTML body.
+
+--komorebi-body
+Content-Type: text/html; charset=utf-8
+
+<p>Logo is referenced inline: <img src="cid:logo.fixture@example.test" alt="Komorebi logo"></p>
+
+--komorebi-body--
+
+--komorebi-related
+Content-Type: image/png; name="logo.png"
+Content-Disposition: inline; filename="logo.png"
+Content-ID: <logo.fixture@example.test>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=
+
+--komorebi-related--
+
+--komorebi-mix
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="../../reports/quarterly?.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJUVPRgo=
+
+--komorebi-mix--

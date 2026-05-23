@@ -81,19 +81,22 @@ Malformed-but-parseable messages are accepted when stable records can still be p
 - Non-ASCII address display names.
 - Charset decoding for ISO-8859-1 and UTF-8 bodies.
 - Multipart plain-text and HTML alternatives.
+- Reusable `.eml` fixture-file corpus in `src-tauri/fixtures/mime/`.
+- Portuguese body text and Japanese/non-ASCII names.
+- Nested multipart structures.
 - Inline CID image parts.
 - Attachment metadata records with path-like sender filenames.
 - Stable attachment ids across repeated parsing.
+- Phishing links and XSS HTML payload preservation for the frontend rendering boundary.
 - Idempotent SQLite persistence of normalized message rows and attachment metadata.
 - Missing multipart closing boundary with a recoverable body.
 - Empty message, invalid UID, and invalid account/folder id denial paths.
 
-No test uses a real mailbox, real account, or real user message.
+No test uses a real mailbox, real account, or real user message. Fixture files are synthetic and documented in `src-tauri/fixtures/mime/README.md`.
 
 ## Not Implemented
 
 - Live `async-imap` adapter integration that fetches raw RFC822 bytes and calls this boundary.
-- MIME fixture files outside Rust unit tests.
 - Persisting attachment bytes to app-generated storage paths.
 - Inline image resolution in the React reader.
 

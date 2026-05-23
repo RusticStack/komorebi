@@ -1,0 +1,26 @@
+From: "Security Notice" <notice@example.test>
+To: "Leitor Português" <reader@example.pt>
+Date: Fri, 22 May 2026 13:05:00 +0100
+Message-ID: <fixture-phishing-xss@example.test>
+Subject: =?UTF-8?Q?A=C3=A7=C3=A3o_necess=C3=A1ria?=
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="komorebi-xss"
+
+--komorebi-xss
+Content-Type: text/plain; charset=utf-8
+
+Ação necessária: verifique o portal manualmente. Do not trust the link text.
+
+--komorebi-xss
+Content-Type: text/html; charset=utf-8
+
+<html>
+  <body>
+    <p>Ação necessária: <a href="https://evil.example.test/login">https://bank.example.test/login</a></p>
+    <p><a href="javascript:alert('xss')">Open secure message</a></p>
+    <img src="https://tracker.example.test/pixel.png" onerror="alert('xss')" alt="tracker">
+    <script>alert('xss')</script>
+  </body>
+</html>
+
+--komorebi-xss--

@@ -1,0 +1,18 @@
+From: "Malformed Fixture" <broken@example.test>
+To: "Leitor Português" <reader@example.pt>
+Date: Fri, 22 May 2026 12:45:00 +0100
+Message-ID: <fixture-malformed-boundary@example.test>
+Subject: Missing closing boundary
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="komorebi-broken"
+
+--komorebi-broken
+Content-Type: text/plain; charset=utf-8
+
+Body survives even when the final boundary is absent.
+
+--komorebi-broken
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+
+@@not-base64@@
