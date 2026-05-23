@@ -95,7 +95,7 @@ describe("i18n", () => {
           attachments: [
             {
               contentType: "text/plain",
-              displayFilename: "relatorio.txt",
+              displayFilename: "",
               disposition: "attachment",
               id: "att_locale",
               sizeBytes: 1536,
@@ -108,8 +108,8 @@ describe("i18n", () => {
           id: "msg_locale",
           preview: "Corpo local",
           receivedAt: "2026-05-22T09:30:00",
-          sender: "Ana",
-          senderEmail: "ana@example.com",
+          sender: "",
+          senderEmail: "",
           subject: "Relatorio",
           unread: true,
         },
@@ -125,10 +125,12 @@ describe("i18n", () => {
     expect(screen.getAllByText(/1\s234\s567 por ler/).length).toBeGreaterThan(0);
     expect(screen.getByText("a sincronizar")).toBeVisible();
     expect(screen.getByText("22/05/2026, 09:30")).toBeVisible();
+    expect(screen.getByText("Remetente desconhecido")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /Relatorio/ }));
 
     const attachments = screen.getByRole("region", { name: "Anexos" });
+    expect(within(attachments).getByText("Anexo")).toBeVisible();
     expect(within(attachments).getByText("text/plain - 1,5 KB")).toBeVisible();
   });
 

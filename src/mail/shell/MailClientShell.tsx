@@ -1107,6 +1107,7 @@ function MessageRow({
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
   const subject = message.subject || t("mail.messages.noSubject");
+  const sender = messageSenderLabel(message, t);
   const receivedAt = localeFormat.dateTime(message.receivedAt);
 
   return (
@@ -1121,7 +1122,7 @@ function MessageRow({
           ? t("mail.messages.unread")
           : t("mail.messages.read"),
         receivedAt,
-        sender: message.sender,
+        sender,
         subject,
       })}
       aria-posinset={index + 1}
@@ -1132,7 +1133,7 @@ function MessageRow({
       onClick={onClick}
     >
       <div className="message-row">
-        <strong>{message.sender}</strong>
+        <strong>{sender}</strong>
         <span className="message-row-meta">
           {message.flagged ? (
             <span className="message-flag">{t("mail.messages.flagged")}</span>
@@ -1164,6 +1165,17 @@ function messageLocationLabel(
   });
 }
 
+function messageSenderLabel(
+  message: Pick<MailMessage, "sender" | "senderEmail">,
+  t: TFunction,
+) {
+  return (
+    message.sender.trim() ||
+    message.senderEmail.trim() ||
+    t("mail.messages.unknownSender")
+  );
+}
+
 function ReaderPane({
   state,
   message,
@@ -1177,6 +1189,7 @@ function ReaderPane({
 }) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
+  const sender = message ? messageSenderLabel(message, t) : "";
 
   if (state.loadState.messages === "loading") {
     return (
@@ -1236,7 +1249,7 @@ function ReaderPane({
         <p className="eyebrow">{t("mail.reader.selectedEyebrow")}</p>
         <h2>{message.subject || t("mail.messages.noSubject")}</h2>
         <div className="sender-line">
-          <span>{message.sender}</span>
+          <span>{sender}</span>
           <time dateTime={message.receivedAt}>
             {localeFormat.dateTime(message.receivedAt)}
           </time>

@@ -105,6 +105,7 @@ The frontend uses `i18next` and `react-i18next` through `src/i18n/index.ts`.
 - First-launch language detection reads `navigator.languages` and `navigator.language`, maps any Portuguese locale to `pt-PT`, maps English locales to `en`, and falls back to English.
 - Translation resources live in `src/i18n/locales/en.json` and `src/i18n/locales/pt-PT.json`.
 - Runtime shell, reader, settings, safe-message, and composer strings route through `t(...)`; the app name remains literal branding.
+- Missing sender and attachment display-name fallbacks are applied in React through i18n keys, not synthesized as English labels in the Rust cache read model.
 - `src/i18n/localeFormat.ts` centralizes `Intl` formatting for message dates/times, unread and search-result counts, attachment sizes, and pluralized count/status text.
 - Message rows and reader headers format raw cache timestamps for the active locale. Unparseable legacy display strings are shown unchanged.
 - Account/folder unread badges, search result status counts, and attachment-size labels use the active locale's number formatting.
@@ -232,9 +233,9 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - composer drawer entry
 - settings drawer entry
 - loading/error shell states
-- first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
+- first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
 
-Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
+Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, missing-label fallback ownership, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
 
 Rust composer and SMTP tests cover sanitized rich composer HTML persistence and outgoing MIME serialization for strikethrough, tables, code blocks, font styles, colors, highlights, and alignment.
 

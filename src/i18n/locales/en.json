@@ -72,7 +72,8 @@
       "location": "{{account}} / {{folder}}",
       "noSubject": "(no subject)",
       "read": "Read",
-      "unread": "Unread"
+      "unread": "Unread",
+      "unknownSender": "Unknown sender"
     },
     "reader": {
       "actions": {

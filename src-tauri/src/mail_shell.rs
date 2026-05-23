@@ -309,7 +309,7 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
            messages.id,
            messages.account_id,
            messages.folder_id,
-           COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '(unknown sender)') AS sender,
+           COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '') AS sender,
            COALESCE(messages.sender_email, '') AS sender_email,
            messages.subject,
            COALESCE(NULLIF(messages.snippet, ''), NULLIF(messages.body_text, ''), '') AS preview,
@@ -411,7 +411,7 @@ fn search_messages(
            messages.id,
            messages.account_id,
            messages.folder_id,
-           COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '(unknown sender)') AS sender,
+           COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '') AS sender,
            COALESCE(messages.sender_email, '') AS sender_email,
            messages.subject,
            COALESCE(NULLIF(messages.snippet, ''), NULLIF(messages.body_text, ''), '') AS preview,
@@ -504,7 +504,7 @@ fn load_message_attachments_by_ids(
         "SELECT
            attachments.message_id,
            attachments.id,
-           COALESCE(NULLIF(attachments.display_filename, ''), 'Attachment') AS display_filename,
+           COALESCE(NULLIF(attachments.display_filename, ''), '') AS display_filename,
            COALESCE(
              NULLIF(attachments.canonical_mime, ''),
              NULLIF(attachments.content_type, ''),
@@ -679,11 +679,7 @@ fn safe_attachment_display_filename(filename: String) -> String {
         .join(" ");
     let bounded = sanitized.chars().take(180).collect::<String>();
 
-    if bounded.is_empty() {
-        "Attachment".to_string()
-    } else {
-        bounded
-    }
+    bounded
 }
 
 fn safe_attachment_content_type(content_type: String) -> String {
@@ -802,6 +798,103 @@ mod tests {
         assert!(!json.contains("attachments/acct_work"));
         assert!(json.contains("person@example.com"));
         assert!(json.contains("invoice_.pdf"));
+    }
+
+    #[test]
+    fn missing_display_labels_are_left_for_frontend_i18n_fallbacks() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO messages (
+                  id,
+                  account_id,
+                  folder_id,
+                  imap_uid,
+                  uid_validity,
+                  subject,
+                  sender_name,
+                  sender_email,
+                  date_received,
+                  is_read,
+                  is_flagged,
+                  body_text,
+                  body_html,
+                  snippet
+                )
+                VALUES (
+                  'msg_missing_labels',
+                  'acct_personal',
+                  'folder_personal_inbox',
+                  4,
+                  10,
+                  '',
+                  NULL,
+                  NULL,
+                  '2026-05-23T12:00:00Z',
+                  1,
+                  0,
+                  'Fallback label search text.',
+                  NULL,
+                  'Fallback label search text.'
+                );
+
+                INSERT INTO attachments (
+                  id,
+                  account_id,
+                  folder_id,
+                  message_id,
+                  content_id,
+                  display_filename,
+                  canonical_mime,
+                  size_bytes,
+                  storage_relative_path,
+                  disposition
+                )
+                VALUES (
+                  'att_missing_label',
+                  'acct_personal',
+                  'folder_personal_inbox',
+                  'msg_missing_labels',
+                  NULL,
+                  '...',
+                  'text/plain',
+                  12,
+                  'attachments/acct_personal/folder_personal_inbox/msg_missing_labels/att_missing_label.txt',
+                  'attachment'
+                );
+                "#,
+            )
+            .unwrap();
+
+        let snapshot = load_mail_shell_from_connection(&connection).unwrap();
+        let message = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "msg_missing_labels")
+            .expect("missing-label message should be loaded");
+
+        assert_eq!(message.sender, "");
+        assert_eq!(message.attachments[0].display_filename, "");
+
+        let search = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "fallback label".to_string(),
+                account_id: None,
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+        let search_message = search
+            .results
+            .iter()
+            .find(|message| message.id == "msg_missing_labels")
+            .expect("missing-label message should be searchable");
+        assert_eq!(search_message.sender, "");
+        assert_eq!(search_message.attachments[0].display_filename, "");
     }
 
     #[test]

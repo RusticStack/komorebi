@@ -72,7 +72,8 @@
       "location": "{{account}} / {{folder}}",
       "noSubject": "(sem assunto)",
       "read": "Lida",
-      "unread": "Por ler"
+      "unread": "Por ler",
+      "unknownSender": "Remetente desconhecido"
     },
     "reader": {
       "actions": {
