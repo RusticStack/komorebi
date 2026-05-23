@@ -49,6 +49,8 @@ import {
   type AccountSetupRequest,
   type AccountSetupResponse,
   type AccountReauthRequest,
+  type OAuthAccountReauthRequest,
+  type OAuthAccountSetupRequest,
   type AccountRemovalRequest,
   type AccountRemovalResponse,
   type AccountConnectionTestResponse,
@@ -65,6 +67,12 @@ export type AccountCreateFunction = (
 ) => Promise<AccountSetupResponse>;
 export type AccountReauthFunction = (
   request: AccountReauthRequest,
+) => Promise<AccountSetupResponse>;
+export type OAuthAccountSetupFunction = (
+  request: OAuthAccountSetupRequest,
+) => Promise<AccountSetupResponse>;
+export type OAuthAccountReauthFunction = (
+  request: OAuthAccountReauthRequest,
 ) => Promise<AccountSetupResponse>;
 export type AccountRemoveFunction = (
   request: AccountRemovalRequest,
@@ -89,6 +97,8 @@ export type MailClientShellProps = {
   sendComposerMail?: ComposerSendFunction;
   createAccount?: AccountCreateFunction;
   reauthAccount?: AccountReauthFunction;
+  startOAuthAccountSetup?: OAuthAccountSetupFunction;
+  startOAuthAccountReauth?: OAuthAccountReauthFunction;
   removeAccount?: AccountRemoveFunction;
   testAccountConnection?: AccountConnectionTestFunction;
   getAccountAuthStatus?: AccountAuthStatusFunction;
@@ -135,6 +145,8 @@ export function MailClientShell({
   sendComposerMail,
   createAccount,
   reauthAccount,
+  startOAuthAccountSetup,
+  startOAuthAccountReauth,
   removeAccount,
   testAccountConnection,
   getAccountAuthStatus,
@@ -716,6 +728,8 @@ export function MailClientShell({
               id: account.id,
               label: account.label,
               email: account.email,
+              providerKind: account.providerKind,
+              authKind: account.authKind,
               signatureHtml: account.signatureHtml,
             }))}
             initialAccountId={state.selectedAccountId}
@@ -739,6 +753,8 @@ export function MailClientShell({
             }}
             onCreateAccount={createAccount}
             onReauthAccount={reauthAccount}
+            onStartOAuthAccountSetup={startOAuthAccountSetup}
+            onStartOAuthAccountReauth={startOAuthAccountReauth}
             onRemoveAccount={removeAccount}
             onTestAccountConnection={testAccountConnection}
             onGetAccountAuthStatus={getAccountAuthStatus}

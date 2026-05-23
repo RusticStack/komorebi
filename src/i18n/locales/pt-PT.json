@@ -313,6 +313,7 @@
     "accounts": {
       "actions": {
         "add": "Adicionar conta",
+        "oauth": "Iniciar OAuth",
         "reauth": "Reautenticar",
         "remove": "Remover conta",
         "status": "Ver estado",
@@ -329,6 +330,9 @@
       },
       "errors": {
         "createUnavailable": "A configuracao de conta esta indisponivel neste runtime.",
+        "oauthReauthUnavailable": "A reautenticacao OAuth esta indisponivel neste runtime.",
+        "oauthSetupUnavailable": "A configuracao OAuth esta indisponivel neste runtime.",
+        "oauthTestUnavailable": "A configuracao OAuth e concluida pelo fluxo do navegador.",
         "reauthUnavailable": "A reautenticacao esta indisponivel para esta conta.",
         "removeUnavailable": "A remocao de conta esta indisponivel para esta conta.",
         "statusUnavailable": "O estado de autenticacao esta indisponivel para esta conta.",
@@ -342,7 +346,7 @@
         "imapHost": "Host IMAP",
         "imapPort": "Porta IMAP",
         "imapSecurity": "Seguranca IMAP",
-        "oauthSecret": "Token de renovacao OAuth",
+        "oauthClientId": "ID de cliente OAuth",
         "passwordSecret": "Palavra-passe ou palavra-passe de aplicacao",
         "provider": "Fornecedor",
         "reauthSecret": "Segredo de substituicao",

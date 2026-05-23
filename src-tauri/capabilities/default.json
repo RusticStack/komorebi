@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window capability. Grants reviewed mail-shell read commands, typed composer draft/send commands, and typed account-management commands.",
+  "description": "Main window capability. Grants reviewed mail-shell read commands, typed composer draft/send commands, typed account-management commands, and backend-owned OAuth loopback account commands.",
   "windows": ["main"],
   "permissions": [
     "allow-load-mail-shell",
@@ -15,6 +15,8 @@
     "allow-reauth-account",
     "allow-remove-account",
     "allow-test-account-connection",
-    "allow-get-account-auth-status"
+    "allow-get-account-auth-status",
+    "allow-start-oauth-account-setup",
+    "allow-start-oauth-account-reauth"
   ]
 }

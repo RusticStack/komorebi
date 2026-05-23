@@ -127,6 +127,11 @@ const accountCommandNames = new Set([
   "get_account_auth_status",
 ]);
 
+const oauthLoopbackCommandNames = new Set([
+  "start_oauth_account_setup",
+  "start_oauth_account_reauth",
+]);
+
 function rustCommandPath(command: string) {
   if (command === "load_mail_shell" || command === "search_mail") {
     return `mail_shell::${command}`;
@@ -134,6 +139,10 @@ function rustCommandPath(command: string) {
 
   if (accountCommandNames.has(command)) {
     return `account_management::${command}`;
+  }
+
+  if (oauthLoopbackCommandNames.has(command)) {
+    return `oauth_loopback::${command}`;
   }
 
   return `composer::${command}`;
@@ -201,6 +210,8 @@ describe("Tauri capabilities", () => {
       "allow-remove-account",
       "allow-test-account-connection",
       "allow-get-account-auth-status",
+      "allow-start-oauth-account-setup",
+      "allow-start-oauth-account-reauth",
     ]);
   });
 
@@ -249,6 +260,8 @@ describe("Tauri capabilities", () => {
       "remove_account",
       "test_account_connection",
       "get_account_auth_status",
+      "start_oauth_account_setup",
+      "start_oauth_account_reauth",
     ]) {
       expect(buildScript).toContain(`"${command}"`);
       expect(libRs).toContain(rustCommandPath(command));

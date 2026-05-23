@@ -11,6 +11,8 @@ const APP_COMMANDS: &[&str] = &[
     "remove_account",
     "test_account_connection",
     "get_account_auth_status",
+    "start_oauth_account_setup",
+    "start_oauth_account_reauth",
 ];
 
 fn main() {

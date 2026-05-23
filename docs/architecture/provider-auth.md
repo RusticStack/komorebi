@@ -1,6 +1,6 @@
 # Provider Authentication
 
-Status: accepted and implemented for backend auth policy, OAuth/XOAUTH2 protocol helpers, and account-management command enforcement.
+Status: accepted and implemented for backend auth policy, OAuth/XOAUTH2 protocol helpers, backend-owned loopback setup/reauthentication, and account-management command enforcement.
 Last reviewed: 2026-05-23.
 
 ## Decision
@@ -17,11 +17,12 @@ The Rust implementation is split across:
 
 - `src-tauri/src/auth.rs`: provider/auth allow, reject, and unsupported policy.
 - `src-tauri/src/oauth.rs`: OAuth authorization URL construction, PKCE, token exchange, token refresh, provider revocation, and XOAUTH2 initial response generation.
+- `src-tauri/src/oauth_loopback.rs`: backend-owned Gmail/Microsoft authorization browser launch, loopback callback listener, state validation, token exchange, and refresh-token storage handoff.
 - `src-tauri/src/token_lifecycle.rs`: backend-only refresh/reconnect/remove workflow.
 - `src-tauri/src/credentials.rs`: Windows Credential Manager secret storage for long-lived secrets.
-- `src-tauri/src/account_management.rs`: typed setup, reauthentication, removal, configuration validation, and redacted auth-status commands that enforce this policy before secret writes or account metadata inserts.
+- `src-tauri/src/account_management.rs`: typed generic setup, generic reauthentication, removal, configuration validation, redacted auth-status commands, and public-command denial for direct Gmail/Microsoft secret handoff.
 
-The settings UI can now submit account setup, reauthentication, removal, configuration validation, and redacted auth-status requests through typed Tauri commands. Gmail and Microsoft remain OAuth2/XOAUTH2-only. Until the OAuth loopback callback task lands, those provider forms accept only an OAuth refresh-token handoff as the secret value; passwords and app passwords are rejected before credential or SQLite writes. The loopback flow must replace this handoff with backend-owned authorization-code exchange.
+The settings UI can now submit generic account setup, Gmail/Microsoft OAuth setup, OAuth reauthentication, generic reauthentication, removal, configuration validation, and redacted auth-status requests through typed Tauri commands. Gmail and Microsoft remain OAuth2/XOAUTH2-only. Their setup and reauthentication forms collect only non-secret account metadata plus an OAuth client ID, then call backend-owned loopback commands. React never receives authorization codes, access tokens, refresh tokens, provider token JSON, or credential target names.
 
 ## Provider Matrix
 
@@ -44,7 +45,7 @@ Current policy:
 - Generic IMAP/SMTP + manual password/app password -> `Allowed` with password-style SASL for compatible providers.
 - Generic IMAP/SMTP + OAuth2 -> `UnsupportedUntilImplemented` until provider-specific issuer/scopes/token behavior are defined.
 
-`create_account` writes the approved secret to Windows Credential Manager before inserting account metadata. If credential storage fails, no account row is inserted. If account metadata insertion fails after a credential write, the command best-effort deletes the just-written account secrets. `reauth_account` rotates only the existing account's approved credential slot and never returns the secret to React. `remove_account` deletes account secrets before deleting or soft-removing local account metadata.
+`create_account` is now the public generic-provider setup command. Its public IPC path rejects Gmail and Microsoft so a frontend cannot submit provider refresh tokens directly. The OAuth loopback helper exchanges the authorization code inside Rust and then uses the lower-level account insertion boundary to write the approved refresh token to Windows Credential Manager before inserting account metadata. If credential storage fails, no account row is inserted. If account metadata insertion fails after a credential write, the command best-effort deletes the just-written account secrets. `reauth_account` is the public generic credential-rotation command and rejects existing Gmail/Microsoft OAuth accounts; `start_oauth_account_reauth` rotates those accounts only after the backend loopback/token exchange succeeds. `remove_account` deletes account secrets before deleting or soft-removing local account metadata.
 
 ## OAuth Details
 
@@ -62,16 +63,16 @@ Microsoft uses:
 - Revocation endpoint: unsupported in Komorebi until a Microsoft-specific mechanism is reviewed
 - Scopes: `offline_access`, `https://outlook.office.com/IMAP.AccessAsUser.All`, `https://outlook.office.com/SMTP.Send`
 
-OAuth authorization requests use PKCE S256, an unguessable state value, and provider-specific offline-access parameters. Token exchange and refresh run in Rust. React must never receive access tokens, refresh tokens, authorization codes after exchange, authorization headers, raw token response JSON, or credential target names from Rust. The current pre-loopback setup form may hold a user-entered refresh-token handoff long enough to submit `create_account`; do not broaden that temporary path, echo it in errors, persist it in frontend storage, or use it for access tokens.
+OAuth authorization requests use PKCE S256, an unguessable state value, and provider-specific offline-access parameters. The loopback listener binds `127.0.0.1` on a random available port and sends the root loopback redirect URI (`http://127.0.0.1:{port}`) for desktop-provider compatibility. The command opens the system browser from Rust, waits for the provider callback, validates the returned state, maps denied consent and provider errors to redacted UI-safe reasons, exchanges the code in Rust, requires a refresh token, and stores only that refresh token in Windows Credential Manager. React must never receive access tokens, refresh tokens, authorization codes, authorization headers, raw token response JSON, or credential target names from Rust.
 
 XOAUTH2 SASL initial responses are generated in Rust as base64-encoded `user=<address>\x01auth=Bearer <access-token>\x01\x01`.
 
 ## Frontend Rules
 
-- Gmail and Microsoft setup screens must use OAuth2 and must not include password, app-password, or "advanced generic" fallback fields. Until loopback is implemented, the only allowed major-provider secret field is the temporary OAuth refresh-token handoff.
+- Gmail and Microsoft setup screens must use OAuth2 loopback and must not include password, app-password, refresh-token, or "advanced generic" fallback fields.
 - Generic setup must clearly say it is for compatible IMAP/SMTP providers only.
 - Generic setup copy must not mention Gmail, Outlook, Microsoft 365, Exchange Online, or Hotmail as examples.
-- Errors should use status language such as `oauth_required`, `oauth_callback_failed`, `token_refresh_failed`, or `reconnect_needed`; never expose token or credential internals.
+- OAuth setup errors should map cancellation, callback timeout, state mismatch, invalid grant, and provider errors to UI-safe text; never expose token or credential internals.
 
 ## Credential Storage Relationship
 
@@ -85,9 +86,7 @@ This policy controls which secrets are allowed to reach the credential backend d
 ## Remaining Work
 
 - Add provider setup documentation for registering OAuth clients and redirect URIs.
-- Implement the Tauri/Rust command that opens the provider URL and receives the loopback callback without exposing secrets to React.
-- Replace the temporary refresh-token handoff with backend-owned token exchange and Credential Manager storage.
-- Add UI states for pending authorization, callback failure, reconnect-needed, and account removal.
+- Add richer UI states for pending authorization, callback failure, reconnect-needed, and account removal.
 - Add live generic IMAP/SMTP login testing once the live adapters exist. Current `test_account_connection` validates only configuration and credential policy.
 
 ## References

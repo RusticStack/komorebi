@@ -187,11 +187,24 @@ describe("AccountSignatureSettings", () => {
       },
       credentialStored: true,
     });
+    const onStartOAuthAccountSetup = vi.fn().mockResolvedValue({
+      account: {
+        authKind: "oauth2",
+        authStatus: "connected",
+        displayEmail: "person@gmail.com",
+        displayName: null,
+        id: "acct_gmail",
+        providerKind: "gmail",
+        username: "person@gmail.com",
+      },
+      credentialStored: true,
+    });
 
     render(
       <AccountSignatureSettings
         accounts={[]}
         onCreateAccount={onCreateAccount}
+        onStartOAuthAccountSetup={onStartOAuthAccountSetup}
         onSaveSignature={() => undefined}
       />,
     );
@@ -208,26 +221,22 @@ describe("AccountSignatureSettings", () => {
     fireEvent.change(screen.getByLabelText("Username"), {
       target: { value: "person@gmail.com" },
     });
-    fireEvent.change(screen.getByLabelText("OAuth refresh token"), {
-      target: { value: "refresh-token" },
+    fireEvent.change(screen.getByLabelText("OAuth client ID"), {
+      target: { value: "desktop-client-id.apps.googleusercontent.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start OAuth" }));
 
-    await waitFor(() => expect(onCreateAccount).toHaveBeenCalledTimes(1));
-    expect(onCreateAccount).toHaveBeenCalledWith({
-      authKind: "oauth2",
+    await waitFor(() =>
+      expect(onStartOAuthAccountSetup).toHaveBeenCalledTimes(1),
+    );
+    expect(onStartOAuthAccountSetup).toHaveBeenCalledWith({
       displayEmail: "person@gmail.com",
       displayName: null,
-      imapHost: null,
-      imapPort: null,
-      imapSecurity: null,
       providerKind: "gmail",
-      secret: "refresh-token",
-      smtpHost: null,
-      smtpPort: null,
-      smtpSecurity: null,
       username: "person@gmail.com",
+      clientId: "desktop-client-id.apps.googleusercontent.com",
     });
+    expect(onCreateAccount).not.toHaveBeenCalled();
   });
 
   it("reauthenticates, checks redacted status, and removes the selected account", async () => {
@@ -299,5 +308,52 @@ describe("AccountSignatureSettings", () => {
         deleteLocalCache: true,
       }),
     );
+  });
+
+  it("reauthenticates OAuth accounts through the browser-owned loopback flow", async () => {
+    const onReauthAccount = vi.fn();
+    const onStartOAuthAccountReauth = vi.fn().mockResolvedValue({
+      account: {
+        authKind: "oauth2",
+        authStatus: "connected",
+        displayEmail: "sender@gmail.com",
+        displayName: "Gmail",
+        id: "acct_gmail",
+        providerKind: "gmail",
+        username: "sender@gmail.com",
+      },
+      credentialStored: true,
+    });
+
+    render(
+      <AccountSignatureSettings
+        accounts={[
+          {
+            authKind: "oauth2",
+            email: "sender@gmail.com",
+            id: "acct_gmail",
+            label: "Gmail",
+            providerKind: "gmail",
+            signatureHtml: null,
+          },
+        ]}
+        onReauthAccount={onReauthAccount}
+        onSaveSignature={() => undefined}
+        onStartOAuthAccountReauth={onStartOAuthAccountReauth}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("OAuth client ID"), {
+      target: { value: "desktop-client-id.apps.googleusercontent.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reauthenticate" }));
+
+    await waitFor(() =>
+      expect(onStartOAuthAccountReauth).toHaveBeenCalledWith({
+        accountId: "acct_gmail",
+        clientId: "desktop-client-id.apps.googleusercontent.com",
+      }),
+    );
+    expect(onReauthAccount).not.toHaveBeenCalled();
   });
 });

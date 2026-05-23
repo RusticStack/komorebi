@@ -313,6 +313,7 @@
     "accounts": {
       "actions": {
         "add": "Add account",
+        "oauth": "Start OAuth",
         "reauth": "Reauthenticate",
         "remove": "Remove account",
         "status": "Check status",
@@ -329,6 +330,9 @@
       },
       "errors": {
         "createUnavailable": "Account setup is unavailable in this runtime.",
+        "oauthReauthUnavailable": "OAuth reauthentication is unavailable in this runtime.",
+        "oauthSetupUnavailable": "OAuth setup is unavailable in this runtime.",
+        "oauthTestUnavailable": "OAuth setup is completed through the browser flow.",
         "reauthUnavailable": "Reauthentication is unavailable for this account.",
         "removeUnavailable": "Account removal is unavailable for this account.",
         "statusUnavailable": "Auth status is unavailable for this account.",
@@ -342,7 +346,7 @@
         "imapHost": "IMAP host",
         "imapPort": "IMAP port",
         "imapSecurity": "IMAP security",
-        "oauthSecret": "OAuth refresh token",
+        "oauthClientId": "OAuth client ID",
         "passwordSecret": "Password or app password",
         "provider": "Provider",
         "reauthSecret": "Replacement secret",

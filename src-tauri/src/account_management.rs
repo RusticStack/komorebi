@@ -220,6 +220,7 @@ pub fn create_account(
     app: tauri::AppHandle,
     request: AccountSetupRequest,
 ) -> Result<AccountSetupResponse, AccountCommandError> {
+    reject_direct_major_provider_oauth_setup(&request)?;
     let cache_path = mail_cache_path(&app)?;
     let mut credentials = WindowsCredentialManager;
 
@@ -232,6 +233,7 @@ pub fn reauth_account(
     request: AccountReauthRequest,
 ) -> Result<AccountSetupResponse, AccountCommandError> {
     let cache_path = mail_cache_path(&app)?;
+    reject_direct_major_provider_oauth_reauth_from_path(&cache_path, &request.account_id)?;
     let mut credentials = WindowsCredentialManager;
 
     reauth_account_from_path(&cache_path, &mut credentials, request)
@@ -253,6 +255,55 @@ pub fn test_account_connection(
     request: AccountSetupRequest,
 ) -> Result<AccountConnectionTestResponse, AccountCommandError> {
     test_account_connection_request(request)
+}
+
+fn reject_direct_major_provider_oauth_setup(
+    request: &AccountSetupRequest,
+) -> Result<(), AccountCommandError> {
+    if matches!(request.provider_kind.as_str(), "gmail" | "microsoft") {
+        return Err(AccountCommandError::new(
+            "Gmail and Microsoft account setup must use the OAuth browser flow",
+        ));
+    }
+
+    Ok(())
+}
+
+fn reject_direct_major_provider_oauth_reauth_from_path(
+    cache_path: &Path,
+    account_id: &str,
+) -> Result<(), AccountCommandError> {
+    validate_entity_id("account_id", account_id)?;
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    reject_direct_major_provider_oauth_reauth_from_connection(&connection, account_id)
+}
+
+fn reject_direct_major_provider_oauth_reauth_from_connection(
+    connection: &Connection,
+    account_id: &str,
+) -> Result<(), AccountCommandError> {
+    let account = connection
+        .query_row(
+            "SELECT provider_kind, auth_kind
+             FROM accounts
+             WHERE id = ?1
+               AND removed_at IS NULL
+               AND auth_status != 'removed'",
+            params![account_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+
+    if let Some((provider_kind, auth_kind)) = account {
+        if matches!(provider_kind.as_str(), "gmail" | "microsoft") && auth_kind == "oauth2" {
+            return Err(AccountCommandError::new(
+                "Gmail and Microsoft reauthentication must use the OAuth browser flow",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -464,7 +515,7 @@ pub fn get_account_auth_status_from_connection(
     })
 }
 
-fn mail_cache_path(app: &tauri::AppHandle) -> Result<PathBuf, AccountCommandError> {
+pub(crate) fn mail_cache_path(app: &tauri::AppHandle) -> Result<PathBuf, AccountCommandError> {
     let app_data_dir = app.path().app_data_dir()?;
     fs::create_dir_all(&app_data_dir)?;
     Ok(app_data_dir.join(MAIL_CACHE_FILE_NAME))
@@ -1040,6 +1091,51 @@ mod tests {
                 .get(&("acct_gmail".into(), CredentialSlot::OAuthRefresh))
                 .map(String::as_str),
             Some("refresh-token"),
+        );
+    }
+
+    #[test]
+    fn frontend_callable_major_provider_secret_handoff_is_rejected() {
+        let mut request = generic_request();
+        request.account_id = Some("acct_gmail".into());
+        request.provider_kind = "gmail".into();
+        request.auth_kind = "oauth2".into();
+        request.secret = "refresh-token".into();
+
+        let error = reject_direct_major_provider_oauth_setup(&request)
+            .expect_err("direct setup must use loopback");
+
+        assert_eq!(
+            error.reason,
+            "Gmail and Microsoft account setup must use the OAuth browser flow"
+        );
+    }
+
+    #[test]
+    fn frontend_callable_major_provider_reauth_secret_handoff_is_rejected() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        let mut request = generic_request();
+        request.account_id = Some("acct_gmail".into());
+        request.provider_kind = "gmail".into();
+        request.auth_kind = "oauth2".into();
+        request.secret = "refresh-token".into();
+        request.imap_host = None;
+        request.imap_port = None;
+        request.imap_security = None;
+        request.smtp_host = None;
+        request.smtp_port = None;
+        request.smtp_security = None;
+        create_account_from_connection(&connection, &mut credentials, request)
+            .expect("seed oauth account through backend helper");
+
+        let error =
+            reject_direct_major_provider_oauth_reauth_from_connection(&connection, "acct_gmail")
+                .expect_err("direct reauth must use loopback");
+
+        assert_eq!(
+            error.reason,
+            "Gmail and Microsoft reauthentication must use the OAuth browser flow"
         );
     }
 

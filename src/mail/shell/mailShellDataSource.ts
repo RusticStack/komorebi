@@ -15,6 +15,8 @@ import type {
   AccountAuthStatusRequest,
   AccountAuthStatusView,
   AccountConnectionTestResponse,
+  OAuthAccountReauthRequest,
+  OAuthAccountSetupRequest,
   AccountReauthRequest,
   AccountRemovalRequest,
   AccountRemovalResponse,
@@ -34,6 +36,8 @@ const REAUTH_ACCOUNT_COMMAND = "reauth_account";
 const REMOVE_ACCOUNT_COMMAND = "remove_account";
 const TEST_ACCOUNT_CONNECTION_COMMAND = "test_account_connection";
 const GET_ACCOUNT_AUTH_STATUS_COMMAND = "get_account_auth_status";
+const START_OAUTH_ACCOUNT_SETUP_COMMAND = "start_oauth_account_setup";
+const START_OAUTH_ACCOUNT_REAUTH_COMMAND = "start_oauth_account_reauth";
 
 declare global {
   interface Window {
@@ -120,6 +124,22 @@ export async function reauthAccountFromTauri(
   request: AccountReauthRequest,
 ): Promise<AccountSetupResponse> {
   return invoke<AccountSetupResponse>(REAUTH_ACCOUNT_COMMAND, { request });
+}
+
+export async function startOAuthAccountSetupFromTauri(
+  request: OAuthAccountSetupRequest,
+): Promise<AccountSetupResponse> {
+  return invoke<AccountSetupResponse>(START_OAUTH_ACCOUNT_SETUP_COMMAND, {
+    request,
+  });
+}
+
+export async function startOAuthAccountReauthFromTauri(
+  request: OAuthAccountReauthRequest,
+): Promise<AccountSetupResponse> {
+  return invoke<AccountSetupResponse>(START_OAUTH_ACCOUNT_REAUTH_COMMAND, {
+    request,
+  });
 }
 
 export async function removeAccountFromTauri(

@@ -9,6 +9,9 @@ import type {
   AccountManagementView,
   AccountAuthStatusRequest,
   AccountProviderKind,
+  OAuthAccountProviderKind,
+  OAuthAccountReauthRequest,
+  OAuthAccountSetupRequest,
   AccountReauthRequest,
   AccountRemovalRequest,
   AccountRemovalResponse,
@@ -21,6 +24,8 @@ export type SignatureAccountOption = {
   id: string;
   label: string;
   email: string;
+  providerKind?: AccountProviderKind;
+  authKind?: AccountAuthKind;
   signatureHtml: string | null;
 };
 
@@ -37,6 +42,12 @@ export type AccountSignatureSettingsProps = {
   ) => Promise<AccountSetupResponse>;
   onReauthAccount?: (
     request: AccountReauthRequest,
+  ) => Promise<AccountSetupResponse>;
+  onStartOAuthAccountSetup?: (
+    request: OAuthAccountSetupRequest,
+  ) => Promise<AccountSetupResponse>;
+  onStartOAuthAccountReauth?: (
+    request: OAuthAccountReauthRequest,
   ) => Promise<AccountSetupResponse>;
   onRemoveAccount?: (
     request: AccountRemovalRequest,
@@ -57,6 +68,7 @@ type AccountFormState = {
   username: string;
   authKind: AccountAuthKind;
   secret: string;
+  oauthClientId: string;
   imapHost: string;
   imapPort: string;
   imapSecurity: AccountSecurityMode;
@@ -72,6 +84,7 @@ const defaultAccountForm: AccountFormState = {
   username: "",
   authKind: "app_password",
   secret: "",
+  oauthClientId: "",
   imapHost: "",
   imapPort: "993",
   imapSecurity: "tls",
@@ -87,6 +100,8 @@ export function AccountSignatureSettings({
   onAccountChanged,
   onCreateAccount,
   onReauthAccount,
+  onStartOAuthAccountSetup,
+  onStartOAuthAccountReauth,
   onRemoveAccount,
   onTestAccountConnection,
   onGetAccountAuthStatus,
@@ -114,6 +129,9 @@ export function AccountSignatureSettings({
   );
   const selectedAccount =
     accounts.find((account) => account.id === selectedAccountId) ?? null;
+  const selectedAccountUsesOAuth =
+    selectedAccount?.authKind === "oauth2" &&
+    selectedAccount.providerKind !== "generic_imap_smtp";
   const draftHtml = selectedAccount
     ? draftsByAccount[selectedAccount.id] ?? selectedAccount.signatureHtml ?? ""
     : "";
@@ -161,6 +179,8 @@ export function AccountSignatureSettings({
                     providerKind === "generic_imap_smtp"
                       ? "app_password"
                       : "oauth2",
+                  secret: "",
+                  oauthClientId: "",
                 }));
               }}
             >
@@ -301,31 +321,44 @@ export function AccountSignatureSettings({
             </>
           ) : null}
 
-          <label>
-            <span>
-              {accountForm.providerKind === "generic_imap_smtp"
-                ? t("settings.accounts.fields.passwordSecret")
-                : t("settings.accounts.fields.oauthSecret")}
-            </span>
-            <input
-              type="password"
-              value={accountForm.secret}
-              onChange={(event) =>
-                updateAccountForm({ secret: event.target.value })
-              }
-            />
-          </label>
+          {accountForm.providerKind === "generic_imap_smtp" ? (
+            <label>
+              <span>{t("settings.accounts.fields.passwordSecret")}</span>
+              <input
+                type="password"
+                value={accountForm.secret}
+                onChange={(event) =>
+                  updateAccountForm({ secret: event.target.value })
+                }
+              />
+            </label>
+          ) : (
+            <label>
+              <span>{t("settings.accounts.fields.oauthClientId")}</span>
+              <input
+                value={accountForm.oauthClientId}
+                onChange={(event) =>
+                  updateAccountForm({ oauthClientId: event.target.value })
+                }
+              />
+            </label>
+          )}
 
           <div className="settings-panel__actions">
             <button
               type="button"
               onClick={() => void handleTestAccount()}
-              disabled={!onTestAccountConnection}
+              disabled={
+                !onTestAccountConnection ||
+                accountForm.providerKind !== "generic_imap_smtp"
+              }
             >
               {t("settings.accounts.actions.test")}
             </button>
-            <button type="submit" disabled={!onCreateAccount}>
-              {t("settings.accounts.actions.add")}
+            <button type="submit" disabled={!canSubmitAccountSetup()}>
+              {accountForm.providerKind === "generic_imap_smtp"
+                ? t("settings.accounts.actions.add")
+                : t("settings.accounts.actions.oauth")}
             </button>
           </div>
         </form>
@@ -343,9 +376,13 @@ export function AccountSignatureSettings({
               {selectedAccount.label} - {selectedAccount.email}
             </p>
             <label>
-              <span>{t("settings.accounts.fields.reauthSecret")}</span>
+              <span>
+                {selectedAccountUsesOAuth
+                  ? t("settings.accounts.fields.oauthClientId")
+                  : t("settings.accounts.fields.reauthSecret")}
+              </span>
               <input
-                type="password"
+                type={selectedAccountUsesOAuth ? "text" : "password"}
                 value={reauthSecret}
                 onChange={(event) => setReauthSecret(event.target.value)}
               />
@@ -366,7 +403,7 @@ export function AccountSignatureSettings({
               >
                 {t("settings.accounts.actions.status")}
               </button>
-              <button type="submit" disabled={!onReauthAccount}>
+              <button type="submit" disabled={!canSubmitReauth()}>
                 {t("settings.accounts.actions.reauth")}
               </button>
               <button
@@ -490,27 +527,51 @@ export function AccountSignatureSettings({
   }
 
   function buildSetupRequest(): AccountSetupRequest {
-    const isGeneric = accountForm.providerKind === "generic_imap_smtp";
-
     return {
       providerKind: accountForm.providerKind,
       displayEmail: accountForm.displayEmail,
       displayName: accountForm.displayName.trim() || null,
       username: accountForm.username,
-      authKind: isGeneric ? accountForm.authKind : "oauth2",
+      authKind: accountForm.authKind,
       secret: accountForm.secret,
-      imapHost: isGeneric ? accountForm.imapHost : null,
-      imapPort: isGeneric ? Number(accountForm.imapPort) || null : null,
-      imapSecurity: isGeneric ? accountForm.imapSecurity : null,
-      smtpHost: isGeneric ? accountForm.smtpHost : null,
-      smtpPort: isGeneric ? Number(accountForm.smtpPort) || null : null,
-      smtpSecurity: isGeneric ? accountForm.smtpSecurity : null,
+      imapHost: accountForm.imapHost,
+      imapPort: Number(accountForm.imapPort) || null,
+      imapSecurity: accountForm.imapSecurity,
+      smtpHost: accountForm.smtpHost,
+      smtpPort: Number(accountForm.smtpPort) || null,
+      smtpSecurity: accountForm.smtpSecurity,
     };
+  }
+
+  function buildOAuthSetupRequest(): OAuthAccountSetupRequest {
+    return {
+      providerKind: accountForm.providerKind as OAuthAccountProviderKind,
+      displayEmail: accountForm.displayEmail,
+      displayName: accountForm.displayName.trim() || null,
+      username: accountForm.username,
+      clientId: accountForm.oauthClientId,
+    };
+  }
+
+  function canSubmitAccountSetup() {
+    return accountForm.providerKind === "generic_imap_smtp"
+      ? Boolean(onCreateAccount)
+      : Boolean(onStartOAuthAccountSetup);
+  }
+
+  function canSubmitReauth() {
+    return selectedAccountUsesOAuth
+      ? Boolean(onStartOAuthAccountReauth)
+      : Boolean(onReauthAccount);
   }
 
   async function handleTestAccount() {
     if (!onTestAccountConnection) {
       setAccountError(t("settings.accounts.errors.testUnavailable"));
+      return;
+    }
+    if (accountForm.providerKind !== "generic_imap_smtp") {
+      setAccountError(t("settings.accounts.errors.oauthTestUnavailable"));
       return;
     }
     await runAccountAction(async () => {
@@ -520,6 +581,25 @@ export function AccountSignatureSettings({
   }
 
   async function handleCreateAccount() {
+    if (accountForm.providerKind !== "generic_imap_smtp") {
+      if (!onStartOAuthAccountSetup) {
+        setAccountError(t("settings.accounts.errors.oauthSetupUnavailable"));
+        return;
+      }
+      await runAccountAction(async () => {
+        const response = await onStartOAuthAccountSetup(buildOAuthSetupRequest());
+        setSelectedAccountId(response.account.id);
+        setAccountNotice(
+          t("settings.accounts.notices.created", {
+            email: response.account.displayEmail,
+          }),
+        );
+        setAccountForm(defaultAccountForm);
+        onAccountChanged?.();
+      });
+      return;
+    }
+
     if (!onCreateAccount) {
       setAccountError(t("settings.accounts.errors.createUnavailable"));
       return;
@@ -538,7 +618,29 @@ export function AccountSignatureSettings({
   }
 
   async function handleReauthAccount() {
-    if (!onReauthAccount || !selectedAccount) {
+    if (!selectedAccount) {
+      setAccountError(t("settings.accounts.errors.reauthUnavailable"));
+      return;
+    }
+
+    if (selectedAccountUsesOAuth) {
+      if (!onStartOAuthAccountReauth) {
+        setAccountError(t("settings.accounts.errors.oauthReauthUnavailable"));
+        return;
+      }
+      await runAccountAction(async () => {
+        await onStartOAuthAccountReauth({
+          accountId: selectedAccount.id,
+          clientId: reauthSecret,
+        });
+        setReauthSecret("");
+        setAccountNotice(t("settings.accounts.notices.reauthed"));
+        onAccountChanged?.();
+      });
+      return;
+    }
+
+    if (!onReauthAccount) {
       setAccountError(t("settings.accounts.errors.reauthUnavailable"));
       return;
     }

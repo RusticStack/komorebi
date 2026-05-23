@@ -30,6 +30,8 @@ pub struct MailShellAccount {
     pub id: String,
     pub label: String,
     pub email: String,
+    pub provider_kind: String,
+    pub auth_kind: String,
     pub status: String,
     pub unread_count: u32,
     pub signature_html: Option<String>,
@@ -218,6 +220,8 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
            accounts.id,
            COALESCE(NULLIF(accounts.display_name, ''), accounts.display_email) AS label,
            accounts.display_email,
+           accounts.provider_kind,
+           accounts.auth_kind,
            CASE
              WHEN accounts.auth_status = 'reconnect_needed' THEN 'reconnect-needed'
              WHEN accounts.auth_status = 'connected'
@@ -250,9 +254,11 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
             id: row.get(0)?,
             label: row.get(1)?,
             email: row.get(2)?,
-            status: row.get(3)?,
-            unread_count: checked_u32(row.get::<_, i64>(4)?, "account unread count")?,
-            signature_html: row.get(5)?,
+            provider_kind: row.get(3)?,
+            auth_kind: row.get(4)?,
+            status: row.get(5)?,
+            unread_count: checked_u32(row.get::<_, i64>(6)?, "account unread count")?,
+            signature_html: row.get(7)?,
         })
     })?;
 
@@ -739,6 +745,8 @@ mod tests {
                     id: "acct_personal".to_string(),
                     label: "Personal".to_string(),
                     email: "person@example.com".to_string(),
+                    provider_kind: "gmail".to_string(),
+                    auth_kind: "oauth2".to_string(),
                     status: "connected".to_string(),
                     unread_count: 1,
                     signature_html: Some("<p>Personal signature</p>".to_string()),
@@ -747,6 +755,8 @@ mod tests {
                     id: "acct_work".to_string(),
                     label: "work@example.com".to_string(),
                     email: "work@example.com".to_string(),
+                    provider_kind: "microsoft".to_string(),
+                    auth_kind: "oauth2".to_string(),
                     status: "syncing".to_string(),
                     unread_count: 2,
                     signature_html: None,

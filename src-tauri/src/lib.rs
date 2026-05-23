@@ -12,6 +12,7 @@ pub mod mail_actions;
 pub mod mail_shell;
 pub mod mime_normalization;
 pub mod oauth;
+pub mod oauth_loopback;
 pub mod schema;
 pub mod smtp_send;
 pub mod token_lifecycle;
@@ -31,7 +32,9 @@ pub fn run() {
             account_management::reauth_account,
             account_management::remove_account,
             account_management::test_account_connection,
-            account_management::get_account_auth_status
+            account_management::get_account_auth_status,
+            oauth_loopback::start_oauth_account_setup,
+            oauth_loopback::start_oauth_account_reauth
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -21,6 +21,8 @@ export type MailAccount = {
   id: string;
   label: string;
   email: string;
+  providerKind?: AccountProviderKind;
+  authKind?: AccountAuthKind;
   status: AccountStatus;
   unreadCount: number;
   signatureHtml: string | null;
@@ -195,6 +197,27 @@ export type AccountSetupRequest = {
 export type AccountReauthRequest = {
   accountId: string;
   secret: string;
+};
+
+export type OAuthAccountProviderKind = Exclude<
+  AccountProviderKind,
+  "generic_imap_smtp"
+>;
+
+export type OAuthAccountSetupRequest = {
+  accountId?: string | null;
+  providerKind: OAuthAccountProviderKind;
+  displayEmail: string;
+  displayName: string | null;
+  username: string;
+  clientId: string;
+  timeoutSeconds?: number | null;
+};
+
+export type OAuthAccountReauthRequest = {
+  accountId: string;
+  clientId: string;
+  timeoutSeconds?: number | null;
 };
 
 export type AccountRemovalRequest = {

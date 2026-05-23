@@ -23,6 +23,8 @@ import {
   reauthAccountFromTauri,
   removeAccountFromTauri,
   searchMailFromTauri,
+  startOAuthAccountReauthFromTauri,
+  startOAuthAccountSetupFromTauri,
   testAccountConnectionFromTauri,
 } from "./mailShellDataSource";
 
@@ -194,6 +196,17 @@ describe("mailShellDataSource", () => {
       accountId: "acct_generic",
       secret: "replacement",
     };
+    const oauthSetupRequest = {
+      clientId: "desktop-client-id",
+      displayEmail: "person@gmail.com",
+      displayName: null,
+      providerKind: "gmail" as const,
+      username: "person@gmail.com",
+    };
+    const oauthReauthRequest = {
+      accountId: "acct_gmail",
+      clientId: "desktop-client-id",
+    };
     const removalRequest = {
       accountId: "acct_generic",
       deleteLocalCache: true,
@@ -222,7 +235,9 @@ describe("mailShellDataSource", () => {
       .mockResolvedValueOnce(setupResponse)
       .mockResolvedValueOnce(removalResponse)
       .mockResolvedValueOnce(connectionResponse)
-      .mockResolvedValueOnce(authStatusResponse);
+      .mockResolvedValueOnce(authStatusResponse)
+      .mockResolvedValueOnce(setupResponse)
+      .mockResolvedValueOnce(setupResponse);
 
     await expect(createAccountFromTauri(setupRequest)).resolves.toBe(
       setupResponse,
@@ -239,6 +254,12 @@ describe("mailShellDataSource", () => {
     await expect(
       getAccountAuthStatusFromTauri(authStatusRequest),
     ).resolves.toBe(authStatusResponse);
+    await expect(
+      startOAuthAccountSetupFromTauri(oauthSetupRequest),
+    ).resolves.toBe(setupResponse);
+    await expect(
+      startOAuthAccountReauthFromTauri(oauthReauthRequest),
+    ).resolves.toBe(setupResponse);
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, "create_account", {
       request: setupRequest,
@@ -254,6 +275,12 @@ describe("mailShellDataSource", () => {
     });
     expect(invokeMock).toHaveBeenNthCalledWith(5, "get_account_auth_status", {
       request: authStatusRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(6, "start_oauth_account_setup", {
+      request: oauthSetupRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(7, "start_oauth_account_reauth", {
+      request: oauthReauthRequest,
     });
   });
 });

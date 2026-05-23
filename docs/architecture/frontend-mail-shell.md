@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, and settings account-management UI implemented; OAuth loopback and live sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management UI, and Gmail/Microsoft OAuth loopback UI wiring implemented; live sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -201,13 +201,16 @@ Current composer limits:
 The Settings drawer uses `AccountSignatureSettings` for account management and signature editing. It exposes typed UI flows for:
 
 - compatible generic IMAP/SMTP setup with host, port, security, username, and password/app-password fields
-- Gmail and Microsoft setup as OAuth2-only forms using the temporary refresh-token handoff until loopback is implemented
+- Gmail and Microsoft setup as OAuth2-only forms using non-secret account metadata plus OAuth client ID, then `start_oauth_account_setup`
 - setup validation through `test_account_connection`, currently configuration/policy validation only
-- reauthentication through `reauth_account`
+- generic reauthentication through `reauth_account`
+- Gmail/Microsoft OAuth reauthentication through `start_oauth_account_reauth`
 - account removal through `remove_account`
 - redacted auth status through `get_account_auth_status`
 
 With no accounts it still shows the accountless settings state plus the add-account form. With account data it can edit the local in-memory account signature model. Persisting signatures through a frontend-callable SQLite command remains future settings work.
+
+The Gmail/Microsoft setup and reauth controls never ask for passwords, app passwords, refresh tokens, authorization codes, or access tokens. The backend command opens the system browser and returns only a redacted setup response or error reason. The generic Test setup button is disabled for OAuth providers because provider consent is validated by the loopback flow, not by a secret-bearing configuration test.
 
 ## Loading, Empty, And Error States
 
@@ -245,7 +248,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 
 `src/mail/shell/mailShellState.test.ts` covers pure shell state rules: unified/account/folder scope filtering, local search fallback behavior, cache-reload selection preservation, and stale backend row clearing.
 
-`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup and composer autosave, and cancellation before invoke or after a stale response.
+`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup, composer autosave, generic account commands, OAuth loopback commands, and cancellation before invoke or after a stale response.
 
 `e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, runs backend-shaped search, opens a search result in the reader, opens the composer, sends through typed fixture handlers, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
 
@@ -259,7 +262,6 @@ No test uses real mailbox data, real credentials, or live provider connections.
 
 ## Not Implemented
 
-- OAuth loopback account setup.
 - Live provider login testing from setup.
 - TanStack Query integration.
 - Live reply/forward routing.
