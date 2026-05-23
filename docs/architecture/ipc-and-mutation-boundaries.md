@@ -4,7 +4,7 @@ Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has two frontend-callable Rust commands and no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, local draft/Sent persistence, and account signature persistence now exist; mutating command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
+Komorebi has reviewed frontend-callable Rust commands for the shell read model, FTS search, and the TipTap composer MVP. There is still no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. Composer commands are typed Rust boundaries for local draft autosave/discard, staged attachment writes, local recent-recipient lookup, and SMTP send orchestration. Account setup, live sync adapters, reply/forward routing, provider Drafts upload, Sent-folder APPEND, and attachment preview/save remain future work.
 
 The accepted boundary is:
 
@@ -35,7 +35,15 @@ The accepted boundary is:
 - reports a missing FTS index as `unavailable` instead of exposing raw SQLite errors to React
 - does not expose raw SQL, filesystem paths, credential refs, passwords, tokens, or attachment storage paths
 
-These commands are listed in `src-tauri/build.rs`, granted only by `allow-load-mail-shell` and `allow-search-mail` in `src-tauri/capabilities/default.json`, and covered by Rust and capability tests.
+Composer commands live in `src-tauri/src/composer.rs`:
+
+- `autosave_composer_draft` accepts typed account/draft ids, address arrays, subject, sanitized body text/HTML, and backend attachment ids. It validates ids and payload bounds, applies migrations, verifies staged attachment ownership, and writes through `src-tauri/src/draft_persistence.rs`.
+- `discard_composer_draft` validates account/draft ownership, intentionally discards the draft, clears private draft content through `draft_persistence`, deletes staged composer attachment rows, and removes staged files best-effort from backend-generated app-data paths.
+- `stage_composer_attachment` accepts user-selected bytes from the WebView File API, never a client file path. It validates account/draft ownership, MIME/type/size through `attachment_safety`, generates the storage id/path in Rust under app data, stores metadata in `composer_attachments`, and returns only display-safe attachment metadata plus inline CID.
+- `send_composer_email` validates and re-autosaves the active draft, resolves account/auth/credentials in Rust, streams staged attachments from app-generated paths, calls the existing `smtp_send::send_email` boundary, records confirmed send state only after SMTP acceptance, and cleans staged composer attachments after success.
+- `list_recent_recipients` accepts a typed account/query/limit request, validates account scope and bounded query text, reads local-only `recent_recipients` rows, and returns only display name, email address, use count, and last-used timestamp for composer autocomplete.
+
+These commands are listed in `src-tauri/build.rs`, granted only by matching `allow-*` permissions in `src-tauri/capabilities/default.json`, and covered by Rust, frontend, and capability tests.
 
 ## Rust-Only Privileged Operations
 
@@ -44,7 +52,7 @@ These operations must be typed Rust commands or internal Rust worker calls:
 - Server-affecting mail actions: send, move, archive, delete, mark read/unread, flag, draft upload, Sent upload, folder rename/delete, and any IMAP/SMTP command that changes provider state. Use `docs/architecture/destructive-mail-actions.md` for move/delete/archive/mark-read/expunge semantics.
 - Credential access: account creation, reauthentication, token refresh, credential lookup, credential rotation, credential deletion, and OAuth revocation.
 - Account metadata mutation: account display metadata, provider metadata, and per-account signatures. Use `docs/architecture/account-signatures.md` for signature sanitization and insertion rules.
-- Attachment writes: downloading, saving, moving, deleting, preview preparation, inline CID materialization, and any file-path selection after a message is parsed. Use `docs/architecture/attachment-safety.md` for path, filename, type, size, and preview rules.
+- Attachment writes: downloading, saving, moving, deleting, preview preparation, inline CID materialization, staged composer uploads, and any file-path selection after a message is parsed. Use `docs/architecture/attachment-safety.md` for path, filename, type, size, and preview rules.
 - Destructive deletes: account removal, cache deletion, attachment cleanup, local message purge, folder cache reset, and provider delete/expunge.
 - Migrations: schema creation, schema upgrades, FTS setup/rebuild, trigger creation, integrity checks, and rollback/recovery.
 - Sync cache mutation: folder discovery, UID/UIDVALIDITY state, message upsert, flag update, expunge handling, body/attachment metadata persistence, search index updates, and retry bookkeeping.
@@ -82,8 +90,9 @@ Do not expose commands that accept raw SQL, arbitrary filesystem paths, arbitrar
 
 - `src-tauri/src/ipc_boundary.rs` tests enforce that the privileged categories stay Rust-only.
 - `src-tauri/src/imap_sync.rs` tests enforce initial Rust-owned sync cache mutation and folder IDLE/polling worker semantics before any frontend command is registered.
-- `src-tauri/src/smtp_send.rs` tests enforce backend-only SMTP send composition, auth resolution, attachment streaming, and confirmed send receipt behavior before any frontend command is registered.
-- `src-tauri/src/draft_persistence.rs` tests enforce backend-owned draft autosave/discard/sent conversion and provider-aware Sent-copy state before any frontend command is registered.
+- `src-tauri/src/smtp_send.rs` tests enforce backend SMTP send composition, auth resolution, attachment streaming, and confirmed send receipt behavior.
+- `src-tauri/src/draft_persistence.rs` tests enforce backend-owned draft autosave/discard/sent conversion and provider-aware Sent-copy state.
+- `src-tauri/src/composer.rs` tests enforce composer command mapping, staged attachment storage/cleanup, invalid attachment denial, invalid address denial, duplicate recipient normalization, recent-recipient lookup/persistence, and fake SMTP send through the typed boundary.
 - `src-tauri/src/account_signatures.rs` tests enforce backend-owned per-account signature storage, sanitization, clearing, and deterministic insertion before any frontend command is registered.
 - `src-tauri/src/ipc_validation.rs` tests enforce the shared IPC denial policy before any command is registered.
 - `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, and unreviewed custom commands.

@@ -85,7 +85,7 @@ describe("Tauri capabilities", () => {
     expect(capabilityFileNames).toEqual(["default.json"]);
   });
 
-  it("keeps the main window limited to reviewed mail-shell read commands", () => {
+  it("keeps the main window limited to reviewed mail-shell and composer commands", () => {
     const defaultCapability = readCapability("default.json");
 
     expect(defaultCapability.identifier).toBe("default");
@@ -95,6 +95,11 @@ describe("Tauri capabilities", () => {
     expect(defaultCapability.permissions).toEqual([
       "allow-load-mail-shell",
       "allow-search-mail",
+      "allow-autosave-composer-draft",
+      "allow-discard-composer-draft",
+      "allow-stage-composer-attachment",
+      "allow-send-composer-email",
+      "allow-list-recent-recipients",
     ]);
   });
 
@@ -130,12 +135,23 @@ describe("Tauri capabilities", () => {
       expect(rustSurface).not.toContain(plugin);
     }
 
-    expect(buildScript).toContain(
-      'const APP_COMMANDS: &[&str] = &["load_mail_shell", "search_mail"];',
-    );
+    for (const command of [
+      "load_mail_shell",
+      "search_mail",
+      "autosave_composer_draft",
+      "discard_composer_draft",
+      "stage_composer_attachment",
+      "send_composer_email",
+      "list_recent_recipients",
+    ]) {
+      expect(buildScript).toContain(`"${command}"`);
+      expect(libRs).toContain(
+        command === "load_mail_shell" || command === "search_mail"
+          ? `mail_shell::${command}`
+          : `composer::${command}`,
+      );
+    }
     expect(buildScript).toContain(".commands(APP_COMMANDS)");
-    expect(libRs).toContain("mail_shell::load_mail_shell");
-    expect(libRs).toContain("mail_shell::search_mail");
     expect(libRs.match(/generate_handler!\[/g)).toHaveLength(1);
   });
 

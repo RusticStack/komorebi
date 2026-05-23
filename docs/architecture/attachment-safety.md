@@ -4,9 +4,9 @@ Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has no live attachment download, preview, or open commands yet. The reader can display inert attachment metadata from the local cache, but it does not receive storage paths or preview URLs. The attachment safety layer exists first so sync, MIME normalization, and reader UI work cannot persist or preview untrusted attachment content with ad hoc path handling.
+Komorebi has no live inbound attachment download, preview, or open commands yet. The reader can display inert attachment metadata from the local cache, but it does not receive storage paths or preview URLs. The TipTap composer can stage user-selected outbound attachment bytes through a typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist or preview untrusted attachment content with ad hoc path handling.
 
-The storage/preview code source of truth is `src-tauri/src/attachment_safety.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`.
+The storage/preview code source of truth is `src-tauri/src/attachment_safety.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`. Composer staging is implemented in `src-tauri/src/composer.rs`.
 
 ## Storage Rules
 
@@ -17,6 +17,14 @@ The current path shape is:
 ```text
 <tauri-app-data>/attachments/<account_id>/<folder_id>/<message_id>/<attachment_id>.<type-extension>
 ```
+
+Composer-staged outbound files use:
+
+```text
+<tauri-app-data>/composer-attachments/<account_id>/<draft_id>/<attachment_id>.<type-extension>
+```
+
+The WebView provides selected bytes through the browser File API, not a local filesystem path. Rust validates type/size, generates the attachment id/path, stores metadata in `composer_attachments`, streams those files during `send_composer_email`, and deletes staged files best-effort after discard or confirmed send.
 
 Path segments are validated internal IDs with only ASCII letters, digits, hyphen, and underscore. The stored filename is derived from the backend attachment id and a canonical extension for the validated content type.
 
@@ -77,6 +85,8 @@ PDF and ZIP can be stored when validated but are not previewable in the current 
 - Auto-open remaining forbidden.
 
 `src-tauri/src/mail_shell.rs` tests cover safe attachment metadata projection, display filename sanitization in the reader snapshot, and storage-path redaction from serialized shell data.
+
+`src-tauri/src/composer.rs` tests cover composer attachment staging under generated app-data paths, unsafe type denial, staged attachment streaming during fake SMTP send, and cleanup after confirmed send.
 
 `pnpm check` runs these tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

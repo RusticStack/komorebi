@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, Sent-copy planning, and per-account signatures implemented.
+Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning, and per-account signatures implemented.
 Last reviewed: 2026-05-23.
 
 ## Implementation
@@ -21,7 +21,11 @@ Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.r
 
 Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
 
-Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs`. Active drafts autosave locally; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
+Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs` and exposed to the composer through `src-tauri/src/composer.rs`. Active drafts autosave locally; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
+
+Staged composer attachment persistence is implemented by migration `006_composer_attachments.sql` and `src-tauri/src/composer.rs`. User-selected outbound bytes are written to backend-generated app-data paths and linked to active draft ids until discard or confirmed send cleanup.
+
+Local recent-recipient persistence is implemented by migration `007_recent_recipients.sql` and `src-tauri/src/composer.rs`. Confirmed composer sends update account-scoped rows used only for local autocomplete.
 
 Per-account signature persistence is implemented in `src-tauri/src/account_signatures.rs` through the existing `accounts.signature_html` column. Signatures are sanitized account metadata and are not credentials.
 
@@ -37,6 +41,8 @@ The current schema defines:
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
 - `smtp_send_receipts`: confirmed outbound SMTP send receipts recorded after provider acceptance.
 - `composer_drafts`: local composer draft autosave state.
+- `composer_attachments`: staged outbound composer attachment metadata and backend-generated storage references.
+- `recent_recipients`: account-scoped local-only autocomplete rows populated after confirmed composer sends.
 - `sent_mail_copies`: provider-aware Sent-folder copy/upload state for confirmed sends.
 - `templates`: future composer template records.
 - `template_versions`: version history for future template editing.
@@ -107,6 +113,8 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - Global template names and per-account template names are deduplicated separately.
 - SMTP send receipts reference accounts, store JSON address snapshots, restrict SMTP security/auth enum values, and are inserted only by the Rust send boundary after confirmed transport acceptance.
 - Composer drafts reference accounts, require JSON address/reference/attachment arrays, and clear private content when discarded or marked sent.
+- Composer attachments reference accounts and active draft rows, store only backend-generated storage-relative paths, require SHA-256 and MIME metadata, and are cleaned after discard or confirmed send.
+- Recent recipients reference accounts, deduplicate by `(account_id, normalized_email)`, store optional display name plus use count and last-used timestamp, and are local cache data only.
 - Sent mail copy records reference confirmed send receipts and account/provider metadata, and distinguish provider auto-copy, pending IMAP append, and local-receipt-only states.
 
 ## Deferred Schema Work
@@ -133,6 +141,8 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - Folder semantics migration adds `attributes_json` to version-2 databases and defaults existing rows to `[]`.
 - SMTP send receipt migration adds `smtp_send_receipts` to version-3 databases and accepts valid confirmed send records.
 - Draft/Sent migration adds `composer_drafts`, `sent_mail_copies`, and `smtp_send_receipts.source_draft_id` to version-4 databases.
+- Composer attachment migration adds `composer_attachments`, staged attachment indexes, and timestamp trigger to version-5 databases.
+- Recent-recipient migration adds `recent_recipients`, autocomplete indexes, uniqueness, and timestamp trigger to version-6 databases.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 

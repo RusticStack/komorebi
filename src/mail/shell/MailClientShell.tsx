@@ -12,6 +12,14 @@ import {
   type Virtualizer,
 } from "@tanstack/react-virtual";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
+import {
+  TipTapComposer,
+  type ComposerAttachmentStageFunction,
+  type ComposerDraftDiscardFunction,
+  type ComposerDraftSaveFunction,
+  type RecentRecipientSearchFunction,
+  type ComposerSendFunction,
+} from "../composer/TipTapComposer";
 import { AccountSignatureSettings } from "../../settings/AccountSignatureSettings";
 import {
   createMailShellState,
@@ -48,6 +56,11 @@ export type MailClientShellProps = {
   loadMailShellData?: () => Promise<MailShellData>;
   searchMail?: MailSearchFunction;
   searchDebounceMs?: number;
+  loadRecentRecipients?: RecentRecipientSearchFunction;
+  saveComposerDraft?: ComposerDraftSaveFunction;
+  discardComposerDraft?: ComposerDraftDiscardFunction;
+  stageComposerAttachment?: ComposerAttachmentStageFunction;
+  sendComposerMail?: ComposerSendFunction;
 };
 
 type Drawer = "composer" | "settings" | null;
@@ -84,6 +97,11 @@ export function MailClientShell({
   loadMailShellData,
   searchMail,
   searchDebounceMs = MAIL_SEARCH_DEBOUNCE_MS,
+  loadRecentRecipients,
+  saveComposerDraft,
+  discardComposerDraft,
+  stageComposerAttachment,
+  sendComposerMail,
 }: MailClientShellProps) {
   const [state, setState] = useState<MailShellState>(() =>
     createMailShellState(
@@ -674,10 +692,14 @@ export function MailClientShell({
           onKeyDown={handleDrawerKeyDown}
         >
           <ComposerDrawer
-            accountLabel={
-              activeAccount?.label ?? state.data.accounts[0]?.label ?? ""
-            }
+            accounts={state.data.accounts}
+            discardDraft={discardComposerDraft}
+            initialAccountId={activeAccount?.id ?? state.data.accounts[0]?.id ?? null}
+            loadRecentRecipients={loadRecentRecipients}
             onClose={closeDrawer}
+            saveDraft={saveComposerDraft}
+            sendMail={sendComposerMail}
+            stageAttachment={stageComposerAttachment}
           />
         </div>
       ) : null}
@@ -1285,51 +1307,7 @@ function ReaderStatus({ text }: { text: string }) {
   );
 }
 
-function ComposerDrawer({
-  accountLabel,
-  onClose,
-}: {
-  accountLabel: string;
-  onClose: () => void;
-}) {
-  return (
-    <section className="composer-panel" aria-label="Composer">
-      <header className="settings-panel__header">
-        <div>
-          <p className="eyebrow">{accountLabel || "Composer"}</p>
-          <h2>New message</h2>
-        </div>
-        <button type="button" onClick={onClose}>
-          Close
-        </button>
-      </header>
-
-      <form className="composer-form">
-        <label>
-          <span>To</span>
-          <input
-            type="text"
-            placeholder="recipient@example.com"
-            data-autofocus="true"
-          />
-        </label>
-        <label>
-          <span>Subject</span>
-          <input type="text" />
-        </label>
-        <label>
-          <span>Message</span>
-          <textarea rows={10} />
-        </label>
-
-        <div className="settings-panel__actions">
-          <button type="button">Save draft</button>
-          <button type="button">Send</button>
-        </div>
-      </form>
-    </section>
-  );
-}
+const ComposerDrawer = TipTapComposer;
 
 function unreadCountForScope(state: MailShellState) {
   const visibleFolders = foldersForScope(state);

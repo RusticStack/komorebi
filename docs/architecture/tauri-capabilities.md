@@ -8,7 +8,7 @@ Komorebi's main webview grants only reviewed feature-specific Tauri permissions.
 
 - `app.security.capabilities` must be `["default"]` until another window or capability is intentionally introduced.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
-- `default.permissions` contains only read-only mail-shell cache commands: `allow-load-mail-shell` and `allow-search-mail`.
+- `default.permissions` contains only reviewed mail-shell and composer commands: `allow-load-mail-shell`, `allow-search-mail`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-send-composer-email`, and `allow-list-recent-recipients`.
 - No remote origins are allowed to use Tauri APIs.
 
 Tauri capability files are kept as standalone files and referenced by identifier in `tauri.conf.json`. This avoids the Tauri default where every file in `src-tauri/capabilities` is enabled automatically when `security.capabilities` is omitted.
@@ -33,6 +33,11 @@ Absence of a permission is the denial mechanism. Do not add broad explicit deny 
 
 - `load_mail_shell`: read-only app-data SQLite snapshot for accounts, folders, unread counts, and a bounded recent-message list.
 - `search_mail`: read-only app-data SQLite FTS query for validated subject/sender/body search results.
+- `autosave_composer_draft`: typed local draft autosave through Rust-owned SQLite persistence.
+- `discard_composer_draft`: typed local draft discard plus staged composer attachment cleanup.
+- `stage_composer_attachment`: typed user-selected byte staging into backend-generated app-data paths; no frontend filesystem path permission.
+- `send_composer_email`: typed SMTP send orchestration through the Rust send boundary, credential resolver, staged attachment streamer, and confirmed-send persistence.
+- `list_recent_recipients`: read-only account-scoped local SQLite autocomplete suggestions from confirmed sends.
 
 `src-tauri/src/lib.rs` must not register any command outside `APP_COMMANDS`, and every registered command must have a matching capability permission.
 
@@ -61,7 +66,7 @@ Rules for likely future plugins:
 
 - `tauri.conf.json` explicitly enables only `default`.
 - All capability files are parseable and reviewed by the test.
-- The default capability targets only the main window and grants only `allow-load-mail-shell` and `allow-search-mail`.
+- The default capability targets only the main window and grants only the reviewed mail-shell and composer command permissions.
 - Forbidden plugin permissions, remote origins, wildcard windows, and unreviewed custom-command registrations are absent.
 - Rust does not register forbidden Tauri plugins.
 

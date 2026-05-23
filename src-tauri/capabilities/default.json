@@ -1,7 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window capability. Grants only reviewed read-only mail-shell cache snapshot and FTS search commands.",
+  "description": "Main window capability. Grants reviewed mail-shell read commands and typed composer draft/send commands.",
   "windows": ["main"],
-  "permissions": ["allow-load-mail-shell", "allow-search-mail"]
+  "permissions": [
+    "allow-load-mail-shell",
+    "allow-search-mail",
+    "allow-autosave-composer-draft",
+    "allow-discard-composer-draft",
+    "allow-stage-composer-attachment",
+    "allow-send-composer-email",
+    "allow-list-recent-recipients"
+  ]
 }

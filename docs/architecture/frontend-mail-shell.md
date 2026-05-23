@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, and safe message detail rendering implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, TipTap composer MVP, and local recent-recipient autocomplete implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -10,6 +10,7 @@ The code source of truth is:
 - `src/mail/shell/mailShellState.ts`
 - `src/mail/shell/mailShellDataSource.ts`
 - `src/mail/shell/MailClientShell.tsx`
+- `src/mail/composer/TipTapComposer.tsx`
 - `src/App.tsx`
 - `src/App.css`
 - `src-tauri/src/mail_shell.rs`
@@ -29,7 +30,7 @@ The default state is an accountless local shell with:
 - settings entry
 - empty states
 
-Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `search_mail` queries the same cache through FTS5 when the user searches. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
+Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `search_mail` queries the same cache through FTS5 when the user searches; composer data-source functions call the typed Rust draft, attachment staging, recent-recipient, and send commands. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
 
 ## State Model
 
@@ -46,7 +47,7 @@ Tests may inject fixture mail through `initialData` to verify workflows. In Taur
 - selected message
 - search query
 
-The navigation state is frontend-local only. Cache reads come from the Rust `load_mail_shell` and `search_mail` commands. The shell does not mutate SQLite, sync state, credentials, attachments, or provider state.
+The navigation state is frontend-local. Cache reads come from the Rust `load_mail_shell` and `search_mail` commands. Composer draft/save/send actions are the only current frontend-triggered mutations and go through typed Rust commands; the shell still does not expose frontend SQL, credentials, arbitrary paths, or provider command strings.
 
 ## Local Cache Read Model
 
@@ -137,11 +138,43 @@ Attachment rows are metadata only. The frontend receives display filenames, MIME
 
 Remote content remains blocked by the sanitizer. The reader exposes a disabled `Load remote content` control as the future preference entry point, but no per-message or per-sender remote-content preference is persisted yet.
 
-## Composer Entry
+## TipTap Composer
 
-The current composer drawer is an entry-point shell only. It provides To, Subject, Message, Save draft, and Send controls for workflow placement, but it is not TipTap, it is not connected to draft persistence, and it does not call SMTP.
+The composer drawer uses TipTap through `src/mail/composer/TipTapComposer.tsx`. It includes:
 
-The full composer remains a separate P3 task.
+- account selector
+- To, CC, BCC, and subject fields
+- address parsing/validation for send
+- duplicate-recipient normalization across To/CC/BCC before draft save or send
+- keyboard-accessible local recent-recipient autocomplete for To/CC/BCC
+- basic formatting: bold, italic, bullet list, numbered list, block quote
+- safe link application/removal for `http`, `https`, and `mailto` URLs without embedded credentials
+- attachment picker using the browser `File` API
+- inline image picker for raster image types, inserted into the editor as a data URL and persisted/sent as a backend staged attachment CID
+- per-account signature insertion using the existing signature sanitizer/helper
+- debounced local draft autosave plus manual Save draft
+- Discard action
+- Send action with visible progress states returned by the Rust send boundary
+
+The Tauri runtime wiring is:
+
+- `autosave_composer_draft` for local draft rows
+- `discard_composer_draft` for discard and staged attachment cleanup
+- `stage_composer_attachment` for backend-generated app-data storage and display-safe metadata
+- `send_composer_email` for draft validation, SMTP send, confirmed send persistence, and staged attachment cleanup after success
+- `list_recent_recipients` for account-scoped local autocomplete suggestions from SQLite
+
+The frontend never receives attachment storage paths and never sends local filesystem paths to Rust. It sends user-selected bytes from the WebView file input to the staging command. The backend validates MIME/type/size and owns the final app-data path.
+
+Recent-recipient autocomplete is local-only. Confirmed sends update the `recent_recipients` table in the local cache after SMTP acceptance; suggestions expose only display name, email address, use count, and last-used timestamp. Duplicate recipients are removed with first occurrence winning in To, then CC, then BCC order, and the composer shows a non-error notice while preserving malformed-address validation errors.
+
+Current composer limits:
+
+- Draft reload after app restart is backend-supported but not surfaced in the drawer yet.
+- Provider Drafts-folder upload is not implemented.
+- Reply/forward routing into the composer is not implemented.
+- Sent-folder APPEND for providers that need it remains future work.
+- Live SMTP success depends on real account setup and credentials, which are not implemented in the UI yet.
 
 ## Settings Entry
 
@@ -172,6 +205,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - selected-message preservation for compatible scope changes
 - safe message detail rendering with sanitized HTML, remote image blocking, inert attachment metadata, and disabled reply/forward/remote-content controls
 - local fixture search and FTS-backed search with debounce, cancellation, result origin labels, no-match state, no-index state, and retryable error state
+- TipTap composer address validation, duplicate recipient handling, keyboard autocomplete from recent recipients, signature insertion, draft save, attachment staging, inline image CID conversion, send command request shape, send progress, and validation errors
 - message selection and reader rendering
 - keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
 - 10,000-message virtualized rendering with bounded DOM row count and stable row state during scroll
@@ -190,9 +224,6 @@ No test uses real mailbox data, real credentials, or live provider connections.
 - Live reply/forward routing.
 - Remote-content preference persistence and allowlisting.
 - Attachment preview/save commands.
-- TipTap composer.
-- Draft autosave command wiring.
-- SMTP send command wiring.
 - i18n dictionaries.
 - E2E accessibility, axe, or real screen-reader harness.
 
@@ -201,7 +232,10 @@ No test uses real mailbox data, real credentials, or live provider connections.
 Keep this document synchronized with:
 
 - `src/mail/shell/mailShellState.ts`
+- `src/mail/shell/mailShellDataSource.ts`
 - `src/mail/shell/MailClientShell.tsx`
+- `src/mail/composer/TipTapComposer.tsx`
+- `src-tauri/src/composer.rs`
 - `src/App.test.tsx`
 - `docs/architecture/message-rendering.md`
 - `docs/architecture/account-signatures.md`

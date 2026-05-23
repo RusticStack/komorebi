@@ -1,11 +1,11 @@
 # Draft And Sent Persistence
 
-Status: backend local draft persistence and provider-aware Sent-copy planning implemented; frontend composer wiring and IMAP APPEND upload are not registered.
-Last reviewed: 2026-05-22.
+Status: backend local draft persistence, frontend autosave/discard command wiring, local recent-recipient persistence, and provider-aware Sent-copy planning implemented; provider Drafts upload and IMAP APPEND upload are not registered.
+Last reviewed: 2026-05-23.
 
 ## Current Scope
 
-The code source of truth is `src-tauri/src/draft_persistence.rs`.
+The code source of truth is `src-tauri/src/draft_persistence.rs` and the frontend-callable command wrapper is `src-tauri/src/composer.rs`.
 
 Komorebi persists composer drafts locally in SQLite and links successful sends to provider-aware Sent-copy state:
 
@@ -15,8 +15,16 @@ Komorebi persists composer drafts locally in SQLite and links successful sends t
 - Intentional discard marks the draft `discarded` and clears subject, recipients, body, and attachment ids.
 - Confirmed send marks the draft `sent`, links `sent_receipt_id`, sets `sent_at`, and clears private draft content.
 - Every confirmed send gets a `sent_mail_copies` record that says whether provider Sent upload is unnecessary, pending, or unsupported.
+- Confirmed composer sends update local-only `recent_recipients` rows for account-scoped autocomplete.
 
-This is a backend persistence boundary only. It is not exposed through Tauri commands yet because the composer UI, command ACL, capability grant, and frontend validation states do not exist.
+This persistence boundary is now exposed through reviewed Tauri commands for the TipTap composer MVP:
+
+- `autosave_composer_draft`
+- `discard_composer_draft`
+- `send_composer_email`
+- `list_recent_recipients`
+
+The commands keep draft mutation in Rust, validate ids/payloads/ownership, and are granted only through narrow capability permissions.
 
 ## Schema
 
@@ -35,6 +43,10 @@ Migration `005_drafts_and_sent_mail.sql` adds:
 - attachment id JSON
 - reply/reference metadata
 - autosave revision and timestamps
+
+Migration `006_composer_attachments.sql` adds `composer_attachments` for user-selected outbound files staged by the composer. These rows store account id, draft id, display filename, canonical MIME, byte size, backend-generated storage path, SHA-256, disposition, and optional inline CID. Staged files are plaintext app-data files and are deleted best-effort after discard or confirmed send.
+
+Migration `007_recent_recipients.sql` adds `recent_recipients` for local autocomplete. Rows are scoped by account, deduplicated by normalized email, store optional display name, use count, and last-used timestamp, and are populated only after confirmed composer sends.
 
 Discarded or sent drafts intentionally clear private content. The row remains only as state evidence and, for sent drafts, a link to the confirmed send receipt.
 
@@ -58,6 +70,8 @@ Discarded or sent drafts intentionally clear private content. The row remains on
 
 Autosave never accepts raw filesystem paths or attachment filenames; only backend attachment ids can be persisted.
 
+The frontend TipTap composer debounces autosave and also exposes a manual Save draft action. It sends sanitized editor HTML and plain text to Rust; the backend wraps HTML in `DraftHtml` and rejects script tags, JavaScript URLs, inline event handlers, oversized payloads, invalid ids, unknown accounts, and unknown staged attachment ids.
+
 The same draft id can be autosaved repeatedly while active. Autosaving a discarded or sent draft is rejected instead of reviving stale private content.
 
 ## Discard
@@ -72,9 +86,13 @@ The same draft id can be autosaved repeatedly while active. Autosaving a discard
 
 Discarded drafts no longer appear in `list_active_drafts`.
 
+`discard_composer_draft` additionally deletes staged composer attachment rows and removes their app-data files best-effort. It does not delete inbound message attachments.
+
 ## Send Conversion
 
 `send_email` in `src-tauri/src/smtp_send.rs` accepts an optional `draft_id`.
+
+`send_composer_email` in `src-tauri/src/composer.rs` re-autosaves the active draft request, validates staged attachments, streams staged files through `ComposerAttachmentStore`, calls `send_email`, and cleans staged composer attachment rows/files after confirmed SMTP acceptance. Failed SMTP delivery leaves the active draft and staged attachments available for retry.
 
 When a draft id is present:
 
@@ -83,6 +101,8 @@ When a draft id is present:
 3. In one SQLite transaction, Rust inserts `smtp_send_receipts`, marks the draft `sent`, clears draft content, and inserts `sent_mail_copies`.
 
 If SMTP delivery fails, no receipt is inserted and the draft remains active.
+
+After SMTP acceptance, the composer wrapper best-effort updates local recent-recipient rows from the deduplicated To/CC/BCC set. This cache is local-only and must not be synced or treated as a provider contact list.
 
 ## Provider Sent Policy
 
@@ -114,14 +134,25 @@ Microsoft Support also documents that duplicate Sent items happen when a server 
 - Confirmed SMTP delivery linking the receipt and marking the draft sent.
 - Sent-copy state written with confirmed sends.
 
-`src-tauri/src/schema.rs` tests cover migration from schema version 4 to version 5 and valid draft/Sent-copy rows.
+`src-tauri/src/schema.rs` tests cover migration from schema version 4 to version 5, migration from version 5 to version 6, migration from version 6 to version 7, valid draft/Sent-copy rows, valid staged composer attachment rows, and recent-recipient uniqueness.
+
+`src-tauri/src/composer.rs` tests cover:
+
+- Autosave command mapping.
+- Staged attachment storage under backend-generated app-data paths.
+- Unsafe attachment content denial.
+- Fake SMTP send through the typed composer wrapper.
+- Staged attachment cleanup after confirmed send.
+- Invalid send address denial before SMTP work.
+- Duplicate recipient normalization and recent-recipient autocomplete persistence after confirmed fake SMTP send.
+
+`src/App.test.tsx` covers frontend autosave/save, address validation, duplicate recipient handling, keyboard recent-recipient autocomplete, attachment and inline-image staging request shapes, signature insertion, send request shape, and progress rendering.
 
 No test uses a live mailbox, live SMTP server, real account, or real credential.
 
 ## Not Implemented
 
-- Frontend composer autosave UI.
-- Tauri commands for autosave, discard, draft reload, or send.
+- Frontend draft reload/reopen UI after restart.
 - IMAP APPEND worker for pending Sent uploads.
 - Provider-specific Sent upload conflict handling.
 - Draft upload to provider Drafts folders.
@@ -139,9 +170,13 @@ No test uses a live mailbox, live SMTP server, real account, or real credential.
 Keep this document synchronized with:
 
 - `src-tauri/src/draft_persistence.rs`
+- `src-tauri/src/composer.rs`
 - `src-tauri/src/smtp_send.rs`
 - `src-tauri/src/schema.rs`
 - `src-tauri/migrations/005_drafts_and_sent_mail.sql`
+- `src-tauri/migrations/006_composer_attachments.sql`
+- `src-tauri/migrations/007_recent_recipients.sql`
+- `src/mail/composer/TipTapComposer.tsx`
 - `docs/architecture/smtp-send.md`
 - `docs/architecture/schema.md`
 - `README.md`

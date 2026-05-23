@@ -1,4 +1,12 @@
-const APP_COMMANDS: &[&str] = &["load_mail_shell", "search_mail"];
+const APP_COMMANDS: &[&str] = &[
+    "load_mail_shell",
+    "search_mail",
+    "autosave_composer_draft",
+    "discard_composer_draft",
+    "stage_composer_attachment",
+    "send_composer_email",
+    "list_recent_recipients",
+];
 
 fn main() {
     tauri_build::try_build(

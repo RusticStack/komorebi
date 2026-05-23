@@ -9,11 +9,20 @@ import {
 import { vi } from "vitest";
 import App from "./App";
 import type {
+  ComposerAttachment,
+  ComposerAttachmentStageRequest,
+  ComposerDraftDiscardRequest,
+  ComposerDraftSaveRequest,
+  ComposerDraftSaveResponse,
+  ComposerSendRequest,
+  ComposerSendResponse,
   MailMessage,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
   MailShellLoadState,
+  RecentRecipientSearchRequest,
+  RecentRecipientSuggestion,
 } from "./mail/shell/mailShellState";
 
 const fixtureMail: MailShellData = {
@@ -188,6 +197,103 @@ function createLargeMailFixture(messageCount: number): MailShellData {
   };
 }
 
+function composerTestHandlers() {
+  const saveComposerDraft = vi.fn(
+    async (
+      request: ComposerDraftSaveRequest,
+    ): Promise<ComposerDraftSaveResponse> => ({
+      accountId: request.accountId,
+      autosaveRevision: 1,
+      id: request.draftId,
+      state: "active",
+    }),
+  );
+  const discardComposerDraft = vi.fn(
+    async (
+      request: ComposerDraftDiscardRequest,
+    ): Promise<ComposerDraftSaveResponse> => ({
+      accountId: request.accountId,
+      autosaveRevision: 2,
+      id: request.draftId,
+      state: "discarded",
+    }),
+  );
+  const stageComposerAttachment = vi.fn(
+    async (
+      request: ComposerAttachmentStageRequest,
+    ): Promise<ComposerAttachment> => ({
+      accountId: request.accountId,
+      contentId:
+        request.disposition === "inline"
+          ? `cid_${request.displayFilename.replace(/\W+/g, "_")}`
+          : null,
+      contentType: request.contentType ?? "application/octet-stream",
+      displayFilename: request.displayFilename,
+      disposition: request.disposition,
+      draftId: request.draftId,
+      id: `catt_${request.displayFilename.replace(/\W+/g, "_")}`,
+      sizeBytes: request.bytes.length,
+    }),
+  );
+  const sendComposerMail = vi.fn(
+    async (request: ComposerSendRequest): Promise<ComposerSendResponse> => ({
+      accountId: request.accountId,
+      attachmentBytesStreamed: request.attachmentIds.length,
+      draftId: request.draftId,
+      messageSizeBytes: 512,
+      progress: [
+        "account-resolved",
+        "draft-prepared",
+        "auth-resolved",
+        "attachment-streamed",
+        "mime-composed",
+        "smtp-accepted",
+        "sent-state-recorded",
+        "draft-finalized",
+      ],
+      providerResponse: "250 accepted",
+      rfcMessageId: "<sent@example.com>",
+      sentFolderPolicy: "local_receipt_only",
+      sentFolderSyncState: "unsupported",
+    }),
+  );
+  const loadRecentRecipients = vi.fn(
+    async (
+      request: RecentRecipientSearchRequest,
+    ): Promise<RecentRecipientSuggestion[]> =>
+      [
+        {
+          accountId: request.accountId,
+          address: "ada@example.com",
+          id: "rr_ada",
+          lastUsedAt: "2026-05-23T10:00:00Z",
+          name: "Ada Lovelace",
+          useCount: 3,
+        },
+        {
+          accountId: request.accountId,
+          address: "copy@example.com",
+          id: "rr_copy",
+          lastUsedAt: "2026-05-22T10:00:00Z",
+          name: "Copy Person",
+          useCount: 1,
+        },
+      ].filter((recipient) =>
+        `${recipient.name ?? ""} ${recipient.address}`
+          .toLocaleLowerCase()
+          .includes(request.query.toLocaleLowerCase()),
+      ),
+  );
+
+  return {
+    discardComposerDraft,
+    loadRecentRecipients,
+    saveComposerDraft,
+    sendComposerMail,
+    stageComposerAttachment,
+  };
+}
+
 describe("App", () => {
   it("renders the accountless mail client shell without fake mailbox data", () => {
     render(<App />);
@@ -274,6 +380,175 @@ describe("App", () => {
     expect(settings).toBeVisible();
     expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
     expect(within(settings).getByLabelText("Account")).toHaveValue("acct_personal");
+  });
+
+  it("builds a TipTap composer draft, stages attachments, sends, and reports progress", async () => {
+    const handlers = composerTestHandlers();
+    render(<App initialData={fixtureMail} {...handlers} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compose" }));
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+
+    fireEvent.change(within(composer).getByLabelText("To"), {
+      target: { value: "Recipient <recipient@example.com>" },
+    });
+    fireEvent.change(within(composer).getByLabelText("CC"), {
+      target: { value: "copy@example.com" },
+    });
+    fireEvent.change(within(composer).getByLabelText("BCC"), {
+      target: { value: "blind@example.com" },
+    });
+    fireEvent.change(within(composer).getByLabelText("Subject"), {
+      target: { value: "Composer MVP" },
+    });
+
+    fireEvent.click(within(composer).getByRole("button", { name: "Insert signature" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Bold" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Bulleted list" }));
+    fireEvent.change(within(composer).getByLabelText("Link URL"), {
+      target: { value: "https://example.com/follow-up" },
+    });
+    fireEvent.click(within(composer).getByRole("button", { name: "Apply link" }));
+
+    const attachment = new File(["hello"], "report.txt", { type: "text/plain" });
+    fireEvent.change(within(composer).getByLabelText("Attachment picker"), {
+      target: { files: [attachment] },
+    });
+    expect(await within(composer).findByText(/report\.txt - text\/plain - 5 B/)).toBeVisible();
+
+    const inlineImage = new File(
+      [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10])],
+      "logo.png",
+      { type: "image/png" },
+    );
+    fireEvent.change(within(composer).getByLabelText("Inline image picker"), {
+      target: { files: [inlineImage] },
+    });
+    expect(await within(composer).findByText(/logo\.png - image\/png - 8 B/)).toBeVisible();
+
+    fireEvent.click(within(composer).getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(handlers.saveComposerDraft).toHaveBeenCalled());
+    const savedRequest =
+      handlers.saveComposerDraft.mock.calls[
+        handlers.saveComposerDraft.mock.calls.length - 1
+      ]?.[0];
+    expect(savedRequest).toMatchObject({
+      accountId: "acct_personal",
+      bcc: [{ address: "blind@example.com", name: null }],
+      cc: [{ address: "copy@example.com", name: null }],
+      subject: "Composer MVP",
+      to: [{ address: "recipient@example.com", name: "Recipient" }],
+    });
+    expect(savedRequest?.bodyHtml).toContain("Personal signature");
+    expect(savedRequest?.attachmentIds).toHaveLength(2);
+
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(handlers.sendComposerMail).toHaveBeenCalledTimes(1));
+    const sendRequest = handlers.sendComposerMail.mock.calls[0][0];
+    expect(sendRequest.attachmentIds).toEqual(savedRequest?.attachmentIds);
+    expect(sendRequest.bodyHtml).toContain("cid:cid_logo_png");
+    expect(await within(composer).findByText("SMTP accepted")).toBeVisible();
+    expect(within(composer).getByRole("button", { name: "Send" })).toBeDisabled();
+
+    const stageRequest = handlers.stageComposerAttachment.mock.calls[0][0];
+    expect(stageRequest).toMatchObject({
+      contentType: "text/plain",
+      displayFilename: "report.txt",
+      disposition: "attachment",
+    });
+    expect(stageRequest.bytes).toEqual([104, 101, 108, 108, 111]);
+  });
+
+  it("shows composer validation errors before send", async () => {
+    const handlers = composerTestHandlers();
+    render(<App initialData={fixtureMail} {...handlers} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compose" }));
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+
+    fireEvent.change(within(composer).getByLabelText("To"), {
+      target: { value: "not-an-address" },
+    });
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+
+    const alert = await within(composer).findByRole("alert");
+    expect(alert).toHaveTextContent("To: not-an-address is not a valid email address.");
+    expect(alert).toHaveTextContent("Add at least one recipient.");
+    expect(alert).toHaveTextContent("Add a message body.");
+    expect(handlers.sendComposerMail).not.toHaveBeenCalled();
+  });
+
+  it("autocompletes recent recipients with the keyboard", async () => {
+    const handlers = composerTestHandlers();
+    render(<App initialData={fixtureMail} {...handlers} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compose" }));
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const toInput = within(composer).getByLabelText("To");
+
+    fireEvent.focus(toInput);
+    fireEvent.change(toInput, { target: { value: "ada" } });
+    expect(
+      await within(composer).findByRole("option", { name: /Ada Lovelace/ }),
+    ).toBeVisible();
+
+    fireEvent.keyDown(toInput, { key: "Enter" });
+
+    expect(toInput).toHaveValue("Ada Lovelace <ada@example.com>, ");
+    expect(handlers.loadRecentRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "acct_personal",
+        query: "ada",
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("deduplicates composer recipients while keeping malformed-address errors clear", async () => {
+    const handlers = composerTestHandlers();
+    render(<App initialData={fixtureMail} {...handlers} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compose" }));
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+
+    fireEvent.change(within(composer).getByLabelText("To"), {
+      target: {
+        value: "Duplicate <duplicate@example.com>, duplicate@example.com",
+      },
+    });
+    fireEvent.change(within(composer).getByLabelText("CC"), {
+      target: { value: "DUPLICATE@example.com, copy@example.com" },
+    });
+    fireEvent.change(within(composer).getByLabelText("BCC"), {
+      target: { value: "bad-address, copy@example.com" },
+    });
+    fireEvent.click(within(composer).getByRole("button", { name: "Insert signature" }));
+
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+
+    const alert = await within(composer).findByRole("alert");
+    expect(alert).toHaveTextContent("BCC: bad-address is not a valid email address.");
+    expect(handlers.sendComposerMail).not.toHaveBeenCalled();
+
+    fireEvent.change(within(composer).getByLabelText("BCC"), {
+      target: { value: "copy@example.com" },
+    });
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(handlers.sendComposerMail).toHaveBeenCalledTimes(1));
+    const sendRequest = handlers.sendComposerMail.mock.calls[0][0];
+    expect(sendRequest.to).toEqual([
+      { address: "duplicate@example.com", name: "Duplicate" },
+    ]);
+    expect(sendRequest.cc).toEqual([{ address: "copy@example.com", name: null }]);
+    expect(sendRequest.bcc).toEqual([]);
+    expect(
+      within(composer)
+        .getAllByRole("status")
+        .some((status) =>
+          status.textContent?.includes("Duplicate recipient skipped"),
+        ),
+    ).toBe(true);
   });
 
   it("renders selected message detail through safe body and attachment boundaries", () => {

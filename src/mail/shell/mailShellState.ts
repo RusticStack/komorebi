@@ -80,6 +80,96 @@ export type MailSearchResponse = {
   results: MailMessage[];
 };
 
+export type ComposerAddress = {
+  name: string | null;
+  address: string;
+};
+
+export type ComposerAttachmentDisposition = "attachment" | "inline";
+
+export type ComposerAttachment = {
+  id: string;
+  accountId: string;
+  draftId: string;
+  displayFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  disposition: ComposerAttachmentDisposition;
+  contentId: string | null;
+};
+
+export type ComposerDraftSaveRequest = {
+  accountId: string;
+  draftId: string;
+  subject: string;
+  to: ComposerAddress[];
+  cc: ComposerAddress[];
+  bcc: ComposerAddress[];
+  bodyText: string | null;
+  bodyHtml: string | null;
+  attachmentIds: string[];
+};
+
+export type ComposerDraftSaveResponse = {
+  id: string;
+  accountId: string;
+  autosaveRevision: number;
+  state: "active" | "discarded" | "sent";
+};
+
+export type ComposerDraftDiscardRequest = {
+  accountId: string;
+  draftId: string;
+};
+
+export type ComposerAttachmentStageRequest = {
+  accountId: string;
+  draftId: string;
+  displayFilename: string;
+  contentType: string | null;
+  disposition: ComposerAttachmentDisposition;
+  bytes: number[];
+};
+
+export type ComposerSendRequest = ComposerDraftSaveRequest;
+
+export type ComposerSendProgress =
+  | "account-resolved"
+  | "draft-prepared"
+  | "auth-resolved"
+  | "attachment-streamed"
+  | "mime-composed"
+  | "smtp-accepted"
+  | "sent-state-recorded"
+  | "draft-finalized";
+
+export type ComposerSendResponse = {
+  accountId: string;
+  draftId: string;
+  rfcMessageId: string;
+  sentFolderPolicy: string;
+  sentFolderSyncState: string;
+  providerResponse: string | null;
+  messageSizeBytes: number;
+  attachmentBytesStreamed: number;
+  progress: ComposerSendProgress[];
+};
+
+export type RecentRecipientSearchRequest = {
+  accountId: string;
+  query: string;
+  limit?: number;
+};
+
+export type RecentRecipientSuggestion = {
+  id: string;
+  accountId: string;
+  name: string | null;
+  address: string;
+  useCount: number;
+  lastUsedAt: string;
+};
+
 export type MailShellLoadState = {
   accounts: LoadStatus;
   folders: LoadStatus;

@@ -4,12 +4,19 @@ Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has two frontend-callable IPC commands:
+Komorebi has reviewed frontend-callable IPC commands:
 
 - `load_mail_shell`: inputless, read-only local-cache shell snapshot.
 - `search_mail`: read-only local-cache FTS query with a typed request.
+- `autosave_composer_draft`: typed local draft autosave.
+- `discard_composer_draft`: typed local draft discard and staged attachment cleanup.
+- `stage_composer_attachment`: typed user-selected byte staging with backend-generated storage paths.
+- `send_composer_email`: typed send request routed through Rust SMTP/draft/credential boundaries.
+- `list_recent_recipients`: typed local recent-recipient autocomplete query.
 
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
+
+Composer commands validate account/draft/attachment ids, payload sizes, address shapes on send, sanitized body wrappers, staged attachment ownership, MIME type/size, local recent-recipient account scope, and app-data storage scope before side effects. They never accept frontend-supplied filesystem paths, raw SQL, credential material, or arbitrary provider commands. `stage_composer_attachment` accepts bytes from a browser `File` selected by the user and writes only to a Rust-generated app-data path.
 
 The code source of truth is `src-tauri/src/ipc_validation.rs`.
 
@@ -58,7 +65,9 @@ Before registering a command in `invoke_handler`, add:
 
 Do not add a command if validation depends on real mailboxes, real credentials, or real app-data paths. Use fake stores, fixtures, and temp directories.
 
-`search_mail` is the current example of an accepted read-only input-bearing command: request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
+`search_mail` is the read-only example of an accepted input-bearing command: request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
+
+Composer commands are the mutating examples: request fields are typed, HTML is accepted only through sanitizer-backed frontend output plus backend `DraftHtml`/`SanitizedHtml` wrappers, attachments are staged by bytes rather than paths, staged ids are ownership-checked, duplicate recipients are normalized before persistence/send, recent-recipient lookup is account-scoped and read-only, and send calls the existing SMTP boundary instead of exposing credentials or transport details to React.
 
 ## Current Denial Tests
 
@@ -73,6 +82,7 @@ Rust tests cover:
 - Invalid id shapes before lookup.
 - Validation errors not echoing sensitive input values.
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
+- Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, and send validation before SMTP work.
 
 `pnpm check` runs the validation tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 5;
+pub const LATEST_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -37,6 +37,16 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 5,
         name: "drafts_and_sent_mail",
         sql: include_str!("../migrations/005_drafts_and_sent_mail.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "composer_attachments",
+        sql: include_str!("../migrations/006_composer_attachments.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "recent_recipients",
+        sql: include_str!("../migrations/007_recent_recipients.sql"),
     },
 ];
 
@@ -362,6 +372,8 @@ mod tests {
             "attachments",
             "smtp_send_receipts",
             "composer_drafts",
+            "composer_attachments",
+            "recent_recipients",
             "sent_mail_copies",
             "templates",
             "template_versions",
@@ -382,6 +394,10 @@ mod tests {
             "idx_attachments_message",
             "idx_smtp_send_receipts_account_sent",
             "idx_composer_drafts_account_state_updated",
+            "idx_composer_attachments_draft",
+            "ux_composer_attachments_content_id",
+            "idx_recent_recipients_account_last_used",
+            "idx_recent_recipients_account_email",
             "idx_sent_mail_copies_account_state",
             "idx_templates_account",
         ] {
@@ -398,6 +414,8 @@ mod tests {
             "messages_fts_after_update",
             "attachments_touch_updated_at",
             "composer_drafts_touch_updated_at",
+            "composer_attachments_touch_updated_at",
+            "recent_recipients_touch_updated_at",
             "sent_mail_copies_touch_updated_at",
             "templates_touch_updated_at",
         ] {
@@ -514,6 +532,40 @@ mod tests {
                     "discarded_at",
                     "sent_receipt_id",
                     "sent_at",
+                    "created_at",
+                    "updated_at",
+                ]
+                .as_slice(),
+            ),
+            (
+                "composer_attachments",
+                [
+                    "id",
+                    "account_id",
+                    "draft_id",
+                    "disposition",
+                    "content_id",
+                    "display_filename",
+                    "canonical_mime",
+                    "size_bytes",
+                    "storage_relative_path",
+                    "sha256",
+                    "created_at",
+                    "updated_at",
+                ]
+                .as_slice(),
+            ),
+            (
+                "recent_recipients",
+                [
+                    "id",
+                    "account_id",
+                    "display_name",
+                    "email",
+                    "normalized_email",
+                    "source",
+                    "use_count",
+                    "last_used_at",
                     "created_at",
                     "updated_at",
                 ]
@@ -923,7 +975,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2, 3, 4, 5]
+            vec![2, 3, 4, 5, 6, 7]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -970,7 +1022,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![3, 4, 5]
+            vec![3, 4, 5, 6, 7]
         );
         let attributes_json = connection
             .query_row(
@@ -1009,7 +1061,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![4, 5]
+            vec![4, 5, 6, 7]
         );
         connection
             .execute(
@@ -1102,7 +1154,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![5]
+            vec![5, 6, 7]
         );
         connection
             .execute(
@@ -1146,5 +1198,149 @@ mod tests {
                 [],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn composer_attachments_migration_adds_staged_outbound_attachment_state_to_v5_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..5] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 5;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+        connection
+            .execute(
+                "INSERT INTO composer_drafts (
+                   id,
+                   account_id,
+                   subject,
+                   to_addresses_json,
+                   body_text
+                 )
+                 VALUES (
+                   'draft_1',
+                   'acct_1',
+                   'Draft',
+                   '[{\"address\":\"person@example.com\"}]',
+                   'Body'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 5);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![6, 7]
+        );
+        connection
+            .execute(
+                "INSERT INTO composer_attachments (
+                   id,
+                   account_id,
+                   draft_id,
+                   disposition,
+                   display_filename,
+                   canonical_mime,
+                   size_bytes,
+                   storage_relative_path,
+                   sha256
+                 )
+                 VALUES (
+                   'catt_1',
+                   'acct_1',
+                   'draft_1',
+                   'attachment',
+                   'report.txt',
+                   'text/plain',
+                   4,
+                   'composer-attachments/acct_1/draft_1/catt_1.txt',
+                   '0000000000000000000000000000000000000000000000000000000000000000'
+                 )",
+                [],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn recent_recipients_migration_adds_local_autocomplete_state_to_v6_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..6] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 6;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 6);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![7]
+        );
+        connection
+            .execute(
+                "INSERT INTO recent_recipients (
+                   id,
+                   account_id,
+                   display_name,
+                   email,
+                   normalized_email
+                 )
+                 VALUES (
+                   'rr_1',
+                   'acct_1',
+                   'Recent Person',
+                   'Recent.Person@example.com',
+                   'recent.person@example.com'
+                 )",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO recent_recipients (
+                   id,
+                   account_id,
+                   email,
+                   normalized_email
+                 )
+                 VALUES (
+                   'rr_duplicate',
+                   'acct_1',
+                   'recent.person@example.com',
+                   'recent.person@example.com'
+                 )",
+                [],
+            )
+            .is_err());
     }
 }

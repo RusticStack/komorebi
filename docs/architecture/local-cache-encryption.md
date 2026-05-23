@@ -1,7 +1,7 @@
 # Local Cache Encryption
 
 Status: accepted decision for the current Windows-first baseline.
-Last reviewed: 2026-05-22.
+Last reviewed: 2026-05-23.
 
 ## Decision
 
@@ -11,6 +11,8 @@ This means:
 
 - Message metadata, `body_text`, and `body_html` stored in SQLite are plaintext database content.
 - Active draft subject, recipient JSON, body text, body HTML, and attachment-id references in `composer_drafts` are plaintext database content until the draft is discarded or converted to sent state.
+- Staged outbound composer attachment files and `composer_attachments` metadata are plaintext until discard or confirmed-send cleanup.
+- Recent-recipient autocomplete rows are plaintext local SQLite content.
 - Per-account `signature_html` values are plaintext account metadata.
 - FTS5 indexed message terms in `messages_fts` are plaintext index content.
 - Attachment files stored under the app-generated attachment directory are plaintext files.
