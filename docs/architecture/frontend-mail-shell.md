@@ -219,7 +219,7 @@ Current composer limits:
 - Provider Drafts-folder upload is not implemented.
 - Reply/forward routing into the composer is not implemented.
 - Sent-folder APPEND for providers that need it remains future work.
-- Live SMTP success depends on live provider adapter verification and credentials from the account-management commands.
+- Live SMTP sends require configured account credentials and stored OAuth client config for Gmail/Microsoft; live smoke coverage is ignored and user-opt-in only.
 
 ## Settings Entry
 
@@ -286,7 +286,7 @@ Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unr
 
 Rust composer and SMTP tests cover sanitized rich composer HTML persistence and outgoing MIME serialization for strikethrough, tables, code blocks, font styles, colors, highlights, and alignment.
 
-No automated test uses real mailbox data, real credentials, or live provider connections. Generic setup includes a backend live-login path for user-entered providers at runtime; tests cover it with local protocol fixtures and fake testers only.
+Normal automated tests use no real mailbox data, real credentials, or live provider connections. Generic setup includes a backend live-login path for user-entered providers at runtime; tests cover it with local protocol fixtures and fake testers only. The live SMTP smoke test is ignored by default and requires explicit user-provided test-account environment variables.
 
 ## Not Implemented
 

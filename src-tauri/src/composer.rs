@@ -18,6 +18,7 @@ use crate::{
         sanitize_display_filename, validate_attachment_for_storage, AttachmentContentType,
         AttachmentSafetyError, AttachmentTypeEvidence, PreviewKind,
     },
+    auth::ProviderKind,
     credentials::WindowsCredentialManager,
     draft_persistence::{
         autosave_draft, discard_draft, ensure_active_draft, ComposerDraftRecord,
@@ -28,7 +29,7 @@ use crate::{
         validate_bounded_text, validate_entity_id, validate_payload_size, IpcValidationError,
         MAX_TEXT_FIELD_BYTES,
     },
-    oauth::ProviderOAuthTokenClient,
+    oauth::{OAuthClientConfig, ProviderOAuthTokenClient},
     schema::{apply_migrations, SchemaMigrationError},
     smtp_send::{
         send_email, AttachmentContentStore, BackendSmtpAuthResolver, LettreSmtpSender,
@@ -37,6 +38,7 @@ use crate::{
         SmtpAccountStore, SmtpAuthResolver, SmtpSender, SqliteSmtpAccountStore,
         ATTACHMENT_STREAM_CHUNK_BYTES,
     },
+    sync_scheduler::load_account_oauth_client_config,
     token_lifecycle::{
         AccessTokenCache, AccountDataError, AccountDataStore, CachedAccessToken, ReconnectReason,
         TokenLifecycle,
@@ -467,17 +469,19 @@ pub fn send_composer_email_from_path(
 ) -> Result<ComposerSendResponse, ComposerCommandError> {
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
+    let oauth_client_configs =
+        oauth_client_configs_for_composer_send(&connection, &request.account_id)?;
     let mut account_store = SqliteSmtpAccountStore::new(&connection);
     let token_lifecycle = TokenLifecycle::new(
         WindowsCredentialManager,
         InMemoryAccessTokenCache::default(),
-        ProviderOAuthTokenClient::new(Vec::new()),
+        ProviderOAuthTokenClient::new(oauth_client_configs),
         SqliteTokenAccountDataStore::new(&connection),
     );
     let mut auth_resolver =
         BackendSmtpAuthResolver::new(WindowsCredentialManager, token_lifecycle, unix_now());
     let mut attachments = ComposerAttachmentStore::new(&connection, app_data_dir);
-    let mut smtp_sender = LettreSmtpSender;
+    let mut smtp_sender = LettreSmtpSender::default();
 
     send_composer_email_with_runtime(
         &connection,
@@ -1164,6 +1168,54 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
+fn oauth_client_configs_for_composer_send(
+    connection: &Connection,
+    account_id: &str,
+) -> Result<Vec<OAuthClientConfig>, ComposerCommandError> {
+    validate_entity_id("account_id", account_id)?;
+    let row = connection
+        .query_row(
+            "SELECT provider_kind, auth_kind
+             FROM accounts
+             WHERE id = ?1
+               AND removed_at IS NULL
+               AND auth_status != 'removed'",
+            [account_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+
+    let Some((provider_kind, auth_kind)) = row else {
+        return Ok(Vec::new());
+    };
+    if auth_kind != "oauth2" {
+        return Ok(Vec::new());
+    }
+
+    let provider = match provider_kind.as_str() {
+        "gmail" => ProviderKind::Gmail,
+        "microsoft" => ProviderKind::Microsoft,
+        "generic_imap_smtp" => return Ok(Vec::new()),
+        _ => return Ok(Vec::new()),
+    };
+
+    let Some(stored) = load_account_oauth_client_config(connection, account_id)
+        .map_err(|error| ComposerCommandError::new(error.reason))?
+    else {
+        return Ok(Vec::new());
+    };
+
+    Ok(vec![OAuthClientConfig::new(
+        provider,
+        stored.client_id,
+        stored.redirect_uri,
+        None,
+    )
+    .map_err(|error| {
+        ComposerCommandError::new(error.to_string())
+    })?])
+}
+
 #[derive(Default)]
 struct InMemoryAccessTokenCache {
     tokens: HashMap<String, CachedAccessToken>,
@@ -1351,6 +1403,7 @@ mod tests {
         smtp_send::{
             ConfirmedSendPersistence, SmtpAccountConfig, SmtpAuth, SmtpDelivery, SmtpSecurity,
         },
+        sync_scheduler::store_account_oauth_client_config,
         token_lifecycle::SecretString,
     };
     use lettre::Message;
@@ -1409,6 +1462,34 @@ mod tests {
             .unwrap();
     }
 
+    fn seed_gmail_account(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO accounts (
+                   id,
+                   provider_kind,
+                   display_email,
+                   display_name,
+                   username,
+                   auth_kind,
+                   credential_ref,
+                   auth_status
+                 )
+                 VALUES (
+                   'acct_gmail',
+                   'gmail',
+                   'sender@gmail.com',
+                   'Gmail Sender',
+                   'sender@gmail.com',
+                   'oauth2',
+                   'cred_acct_gmail',
+                   'connected'
+                 )",
+                [],
+            )
+            .unwrap();
+    }
+
     fn draft_save_request() -> ComposerDraftSaveRequest {
         ComposerDraftSaveRequest {
             account_id: "acct_composer".into(),
@@ -1444,6 +1525,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(subject, "Composer subject");
+    }
+
+    #[test]
+    fn composer_send_loads_stored_oauth_client_config_for_major_provider_smtp() {
+        let connection = migrated_connection();
+        seed_gmail_account(&connection);
+        store_account_oauth_client_config(
+            &connection,
+            "acct_gmail",
+            "gmail-client-id",
+            "http://127.0.0.1:49152/oauth/callback",
+        )
+        .unwrap();
+
+        let configs = oauth_client_configs_for_composer_send(&connection, "acct_gmail")
+            .expect("load OAuth SMTP config");
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].provider, ProviderKind::Gmail);
+        assert_eq!(configs[0].client_id, "gmail-client-id");
+        assert_eq!(
+            configs[0].redirect_uri,
+            "http://127.0.0.1:49152/oauth/callback"
+        );
     }
 
     #[test]

@@ -857,7 +857,19 @@ impl AttachmentContentStore for FilesystemAttachmentStore<'_> {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct LettreSmtpSender;
+pub struct LettreSmtpSender {
+    #[cfg(test)]
+    allow_plaintext_loopback: bool,
+}
+
+impl LettreSmtpSender {
+    #[cfg(test)]
+    fn plaintext_loopback_for_tests() -> Self {
+        Self {
+            allow_plaintext_loopback: true,
+        }
+    }
+}
 
 impl SmtpSender for LettreSmtpSender {
     fn send(
@@ -866,7 +878,9 @@ impl SmtpSender for LettreSmtpSender {
         auth: &SmtpAuth,
         message: &Message,
     ) -> Result<SmtpDelivery, SendEmailError> {
-        if account.smtp_security == SmtpSecurity::None {
+        if account.smtp_security == SmtpSecurity::None
+            && !self.allows_plaintext_loopback_for_tests(&account.smtp_host)
+        {
             return Err(SendEmailError::UnsupportedAuth {
                 reason: "authenticated SMTP requires TLS or STARTTLS",
             });
@@ -885,7 +899,7 @@ impl SmtpSender for LettreSmtpSender {
             SmtpSecurity::StartTls => SmtpTransport::starttls_relay(&account.smtp_host),
             SmtpSecurity::None => Ok(SmtpTransport::builder_dangerous(&account.smtp_host)),
         }
-        .map_err(|error| SendEmailError::SmtpTransport(error.to_string()))?
+        .map_err(|_| SendEmailError::SmtpTransport("SMTP transport setup failed".to_string()))?
         .port(account.smtp_port)
         .credentials(credentials)
         .authentication(vec![mechanism])
@@ -894,11 +908,27 @@ impl SmtpSender for LettreSmtpSender {
         let response = builder
             .build()
             .send(message)
-            .map_err(|error| SendEmailError::SmtpTransport(error.to_string()))?;
+            .map_err(redacted_smtp_transport_error)?;
 
         Ok(SmtpDelivery {
             provider_response: Some(response_summary(&response)),
         })
+    }
+}
+
+impl LettreSmtpSender {
+    fn allows_plaintext_loopback_for_tests(&self, host: &str) -> bool {
+        #[cfg(test)]
+        {
+            self.allow_plaintext_loopback
+                && (host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1")
+        }
+
+        #[cfg(not(test))]
+        {
+            let _ = host;
+            false
+        }
     }
 }
 
@@ -1442,6 +1472,25 @@ fn response_summary(response: &Response) -> String {
     }
 }
 
+fn redacted_smtp_transport_error(error: lettre::transport::smtp::Error) -> SendEmailError {
+    let message = error.to_string().to_ascii_lowercase();
+    let reason = if message.contains("auth")
+        || message.contains("credential")
+        || message.contains("535")
+        || message.contains("534")
+    {
+        "SMTP authentication failed"
+    } else if message.contains("starttls") || message.contains("tls") {
+        "SMTP TLS negotiation failed"
+    } else if message.contains("timeout") || message.contains("timed out") {
+        "SMTP connection timed out"
+    } else {
+        "SMTP transport failed"
+    };
+
+    SendEmailError::SmtpTransport(reason.to_string())
+}
+
 fn u64_to_i64(value: u64, field: &'static str) -> Result<i64, SendEmailError> {
     i64::try_from(value).map_err(|_| SendEmailError::Database(format!("{field} overflows i64")))
 }
@@ -1453,6 +1502,11 @@ mod tests {
     use std::{
         collections::{BTreeMap, VecDeque},
         fs,
+        io::{self, BufRead, BufReader, Write},
+        net::{SocketAddr, TcpListener, TcpStream},
+        sync::{Arc, Mutex},
+        thread::{self, JoinHandle},
+        time::Duration,
     };
 
     fn address(value: &str) -> OutboundEmailAddress {
@@ -2093,7 +2147,7 @@ mod tests {
             .subject("No plaintext auth")
             .singlepart(SinglePart::plain("body".to_string()))
             .unwrap();
-        let mut sender = LettreSmtpSender;
+        let mut sender = LettreSmtpSender::default();
 
         let error = sender.send(&account, &auth, &message).unwrap_err();
 
@@ -2103,6 +2157,86 @@ mod tests {
                 reason: "authenticated SMTP requires TLS or STARTTLS"
             }
         );
+    }
+
+    #[test]
+    fn lettre_sender_delivers_plain_auth_to_local_loopback_fixture_for_adapter_verification() {
+        let server = LoopbackSmtpServer::start("PLAIN LOGIN", false);
+        let account = loopback_account(server.addr().port(), AuthKind::AppPassword);
+        let auth = SmtpAuth::Plain {
+            username: "sender@example.com".into(),
+            password: SecretString::new("app-password"),
+        };
+        let message = loopback_message("Plain adapter verification");
+        let mut sender = LettreSmtpSender::plaintext_loopback_for_tests();
+
+        let delivery = sender.send(&account, &auth, &message).unwrap();
+        let fixture = server.join();
+
+        assert!(delivery
+            .provider_response
+            .as_deref()
+            .unwrap_or_default()
+            .contains("250"));
+        assert!(fixture
+            .commands
+            .iter()
+            .any(|line| line.starts_with("AUTH PLAIN ")));
+        assert_eq!(fixture.messages.len(), 1);
+        assert!(fixture.messages[0].contains("Subject: Plain adapter verification"));
+        assert!(!fixture.messages[0].contains("app-password"));
+    }
+
+    #[test]
+    fn lettre_sender_uses_xoauth2_for_oauth_accounts_on_loopback_fixture() {
+        let server = LoopbackSmtpServer::start("XOAUTH2 PLAIN", false);
+        let mut account = loopback_account(server.addr().port(), AuthKind::OAuth2);
+        account.provider_kind = ProviderKind::Gmail;
+        account.display_email = "sender@gmail.com".into();
+        account.username = "sender@gmail.com".into();
+        let auth = SmtpAuth::XOAuth2 {
+            username: "sender@gmail.com".into(),
+            access_token: SecretString::new("access-token"),
+        };
+        let message = loopback_message("XOAUTH2 adapter verification");
+        let mut sender = LettreSmtpSender::plaintext_loopback_for_tests();
+
+        sender.send(&account, &auth, &message).unwrap();
+        let fixture = server.join();
+
+        assert!(fixture
+            .commands
+            .iter()
+            .any(|line| line.starts_with("AUTH XOAUTH2 ")));
+        assert_eq!(fixture.messages.len(), 1);
+        assert!(fixture.messages[0].contains("Subject: XOAUTH2 adapter verification"));
+        assert!(!fixture.messages[0].contains("access-token"));
+    }
+
+    #[test]
+    fn lettre_sender_redacts_loopback_auth_failures() {
+        let server = LoopbackSmtpServer::start("PLAIN LOGIN", true);
+        let account = loopback_account(server.addr().port(), AuthKind::AppPassword);
+        let auth = SmtpAuth::Plain {
+            username: "sender@example.com".into(),
+            password: SecretString::new("super-secret-password"),
+        };
+        let message = loopback_message("Rejected adapter verification");
+        let mut sender = LettreSmtpSender::plaintext_loopback_for_tests();
+
+        let error = sender.send(&account, &auth, &message).unwrap_err();
+        let fixture = server.join();
+
+        assert_eq!(
+            error,
+            SendEmailError::SmtpTransport("SMTP authentication failed".to_string())
+        );
+        assert!(fixture
+            .commands
+            .iter()
+            .any(|line| line.starts_with("AUTH PLAIN ")));
+        assert!(fixture.messages.is_empty());
+        assert!(!error.to_string().contains("super-secret-password"));
     }
 
     #[test]
@@ -2171,6 +2305,163 @@ mod tests {
         ));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    fn loopback_account(port: u16, auth_kind: AuthKind) -> SmtpAccountConfig {
+        SmtpAccountConfig {
+            account_id: "acct_send".into(),
+            provider_kind: ProviderKind::GenericImapSmtp,
+            auth_kind,
+            display_email: "sender@example.com".into(),
+            display_name: Some("Sender".into()),
+            username: "sender@example.com".into(),
+            smtp_host: "127.0.0.1".into(),
+            smtp_port: port,
+            smtp_security: SmtpSecurity::None,
+            signature_html: None,
+        }
+    }
+
+    fn loopback_message(subject: &str) -> Message {
+        Message::builder()
+            .from("Sender <sender@example.com>".parse().unwrap())
+            .to("Recipient <recipient@example.com>".parse().unwrap())
+            .subject(subject)
+            .singlepart(SinglePart::plain(
+                "This message stays on the loopback SMTP fixture.".to_string(),
+            ))
+            .unwrap()
+    }
+
+    struct LoopbackSmtpServer {
+        addr: SocketAddr,
+        commands: Arc<Mutex<Vec<String>>>,
+        messages: Arc<Mutex<Vec<String>>>,
+        handle: Option<JoinHandle<()>>,
+    }
+
+    struct LoopbackSmtpResult {
+        commands: Vec<String>,
+        messages: Vec<String>,
+    }
+
+    impl LoopbackSmtpServer {
+        fn start(mechanisms: &'static str, reject_auth: bool) -> Self {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind SMTP fixture");
+            let addr = listener.local_addr().expect("SMTP fixture addr");
+            let commands = Arc::new(Mutex::new(Vec::new()));
+            let messages = Arc::new(Mutex::new(Vec::new()));
+            let thread_commands = Arc::clone(&commands);
+            let thread_messages = Arc::clone(&messages);
+
+            let handle = thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("accept SMTP fixture");
+                handle_loopback_smtp(
+                    stream,
+                    mechanisms,
+                    reject_auth,
+                    thread_commands,
+                    thread_messages,
+                )
+                .expect("serve SMTP fixture");
+            });
+
+            Self {
+                addr,
+                commands,
+                messages,
+                handle: Some(handle),
+            }
+        }
+
+        fn addr(&self) -> SocketAddr {
+            self.addr
+        }
+
+        fn join(mut self) -> LoopbackSmtpResult {
+            self.handle
+                .take()
+                .expect("SMTP fixture handle")
+                .join()
+                .expect("SMTP fixture exits");
+            LoopbackSmtpResult {
+                commands: self.commands.lock().expect("commands").clone(),
+                messages: self.messages.lock().expect("messages").clone(),
+            }
+        }
+    }
+
+    fn handle_loopback_smtp(
+        stream: TcpStream,
+        mechanisms: &str,
+        reject_auth: bool,
+        commands: Arc<Mutex<Vec<String>>>,
+        messages: Arc<Mutex<Vec<String>>>,
+    ) -> io::Result<()> {
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = BufReader::new(stream);
+        write_smtp_line(&mut writer, "220 komorebi.test loopback SMTP ready")?;
+
+        loop {
+            let Some(line) = read_smtp_line(&mut reader)? else {
+                return Ok(());
+            };
+            commands.lock().expect("commands").push(line.clone());
+            let upper = line.to_ascii_uppercase();
+
+            if upper.starts_with("EHLO ") || upper.starts_with("HELO ") {
+                write_smtp_line(&mut writer, "250-komorebi.test")?;
+                write_smtp_line(&mut writer, &format!("250-AUTH {mechanisms}"))?;
+                write_smtp_line(&mut writer, "250 SIZE 52428800")?;
+            } else if upper.starts_with("AUTH ") {
+                if reject_auth {
+                    write_smtp_line(&mut writer, "535 5.7.8 Authentication credentials invalid")?;
+                    return Ok(());
+                }
+                write_smtp_line(&mut writer, "235 2.7.0 Authentication successful")?;
+            } else if upper.starts_with("MAIL FROM:") {
+                write_smtp_line(&mut writer, "250 2.1.0 OK")?;
+            } else if upper.starts_with("RCPT TO:") {
+                write_smtp_line(&mut writer, "250 2.1.5 OK")?;
+            } else if upper == "DATA" {
+                write_smtp_line(&mut writer, "354 End data with <CR><LF>.<CR><LF>")?;
+                let mut message = String::new();
+                loop {
+                    let Some(data_line) = read_smtp_line(&mut reader)? else {
+                        return Ok(());
+                    };
+                    if data_line == "." {
+                        break;
+                    }
+                    message.push_str(&data_line);
+                    message.push_str("\r\n");
+                }
+                messages.lock().expect("messages").push(message);
+                write_smtp_line(&mut writer, "250 2.0.0 queued")?;
+            } else if upper == "QUIT" {
+                write_smtp_line(&mut writer, "221 2.0.0 Bye")?;
+                return Ok(());
+            } else {
+                write_smtp_line(&mut writer, "502 5.5.2 Command not recognized")?;
+            }
+        }
+    }
+
+    fn read_smtp_line(reader: &mut BufReader<TcpStream>) -> io::Result<Option<String>> {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
+    }
+
+    fn write_smtp_line(writer: &mut TcpStream, line: &str) -> io::Result<()> {
+        writer.write_all(line.as_bytes())?;
+        writer.write_all(b"\r\n")?;
+        writer.flush()
     }
 
     #[derive(Default)]

@@ -147,9 +147,9 @@ Microsoft Support also documents that duplicate Sent items happen when a server 
 - Invalid send address denial before SMTP work.
 - Duplicate recipient normalization and recent-recipient autocomplete persistence after confirmed fake SMTP send.
 
-`src/App.test.tsx` covers frontend autosave/save, address validation, duplicate recipient handling, keyboard recent-recipient autocomplete, attachment and inline-image staging request shapes, signature insertion, send request shape, and progress rendering.
+`src/App.test.tsx` covers frontend autosave/save, address validation, duplicate recipient handling, keyboard recent-recipient autocomplete, attachment and inline-image staging request shapes, signature insertion, send request shape, progress rendering, and redacted SMTP failure mapping.
 
-No test uses a live mailbox, live SMTP server, real account, or real credential.
+Normal tests use no live mailbox, live SMTP server, real account, or real credential. `src-tauri/tests/live_smtp_smoke.rs` is ignored and env-gated for explicit user-provided live SMTP test accounts only.
 
 ## Not Implemented
 
@@ -157,7 +157,7 @@ No test uses a live mailbox, live SMTP server, real account, or real credential.
 - IMAP APPEND worker for pending Sent uploads.
 - Provider-specific Sent upload conflict handling.
 - Draft upload to provider Drafts folders.
-- Live provider verification.
+- Live IMAP/provider verification beyond the ignored SMTP smoke test.
 
 ## References
 

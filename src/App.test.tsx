@@ -479,6 +479,29 @@ describe("App", () => {
     expect(handlers.sendComposerMail).not.toHaveBeenCalled();
   });
 
+  it("maps SMTP send failures to a redacted composer error", async () => {
+    const handlers = composerTestHandlers();
+    handlers.sendComposerMail.mockRejectedValueOnce(
+      new Error("SMTP AUTH failed for access-token-super-secret"),
+    );
+    render(<App initialData={fixtureMail} {...handlers} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compose" }));
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+    fireEvent.change(within(composer).getByLabelText("To"), {
+      target: { value: "Recipient <recipient@example.com>" },
+    });
+    fireEvent.click(within(composer).getByRole("button", { name: "Insert signature" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+
+    const alert = await within(composer).findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Message could not be sent. The draft remains saved.",
+    );
+    expect(alert).not.toHaveTextContent("access-token-super-secret");
+    expect(await within(composer).findByText("Composer needs attention")).toBeVisible();
+  });
+
   it("autocompletes recent recipients with the keyboard", async () => {
     const handlers = composerTestHandlers();
     render(<App initialData={fixtureMail} {...handlers} />);

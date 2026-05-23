@@ -2,7 +2,7 @@
 
 Komorebi is a privacy-first Windows 10/11 desktop email client built with Tauri v2, React, TypeScript, Vite, and Rust.
 
-The current implementation is an executable, state-driven mail shell with no seeded mailbox data. In Tauri runtime it can create, reauthenticate, remove, and read local account metadata through typed commands, read account, folder, unread-count, and recent-message navigation data from the local SQLite cache, and run app-managed live IMAP sync workers for configured accounts. It still needs opt-in live-provider smoke coverage, reader attachment preview/save/export, live SMTP verification, Sent-folder APPEND, provider Drafts upload, and release packaging before production mail-provider claims.
+The current implementation is an executable, state-driven mail shell with no seeded mailbox data. In Tauri runtime it can create, reauthenticate, remove, and read local account metadata through typed commands, read account, folder, unread-count, and recent-message navigation data from the local SQLite cache, run app-managed live IMAP sync workers for configured accounts, and send through configured SMTP accounts from the typed composer command. It still needs opt-in live IMAP/provider smoke coverage, reader attachment preview/save/export, Sent-folder APPEND, provider Drafts upload, and release packaging before production mail-provider claims.
 
 ## Toolchain
 
@@ -54,7 +54,7 @@ IMAP sync state-machine behavior is documented in [docs/architecture/sync-state-
 
 Inbound MIME normalization is documented in [docs/architecture/mime-normalization.md](docs/architecture/mime-normalization.md). Raw message bytes are parsed in Rust with `mail-parser` into decoded message fields, stable attachment metadata records, storage-safe attachment bytes, and parser-warning JSON. Live IMAP sync now feeds fetched RFC822/RFC5322 bytes through this boundary and persists message bodies, safe attachment files, attachment metadata, warning JSON, and FTS-visible content to SQLite. Reader preview/save/export commands remain future work.
 
-SMTP send behavior is documented in [docs/architecture/smtp-send.md](docs/architecture/smtp-send.md). The Rust backend resolves account-specific SMTP metadata/auth, composes outbound MIME with `lettre`, preserves sanitized rich composer HTML, inserts sanitized account signatures, streams attachment sources through backend-owned paths, and records local send receipts only after SMTP acceptance. The TipTap composer now calls the typed `send_composer_email` wrapper; live SMTP adapter verification, Sent-folder APPEND, and live SMTP tests remain future work.
+SMTP send behavior is documented in [docs/architecture/smtp-send.md](docs/architecture/smtp-send.md). The Rust backend resolves account-specific SMTP metadata/auth, loads stored OAuth client configuration for Gmail/Microsoft token refresh, composes outbound MIME with `lettre`, preserves sanitized rich composer HTML, inserts sanitized account signatures, streams attachment sources through backend-owned paths, and records local send receipts only after SMTP acceptance. The TipTap composer calls the typed `send_composer_email` wrapper; Sent-folder APPEND and provider Drafts upload remain future work.
 
 Draft and Sent persistence is documented in [docs/architecture/draft-and-sent-persistence.md](docs/architecture/draft-and-sent-persistence.md). The Rust backend stores active drafts locally, intentionally clears discarded or sent draft content, stages outbound composer attachments under backend-generated app-data paths, converts a source draft after confirmed SMTP acceptance, updates local-only recent-recipient autocomplete rows, and records provider-aware Sent-copy state. Draft reload UI, provider Drafts upload, and IMAP APPEND for pending Sent uploads remain future work.
 
@@ -145,6 +145,16 @@ If Chromium browser binaries are missing on a fresh machine, install them with:
 
 ```powershell
 pnpm exec playwright install chromium
+```
+
+## Opt-In Live SMTP Smoke
+
+The ignored Rust live SMTP smoke test sends one message through a user-provided test account and deletes its temporary credential entry afterward. It never runs in normal `cargo test` or `pnpm check`.
+
+Generic IMAP/SMTP requires `KOMOREBI_LIVE_SMTP_SMOKE=1`, `KOMOREBI_LIVE_SMTP_PROVIDER=generic_imap_smtp`, `KOMOREBI_LIVE_SMTP_FROM`, `KOMOREBI_LIVE_SMTP_TO`, `KOMOREBI_LIVE_SMTP_SECRET`, IMAP host/port/security, and SMTP host/port/security. Gmail/Microsoft require `KOMOREBI_LIVE_SMTP_PROVIDER=gmail` or `microsoft`, `KOMOREBI_LIVE_SMTP_REFRESH_TOKEN`, `KOMOREBI_LIVE_SMTP_OAUTH_CLIENT_ID`, and `KOMOREBI_LIVE_SMTP_OAUTH_REDIRECT_URI`.
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml --test live_smtp_smoke -- --ignored --nocapture
 ```
 
 ## Generated Outputs

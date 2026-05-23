@@ -1,6 +1,6 @@
 # SMTP Send Boundary
 
-Status: backend send boundary implemented in Rust and exposed through the typed composer send command.
+Status: backend send boundary and live `lettre` SMTP transport implemented in Rust and exposed through the typed composer send command.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -13,6 +13,7 @@ Komorebi sends outbound mail through a backend-only boundary that:
 - Resolves Gmail and Microsoft SMTP defaults when account rows do not override them.
 - Requires generic IMAP/SMTP accounts to provide SMTP host, port, and security metadata.
 - Resolves account-specific auth inside Rust.
+- Loads stored non-secret OAuth client configuration before Gmail/Microsoft token refresh during composer sends.
 - Composes MIME with `lettre`.
 - Inserts the selected account's sanitized signature through the backend signature boundary.
 - Streams attachment file bytes from app-generated storage paths in bounded chunks.
@@ -44,6 +45,8 @@ Provider defaults:
 - Generic IMAP/SMTP: SMTP host, port, and security are required in the account row.
 
 SMTP hosts must be host names, not URLs, paths, or credential-bearing strings. Authenticated SMTP over `smtp_security = none` is denied before a network connection is attempted. `tls` and `starttls` are the accepted authenticated transport modes.
+
+`LettreSmtpSender` is the production live SMTP adapter. It uses TLS wrapper mode for `tls`, required STARTTLS for `starttls`, provider-specific AUTH mechanisms (`PLAIN` for compatible generic providers and `XOAUTH2` for Gmail/Microsoft), a bounded timeout, and redacted transport errors. Plaintext SMTP is available only to unit tests through an internal loopback-only constructor so the live adapter can be verified against a local protocol fixture without weakening production transport policy.
 
 ## Authentication
 
@@ -129,26 +132,29 @@ This is not full Sent-folder synchronization. Provider-aware Sent-copy planning 
 - Attachment chunk streaming through a fake attachment store.
 - Attachment storage path traversal denial under a temp root.
 - Unsafe HTML, invalid recipient, missing body, missing recipient, invalid attachment ID, URL-like SMTP host, and plaintext authenticated SMTP denial paths.
+- `LettreSmtpSender` delivery against a local loopback SMTP fixture for PLAIN and XOAUTH2 without exposing secrets in message DATA, plus redacted auth-failure mapping.
 
 `src-tauri/src/schema.rs` tests cover migration from schema version 3 to version 4, valid receipt insertion, and later draft/composer attachment migrations.
 
 `src-tauri/src/composer.rs` tests cover the frontend-callable send wrapper with fake SMTP/auth and staged attachments.
-They also cover duplicate recipient normalization and local recent-recipient persistence after confirmed fake SMTP send.
+They also cover duplicate recipient normalization, stored Gmail/Microsoft OAuth client config loading for composer sends, and local recent-recipient persistence after confirmed fake SMTP send.
 
-`src-tauri/tests/protocol_fixtures.rs` tests cover a socket-level SMTP fixture for future transport-adapter work:
+`src-tauri/tests/protocol_fixtures.rs` tests cover a socket-level SMTP fixture:
 
 - EHLO capability advertisement.
 - AUTH success and AUTH failure denial.
 - MAIL FROM, RCPT TO, DATA, and QUIT command flow.
 - Captured message DATA payloads for assertions without a live SMTP server.
 
-No test uses a live mailbox, live SMTP server, real account, or real credential.
+`src-tauri/tests/live_smtp_smoke.rs` is ignored by default and runs only when the user explicitly opts in with `KOMOREBI_LIVE_SMTP_SMOKE=1` and supplies test-account environment variables. It creates a disposable SQLite cache, writes the test secret to Windows Credential Manager under a generated account id, sends through `send_composer_email_from_path`, verifies `SmtpAccepted`/`SentStateRecorded`, and deletes the temporary credential/app-data directory afterward.
+
+Normal checks do not use a live mailbox, live SMTP server, real account, or real credential.
 
 ## Not Implemented
 
 - Draft reload/reopen UI after restart.
 - IMAP APPEND worker for pending Sent uploads.
-- Live SMTP adapter verification and live SMTP integration tests.
+- Provider-specific setup documentation for obtaining OAuth client IDs and test refresh tokens.
 
 ## Documentation Sync
 
