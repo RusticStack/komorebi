@@ -7,7 +7,7 @@ use crate::{
 
 pub const CREDENTIAL_NAMESPACE: &str = "Komorebi/mail-account";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CredentialSlot {
     OAuthRefresh,
     OAuthAccess,

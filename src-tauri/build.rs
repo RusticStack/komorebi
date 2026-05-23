@@ -6,6 +6,11 @@ const APP_COMMANDS: &[&str] = &[
     "stage_composer_attachment",
     "send_composer_email",
     "list_recent_recipients",
+    "create_account",
+    "reauth_account",
+    "remove_account",
+    "test_account_connection",
+    "get_account_auth_status",
 ];
 
 fn main() {

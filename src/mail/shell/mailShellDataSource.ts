@@ -12,6 +12,14 @@ import type {
   MailShellData,
   RecentRecipientSearchRequest,
   RecentRecipientSuggestion,
+  AccountAuthStatusRequest,
+  AccountAuthStatusView,
+  AccountConnectionTestResponse,
+  AccountReauthRequest,
+  AccountRemovalRequest,
+  AccountRemovalResponse,
+  AccountSetupRequest,
+  AccountSetupResponse,
 } from "./mailShellState";
 
 const LOAD_MAIL_SHELL_COMMAND = "load_mail_shell";
@@ -21,6 +29,11 @@ const DISCARD_COMPOSER_DRAFT_COMMAND = "discard_composer_draft";
 const STAGE_COMPOSER_ATTACHMENT_COMMAND = "stage_composer_attachment";
 const SEND_COMPOSER_EMAIL_COMMAND = "send_composer_email";
 const LIST_RECENT_RECIPIENTS_COMMAND = "list_recent_recipients";
+const CREATE_ACCOUNT_COMMAND = "create_account";
+const REAUTH_ACCOUNT_COMMAND = "reauth_account";
+const REMOVE_ACCOUNT_COMMAND = "remove_account";
+const TEST_ACCOUNT_CONNECTION_COMMAND = "test_account_connection";
+const GET_ACCOUNT_AUTH_STATUS_COMMAND = "get_account_auth_status";
 
 declare global {
   interface Window {
@@ -95,6 +108,40 @@ export async function listRecentRecipientsFromTauri(
   throwIfAborted(signal);
 
   return response;
+}
+
+export async function createAccountFromTauri(
+  request: AccountSetupRequest,
+): Promise<AccountSetupResponse> {
+  return invoke<AccountSetupResponse>(CREATE_ACCOUNT_COMMAND, { request });
+}
+
+export async function reauthAccountFromTauri(
+  request: AccountReauthRequest,
+): Promise<AccountSetupResponse> {
+  return invoke<AccountSetupResponse>(REAUTH_ACCOUNT_COMMAND, { request });
+}
+
+export async function removeAccountFromTauri(
+  request: AccountRemovalRequest,
+): Promise<AccountRemovalResponse> {
+  return invoke<AccountRemovalResponse>(REMOVE_ACCOUNT_COMMAND, { request });
+}
+
+export async function testAccountConnectionFromTauri(
+  request: AccountSetupRequest,
+): Promise<AccountConnectionTestResponse> {
+  return invoke<AccountConnectionTestResponse>(TEST_ACCOUNT_CONNECTION_COMMAND, {
+    request,
+  });
+}
+
+export async function getAccountAuthStatusFromTauri(
+  request: AccountAuthStatusRequest,
+): Promise<AccountAuthStatusView> {
+  return invoke<AccountAuthStatusView>(GET_ACCOUNT_AUTH_STATUS_COMMAND, {
+    request,
+  });
 }
 
 function throwIfAborted(signal: AbortSignal) {

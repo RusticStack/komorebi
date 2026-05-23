@@ -148,7 +148,7 @@ No test uses a live mailbox, live SMTP server, real account, or real credential.
 
 - Draft reload/reopen UI after restart.
 - IMAP APPEND worker for pending Sent uploads.
-- Live account setup and live SMTP integration tests.
+- Live SMTP adapter verification and live SMTP integration tests.
 
 ## Documentation Sync
 

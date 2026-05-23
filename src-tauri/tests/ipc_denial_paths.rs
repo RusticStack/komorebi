@@ -6,12 +6,19 @@ use std::{
 };
 
 use komorebi_lib::{
+    account_management::{
+        create_account_from_connection, get_account_auth_status_from_connection,
+        reauth_account_from_connection, remove_account_from_connection,
+        test_account_connection_request, AccountAuthStatusRequest, AccountCredentialStore,
+        AccountReauthRequest, AccountRemovalRequest, AccountSetupRequest,
+    },
     attachment_safety::MAX_ATTACHMENT_BYTES,
     composer::{
         autosave_composer_draft_from_connection, list_recent_recipients_from_connection,
         stage_composer_attachment_from_connection, ComposerAddress, ComposerAttachmentDisposition,
         ComposerAttachmentStageRequest, ComposerDraftSaveRequest, RecentRecipientSearchRequest,
     },
+    credentials::{CredentialError, CredentialSlot},
     ipc_validation::{reject_client_supplied_path, MAX_TEXT_FIELD_BYTES},
     mail_actions::{
         execute_mail_action, FolderActionKind, MailAction, MailActionCommand, MailActionError,
@@ -20,6 +27,7 @@ use komorebi_lib::{
     },
     mail_shell::{search_mail_from_connection, MailSearchRequest},
     schema::apply_migrations,
+    token_lifecycle::SecretString,
 };
 use rusqlite::{params, Connection};
 
@@ -307,6 +315,101 @@ fn server_affecting_mail_actions_reject_unauthorized_operations_before_mutation(
     assert_eq!(store.mutation_count, 0);
 }
 
+#[test]
+fn account_management_commands_reject_bad_auth_ids_payloads_and_credential_failures() {
+    let connection = migrated_connection();
+    let mut credentials = RecordingAccountCredentialStore::default();
+
+    let mut gmail_password = account_setup_request();
+    gmail_password.provider_kind = "gmail".into();
+    gmail_password.auth_kind = "manual_password".into();
+    gmail_password.imap_host = None;
+    gmail_password.imap_port = None;
+    gmail_password.imap_security = None;
+    gmail_password.smtp_host = None;
+    gmail_password.smtp_port = None;
+    gmail_password.smtp_security = None;
+
+    let unsupported_auth =
+        create_account_from_connection(&connection, &mut credentials, gmail_password)
+            .expect_err("major provider password auth is rejected");
+    assert!(unsupported_auth.reason.contains("Gmail requires OAuth2"));
+    assert!(credentials.secrets.is_empty());
+    assert_eq!(account_count(&connection), 0);
+
+    let mut invalid_id = account_setup_request();
+    invalid_id.account_id = Some("../secret".into());
+    let invalid_id_error =
+        create_account_from_connection(&connection, &mut credentials, invalid_id)
+            .expect_err("invalid account id is rejected");
+    assert!(invalid_id_error.reason.contains("account_id is invalid"));
+    assert!(credentials.secrets.is_empty());
+
+    let mut oversized = account_setup_request();
+    oversized.display_name = Some("x".repeat(257));
+    let oversized_error = create_account_from_connection(&connection, &mut credentials, oversized)
+        .expect_err("oversized display name is rejected");
+    assert!(oversized_error.reason.contains("display_name exceeds"));
+    assert!(credentials.secrets.is_empty());
+
+    let mut plaintext_transport = account_setup_request();
+    plaintext_transport.smtp_security = Some("none".into());
+    let plaintext_error =
+        create_account_from_connection(&connection, &mut credentials, plaintext_transport)
+            .expect_err("plaintext mail transport is rejected");
+    assert!(plaintext_error
+        .reason
+        .contains("smtp_security must use TLS or STARTTLS"));
+    assert!(credentials.secrets.is_empty());
+
+    credentials.fail_writes = true;
+    let credential_error =
+        create_account_from_connection(&connection, &mut credentials, account_setup_request())
+            .expect_err("credential-store failure prevents metadata insert");
+    assert!(credential_error.reason.contains("credential write failed"));
+    assert_eq!(account_count(&connection), 0);
+    credentials.fail_writes = false;
+
+    create_account_from_connection(&connection, &mut credentials, account_setup_request())
+        .expect("create account after denial checks");
+
+    let bad_reauth = reauth_account_from_connection(
+        &connection,
+        &mut credentials,
+        AccountReauthRequest {
+            account_id: "..\\secret".into(),
+            secret: "replacement".into(),
+        },
+    )
+    .expect_err("reauth invalid id is rejected");
+    assert!(bad_reauth.reason.contains("account_id is invalid"));
+
+    let status = get_account_auth_status_from_connection(
+        &connection,
+        &mut credentials,
+        AccountAuthStatusRequest {
+            account_id: ACCOUNT_ID.into(),
+        },
+    )
+    .expect("status returns redacted credential presence");
+    assert!(status.credential_present);
+
+    let invalid_removal = remove_account_from_connection(
+        &connection,
+        &mut credentials,
+        AccountRemovalRequest {
+            account_id: "acct_missing".into(),
+            delete_local_cache: true,
+        },
+    )
+    .expect_err("unknown account removal is rejected");
+    assert_eq!(invalid_removal.reason, "account was not found");
+
+    let config_check =
+        test_account_connection_request(account_setup_request()).expect("configuration validates");
+    assert_eq!(config_check.status, "configuration-ready");
+}
+
 fn migrated_connection() -> Connection {
     let mut connection = Connection::open_in_memory().expect("open disposable sqlite database");
     apply_migrations(&mut connection).expect("apply migrations");
@@ -397,6 +500,30 @@ fn draft_request() -> ComposerDraftSaveRequest {
         body_html: Some("<p>Plain body</p>".into()),
         attachment_ids: Vec::new(),
     }
+}
+
+fn account_setup_request() -> AccountSetupRequest {
+    AccountSetupRequest {
+        account_id: Some(ACCOUNT_ID.into()),
+        provider_kind: "generic_imap_smtp".into(),
+        display_email: "ipc@example.com".into(),
+        display_name: Some("IPC".into()),
+        username: "ipc@example.com".into(),
+        auth_kind: "app_password".into(),
+        secret: "app-password".into(),
+        imap_host: Some("imap.example.com".into()),
+        imap_port: Some(993),
+        imap_security: Some("tls".into()),
+        smtp_host: Some("smtp.example.com".into()),
+        smtp_port: Some(587),
+        smtp_security: Some("starttls".into()),
+    }
+}
+
+fn account_count(connection: &Connection) -> i64 {
+    connection
+        .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+        .expect("count accounts")
 }
 
 fn temp_app_data_dir(label: &str) -> PathBuf {
@@ -502,5 +629,47 @@ impl MailActionStore for RecordingMailActionStore {
     ) -> Result<usize, MailActionStoreError> {
         self.mutation_count += 1;
         Ok(1)
+    }
+}
+
+#[derive(Default)]
+struct RecordingAccountCredentialStore {
+    secrets: HashMap<(String, CredentialSlot), String>,
+    fail_writes: bool,
+}
+
+impl AccountCredentialStore for RecordingAccountCredentialStore {
+    fn write_account_secret(
+        &mut self,
+        account_id: &str,
+        slot: CredentialSlot,
+        secret: &SecretString,
+    ) -> Result<(), CredentialError> {
+        if self.fail_writes {
+            return Err(CredentialError::WindowsUnavailable {
+                operation: "write",
+                code: 5,
+            });
+        }
+
+        self.secrets.insert(
+            (account_id.to_string(), slot),
+            secret.expose_secret().to_string(),
+        );
+        Ok(())
+    }
+
+    fn delete_account_secrets(&mut self, account_id: &str) -> Result<(), CredentialError> {
+        self.secrets
+            .retain(|(stored_account_id, _), _| stored_account_id != account_id);
+        Ok(())
+    }
+
+    fn account_secret_exists(
+        &mut self,
+        account_id: &str,
+        slot: CredentialSlot,
+    ) -> Result<bool, CredentialError> {
+        Ok(self.secrets.contains_key(&(account_id.to_string(), slot)))
     }
 }

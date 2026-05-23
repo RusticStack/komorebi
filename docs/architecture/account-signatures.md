@@ -14,7 +14,7 @@ The frontend sources of truth are:
 
 Komorebi stores one optional sanitized HTML signature per account in `accounts.signature_html`. Signatures are account metadata, not credentials. They are plaintext local SQLite content and must not be described as encrypted.
 
-The app shell now has a Settings entry and the signature settings component supports account selection, editing, clearing, sanitized preview, and save callbacks. The current app still has no account setup or frontend-callable persistence command, so the production wiring from real account rows to this component remains part of the account setup/IPC work.
+The app shell now has a Settings entry and the signature settings component supports account setup, reauthentication, removal, account selection, editing, clearing, sanitized preview, and save callbacks. Account metadata can be created and removed through typed account-management commands. Signature persistence from the settings UI is still a local callback only; a frontend-callable signature save command remains future settings work.
 
 ## Sanitization
 

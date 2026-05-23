@@ -1,13 +1,13 @@
 # Credential Model
 
-Status: accepted and implemented for the Windows-first secret-store layer.
-Last reviewed: 2026-05-22.
+Status: accepted and implemented for the Windows-first secret-store layer plus typed account-management command use.
+Last reviewed: 2026-05-23.
 
 ## Decision
 
 Komorebi will store mail-account secrets in Windows Credential Manager through the Rust backend. Windows Credential Manager entries are user-scoped and protected by the Windows credential subsystem/DPAPI. The frontend must never receive raw passwords, refresh tokens, access tokens, credential blobs, or decrypted secret material.
 
-The implementation lives in `src-tauri/src/credentials.rs`. It uses a narrow Rust abstraction over the Windows `CredWriteW`, `CredReadW`, and `CredDeleteW` APIs through `windows-sys`, so call sites do not depend on raw Win32 API shape.
+The secret-store implementation lives in `src-tauri/src/credentials.rs`. It uses a narrow Rust abstraction over the Windows `CredWriteW`, `CredReadW`, and `CredDeleteW` APIs through `windows-sys`, so call sites do not depend on raw Win32 API shape. Account setup, reauthentication, removal, and redacted auth-status commands live in `src-tauri/src/account_management.rs`.
 
 No credential storage may be implemented with browser storage, Tauri Store, SQLite, plain files, logs, diagnostics bundles, or environment variables. `tauri-plugin-store` may hold non-secret preferences only.
 
@@ -70,7 +70,7 @@ Rules:
 
 ## Runtime Access Flow
 
-1. React submits account setup data to a typed Rust command.
+1. React submits account setup data to a typed Rust command. Until OAuth loopback is implemented, Gmail/Microsoft setup may submit a user-entered OAuth refresh-token handoff; generic setup may submit a password/app-password for compatible providers.
 2. Rust validates provider/auth mode and rejects plaintext persistence outside the credential backend.
 3. Rust writes the secret to Windows Credential Manager.
 4. Rust writes the SQLite account metadata with `credential_ref` only after the credential write succeeds.
@@ -92,14 +92,17 @@ Account removal must run as a single typed backend workflow:
 
 Credential rotation must write the replacement credential first, verify it can authenticate or refresh, then replace `credential_ref`/metadata. Failed rotation leaves the previous credential intact.
 
+Current `reauth_account` performs the validated credential-slot replacement and marks the local account connected, but it does not perform a live provider login because live IMAP/SMTP adapters and OAuth loopback are still future work. Add live verification before claiming credential rotation proves provider acceptance.
+
 Token refresh, reconnect-needed status, provider revocation handling, and the provider OAuth HTTP client are defined in `docs/architecture/token-lifecycle.md` and enforced by `src-tauri/src/token_lifecycle.rs` plus `src-tauri/src/oauth.rs`.
 
 ## Frontend And IPC Boundaries
 
 - Every account setup or reauthentication command must evaluate the provider/auth policy in `src-tauri/src/auth.rs` before storing credentials or account metadata.
 - No frontend API may expose `get_password`, `get_token`, `export_secret`, raw credential target names, or arbitrary credential reads.
-- Allowed account commands are narrowly typed, for example `create_account`, `reauth_account`, `remove_account`, `get_account_auth_status`, and `test_account_connection`.
+- Current account commands are narrowly typed: `create_account`, `reauth_account`, `remove_account`, `get_account_auth_status`, and `test_account_connection`.
 - `get_account_auth_status` may return booleans, expiry times, provider names, and redacted error codes only.
+- `test_account_connection` currently validates configuration shape and credential policy only. It must not be described as a live provider login until live adapters are wired and tested.
 - IPC validation must reject unknown account IDs, unsupported provider/auth combinations, oversized payloads, arbitrary credential target names, and raw SQL.
 
 ## Diagnostics

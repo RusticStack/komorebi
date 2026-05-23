@@ -36,7 +36,7 @@ Not implemented by this task:
 
 - Live `async-imap` network adapter.
 - Live adapter calls into MIME normalization and attachment extraction/storage writes.
-- Frontend account setup or sync-status UI.
+- Live sync-status UI fed by background workers.
 
 ## State Flow
 

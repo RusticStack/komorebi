@@ -310,6 +310,71 @@
       "clear": "Limpar",
       "saveSignature": "Guardar assinatura"
     },
+    "accounts": {
+      "actions": {
+        "add": "Adicionar conta",
+        "reauth": "Reautenticar",
+        "remove": "Remover conta",
+        "status": "Ver estado",
+        "test": "Testar configuracao"
+      },
+      "auth": {
+        "app_password": "Palavra-passe de aplicacao",
+        "manual_password": "Palavra-passe manual",
+        "oauth2": "OAuth2"
+      },
+      "credential": {
+        "missing": "credencial em falta",
+        "present": "credencial presente"
+      },
+      "errors": {
+        "createUnavailable": "A configuracao de conta esta indisponivel neste runtime.",
+        "reauthUnavailable": "A reautenticacao esta indisponivel para esta conta.",
+        "removeUnavailable": "A remocao de conta esta indisponivel para esta conta.",
+        "statusUnavailable": "O estado de autenticacao esta indisponivel para esta conta.",
+        "testUnavailable": "O teste de configuracao de conta esta indisponivel neste runtime."
+      },
+      "fields": {
+        "authKind": "Autenticacao",
+        "deleteLocalCache": "Eliminar cache local desta conta",
+        "displayEmail": "Endereco de email",
+        "displayName": "Nome apresentado",
+        "imapHost": "Host IMAP",
+        "imapPort": "Porta IMAP",
+        "imapSecurity": "Seguranca IMAP",
+        "oauthSecret": "Token de renovacao OAuth",
+        "passwordSecret": "Palavra-passe ou palavra-passe de aplicacao",
+        "provider": "Fornecedor",
+        "reauthSecret": "Segredo de substituicao",
+        "smtpHost": "Host SMTP",
+        "smtpPort": "Porta SMTP",
+        "smtpSecurity": "Seguranca SMTP",
+        "username": "Nome de utilizador"
+      },
+      "heading": "Contas",
+      "notices": {
+        "created": "{{email}} foi adicionada.",
+        "reauthed": "As credenciais da conta foram substituidas.",
+        "removed": "A conta foi removida.",
+        "testReady": "Configuracao validada."
+      },
+      "providers": {
+        "generic_imap_smtp": "IMAP/SMTP generico",
+        "gmail": "Gmail",
+        "microsoft": "Microsoft"
+      },
+      "sections": {
+        "incoming": "Correio recebido",
+        "outgoing": "Correio enviado",
+        "selected": "Conta selecionada"
+      },
+      "security": {
+        "none": "Nenhuma",
+        "starttls": "STARTTLS",
+        "tls": "TLS"
+      },
+      "statusSummary": "Estado de autenticacao: {{status}}; {{credential}}."
+    },
     "aria": {
       "panel": "Definicoes",
       "preview": "Pre-visualizacao da assinatura"

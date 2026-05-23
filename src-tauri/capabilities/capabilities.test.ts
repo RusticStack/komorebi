@@ -119,6 +119,26 @@ function permissionIdentifier(permission: CapabilityPermission): string {
   return typeof permission === "string" ? permission : permission.identifier;
 }
 
+const accountCommandNames = new Set([
+  "create_account",
+  "reauth_account",
+  "remove_account",
+  "test_account_connection",
+  "get_account_auth_status",
+]);
+
+function rustCommandPath(command: string) {
+  if (command === "load_mail_shell" || command === "search_mail") {
+    return `mail_shell::${command}`;
+  }
+
+  if (accountCommandNames.has(command)) {
+    return `account_management::${command}`;
+  }
+
+  return `composer::${command}`;
+}
+
 function readCapability(fileName: string): Capability {
   return readJson<Capability>(resolve(capabilityDir, fileName));
 }
@@ -161,7 +181,7 @@ describe("Tauri capabilities", () => {
     expect(devCsp).toContain("frame-ancestors 'none'");
   });
 
-  it("keeps the main window limited to reviewed mail-shell and composer commands", () => {
+  it("keeps the main window limited to reviewed mail-shell, composer, and account commands", () => {
     const defaultCapability = readCapability("default.json");
 
     expect(defaultCapability.identifier).toBe("default");
@@ -176,6 +196,11 @@ describe("Tauri capabilities", () => {
       "allow-stage-composer-attachment",
       "allow-send-composer-email",
       "allow-list-recent-recipients",
+      "allow-create-account",
+      "allow-reauth-account",
+      "allow-remove-account",
+      "allow-test-account-connection",
+      "allow-get-account-auth-status",
     ]);
   });
 
@@ -219,13 +244,14 @@ describe("Tauri capabilities", () => {
       "stage_composer_attachment",
       "send_composer_email",
       "list_recent_recipients",
+      "create_account",
+      "reauth_account",
+      "remove_account",
+      "test_account_connection",
+      "get_account_auth_status",
     ]) {
       expect(buildScript).toContain(`"${command}"`);
-      expect(libRs).toContain(
-        command === "load_mail_shell" || command === "search_mail"
-          ? `mail_shell::${command}`
-          : `composer::${command}`,
-      );
+      expect(libRs).toContain(rustCommandPath(command));
     }
     expect(buildScript).toContain(".commands(APP_COMMANDS)");
     expect(libRs.match(/generate_handler!\[/g)).toHaveLength(1);

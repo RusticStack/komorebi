@@ -46,12 +46,35 @@ import {
   type MailSearchResponse,
   type MailMessage,
   type MailShellState,
+  type AccountSetupRequest,
+  type AccountSetupResponse,
+  type AccountReauthRequest,
+  type AccountRemovalRequest,
+  type AccountRemovalResponse,
+  type AccountConnectionTestResponse,
+  type AccountAuthStatusRequest,
+  type AccountAuthStatusView,
 } from "./mailShellState";
 
 export type MailSearchFunction = (
   request: MailSearchRequest,
   signal: AbortSignal,
 ) => Promise<MailSearchResponse>;
+export type AccountCreateFunction = (
+  request: AccountSetupRequest,
+) => Promise<AccountSetupResponse>;
+export type AccountReauthFunction = (
+  request: AccountReauthRequest,
+) => Promise<AccountSetupResponse>;
+export type AccountRemoveFunction = (
+  request: AccountRemovalRequest,
+) => Promise<AccountRemovalResponse>;
+export type AccountConnectionTestFunction = (
+  request: AccountSetupRequest,
+) => Promise<AccountConnectionTestResponse>;
+export type AccountAuthStatusFunction = (
+  request: AccountAuthStatusRequest,
+) => Promise<AccountAuthStatusView>;
 
 export type MailClientShellProps = {
   initialData?: MailShellData;
@@ -64,6 +87,11 @@ export type MailClientShellProps = {
   discardComposerDraft?: ComposerDraftDiscardFunction;
   stageComposerAttachment?: ComposerAttachmentStageFunction;
   sendComposerMail?: ComposerSendFunction;
+  createAccount?: AccountCreateFunction;
+  reauthAccount?: AccountReauthFunction;
+  removeAccount?: AccountRemoveFunction;
+  testAccountConnection?: AccountConnectionTestFunction;
+  getAccountAuthStatus?: AccountAuthStatusFunction;
 };
 
 type Drawer = "composer" | "settings" | null;
@@ -105,6 +133,11 @@ export function MailClientShell({
   discardComposerDraft,
   stageComposerAttachment,
   sendComposerMail,
+  createAccount,
+  reauthAccount,
+  removeAccount,
+  testAccountConnection,
+  getAccountAuthStatus,
 }: MailClientShellProps) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
@@ -699,6 +732,16 @@ export function MailClientShell({
                 },
               }));
             }}
+            onAccountChanged={() => {
+              if (loadMailShellData) {
+                void reloadMailShell();
+              }
+            }}
+            onCreateAccount={createAccount}
+            onReauthAccount={reauthAccount}
+            onRemoveAccount={removeAccount}
+            onTestAccountConnection={testAccountConnection}
+            onGetAccountAuthStatus={getAccountAuthStatus}
             onClose={closeDrawer}
           />
         </div>

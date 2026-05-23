@@ -756,6 +756,7 @@ textarea:disabled {
   color: #fffaf5;
 }
 
+.account-settings,
 .signature-settings,
 .composer-form {
   display: grid;
@@ -763,6 +764,69 @@ textarea:disabled {
   gap: 16px;
 }
 
+.account-settings h3,
+.account-settings h4 {
+  margin: 0;
+}
+
+.account-form {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e7e1d8;
+}
+
+.account-form--compact {
+  padding-top: 4px;
+}
+
+.account-server-grid {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e7e1d8;
+  border-radius: 8px;
+}
+
+.account-server-grid legend {
+  padding: 0 4px;
+  color: #716d66;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.settings-notice,
+.settings-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.86rem;
+}
+
+.settings-notice {
+  border: 1px solid #c8d4c2;
+  background: #f3f7ef;
+  color: #43523c;
+}
+
+.settings-error {
+  border: 1px solid #dfb8aa;
+  background: #fff4ef;
+  color: #7a3d2d;
+}
+
+.account-form label,
 .signature-settings label,
 .composer-form label {
   display: grid;
@@ -772,6 +836,12 @@ textarea:disabled {
   font-weight: 700;
 }
 
+.account-form label.checkbox-row {
+  display: flex;
+}
+
+.account-form input,
+.account-form select,
 .signature-settings select,
 .composer-form select,
 .signature-settings textarea,

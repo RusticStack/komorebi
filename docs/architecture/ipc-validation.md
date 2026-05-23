@@ -13,12 +13,19 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `stage_composer_attachment`: typed user-selected byte staging with backend-generated storage paths.
 - `send_composer_email`: typed send request routed through Rust SMTP/draft/credential boundaries.
 - `list_recent_recipients`: typed local recent-recipient autocomplete query.
+- `create_account`: typed account setup that enforces provider/auth policy before credential and metadata writes.
+- `reauth_account`: typed credential rotation for an existing account.
+- `remove_account`: typed account removal with credential deletion before metadata/cache cleanup.
+- `test_account_connection`: typed configuration and credential-policy validation without persistence.
+- `get_account_auth_status`: typed redacted auth-status lookup.
 
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
 
 Composer commands validate account/draft/attachment ids, payload sizes, address shapes on send, sanitized body wrappers, staged attachment ownership, MIME type/size, local recent-recipient account scope, and app-data storage scope before side effects. They never accept frontend-supplied filesystem paths, raw SQL, credential material, or arbitrary provider commands. `stage_composer_attachment` accepts bytes from a browser `File` selected by the user and writes only to a Rust-generated app-data path.
 
 The composer frontend sanitizer is `src/mail/composer/composerRichText.ts`. It is the reviewed source for rich HTML that may cross IPC: only the supported TipTap subset is preserved, and inline styles are reduced to whitelisted alignment, color, background-color, font-size, and font-family values before Rust accepts `DraftHtml` or `SanitizedHtml` wrappers.
+
+Account-management commands validate provider kind, auth kind, account id shape, email/username shape, host names, ports, security mode, display-name and secret payload size, and credential backend success before side effects. Gmail and Microsoft password/app-password setup is rejected before any credential write. Account metadata is inserted only after credential storage succeeds. `test_account_connection` is currently a configuration validation command, not a live IMAP/SMTP login.
 
 The code source of truth is `src-tauri/src/ipc_validation.rs`.
 
@@ -87,7 +94,8 @@ Rust tests cover:
 - Validation errors not echoing sensitive input values.
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
 - Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, sanitized rich-HTML handling, and send validation before SMTP work.
-- `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search input, unowned account/folder/message scope, oversized search/composer/recent-recipient/attachment payloads, and unauthorized mail actions rejected before fake-store mutation.
+- Account-management denial paths for unsupported provider/auth combinations, invalid account ids, oversized account fields, credential-store failure before metadata persistence, unknown account removal, and redacted auth status.
+- `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search input, unowned account/folder/message scope, oversized search/composer/recent-recipient/attachment/account payloads, account credential failure, and unauthorized mail actions rejected before fake-store mutation.
 
 `pnpm check` runs the validation tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

@@ -5,13 +5,18 @@ import {
 } from "./mail/shell/MailClientShell";
 import {
   autosaveComposerDraftFromTauri,
+  createAccountFromTauri,
   discardComposerDraftFromTauri,
+  getAccountAuthStatusFromTauri,
   isTauriRuntime,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
+  reauthAccountFromTauri,
+  removeAccountFromTauri,
   searchMailFromTauri,
   sendComposerMailFromTauri,
   stageComposerAttachmentFromTauri,
+  testAccountConnectionFromTauri,
 } from "./mail/shell/mailShellDataSource";
 
 function App(props: MailClientShellProps) {
@@ -29,6 +34,15 @@ function App(props: MailClientShellProps) {
   const runtimeRecentRecipients = isRuntime
     ? listRecentRecipientsFromTauri
     : undefined;
+  const runtimeCreateAccount = isRuntime ? createAccountFromTauri : undefined;
+  const runtimeReauthAccount = isRuntime ? reauthAccountFromTauri : undefined;
+  const runtimeRemoveAccount = isRuntime ? removeAccountFromTauri : undefined;
+  const runtimeTestAccount = isRuntime
+    ? testAccountConnectionFromTauri
+    : undefined;
+  const runtimeGetAccountAuthStatus = isRuntime
+    ? getAccountAuthStatusFromTauri
+    : undefined;
 
   return (
     <MailClientShell
@@ -43,6 +57,13 @@ function App(props: MailClientShellProps) {
       sendComposerMail={props.sendComposerMail ?? runtimeSend}
       loadRecentRecipients={
         props.loadRecentRecipients ?? runtimeRecentRecipients
+      }
+      createAccount={props.createAccount ?? runtimeCreateAccount}
+      reauthAccount={props.reauthAccount ?? runtimeReauthAccount}
+      removeAccount={props.removeAccount ?? runtimeRemoveAccount}
+      testAccountConnection={props.testAccountConnection ?? runtimeTestAccount}
+      getAccountAuthStatus={
+        props.getAccountAuthStatus ?? runtimeGetAccountAuthStatus
       }
     />
   );

@@ -170,6 +170,78 @@ export type RecentRecipientSuggestion = {
   lastUsedAt: string;
 };
 
+export type AccountProviderKind = "gmail" | "microsoft" | "generic_imap_smtp";
+
+export type AccountAuthKind = "oauth2" | "app_password" | "manual_password";
+
+export type AccountSecurityMode = "tls" | "starttls" | "none";
+
+export type AccountSetupRequest = {
+  accountId?: string | null;
+  providerKind: AccountProviderKind;
+  displayEmail: string;
+  displayName: string | null;
+  username: string;
+  authKind: AccountAuthKind;
+  secret: string;
+  imapHost: string | null;
+  imapPort: number | null;
+  imapSecurity: AccountSecurityMode | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecurity: AccountSecurityMode | null;
+};
+
+export type AccountReauthRequest = {
+  accountId: string;
+  secret: string;
+};
+
+export type AccountRemovalRequest = {
+  accountId: string;
+  deleteLocalCache: boolean;
+};
+
+export type AccountAuthStatusRequest = {
+  accountId: string;
+};
+
+export type AccountManagementView = {
+  id: string;
+  providerKind: AccountProviderKind;
+  displayEmail: string;
+  displayName: string | null;
+  username: string;
+  authKind: AccountAuthKind;
+  authStatus: "connected" | "reconnect_needed" | "disconnected" | "removed";
+};
+
+export type AccountSetupResponse = {
+  account: AccountManagementView;
+  credentialStored: boolean;
+};
+
+export type AccountConnectionTestResponse = {
+  providerKind: AccountProviderKind;
+  authKind: AccountAuthKind;
+  status: "configuration-ready";
+};
+
+export type AccountRemovalResponse = {
+  accountId: string;
+  credentialsDeleted: boolean;
+  localCacheDeleted: boolean;
+  metadataRemoved: boolean;
+};
+
+export type AccountAuthStatusView = {
+  accountId: string;
+  providerKind: AccountProviderKind;
+  authKind: AccountAuthKind;
+  authStatus: "connected" | "reconnect_needed" | "disconnected" | "removed";
+  credentialPresent: boolean;
+};
+
 export type MailShellLoadState = {
   accounts: LoadStatus;
   folders: LoadStatus;

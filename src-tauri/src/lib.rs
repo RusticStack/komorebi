@@ -1,3 +1,4 @@
+pub mod account_management;
 pub mod account_signatures;
 pub mod attachment_safety;
 pub mod auth;
@@ -25,7 +26,12 @@ pub fn run() {
             composer::discard_composer_draft,
             composer::stage_composer_attachment,
             composer::send_composer_email,
-            composer::list_recent_recipients
+            composer::list_recent_recipients,
+            account_management::create_account,
+            account_management::reauth_account,
+            account_management::remove_account,
+            account_management::test_account_connection,
+            account_management::get_account_auth_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

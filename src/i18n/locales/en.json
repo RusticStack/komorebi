@@ -310,6 +310,71 @@
       "clear": "Clear",
       "saveSignature": "Save signature"
     },
+    "accounts": {
+      "actions": {
+        "add": "Add account",
+        "reauth": "Reauthenticate",
+        "remove": "Remove account",
+        "status": "Check status",
+        "test": "Test setup"
+      },
+      "auth": {
+        "app_password": "App password",
+        "manual_password": "Manual password",
+        "oauth2": "OAuth2"
+      },
+      "credential": {
+        "missing": "credential missing",
+        "present": "credential present"
+      },
+      "errors": {
+        "createUnavailable": "Account setup is unavailable in this runtime.",
+        "reauthUnavailable": "Reauthentication is unavailable for this account.",
+        "removeUnavailable": "Account removal is unavailable for this account.",
+        "statusUnavailable": "Auth status is unavailable for this account.",
+        "testUnavailable": "Account setup testing is unavailable in this runtime."
+      },
+      "fields": {
+        "authKind": "Authentication",
+        "deleteLocalCache": "Delete local cache for this account",
+        "displayEmail": "Email address",
+        "displayName": "Display name",
+        "imapHost": "IMAP host",
+        "imapPort": "IMAP port",
+        "imapSecurity": "IMAP security",
+        "oauthSecret": "OAuth refresh token",
+        "passwordSecret": "Password or app password",
+        "provider": "Provider",
+        "reauthSecret": "Replacement secret",
+        "smtpHost": "SMTP host",
+        "smtpPort": "SMTP port",
+        "smtpSecurity": "SMTP security",
+        "username": "Username"
+      },
+      "heading": "Accounts",
+      "notices": {
+        "created": "{{email}} was added.",
+        "reauthed": "Account credentials were replaced.",
+        "removed": "Account was removed.",
+        "testReady": "Configuration validated."
+      },
+      "providers": {
+        "generic_imap_smtp": "Generic IMAP/SMTP",
+        "gmail": "Gmail",
+        "microsoft": "Microsoft"
+      },
+      "sections": {
+        "incoming": "Incoming mail",
+        "outgoing": "Outgoing mail",
+        "selected": "Selected account"
+      },
+      "security": {
+        "none": "None",
+        "starttls": "STARTTLS",
+        "tls": "TLS"
+      },
+      "statusSummary": "Auth status: {{status}}; {{credential}}."
+    },
     "aria": {
       "panel": "Settings",
       "preview": "Signature preview"

@@ -15,10 +15,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import {
   autosaveComposerDraftFromTauri,
+  createAccountFromTauri,
+  getAccountAuthStatusFromTauri,
   isTauriRuntime,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
+  reauthAccountFromTauri,
+  removeAccountFromTauri,
   searchMailFromTauri,
+  testAccountConnectionFromTauri,
 } from "./mailShellDataSource";
 
 const shellResponse: MailShellData = {
@@ -155,6 +160,100 @@ describe("mailShellDataSource", () => {
     );
     expect(invokeMock).toHaveBeenCalledWith("autosave_composer_draft", {
       request,
+    });
+  });
+
+  it("maps account management workflows to typed Tauri commands", async () => {
+    const setupRequest = {
+      authKind: "app_password" as const,
+      displayEmail: "person@example.com",
+      displayName: "Personal",
+      imapHost: "imap.example.com",
+      imapPort: 993,
+      imapSecurity: "tls" as const,
+      providerKind: "generic_imap_smtp" as const,
+      secret: "app-password",
+      smtpHost: "smtp.example.com",
+      smtpPort: 587,
+      smtpSecurity: "starttls" as const,
+      username: "person@example.com",
+    };
+    const setupResponse = {
+      account: {
+        authKind: "app_password" as const,
+        authStatus: "connected" as const,
+        displayEmail: "person@example.com",
+        displayName: "Personal",
+        id: "acct_generic",
+        providerKind: "generic_imap_smtp" as const,
+        username: "person@example.com",
+      },
+      credentialStored: true,
+    };
+    const reauthRequest = {
+      accountId: "acct_generic",
+      secret: "replacement",
+    };
+    const removalRequest = {
+      accountId: "acct_generic",
+      deleteLocalCache: true,
+    };
+    const removalResponse = {
+      accountId: "acct_generic",
+      credentialsDeleted: true,
+      localCacheDeleted: true,
+      metadataRemoved: true,
+    };
+    const authStatusRequest = { accountId: "acct_generic" };
+    const authStatusResponse = {
+      accountId: "acct_generic",
+      authKind: "app_password" as const,
+      authStatus: "connected" as const,
+      credentialPresent: true,
+      providerKind: "generic_imap_smtp" as const,
+    };
+    const connectionResponse = {
+      authKind: "app_password" as const,
+      providerKind: "generic_imap_smtp" as const,
+      status: "configuration-ready" as const,
+    };
+    invokeMock
+      .mockResolvedValueOnce(setupResponse)
+      .mockResolvedValueOnce(setupResponse)
+      .mockResolvedValueOnce(removalResponse)
+      .mockResolvedValueOnce(connectionResponse)
+      .mockResolvedValueOnce(authStatusResponse);
+
+    await expect(createAccountFromTauri(setupRequest)).resolves.toBe(
+      setupResponse,
+    );
+    await expect(reauthAccountFromTauri(reauthRequest)).resolves.toBe(
+      setupResponse,
+    );
+    await expect(removeAccountFromTauri(removalRequest)).resolves.toBe(
+      removalResponse,
+    );
+    await expect(testAccountConnectionFromTauri(setupRequest)).resolves.toBe(
+      connectionResponse,
+    );
+    await expect(
+      getAccountAuthStatusFromTauri(authStatusRequest),
+    ).resolves.toBe(authStatusResponse);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "create_account", {
+      request: setupRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "reauth_account", {
+      request: reauthRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "remove_account", {
+      request: removalRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "test_account_connection", {
+      request: setupRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "get_account_auth_status", {
+      request: authStatusRequest,
     });
   });
 });

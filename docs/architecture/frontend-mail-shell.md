@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, and local recent-recipient autocomplete implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, and settings account-management UI implemented; OAuth loopback and live sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -126,7 +126,7 @@ The message list uses `@tanstack/react-virtual` in `MailClientShell.tsx`.
 
 ## Keyboard And Accessibility
 
-The shell must remain usable from the keyboard before live account setup exists:
+The shell must remain usable from the keyboard before live sync data exists:
 
 - `/` and Ctrl/Cmd+F focus the search field when message data is ready; shortcuts are ignored from editable fields and while a drawer is open.
 - Account, folder, and message lists support Arrow Up/Down/Left/Right plus Home/End to move focus and update the active scope or message.
@@ -194,13 +194,20 @@ Current composer limits:
 - Provider Drafts-folder upload is not implemented.
 - Reply/forward routing into the composer is not implemented.
 - Sent-folder APPEND for providers that need it remains future work.
-- Live SMTP success depends on real account setup and credentials, which are not implemented in the UI yet.
+- Live SMTP success depends on live provider adapter verification and credentials from the account-management commands.
 
 ## Settings Entry
 
-The Settings drawer uses `AccountSignatureSettings` for signature editing. With no accounts it shows the accountless settings state. With injected account data it can edit the local in-memory account signature model.
+The Settings drawer uses `AccountSignatureSettings` for account management and signature editing. It exposes typed UI flows for:
 
-Persisting settings to SQLite through Tauri commands remains future IPC/account setup work.
+- compatible generic IMAP/SMTP setup with host, port, security, username, and password/app-password fields
+- Gmail and Microsoft setup as OAuth2-only forms using the temporary refresh-token handoff until loopback is implemented
+- setup validation through `test_account_connection`, currently configuration/policy validation only
+- reauthentication through `reauth_account`
+- account removal through `remove_account`
+- redacted auth status through `get_account_auth_status`
+
+With no accounts it still shows the accountless settings state plus the add-account form. With account data it can edit the local in-memory account signature model. Persisting signatures through a frontend-callable SQLite command remains future settings work.
 
 ## Loading, Empty, And Error States
 
@@ -252,7 +259,8 @@ No test uses real mailbox data, real credentials, or live provider connections.
 
 ## Not Implemented
 
-- Real account setup commands.
+- OAuth loopback account setup.
+- Live provider login testing from setup.
 - TanStack Query integration.
 - Live reply/forward routing.
 - Remote-content preference persistence and allowlisting.
