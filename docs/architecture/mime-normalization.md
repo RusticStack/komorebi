@@ -10,12 +10,12 @@ The code source of truth is `src-tauri/src/mime_normalization.rs`.
 Komorebi normalizes raw inbound RFC822/RFC5322 message bytes with the Rust `mail-parser` crate before message bodies or attachment metadata become cache records. The parser boundary is backend-only and produces schema-shaped records:
 
 - `RemoteMessage` for the `messages` table fields owned by sync.
-- `ParsedAttachmentRecord` for the `attachments` table fields that can be derived before attachment bytes are written to app storage.
+- `ParsedAttachmentRecord` for the `attachments` table fields plus decoded bytes only when the part passes attachment storage validation.
 - `MimeParseWarning` entries for accepted-but-risky parts, such as decoding problems or attachments that fail storage safety checks.
 
-`parse_inbound_mime` maps fetched RFC822/RFC5322 bytes into a `RemoteMessage`, attachment metadata, and parser warnings. The live IMAP adapter calls this boundary for `BODY.PEEK[]` responses and hands the schema-shaped records to `SqliteSyncCache`, which persists message bodies, attachment metadata, warning JSON, and FTS-indexed content in the normal sync transaction. `persist_parsed_inbound_mime` remains a direct test/helper path for writing the same normalized records to SQLite. None of these paths writes attachment bytes to disk.
+`parse_inbound_mime` maps fetched RFC822/RFC5322 bytes into a `RemoteMessage`, attachment metadata, storage-safe decoded attachment bytes, and parser warnings. The live IMAP adapter calls this boundary for `BODY.PEEK[]` responses and hands the schema-shaped records to `SqliteSyncCache`, which persists message bodies, attachment metadata, warning JSON, storage-safe attachment files, and FTS-indexed content in the normal sync path. `persist_parsed_inbound_mime` remains a direct test/helper path for writing the same normalized records to SQLite without an app-data storage root.
 
-This task implements normalization, metadata persistence, live-adapter raw MIME persistence, warning storage, and fixture tests. It does not persist attachment files or expose parser commands to React.
+This task implements normalization, metadata persistence, live-adapter raw MIME persistence, warning storage, storage-safe inbound attachment files, and fixture tests. It does not expose parser commands or local attachment paths to React.
 
 ## Message Record Rules
 
@@ -62,12 +62,13 @@ Attachment metadata is normalized without trusting sender-controlled paths:
 - `disposition` is `inline` when the MIME part is inline, has inline binary content, or has a content id; otherwise it is `attachment`.
 - `declared_content_type` is lower-cased from MIME headers with `application/octet-stream` fallback.
 - `sniffed_content_type`, `preview_kind`, `size_bytes`, and `sha256` are computed from decoded part bytes.
+- `storage` contains decoded bytes only when the part passes the attachment storage allowlist, declared/sniffed type checks, size checks, and hash checks.
 
-The parser runs `validate_attachment_for_storage` for every parsed attachment. Attachments that fail storage validation are still represented as metadata with a warning, but future storage/download code must not write or preview those bytes without passing the attachment safety boundary.
+The parser runs `validate_attachment_for_storage` for every parsed attachment. Attachments that fail storage validation are still represented as metadata with a warning, but they do not carry bytes into the sync cache and are never written to disk.
 
-Attachment metadata persistence is idempotent by stable attachment id. `storage_relative_path` stays `NULL` until a later download/storage worker writes bytes under an app-generated path.
+Attachment metadata persistence is idempotent by stable attachment id. When `SqliteSyncCache` has an app-data directory, safe attachment bytes are written under app-generated relative paths shaped as `attachments/{account_id}/{folder_id}/{message_id}/{attachment_id}.{ext}` and `attachments.storage_relative_path` is set. Without an app-data directory, metadata persistence remains valid and `storage_relative_path` stays `NULL`.
 
-Live sync replaces a live-fetched message's attachment metadata with the current parsed set when the message was derived from raw MIME. Fixture-only `RemoteMessage` values that are already normalized keep the older fake-server behavior and do not delete attachment rows.
+Live sync replaces a live-fetched message's attachment metadata with the current parsed set when the message was derived from raw MIME. It cleans replaced, UIDVALIDITY-reset, and expunged attachment files best-effort. Fixture-only `RemoteMessage` values that are already normalized keep the older fake-server behavior and do not delete attachment rows.
 
 ## Malformed Input
 
@@ -93,16 +94,16 @@ Accepted warnings are serialized into `messages.mime_parse_warnings_json` as che
 - Stable attachment ids across repeated parsing.
 - Phishing links and XSS HTML payload preservation for the frontend rendering boundary.
 - Idempotent SQLite persistence of normalized message rows and attachment metadata.
+- Storage-safe attachment byte carry, generated storage path persistence, hash checks, and expunge cleanup through sync-cache tests.
 - Missing multipart closing boundary with a recoverable body.
 - Empty message, invalid UID, and invalid account/folder id denial paths.
 - Raw-message parsing used by the live IMAP adapter.
-- Live IMAP fixture sync that persists parsed body text, attachment metadata, parser warnings, and FTS-searchable terms from `BODY.PEEK[]`.
+- Live IMAP fixture sync that persists parsed body text, safe attachment bytes, attachment metadata, parser warnings, and FTS-searchable terms from `BODY.PEEK[]`.
 
 No test uses a real mailbox, real account, or real user message. Fixture files are synthetic and documented in `src-tauri/fixtures/mime/README.md`.
 
 ## Not Implemented
 
-- Persisting attachment bytes to app-generated storage paths.
 - Inline image resolution in the React reader.
 
 Outbound SMTP MIME generation is a separate backend boundary documented in `docs/architecture/smtp-send.md`.

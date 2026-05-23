@@ -16,6 +16,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 const SNIPPET_LEN: usize = 240;
 const DEFAULT_ATTACHMENT_FILENAME: &str = "attachment.bin";
@@ -49,7 +50,7 @@ pub struct ParsedInboundMime {
     pub warnings: Vec<MimeParseWarning>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedAttachmentRecord {
     pub id: String,
     pub account_id: String,
@@ -67,6 +68,13 @@ pub struct ParsedAttachmentRecord {
     pub size_bytes: u64,
     pub sha256: String,
     pub preview_kind: Option<AttachmentPreviewKind>,
+    pub storage: Option<ParsedAttachmentStorage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedAttachmentStorage {
+    pub content_type: AttachmentContentType,
+    pub bytes: Arc<[u8]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -308,11 +316,7 @@ fn normalize_attachments(
         let sniffed = sniff_attachment_content_type(bytes);
         let sender_filename = part.attachment_name().map(str::to_string);
         let display_filename = display_filename(sender_filename.as_deref(), sniffed);
-        let preview_kind = sniffed
-            .and_then(AttachmentContentType::preview_kind)
-            .map(AttachmentPreviewKind::from);
-
-        if let Err(error) = validate_attachment_for_storage(AttachmentTypeEvidence {
+        let storage_content_type = match validate_attachment_for_storage(AttachmentTypeEvidence {
             declared_mime: Some(&declared_content_type),
             sniffed_bytes: bytes,
             byte_count: bytes
@@ -320,11 +324,22 @@ fn normalize_attachments(
                 .try_into()
                 .map_err(|_| MimeParseError::SizeOverflow)?,
         }) {
-            warnings.push(MimeParseWarning::AttachmentNotStorageSafe {
-                attachment_id: id.clone(),
-                reason: error.to_string(),
-            });
-        }
+            Ok(content_type) => Some(content_type),
+            Err(error) => {
+                warnings.push(MimeParseWarning::AttachmentNotStorageSafe {
+                    attachment_id: id.clone(),
+                    reason: error.to_string(),
+                });
+                None
+            }
+        };
+        let preview_kind = storage_content_type
+            .and_then(AttachmentContentType::preview_kind)
+            .map(AttachmentPreviewKind::from);
+        let storage = storage_content_type.map(|content_type| ParsedAttachmentStorage {
+            content_type,
+            bytes: Arc::from(bytes),
+        });
 
         attachments.push(ParsedAttachmentRecord {
             id,
@@ -346,6 +361,7 @@ fn normalize_attachments(
                 .map_err(|_| MimeParseError::SizeOverflow)?,
             sha256: sha256_hex(bytes),
             preview_kind,
+            storage,
         });
     }
 

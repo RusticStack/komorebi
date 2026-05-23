@@ -10,6 +10,7 @@ pub const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 pub const MAX_PREVIEW_BYTES: u64 = 5 * 1024 * 1024;
 pub const MAX_DISPLAY_FILENAME_BYTES: usize = 255;
 pub const AUTO_OPEN_ATTACHMENTS: bool = false;
+pub const INBOUND_ATTACHMENT_DIR_NAME: &str = "attachments";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentContentType {
@@ -213,10 +214,7 @@ pub fn attachment_storage_path(
         return Err(AttachmentSafetyError::EmptyStorageRoot);
     }
 
-    validate_entity_id("account_id", key.account_id)?;
-    validate_entity_id("folder_id", key.folder_id)?;
-    validate_entity_id("message_id", key.message_id)?;
-    validate_entity_id("attachment_id", key.attachment_id)?;
+    validate_attachment_storage_key(key)?;
 
     Ok(storage_root
         .join(key.account_id)
@@ -227,6 +225,21 @@ pub fn attachment_storage_path(
             key.attachment_id,
             key.content_type.storage_extension()
         )))
+}
+
+pub fn attachment_storage_relative_path(
+    key: AttachmentStorageKey<'_>,
+) -> Result<String, AttachmentSafetyError> {
+    validate_attachment_storage_key(key)?;
+
+    Ok(format!(
+        "{INBOUND_ATTACHMENT_DIR_NAME}/{}/{}/{}/{}.{}",
+        key.account_id,
+        key.folder_id,
+        key.message_id,
+        key.attachment_id,
+        key.content_type.storage_extension()
+    ))
 }
 
 pub fn sanitize_display_filename(
@@ -339,6 +352,16 @@ fn normalize_declared_mime(value: Option<&str>) -> Option<String> {
                 .to_ascii_lowercase()
         })
         .filter(|mime| !mime.is_empty())
+}
+
+fn validate_attachment_storage_key(
+    key: AttachmentStorageKey<'_>,
+) -> Result<(), AttachmentSafetyError> {
+    validate_entity_id("account_id", key.account_id)?;
+    validate_entity_id("folder_id", key.folder_id)?;
+    validate_entity_id("message_id", key.message_id)?;
+    validate_entity_id("attachment_id", key.attachment_id)?;
+    Ok(())
 }
 
 fn declared_type_matches_sniffed(declared_mime: &str, sniffed_type: AttachmentContentType) -> bool {
@@ -483,10 +506,13 @@ mod tests {
             AttachmentContentType::Png,
         );
         let path = attachment_storage_path(root, storage_key(AttachmentContentType::Png)).unwrap();
+        let relative_path =
+            attachment_storage_relative_path(storage_key(AttachmentContentType::Png)).unwrap();
         let path_text = path.to_string_lossy();
 
         assert_eq!(display_name, "calc.exe");
         assert!(path.ends_with(Path::new("acct_1/folder_1/msg_1/att_1.png")));
+        assert_eq!(relative_path, "attachments/acct_1/folder_1/msg_1/att_1.png");
         assert!(!path_text.contains("calc.exe"));
         assert!(!path_text.contains(".."));
         assert!(!path_text.contains("system32"));

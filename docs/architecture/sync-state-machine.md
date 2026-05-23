@@ -34,7 +34,7 @@ Implemented now:
 - Live IMAP connection setup over TLS or STARTTLS, with plaintext available only in tests.
 - Generic password `LOGIN` and Gmail/Microsoft-style OAuth `XOAUTH2` authentication without returning secrets to React.
 - Live `LIST`, `SELECT`, `UID SEARCH`, chunked `UID FETCH`, flag `UID STORE`, `EXPUNGE`, `CAPABILITY`, `IDLE`, reconnect, cancellation, timeout, max-literal, and redacted-error handling.
-- Live fetch parsing from RFC822/RFC5322 bytes through the MIME normalization boundary, including SQLite persistence for message bodies, attachment metadata, parser-warning JSON, and FTS-visible content.
+- Live fetch parsing from RFC822/RFC5322 bytes through the MIME normalization boundary, including SQLite persistence for message bodies, safe attachment files, attachment metadata, parser-warning JSON, and FTS-visible content.
 - Local socket tests for live adapter password auth, XOAUTH2, folder discovery, UID search/fetch, flag fetch/update, expunge, IDLE timeout/change handling, reconnect after network drop, cancellation, redacted auth errors, and parser edge cases.
 - App-managed background scheduler registered in `src-tauri/src/lib.rs`.
 - Startup loading of active `connected` accounts from the local SQLite cache.
@@ -48,7 +48,7 @@ Implemented now:
 Not implemented by this task:
 
 - Tokio/`async-imap` integration or migration.
-- Live attachment byte storage writes from fetched messages.
+- Reader-facing attachment preview/save/export commands.
 - User-visible last-successful-sync/error details beyond current account `connected`/`syncing`/`offline`/`reconnect-needed` projection.
 - Opt-in live-provider smoke tests using user-provided test accounts.
 
@@ -131,7 +131,8 @@ Concurrency rules:
 - Local message IDs are backend-generated stable IDs derived from account, folder, UIDVALIDITY, and UID.
 - MIME normalization uses the same stable message ID derivation for attachment records.
 - Live-fetched MIME warnings are stored as checked JSON in `messages.mime_parse_warnings_json`.
-- Live-fetched attachment metadata is replaced from the parsed MIME part set when a raw-message fetch is persisted; attachment file bytes remain unset until a storage worker writes `attachments.storage_relative_path`.
+- Live-fetched attachment metadata is replaced from the parsed MIME part set when a raw-message fetch is persisted. Storage-safe decoded bytes are written under generated app-data paths and recorded in `attachments.storage_relative_path`; unsafe parts remain metadata-only with warnings.
+- Replaced, UIDVALIDITY-reset, expunged, and account-cache-deleted attachment files are cleaned best-effort.
 - IMAP flags are stored in `flags_json`; standard flags also update boolean columns.
 - Message inserts and body updates flow through the existing `messages_fts` triggers.
 
@@ -197,6 +198,7 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - Unknown account rejection before server access.
 - Standard and custom IMAP flag normalization/preservation.
 - Special-use folder detection, unknown provider attribute preservation, and sync of messages in custom folders.
+- Storage-safe inbound attachment bytes are written under generated paths, malicious sender filenames do not affect storage, hashes/sizes are preserved, and expunge cleanup removes stored files.
 
 `src-tauri/tests/protocol_fixtures.rs` tests cover a socket-level IMAP fixture for future adapter work:
 
@@ -213,7 +215,7 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - IDLE timeout and cancellation behavior.
 - Reconnect after a dropped socket and reauthentication before further protocol work.
 - LIST and FETCH parser edge cases, including quoted folder names and missing UID denial.
-- Raw `BODY.PEEK[]` sync persistence for parsed body text, attachment metadata, MIME warning JSON, and FTS search results.
+- Raw `BODY.PEEK[]` sync persistence for parsed body text, safe attachment bytes, attachment metadata, MIME warning JSON, and FTS search results.
 
 No test uses a real mailbox or real credentials.
 

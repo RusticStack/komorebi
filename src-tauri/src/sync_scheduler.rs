@@ -470,7 +470,8 @@ fn run_live_account_worker_inner(job: &AccountWorkerJob) -> Result<(), SyncSched
     {
         let config = load_live_imap_config(&connection, &job.account_id)?;
         let mut server = LiveImapAdapter::connect(config)?;
-        let mut cache = SqliteSyncCache::new(&connection);
+        let app_data_dir = cache_app_data_dir(&job.cache_path)?;
+        let mut cache = SqliteSyncCache::with_app_data_dir(&connection, app_data_dir);
         let mut waiter = ThreadBackoffWaiter;
         let engine = ImapSyncEngine::new(job.options.backoff);
         engine.sync_account(
@@ -568,7 +569,8 @@ fn run_live_folder_worker(
 
     let config = load_live_imap_config(&connection, account_id)?;
     let mut server = LiveImapAdapter::connect(config)?;
-    let mut cache = SqliteSyncCache::new(&connection);
+    let app_data_dir = cache_app_data_dir(cache_path)?;
+    let mut cache = SqliteSyncCache::with_app_data_dir(&connection, app_data_dir);
     let mut waiter = ThreadBackoffWaiter;
     let engine = ImapSyncEngine::new(options.backoff);
     engine.run_folder_worker(
@@ -586,6 +588,16 @@ fn run_live_folder_worker(
     )?;
 
     Ok(())
+}
+
+fn cache_app_data_dir(cache_path: &Path) -> Result<PathBuf, SyncSchedulerError> {
+    let Some(parent) = cache_path.parent() else {
+        return Err(SyncSchedulerError::new(
+            "mail cache path must have an app-data parent directory",
+        ));
+    };
+
+    Ok(parent.to_path_buf())
 }
 
 fn load_active_account_ids(connection: &Connection) -> Result<Vec<String>, SyncSchedulerError> {

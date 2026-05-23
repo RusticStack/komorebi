@@ -1410,11 +1410,15 @@ mod tests {
     };
     use base64::{engine::general_purpose, Engine as _};
     use rusqlite::Connection;
+    use sha2::{Digest, Sha256};
     use std::{
+        fs,
         io::{BufRead, BufReader},
         net::{SocketAddr, TcpListener},
+        path::PathBuf,
         sync::{Arc, Mutex},
         thread,
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     #[test]
@@ -1532,7 +1536,8 @@ mod tests {
         let mut connection = Connection::open_in_memory().unwrap();
         apply_migrations(&mut connection).unwrap();
         seed_live_account(&connection);
-        let mut cache = SqliteSyncCache::new(&connection);
+        let app_data_dir = temp_app_data_dir("live-attachments");
+        let mut cache = SqliteSyncCache::with_app_data_dir(&connection, &app_data_dir);
 
         ImapSyncEngine::default()
             .sync_account(
@@ -1558,19 +1563,48 @@ mod tests {
         assert_eq!(message.2, 1);
         assert!(message.3.contains("attachment_not_storage_safe"));
 
-        let attachment: (String, String, i64, Option<String>) = connection
+        let stored_attachment: (String, String, i64, String, String) = connection
             .query_row(
-                "SELECT message_id, display_filename, size_bytes, storage_relative_path
+                "SELECT message_id, display_filename, size_bytes, storage_relative_path, sha256
                  FROM attachments
-                 WHERE account_id = 'acct_live'",
+                 WHERE account_id = 'acct_live'
+                   AND storage_relative_path IS NOT NULL",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
-        assert_eq!(attachment.0, message.0);
-        assert_eq!(attachment.1, "unsafe.bin");
-        assert!(attachment.2 > 0);
-        assert_eq!(attachment.3, None);
+        assert_eq!(stored_attachment.0, message.0);
+        assert_eq!(stored_attachment.1, "safe-note.txt");
+        assert_eq!(stored_attachment.2, "stored attachment bytes".len() as i64);
+        assert!(stored_attachment.3.starts_with("attachments/acct_live/"));
+        assert!(!stored_attachment.3.contains("evil"));
+        assert!(!stored_attachment.3.contains(".."));
+        let stored_path = app_data_dir.join(&stored_attachment.3);
+        assert_eq!(fs::read(&stored_path).unwrap(), b"stored attachment bytes");
+        assert_eq!(
+            stored_attachment.4,
+            sha256_hex_for_test(b"stored attachment bytes")
+        );
+
+        let unsafe_path: Option<String> = connection
+            .query_row(
+                "SELECT storage_relative_path
+                 FROM attachments
+                 WHERE account_id = 'acct_live'
+                   AND display_filename = 'unsafe.bin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unsafe_path, None);
 
         let search = search_messages_fts(&connection, "searchable", 10).unwrap();
         assert_eq!(search.len(), 1);
@@ -1578,6 +1612,7 @@ mod tests {
 
         drop(adapter);
         server.join();
+        fs::remove_dir_all(app_data_dir).unwrap();
     }
 
     #[test]
@@ -1748,7 +1783,30 @@ mod tests {
     }
 
     fn raw_message_with_attachment() -> Vec<u8> {
-        b"Message-ID: <live-persist@example.com>\r\nSubject: Live MIME Persistence\r\nFrom: Alice <alice@example.com>\r\nTo: Bob <bob@example.com>\r\nDate: Fri, 22 May 2026 12:00:00 +0000\r\nContent-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n--mix\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLive MIME searchable body\r\n--mix\r\nContent-Type: application/x-msdownload; name=\"../unsafe.bin\"\r\nContent-Disposition: attachment; filename=\"../unsafe.bin\"\r\n\r\nunsupported bytes!\r\n--mix--\r\n".to_vec()
+        b"Message-ID: <live-persist@example.com>\r\nSubject: Live MIME Persistence\r\nFrom: Alice <alice@example.com>\r\nTo: Bob <bob@example.com>\r\nDate: Fri, 22 May 2026 12:00:00 +0000\r\nContent-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n--mix\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLive MIME searchable body\r\n--mix\r\nContent-Type: text/plain; name=\"../../evil/safe-note.txt\"\r\nContent-Disposition: attachment; filename=\"../../evil/safe-note.txt\"\r\n\r\nstored attachment bytes\r\n--mix\r\nContent-Type: application/x-msdownload; name=\"../unsafe.bin\"\r\nContent-Disposition: attachment; filename=\"../unsafe.bin\"\r\n\r\nMZ unsupported bytes!\r\n--mix--\r\n".to_vec()
+    }
+
+    fn temp_app_data_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "komorebi-imap-live-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn sha256_hex_for_test(bytes: &[u8]) -> String {
+        let mut digest = Sha256::new();
+        digest.update(bytes);
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     fn seed_live_account(connection: &Connection) {

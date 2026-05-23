@@ -16,6 +16,7 @@ use crate::{
         LiveGenericAccountConnectionTester, MailTransportSecurity,
     },
     account_signatures::{AccountSignatureError, AccountSignatureHtml},
+    attachment_safety::INBOUND_ATTACHMENT_DIR_NAME,
     auth::{evaluate_account_setup_auth_policy, AuthKind, AuthPolicy, ProviderKind},
     credentials::{
         credential_target_name, CredentialError, CredentialSlot, WindowsCredentialManager,
@@ -572,7 +573,16 @@ pub fn remove_account_from_path(
 ) -> Result<AccountRemovalResponse, AccountCommandError> {
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
-    remove_account_from_connection(&connection, credentials, request)
+    let account_id = request.account_id.clone();
+    let delete_local_cache = request.delete_local_cache;
+    let response = remove_account_from_connection(&connection, credentials, request)?;
+    if delete_local_cache {
+        if let Some(app_data_dir) = cache_path.parent() {
+            delete_account_attachment_dir_best_effort(app_data_dir, &account_id);
+        }
+    }
+
+    Ok(response)
 }
 
 pub fn remove_account_from_connection(
@@ -627,6 +637,17 @@ pub fn update_account_settings_from_path(
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
     update_account_settings_from_connection(&connection, request)
+}
+
+fn delete_account_attachment_dir_best_effort(app_data_dir: &Path, account_id: &str) {
+    if validate_entity_id("account_id", account_id).is_err() {
+        return;
+    }
+
+    let path = app_data_dir
+        .join(INBOUND_ATTACHMENT_DIR_NAME)
+        .join(account_id);
+    let _ = fs::remove_dir_all(path);
 }
 
 pub fn update_account_settings_from_connection(
@@ -1324,6 +1345,23 @@ mod tests {
         connection
     }
 
+    fn migrated_file_database(label: &str) -> (PathBuf, PathBuf) {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let app_data_dir = std::env::temp_dir().join(format!(
+            "komorebi-account-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&app_data_dir).unwrap();
+        let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+        let mut connection = Connection::open(&cache_path).expect("open file db");
+        apply_migrations(&mut connection).expect("apply migrations");
+        drop(connection);
+        (cache_path, app_data_dir)
+    }
+
     fn generic_request() -> AccountSetupRequest {
         AccountSetupRequest {
             account_id: Some("acct_generic".into()),
@@ -1642,6 +1680,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preference_count, 0);
+    }
+
+    #[test]
+    fn remove_account_from_path_deletes_inbound_attachment_directory_on_cache_delete() {
+        let (cache_path, app_data_dir) = migrated_file_database("remove-attachments");
+        let mut credentials = FakeAccountCredentialStore::default();
+        {
+            let connection = Connection::open(&cache_path).unwrap();
+            create_account_from_connection(&connection, &mut credentials, generic_request())
+                .expect("create account");
+        }
+        let attachment_dir = app_data_dir
+            .join(INBOUND_ATTACHMENT_DIR_NAME)
+            .join("acct_generic")
+            .join("folder_1")
+            .join("message_1");
+        fs::create_dir_all(&attachment_dir).unwrap();
+        fs::write(attachment_dir.join("att_1.txt"), b"cached attachment").unwrap();
+
+        remove_account_from_path(
+            &cache_path,
+            &mut credentials,
+            AccountRemovalRequest {
+                account_id: "acct_generic".into(),
+                delete_local_cache: true,
+            },
+        )
+        .expect("remove account");
+
+        assert!(!app_data_dir
+            .join(INBOUND_ATTACHMENT_DIR_NAME)
+            .join("acct_generic")
+            .exists());
+        fs::remove_dir_all(app_data_dir).unwrap();
     }
 
     #[test]

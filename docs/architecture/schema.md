@@ -52,7 +52,7 @@ The current schema defines:
 
 All durable tables include `created_at`; mutable tables include `updated_at` with timestamp triggers.
 
-Message bodies and FTS indexed terms are not encrypted at rest in the current schema. The accepted cache-encryption posture is documented in `docs/architecture/local-cache-encryption.md`.
+Message bodies, FTS indexed terms, attachment metadata, and app-generated attachment files are not encrypted at rest in the current schema/storage model. The accepted cache-encryption posture is documented in `docs/architecture/local-cache-encryption.md`.
 
 Sync state-machine behavior is documented in `docs/architecture/sync-state-machine.md`.
 
@@ -112,7 +112,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - `folders.attributes_json` must be valid JSON and stores normalized provider LIST/XLIST/SPECIAL-USE attributes for roles the current enum does not model directly.
 - Messages must store `imap_uid` and `uid_validity` together, or neither for local-only states.
 - `messages.mime_parse_warnings_json` must be valid JSON and stores parser warnings from accepted raw MIME fetches without logging message content.
-- Attachments reference their owning message through `(account_id, folder_id, message_id)` and cascade with the account/message.
+- Attachments reference their owning message through `(account_id, folder_id, message_id)` and cascade with the account/message. `attachments.storage_relative_path`, when present, is backend-generated under `attachments/{account_id}/{folder_id}/{message_id}/` and never derived from sender filenames.
 - Template JSON and setting JSON must pass `json_valid`.
 - Global template names and per-account template names are deduplicated separately.
 - SMTP send receipts reference accounts, store JSON address snapshots, restrict SMTP security/auth enum values, and are inserted only by the Rust send boundary after confirmed transport acceptance.
@@ -123,7 +123,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 
 ## Deferred Schema Work
 
-Encrypted local mail storage is future work. This schema stores message bodies and FTS terms as plaintext SQLite content until a reviewed encryption design and migration are implemented.
+Encrypted local mail storage is future work. This schema/storage model stores message bodies and FTS terms as plaintext SQLite content and attachment files as plaintext app-data files until a reviewed encryption design and migration are implemented.
 
 ## Tests
 

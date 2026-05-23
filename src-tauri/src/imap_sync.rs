@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
-    fmt,
+    fmt, fs,
+    path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,8 +11,12 @@ use std::{
     time::Duration,
 };
 
+use crate::attachment_safety::{
+    attachment_storage_relative_path, validate_attachment_for_storage, AttachmentStorageKey,
+    AttachmentTypeEvidence, INBOUND_ATTACHMENT_DIR_NAME,
+};
 use crate::mime_normalization::{
-    AttachmentDisposition, AttachmentPreviewKind, ParsedAttachmentRecord,
+    AttachmentDisposition, AttachmentPreviewKind, ParsedAttachmentRecord, ParsedAttachmentStorage,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -1453,11 +1458,25 @@ fn validate_flag_updates(
 
 pub struct SqliteSyncCache<'connection> {
     connection: &'connection Connection,
+    app_data_dir: Option<PathBuf>,
 }
 
 impl<'connection> SqliteSyncCache<'connection> {
     pub fn new(connection: &'connection Connection) -> Self {
-        Self { connection }
+        Self {
+            connection,
+            app_data_dir: None,
+        }
+    }
+
+    pub fn with_app_data_dir(
+        connection: &'connection Connection,
+        app_data_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            connection,
+            app_data_dir: Some(app_data_dir.into()),
+        }
     }
 
     fn replace_message_attachments(
@@ -1478,18 +1497,25 @@ impl<'connection> SqliteSyncCache<'connection> {
             }
         }
 
-        self.connection.execute(
-            "DELETE FROM attachments
+        let old_paths =
+            self.attachment_storage_paths_for_message(account_id, folder_id, message_id)?;
+        let new_paths =
+            self.materialize_attachment_files(account_id, folder_id, message_id, attachments)?;
+        let new_path_values: BTreeSet<String> = new_paths.values().cloned().collect();
+
+        let sql_result = (|| -> Result<(), SyncError> {
+            self.connection.execute(
+                "DELETE FROM attachments
              WHERE account_id = ?1
                AND folder_id = ?2
                AND message_id = ?3",
-            params![account_id, folder_id, message_id],
-        )?;
+                params![account_id, folder_id, message_id],
+            )?;
 
-        for attachment in attachments {
-            let preview_kind = attachment.preview_kind.map(attachment_preview_schema_value);
-            self.connection.execute(
-                "INSERT INTO attachments (
+            for attachment in attachments {
+                let preview_kind = attachment.preview_kind.map(attachment_preview_schema_value);
+                self.connection.execute(
+                    "INSERT INTO attachments (
                    id,
                    account_id,
                    folder_id,
@@ -1506,31 +1532,279 @@ impl<'connection> SqliteSyncCache<'connection> {
                    is_inline,
                    preview_kind
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13, ?14)",
-                params![
-                    &attachment.id,
-                    &attachment.account_id,
-                    &attachment.folder_id,
-                    &attachment.message_id,
-                    &attachment.content_id,
-                    attachment_disposition_schema_value(attachment.disposition),
-                    &attachment.sender_filename,
-                    &attachment.display_filename,
-                    attachment
-                        .sniffed_content_type
-                        .as_deref()
-                        .unwrap_or(&attachment.declared_content_type),
-                    &attachment.declared_content_type,
-                    u64_to_i64(attachment.size_bytes)?,
-                    &attachment.sha256,
-                    bool_to_i64(attachment.disposition == AttachmentDisposition::Inline),
-                    preview_kind
-                ],
-            )?;
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    params![
+                        &attachment.id,
+                        &attachment.account_id,
+                        &attachment.folder_id,
+                        &attachment.message_id,
+                        &attachment.content_id,
+                        attachment_disposition_schema_value(attachment.disposition),
+                        &attachment.sender_filename,
+                        &attachment.display_filename,
+                        attachment
+                            .storage
+                            .as_ref()
+                            .map(|storage| storage.content_type.canonical_mime())
+                            .or(attachment.sniffed_content_type.as_deref())
+                            .unwrap_or(&attachment.declared_content_type),
+                        &attachment.declared_content_type,
+                        u64_to_i64(attachment.size_bytes)?,
+                        new_paths.get(&attachment.id).map(String::as_str),
+                        &attachment.sha256,
+                        bool_to_i64(attachment.disposition == AttachmentDisposition::Inline),
+                        preview_kind
+                    ],
+                )?;
+            }
+
+            Ok(())
+        })();
+
+        match sql_result {
+            Ok(()) => {
+                self.delete_attachment_files_best_effort(old_paths.difference(&new_path_values));
+                Ok(())
+            }
+            Err(error) => {
+                self.delete_attachment_files_best_effort(new_path_values.difference(&old_paths));
+                Err(error)
+            }
+        }
+    }
+
+    fn materialize_attachment_files(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        message_id: &str,
+        attachments: &[ParsedAttachmentRecord],
+    ) -> Result<BTreeMap<String, String>, SyncError> {
+        let mut paths = BTreeMap::new();
+        let Some(app_data_dir) = &self.app_data_dir else {
+            return Ok(paths);
+        };
+
+        for attachment in attachments {
+            let Some(storage) = &attachment.storage else {
+                continue;
+            };
+            validate_attachment_storage(attachment, storage)?;
+
+            let relative_path = attachment_storage_relative_path(AttachmentStorageKey {
+                account_id,
+                folder_id,
+                message_id,
+                attachment_id: &attachment.id,
+                content_type: storage.content_type,
+            })
+            .map_err(SyncError::cache)?;
+            let full_path = checked_app_data_path(app_data_dir, &relative_path)?;
+            if let Some(parent) = full_path.parent() {
+                fs::create_dir_all(parent).map_err(SyncError::cache)?;
+            }
+            fs::write(&full_path, storage.bytes.as_ref()).map_err(SyncError::cache)?;
+            paths.insert(attachment.id.clone(), relative_path);
         }
 
-        Ok(())
+        Ok(paths)
     }
+
+    fn attachment_storage_paths_for_message(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        message_id: &str,
+    ) -> Result<BTreeSet<String>, SyncError> {
+        let mut statement = self.connection.prepare(
+            "SELECT storage_relative_path
+             FROM attachments
+             WHERE account_id = ?1
+               AND folder_id = ?2
+               AND message_id = ?3
+               AND storage_relative_path IS NOT NULL",
+        )?;
+        let rows = statement.query_map(params![account_id, folder_id, message_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+
+        collect_storage_paths(rows)
+    }
+
+    fn attachment_storage_paths_for_folder(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+    ) -> Result<BTreeSet<String>, SyncError> {
+        let mut statement = self.connection.prepare(
+            "SELECT storage_relative_path
+             FROM attachments
+             WHERE account_id = ?1
+               AND folder_id = ?2
+               AND storage_relative_path IS NOT NULL",
+        )?;
+        let rows = statement.query_map(params![account_id, folder_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+
+        collect_storage_paths(rows)
+    }
+
+    fn attachment_storage_paths_for_uid(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        uid_validity: u64,
+        uid: u64,
+    ) -> Result<BTreeSet<String>, SyncError> {
+        let mut statement = self.connection.prepare(
+            "SELECT a.storage_relative_path
+             FROM attachments a
+             INNER JOIN messages m
+               ON m.account_id = a.account_id
+              AND m.folder_id = a.folder_id
+              AND m.id = a.message_id
+             WHERE m.account_id = ?1
+               AND m.folder_id = ?2
+               AND m.uid_validity = ?3
+               AND m.imap_uid = ?4
+               AND a.storage_relative_path IS NOT NULL",
+        )?;
+        let rows = statement.query_map(
+            params![
+                account_id,
+                folder_id,
+                u64_to_i64(uid_validity)?,
+                u64_to_i64(uid)?
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+
+        collect_storage_paths(rows)
+    }
+
+    fn delete_attachment_files_best_effort<'a>(
+        &self,
+        relative_paths: impl IntoIterator<Item = &'a String>,
+    ) {
+        let Some(app_data_dir) = &self.app_data_dir else {
+            return;
+        };
+
+        for relative_path in relative_paths {
+            let Ok(path) = checked_app_data_path(app_data_dir, relative_path) else {
+                continue;
+            };
+            if fs::remove_file(&path).is_ok() {
+                remove_empty_attachment_parents(app_data_dir, &path);
+            }
+        }
+    }
+}
+
+fn collect_storage_paths(
+    rows: impl Iterator<Item = rusqlite::Result<String>>,
+) -> Result<BTreeSet<String>, SyncError> {
+    let mut paths = BTreeSet::new();
+    for row in rows {
+        paths.insert(row?);
+    }
+
+    Ok(paths)
+}
+
+fn validate_attachment_storage(
+    attachment: &ParsedAttachmentRecord,
+    storage: &ParsedAttachmentStorage,
+) -> Result<(), SyncError> {
+    let byte_count = u64::try_from(storage.bytes.len()).map_err(|_| SyncError::Cache {
+        reason: "attachment size does not fit in u64".into(),
+    })?;
+    if byte_count != attachment.size_bytes {
+        return Err(SyncError::Cache {
+            reason: "parsed attachment byte count changed before storage".into(),
+        });
+    }
+    let validated = validate_attachment_for_storage(AttachmentTypeEvidence {
+        declared_mime: Some(&attachment.declared_content_type),
+        sniffed_bytes: storage.bytes.as_ref(),
+        byte_count,
+    })
+    .map_err(SyncError::cache)?;
+    if validated != storage.content_type {
+        return Err(SyncError::Cache {
+            reason: "parsed attachment storage type changed before storage".into(),
+        });
+    }
+    let digest = sha256_hex_bytes(storage.bytes.as_ref());
+    if digest != attachment.sha256 {
+        return Err(SyncError::Cache {
+            reason: "parsed attachment hash changed before storage".into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn checked_app_data_path(app_data_dir: &Path, relative_path: &str) -> Result<PathBuf, SyncError> {
+    ensure_safe_relative_storage_path(relative_path)?;
+    Ok(app_data_dir.join(relative_path))
+}
+
+fn ensure_safe_relative_storage_path(relative_path: &str) -> Result<(), SyncError> {
+    if relative_path.trim().is_empty() {
+        return Err(SyncError::Cache {
+            reason: "attachment storage path is empty".into(),
+        });
+    }
+
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err(SyncError::Cache {
+            reason: "attachment storage path must be relative".into(),
+        });
+    }
+
+    let mut components = path.components();
+    if !matches!(components.next(), Some(Component::Normal(value)) if value.to_string_lossy() == INBOUND_ATTACHMENT_DIR_NAME)
+    {
+        return Err(SyncError::Cache {
+            reason: "attachment storage path must stay under the inbound attachment root".into(),
+        });
+    }
+
+    if components.any(|component| !matches!(component, Component::Normal(_))) {
+        return Err(SyncError::Cache {
+            reason: "attachment storage path contains unsafe components".into(),
+        });
+    }
+
+    Ok(())
+}
+
+fn remove_empty_attachment_parents(app_data_dir: &Path, file_path: &Path) {
+    let root = app_data_dir.join(INBOUND_ATTACHMENT_DIR_NAME);
+    let mut current = file_path.parent();
+    while let Some(directory) = current {
+        if directory == root || directory == app_data_dir {
+            break;
+        }
+        if fs::remove_dir(directory).is_err() {
+            break;
+        }
+        current = directory.parent();
+    }
+}
+
+fn sha256_hex_bytes(bytes: &[u8]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(bytes);
+    let hash = digest.finalize();
+    let mut output = String::with_capacity(hash.len() * 2);
+    for byte in hash {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
 }
 
 impl SyncCache for SqliteSyncCache<'_> {
@@ -1661,10 +1935,12 @@ impl SyncCache for SqliteSyncCache<'_> {
         account_id: &str,
         folder_id: &str,
     ) -> Result<(), SyncError> {
+        let storage_paths = self.attachment_storage_paths_for_folder(account_id, folder_id)?;
         self.connection.execute(
             "DELETE FROM messages WHERE account_id = ?1 AND folder_id = ?2",
             params![account_id, folder_id],
         )?;
+        self.delete_attachment_files_best_effort(&storage_paths);
 
         Ok(())
     }
@@ -1932,6 +2208,8 @@ impl SyncCache for SqliteSyncCache<'_> {
         uid_validity: u64,
         uid: u64,
     ) -> Result<bool, SyncError> {
+        let storage_paths =
+            self.attachment_storage_paths_for_uid(account_id, folder_id, uid_validity, uid)?;
         let changed = self.connection.execute(
             "DELETE FROM messages
              WHERE account_id = ?1
@@ -1945,6 +2223,9 @@ impl SyncCache for SqliteSyncCache<'_> {
                 u64_to_i64(uid)?
             ],
         )?;
+        if changed > 0 {
+            self.delete_attachment_files_best_effort(&storage_paths);
+        }
 
         Ok(changed > 0)
     }
@@ -2070,8 +2351,14 @@ fn optional_i64_to_u64(value: Option<i64>) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mime_normalization::{parse_inbound_mime, ParseInboundMimeRequest};
     use crate::schema::{apply_migrations, search_messages_fts};
-    use std::collections::VecDeque;
+    use std::{
+        collections::VecDeque,
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     const ACCOUNT_ID: &str = "acct_sync";
     const INBOX_REMOTE: &str = "INBOX";
@@ -2419,6 +2706,37 @@ mod tests {
         message
     }
 
+    fn parsed_message_with_attachment(
+        folder_id: &str,
+        uid_validity: u64,
+        uid: u64,
+    ) -> RemoteMessage {
+        let raw = b"Message-ID: <stored-attachment@example.com>\r\nSubject: Stored attachment\r\nFrom: Sender <sender@example.com>\r\nTo: Reader <reader@example.com>\r\nContent-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n--mix\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBody with stored attachment\r\n--mix\r\nContent-Type: text/plain; name=\"../../evil/safe-note.txt\"\r\nContent-Disposition: attachment; filename=\"../../evil/safe-note.txt\"\r\n\r\nstored sync attachment\r\n--mix--\r\n";
+        parse_inbound_mime(ParseInboundMimeRequest {
+            account_id: ACCOUNT_ID,
+            folder_id,
+            uid_validity,
+            uid,
+            raw_message: raw,
+            internal_date: None,
+        })
+        .expect("attachment MIME parses")
+        .message
+    }
+
+    fn temp_app_data_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "komorebi-imap-sync-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
     fn message_count(connection: &Connection) -> i64 {
         connection
             .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
@@ -2622,6 +2940,65 @@ mod tests {
         let search = search_messages_fts(&connection, "Komorebi", 10).unwrap();
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].subject, "Welcome to Komorebi");
+    }
+
+    #[test]
+    fn sync_cache_stores_and_cleans_inbound_attachment_bytes() {
+        let connection = migrated_connection();
+        seed_account(&connection);
+        let folder_id = generated_id("folder", &[ACCOUNT_ID, INBOX_REMOTE]);
+        let mut server =
+            FakeImapServer::with_inbox(vec![parsed_message_with_attachment(&folder_id, 77, 1)]);
+        let app_data_dir = temp_app_data_dir("attachment-cleanup");
+        {
+            let mut cache = SqliteSyncCache::with_app_data_dir(&connection, &app_data_dir);
+            ImapSyncEngine::default()
+                .sync_account(
+                    &mut server,
+                    &mut cache,
+                    ACCOUNT_ID,
+                    &SyncCancellationToken::new(),
+                    &mut NoopBackoffWaiter,
+                )
+                .unwrap();
+        }
+
+        let attachment: (String, String, String, i64) = connection
+            .query_row(
+                "SELECT display_filename, storage_relative_path, sha256, size_bytes
+                 FROM attachments
+                 WHERE account_id = ?1",
+                [ACCOUNT_ID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(attachment.0, "safe-note.txt");
+        assert!(attachment.1.starts_with("attachments/acct_sync/"));
+        assert!(!attachment.1.contains("evil"));
+        assert!(!attachment.1.contains("safe-note.txt"));
+        assert_eq!(attachment.3, "stored sync attachment".len() as i64);
+        assert_eq!(
+            fs::read(app_data_dir.join(&attachment.1)).unwrap(),
+            b"stored sync attachment"
+        );
+        assert_eq!(attachment.2, sha256_hex_bytes(b"stored sync attachment"));
+
+        server.set_inbox_messages(77, Vec::new());
+        {
+            let mut cache = SqliteSyncCache::with_app_data_dir(&connection, &app_data_dir);
+            ImapSyncEngine::default()
+                .sync_account(
+                    &mut server,
+                    &mut cache,
+                    ACCOUNT_ID,
+                    &SyncCancellationToken::new(),
+                    &mut NoopBackoffWaiter,
+                )
+                .unwrap();
+        }
+
+        assert!(!app_data_dir.join(&attachment.1).exists());
+        fs::remove_dir_all(app_data_dir).unwrap();
     }
 
     #[test]

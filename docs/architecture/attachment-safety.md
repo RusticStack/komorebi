@@ -4,7 +4,7 @@ Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has no live inbound attachment download, preview, or open commands yet. Live MIME sync can persist inert inbound attachment metadata from fetched messages, and the reader can display that local-cache metadata, but it does not receive storage paths or preview URLs. The TipTap composer can stage user-selected outbound attachment bytes through a typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist or preview untrusted attachment content with ad hoc path handling.
+Komorebi has no reader-facing attachment preview, save, export, or open commands yet. Live MIME sync persists storage-safe inbound attachment bytes and inert metadata from fetched messages, and the reader can display that local-cache metadata, but it does not receive storage paths or preview URLs. The TipTap composer can stage user-selected outbound attachment bytes through a typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist or preview untrusted attachment content with ad hoc path handling.
 
 The storage/preview code source of truth is `src-tauri/src/attachment_safety.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`. Composer staging is implemented in `src-tauri/src/composer.rs`.
 
@@ -18,13 +18,21 @@ The current path shape is:
 <tauri-app-data>/attachments/<account_id>/<folder_id>/<message_id>/<attachment_id>.<type-extension>
 ```
 
+The persisted database value is the app-data-relative path:
+
+```text
+attachments/<account_id>/<folder_id>/<message_id>/<attachment_id>.<type-extension>
+```
+
 Composer-staged outbound files use:
 
 ```text
 <tauri-app-data>/composer-attachments/<account_id>/<draft_id>/<attachment_id>.<type-extension>
 ```
 
-The WebView provides selected bytes through the browser File API, not a local filesystem path. Rust validates type/size, generates the attachment id/path, stores metadata in `composer_attachments`, streams those files during `send_composer_email`, and deletes staged files best-effort after discard or confirmed send.
+Inbound sync writes decoded attachment bytes only after `validate_attachment_for_storage` accepts the declared/sniffed type, byte count, and safety policy. Unsafe inbound parts remain metadata-only with parser warnings and `storage_relative_path = NULL`. `SqliteSyncCache` writes safe inbound bytes under generated paths, records the SHA-256 and relative path, and cleans replaced, UIDVALIDITY-reset, expunged, and account-cache-deleted files best-effort.
+
+The WebView provides selected composer bytes through the browser File API, not a local filesystem path. Rust validates type/size, generates the attachment id/path, stores metadata in `composer_attachments`, streams those files during `send_composer_email`, and deletes staged files best-effort after discard or confirmed send.
 
 Composer streaming treats `composer_attachments.storage_relative_path` as untrusted persisted state. Before a staged file is opened, Rust rejects empty, absolute, prefixed, root, or parent-directory paths, canonicalizes the app-data root and target file, and requires the final path to remain under app data.
 
@@ -56,7 +64,7 @@ Current storage allowlist:
 
 The safety layer sniffs content bytes and compares them to the declared MIME type when a declared type is present. `application/octet-stream` may be accepted only when sniffing identifies an allowed type. Explicitly dangerous declared types such as HTML, SVG, JavaScript, shell/batch/MSI/downloadable executable types, and legacy Office binary types are rejected.
 
-`src-tauri/src/mime_normalization.rs` applies this validation while parsing inbound MIME parts. A parsed attachment that fails storage validation may remain as metadata with a warning, but future storage/download code must not write or preview the bytes unless the attachment safety boundary accepts them.
+`src-tauri/src/mime_normalization.rs` applies this validation while parsing inbound MIME parts. A parsed attachment that fails storage validation may remain as metadata with a warning, but it does not carry bytes into sync storage and must not be previewed or saved later unless a future command revalidates user intent, ownership, path, size, and type.
 
 Any expansion of the allowlist must add tests for declared type, sniffed bytes, storage extension, preview behavior, and unsafe-open denial.
 
@@ -87,6 +95,9 @@ Current Tauri capability tests deny attachment open, preview, save, download, an
 - Display filename sanitization.
 - Preview user-intent, type allowlist, and size-limit checks.
 - Auto-open remaining forbidden.
+- App-data-relative inbound attachment storage paths that ignore sender filenames.
+
+`src-tauri/src/imap_sync.rs` and `src-tauri/src/imap_live.rs` tests cover live-fetched inbound attachment byte storage, malicious sender filenames not affecting storage, unsafe parts staying metadata-only, hash/size persistence, and cleanup after expunge.
 
 `src-tauri/src/mail_shell.rs` tests cover safe attachment metadata projection, display filename sanitization in the reader snapshot, and storage-path redaction from serialized shell data.
 
