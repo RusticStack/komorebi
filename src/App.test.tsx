@@ -893,6 +893,26 @@ describe("App", () => {
     expect(screen.getByRole("searchbox")).toBeDisabled();
   });
 
+  it("retries a failed backend cache load and replaces the error state with fresh mail", async () => {
+    const loadMailShellData = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("cache unavailable"))
+      .mockResolvedValueOnce(fixtureMail);
+
+    render(<App loadMailShellData={loadMailShellData} />);
+
+    expect(await screen.findByRole("region", { name: "Message error" })).toBeVisible();
+    expect(loadMailShellData).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]);
+
+    expect(await screen.findByText("Roadmap review")).toBeVisible();
+    expect(loadMailShellData).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("region", { name: "Message error" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("opens accountless settings without exposing fake signature data", () => {
     render(<App />);
 

@@ -219,6 +219,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 
 - accountless default render without fake mailbox data
 - local-cache loader behavior through an injected data source
+- retry after a failed backend cache load
 - unified inbox visibility
 - account navigation
 - folder navigation
@@ -234,6 +235,10 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - settings drawer entry
 - loading/error shell states
 - first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
+
+`src/mail/shell/mailShellState.test.ts` covers pure shell state rules: unified/account/folder scope filtering, local search fallback behavior, cache-reload selection preservation, and stale backend row clearing.
+
+`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup and composer autosave, and cancellation before invoke or after a stale response.
 
 Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, missing-label fallback ownership, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
 
