@@ -35,6 +35,14 @@ export type MailFolder = {
   totalCount: number;
 };
 
+export type MailAttachment = {
+  id: string;
+  displayFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  disposition: "attachment" | "inline";
+};
+
 export type MailMessage = {
   id: string;
   accountId: string;
@@ -48,6 +56,7 @@ export type MailMessage = {
   flagged: boolean;
   bodyText: string | null;
   bodyHtml: string | null;
+  attachments: MailAttachment[];
 };
 
 export type MailShellData = {

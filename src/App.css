@@ -49,6 +49,7 @@ textarea:disabled {
 }
 
 .list-toolbar button:disabled,
+.reader-actions button:disabled,
 .reader-empty button:disabled,
 .composer-panel button:disabled,
 .settings-panel button:disabled {
@@ -505,6 +506,7 @@ textarea:disabled {
 
 .reader-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 14px 34px;
   border-bottom: 1px solid #e7e1d8;
@@ -574,6 +576,78 @@ textarea:disabled {
   padding: 8px 0 8px 12px;
   background: #fbfaf8;
   font-size: 0.88rem;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 12px;
+  max-width: 72ch;
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid #e7e1d8;
+}
+
+.attachment-list h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.attachment-list ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #e7e1d8;
+  border-radius: 8px;
+  background: #fbfaf8;
+}
+
+.attachment-meta {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.attachment-meta strong,
+.attachment-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta span,
+.attachment-meta small {
+  color: #716d66;
+  font-size: 0.82rem;
+}
+
+.attachment-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.attachment-actions button {
+  min-height: 34px;
+  border: 1px solid #ddd4c8;
+  border-radius: 8px;
+  padding: 5px 10px;
+  color: #2d2d2d;
+  background: #f2eee6;
+}
+
+.attachment-actions button:disabled {
+  background: #d8d0c4;
+  color: #716d66;
 }
 
 .reader-status {
@@ -764,6 +838,11 @@ textarea:focus-visible,
   .reader-status {
     width: 100vw;
     max-width: 100vw;
+  }
+
+  .attachment-item {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .reader {

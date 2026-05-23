@@ -65,6 +65,7 @@ const fixtureMail: MailShellData = {
       flagged: false,
       bodyText: "Review notes for the local cache work.",
       bodyHtml: null,
+      attachments: [],
     },
     {
       id: "msg_archive",
@@ -79,6 +80,7 @@ const fixtureMail: MailShellData = {
       flagged: false,
       bodyText: "Stored outside the unified inbox.",
       bodyHtml: null,
+      attachments: [],
     },
     {
       id: "msg_invoice",
@@ -92,7 +94,24 @@ const fixtureMail: MailShellData = {
       unread: true,
       flagged: true,
       bodyText: "Can you confirm the invoice number?",
-      bodyHtml: "<p>Can you confirm the invoice number?</p>",
+      bodyHtml:
+        '<p>Can you <strong>confirm</strong> the invoice number?</p><img src="https://tracker.example/pixel.png" alt="tracking pixel"><script>alert("xss")</script>',
+      attachments: [
+        {
+          id: "att_invoice",
+          displayFilename: "invoice.pdf",
+          contentType: "application/pdf",
+          sizeBytes: 24_576,
+          disposition: "attachment",
+        },
+        {
+          id: "att_inline_logo",
+          displayFilename: "logo.png",
+          contentType: "image/png",
+          sizeBytes: 2_048,
+          disposition: "inline",
+        },
+      ],
     },
   ],
 };
@@ -137,6 +156,7 @@ function createLargeMailFixture(messageCount: number): MailShellData {
         flagged: index % 10 === 0 || index === messageCount - 1,
         bodyText: `Body for bulk message ${paddedIndex}.`,
         bodyHtml: null,
+        attachments: [],
       };
     }),
   };
@@ -228,6 +248,57 @@ describe("App", () => {
     expect(settings).toBeVisible();
     expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
     expect(within(settings).getByLabelText("Account")).toHaveValue("acct_personal");
+  });
+
+  it("renders selected message detail through safe body and attachment boundaries", () => {
+    const { container } = render(<App initialData={fixtureMail} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Invoice question/ }));
+
+    const reader = screen.getByRole("region", { name: "Selected message" });
+    expect(
+      within(reader).getByRole("heading", { name: "Invoice question" }),
+    ).toBeVisible();
+    expect(reader).toHaveTextContent("Can you confirm the invoice number?");
+    expect(within(reader).getByText("Remote content blocked")).toBeVisible();
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("img[src]")).toBeNull();
+
+    expect(
+      within(reader).getByRole("button", {
+        name: "Reply unavailable",
+      }),
+    ).toBeDisabled();
+    expect(
+      within(reader).getByRole("button", {
+        name: "Forward unavailable",
+      }),
+    ).toBeDisabled();
+    expect(
+      within(reader).getByRole("button", {
+        name: "Load remote content unavailable; remote resources are blocked by default",
+      }),
+    ).toBeDisabled();
+
+    const attachments = within(reader).getByRole("region", {
+      name: "Attachments",
+    });
+    expect(within(attachments).getByText("invoice.pdf")).toBeVisible();
+    expect(within(attachments).getByText("application/pdf - 24 KB")).toBeVisible();
+    expect(within(attachments).getByText("logo.png")).toBeVisible();
+    expect(within(attachments).getByText("image/png - 2 KB")).toBeVisible();
+    expect(
+      within(attachments).getByRole("button", {
+        name: "Preview invoice.pdf unavailable",
+      }),
+    ).toBeDisabled();
+    expect(
+      within(attachments).getByRole("button", {
+        name: "Save invoice.pdf unavailable",
+      }),
+    ).toBeDisabled();
+    expect(reader).not.toHaveTextContent("AppData");
+    expect(reader).not.toHaveTextContent("att_invoice.pdf");
   });
 
   it("supports keyboard navigation for search, folders, messages, and reading", () => {

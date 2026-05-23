@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -54,6 +54,17 @@ pub struct MailShellMessage {
     pub flagged: bool,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
+    pub attachments: Vec<MailShellAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailShellAttachment {
+    pub id: String,
+    pub display_filename: String,
+    pub content_type: String,
+    pub size_bytes: u64,
+    pub disposition: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -211,6 +222,7 @@ fn load_folders(connection: &Connection) -> rusqlite::Result<Vec<MailShellFolder
 }
 
 fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessage>> {
+    let mut attachments_by_message = load_message_attachments(connection)?;
     let mut statement = connection.prepare(
         "SELECT
            messages.id,
@@ -239,8 +251,11 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
 
     let rows = statement.query_map(params![MESSAGE_SNAPSHOT_LIMIT], |row| {
         let preview = trim_preview(row.get::<_, String>(6)?);
+        let id: String = row.get(0)?;
+        let attachments = attachments_by_message.remove(&id).unwrap_or_default();
+
         Ok(MailShellMessage {
-            id: row.get(0)?,
+            id,
             account_id: row.get(1)?,
             folder_id: row.get(2)?,
             sender: row.get(3)?,
@@ -252,10 +267,78 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
             flagged: row.get::<_, i64>(9)? == 1,
             body_text: row.get(10)?,
             body_html: row.get(11)?,
+            attachments,
         })
     })?;
 
     collect_rows(rows)
+}
+
+fn load_message_attachments(
+    connection: &Connection,
+) -> rusqlite::Result<HashMap<String, Vec<MailShellAttachment>>> {
+    let mut statement = connection.prepare(
+        "WITH visible_messages AS (
+           SELECT
+             messages.id,
+             messages.account_id,
+             messages.folder_id
+           FROM messages
+           JOIN accounts ON accounts.id = messages.account_id
+           JOIN folders ON folders.account_id = messages.account_id
+            AND folders.id = messages.folder_id
+           WHERE accounts.removed_at IS NULL
+             AND accounts.auth_status != 'removed'
+           ORDER BY
+             COALESCE(messages.date_received, messages.internal_date, messages.created_at) DESC,
+             messages.id
+           LIMIT ?1
+         )
+         SELECT
+           attachments.message_id,
+           attachments.id,
+           COALESCE(NULLIF(attachments.display_filename, ''), 'Attachment') AS display_filename,
+           COALESCE(
+             NULLIF(attachments.canonical_mime, ''),
+             NULLIF(attachments.content_type, ''),
+             'application/octet-stream'
+           ) AS content_type,
+           attachments.size_bytes,
+           attachments.disposition
+         FROM attachments
+         JOIN visible_messages ON visible_messages.account_id = attachments.account_id
+          AND visible_messages.folder_id = attachments.folder_id
+          AND visible_messages.id = attachments.message_id
+         ORDER BY
+           attachments.message_id,
+           CASE attachments.disposition WHEN 'inline' THEN 0 ELSE 1 END,
+           display_filename COLLATE NOCASE,
+           attachments.id",
+    )?;
+
+    let rows = statement.query_map(params![MESSAGE_SNAPSHOT_LIMIT], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            MailShellAttachment {
+                id: row.get(1)?,
+                display_filename: safe_attachment_display_filename(row.get(2)?),
+                content_type: safe_attachment_content_type(row.get(3)?),
+                size_bytes: checked_u64(row.get::<_, i64>(4)?, "attachment size")?,
+                disposition: normalize_attachment_disposition(row.get(5)?),
+            },
+        ))
+    })?;
+
+    let mut attachments_by_message = HashMap::<String, Vec<MailShellAttachment>>::new();
+    for row in rows {
+        let (message_id, attachment) = row?;
+        attachments_by_message
+            .entry(message_id)
+            .or_default()
+            .push(attachment);
+    }
+
+    Ok(attachments_by_message)
 }
 
 fn collect_rows<T>(
@@ -273,6 +356,11 @@ fn checked_u32(value: i64, label: &str) -> rusqlite::Result<u32> {
         .map_err(|_| rusqlite::Error::InvalidColumnName(format!("{label} is out of range")))
 }
 
+fn checked_u64(value: i64, label: &str) -> rusqlite::Result<u64> {
+    u64::try_from(value)
+        .map_err(|_| rusqlite::Error::InvalidColumnName(format!("{label} is out of range")))
+}
+
 fn normalize_folder_kind(kind: String) -> String {
     match kind.as_str() {
         "inbox" | "sent" | "drafts" | "archive" | "trash" | "junk" | "custom" | "all"
@@ -284,6 +372,57 @@ fn normalize_folder_kind(kind: String) -> String {
 fn trim_preview(preview: String) -> String {
     let normalized = preview.split_whitespace().collect::<Vec<_>>().join(" ");
     normalized.chars().take(180).collect()
+}
+
+fn safe_attachment_display_filename(filename: String) -> String {
+    let leaf = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    let sanitized = leaf
+        .chars()
+        .map(|character| match character {
+            '\0' | '\r' | '\n' | '\t' => ' ',
+            ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            character if character.is_control() => ' ',
+            character => character,
+        })
+        .collect::<String>();
+    let sanitized = sanitized
+        .trim()
+        .trim_matches('.')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let bounded = sanitized.chars().take(180).collect::<String>();
+
+    if bounded.is_empty() {
+        "Attachment".to_string()
+    } else {
+        bounded
+    }
+}
+
+fn safe_attachment_content_type(content_type: String) -> String {
+    let sanitized = content_type
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect::<String>();
+    let sanitized = sanitized.trim();
+
+    if sanitized.is_empty() {
+        "application/octet-stream".to_string()
+    } else {
+        sanitized.chars().take(120).collect()
+    }
+}
+
+fn normalize_attachment_disposition(disposition: String) -> String {
+    match disposition.as_str() {
+        "inline" => "inline".to_string(),
+        _ => "attachment".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -346,6 +485,16 @@ mod tests {
         assert!(snapshot.messages[0].unread);
         assert!(snapshot.messages[0].flagged);
         assert_eq!(
+            snapshot.messages[0].attachments,
+            vec![MailShellAttachment {
+                id: "att_work_invoice".to_string(),
+                display_filename: "invoice_.pdf".to_string(),
+                content_type: "application/pdf".to_string(),
+                size_bytes: 24576,
+                disposition: "attachment".to_string(),
+            }]
+        );
+        assert_eq!(
             snapshot.messages[0].preview,
             "Can you confirm the invoice number?"
         );
@@ -365,7 +514,12 @@ mod tests {
 
         assert!(!json.contains("credential_ref"));
         assert!(!json.contains("Komorebi/mail-account"));
+        assert!(!json.contains("storage_relative_path"));
+        assert!(!json.contains("att_work_invoice.pdf"));
+        assert!(!json.contains("invoice?.pdf"));
+        assert!(!json.contains("attachments/acct_work"));
         assert!(json.contains("person@example.com"));
+        assert!(json.contains("invoice_.pdf"));
     }
 
     fn seed_shell_cache(connection: &Connection) {
@@ -533,6 +687,31 @@ mod tests {
                     '<p>Can you confirm the invoice number?</p>',
                     'Can you confirm the invoice number?'
                   );
+
+                INSERT INTO attachments (
+                  id,
+                  account_id,
+                  folder_id,
+                  message_id,
+                  content_id,
+                  display_filename,
+                  canonical_mime,
+                  size_bytes,
+                  storage_relative_path,
+                  disposition
+                )
+                VALUES (
+                  'att_work_invoice',
+                  'acct_work',
+                  'folder_work_inbox',
+                  'msg_work',
+                  NULL,
+                  '..\invoice?.pdf',
+                  'application/pdf',
+                  24576,
+                  'attachments/acct_work/folder_work_inbox/msg_work/att_work_invoice.pdf',
+                  'attachment'
+                );
                 "#,
             )
             .unwrap();

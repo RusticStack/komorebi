@@ -30,6 +30,7 @@ import {
   selectedMessage,
   type MailShellData,
   type MailShellLoadState,
+  type MailAttachment,
   type MailMessage,
   type MailShellState,
 } from "./mailShellState";
@@ -906,17 +907,105 @@ function ReaderPane({
       </header>
 
       <div className="reader-actions" aria-label="Message actions">
-        <button type="button">Reply</button>
-        <button type="button">Archive</button>
-        <button type="button">{message.unread ? "Mark read" : "Mark unread"}</button>
+        <button
+          type="button"
+          disabled
+          title="Composer reply routing is not implemented yet."
+          aria-label="Reply unavailable"
+        >
+          Reply
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Composer forward routing is not implemented yet."
+          aria-label="Forward unavailable"
+        >
+          Forward
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Archive is waiting for the typed mail-action command."
+          aria-label="Archive unavailable"
+        >
+          Archive
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Read-state changes are waiting for the typed mail-action command."
+          aria-label={`${message.unread ? "Mark read" : "Mark unread"} unavailable`}
+        >
+          {message.unread ? "Mark read" : "Mark unread"}
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Remote resources stay blocked until a per-message or per-sender preference command exists."
+          aria-label="Load remote content unavailable; remote resources are blocked by default"
+        >
+          Load remote content
+        </button>
       </div>
 
       <article className="reader-body">
         <SafeEmailBody bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
+        <AttachmentList attachments={message.attachments} />
       </article>
 
       <ReaderStatus text="Remote content blocked by default" />
     </>
+  );
+}
+
+function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="attachment-list" aria-label="Attachments">
+      <h3>Attachments</h3>
+      <ul>
+        {attachments.map((attachment) => {
+          const displayFilename =
+            attachment.displayFilename.trim() || "Attachment";
+          const contentType =
+            attachment.contentType.trim() || "application/octet-stream";
+
+          return (
+            <li className="attachment-item" key={attachment.id}>
+              <div className="attachment-meta">
+                <strong>{displayFilename}</strong>
+                <span>
+                  {contentType} - {formatAttachmentSize(attachment.sizeBytes)}
+                </span>
+                <small>{attachment.disposition}</small>
+              </div>
+              <div className="attachment-actions" aria-label="Attachment actions">
+                <button
+                  type="button"
+                  disabled
+                  title="Attachment preview requires a typed backend command."
+                  aria-label={`Preview ${displayFilename} unavailable`}
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  title="Attachment saving requires a typed backend command."
+                  aria-label={`Save ${displayFilename} unavailable`}
+                >
+                  Save
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -992,6 +1081,28 @@ function unreadCountForScope(state: MailShellState) {
   }
 
   return visibleFolders.reduce((total, folder) => total + folder.unreadCount, 0);
+}
+
+function formatAttachmentSize(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return "0 B";
+  }
+
+  if (sizeBytes < 1024) {
+    return `${Math.round(sizeBytes)} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = sizeBytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded} ${units[unitIndex]}`;
 }
 
 function nextIndexForKey(

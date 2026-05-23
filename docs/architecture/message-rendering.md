@@ -1,12 +1,12 @@
 # Message Rendering Boundary
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Current State
 
 Komorebi renders untrusted email HTML only through `src/mail/rendering/SafeEmailBody.tsx`. The sanitizer and link/resource policy live in `src/mail/rendering/emailHtml.ts`.
 
-The current app shell has no selected message and therefore renders no message HTML. When a message-detail view is connected, it must use this boundary and must not add any other `dangerouslySetInnerHTML` sink.
+The current app shell renders selected-message details through this boundary. It must not add any other `dangerouslySetInnerHTML` sink.
 
 ## Sanitization Policy
 
@@ -26,7 +26,7 @@ Remote and inline-resource loading is blocked by default. The renderer removes `
 
 Future inline CID image support must map a parsed MIME attachment to an app-generated local preview URL through a typed Rust command and `docs/architecture/attachment-safety.md`. Sender-provided URLs and filenames must never become resource URLs directly.
 
-Remote-content preferences, if added, must be scoped narrowly to the sender or message and must not weaken sanitizer rules.
+The reader exposes a disabled `Load remote content` control as the future preference entry point. Remote-content preferences, if added, must be scoped narrowly to the sender or message and must not weaken sanitizer rules.
 
 ## Links
 
@@ -56,6 +56,8 @@ The Tauri opener plugin remains denied. Adding external open behavior requires a
 - Safe links are rewritten for delegated opening.
 - Unsafe links are stripped.
 - Plain text fallback does not interpret markup.
+
+`src/App.test.tsx` verifies the shell detail view keeps remote images blocked while rendering selected sanitized HTML and plain-text-backed messages.
 
 `pnpm check` runs these tests through Vitest.
 

@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, keyboard/accessibility workflows, and virtualized message rendering implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, keyboard/accessibility workflows, virtualized message rendering, and safe message detail rendering implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -38,6 +38,7 @@ Tests may inject fixture mail through `initialData` to verify workflows. In Taur
 - accounts
 - folders
 - messages
+- message attachments
 - account/folder/message loading status
 - unified inbox mode
 - selected account
@@ -55,8 +56,9 @@ The navigation state is frontend-local only. Cache reads come from the Rust `loa
 - applies Rust-owned migrations before reading
 - excludes removed accounts
 - returns redacted account metadata, folder counts, and a bounded recent-message snapshot
+- returns only display-safe attachment metadata for snapshot messages: id, sanitized display filename, MIME type, byte size, and disposition
 - maps folder unread counts from sync state into account/folder/unified unread badges
-- never returns `credential_ref`, passwords, tokens, attachment storage paths, or raw SQL results
+- never returns `credential_ref`, passwords, tokens, attachment storage paths, storage-relative filenames, checksums, or raw SQL results
 
 The command has no frontend-supplied arguments. It is exposed only through `load_mail_shell`, `src-tauri/build.rs`, and the `allow-load-mail-shell` capability permission.
 
@@ -109,8 +111,17 @@ The reader pane supports:
 - loading state
 - error state
 - selected message state
+- plain-text fallback through React text output
+- sanitized HTML through `SafeEmailBody`
+- default remote-resource blocking status
+- inert attachment metadata list
+- disabled reply, forward, archive, mark-read, and remote-content controls until typed backend commands exist
 
 Message body rendering reuses `SafeEmailBody`. Do not add another untrusted HTML sink in the shell.
+
+Attachment rows are metadata only. The frontend receives display filenames, MIME type, size, and disposition; it does not receive `storage_relative_path`, local filesystem paths, sender filenames as storage hints, hashes, or preview URLs. Preview and save buttons are intentionally disabled until a future typed attachment command validates user intent, ownership, path, size, and content type.
+
+Remote content remains blocked by the sanitizer. The reader exposes a disabled `Load remote content` control as the future preference entry point, but no per-message or per-sender remote-content preference is persisted yet.
 
 ## Composer Entry
 
@@ -145,6 +156,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - account navigation
 - folder navigation
 - selected-message preservation for compatible scope changes
+- safe message detail rendering with sanitized HTML, remote image blocking, inert attachment metadata, and disabled reply/forward/remote-content controls
 - message search
 - message selection and reader rendering
 - keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
@@ -153,7 +165,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - settings drawer entry
 - loading/error shell states
 
-Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, removed-account exclusion, and credential-reference redaction from disposable SQLite databases.
+Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, removed-account exclusion, credential-reference redaction, and attachment storage-path redaction from disposable SQLite databases.
 
 No test uses real mailbox data, real credentials, or live provider connections.
 
@@ -161,6 +173,9 @@ No test uses real mailbox data, real credentials, or live provider connections.
 
 - Real account setup commands.
 - TanStack Query integration.
+- Live reply/forward routing.
+- Remote-content preference persistence and allowlisting.
+- Attachment preview/save commands.
 - TipTap composer.
 - Draft autosave command wiring.
 - SMTP send command wiring.

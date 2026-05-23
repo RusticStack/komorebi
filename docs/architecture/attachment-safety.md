@@ -1,12 +1,12 @@
 # Attachment Storage And Preview Safety
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has no live attachment download, preview, or open commands yet. The attachment safety layer exists first so sync, MIME normalization, and reader UI work cannot persist or preview untrusted attachment content with ad hoc path handling.
+Komorebi has no live attachment download, preview, or open commands yet. The reader can display inert attachment metadata from the local cache, but it does not receive storage paths or preview URLs. The attachment safety layer exists first so sync, MIME normalization, and reader UI work cannot persist or preview untrusted attachment content with ad hoc path handling.
 
-The code source of truth is `src-tauri/src/attachment_safety.rs`.
+The storage/preview code source of truth is `src-tauri/src/attachment_safety.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`.
 
 ## Storage Rules
 
@@ -21,6 +21,8 @@ The current path shape is:
 Path segments are validated internal IDs with only ASCII letters, digits, hyphen, and underscore. The stored filename is derived from the backend attachment id and a canonical extension for the validated content type.
 
 Sender filenames are display-only metadata. They are sanitized for display by stripping path components, replacing Windows-reserved filename characters, removing controls, trimming leading/trailing dots, and bounding length. Sanitized display filenames are not used for storage, preview URLs, download destinations, or opener commands.
+
+The frontend mail shell may receive only attachment id, sanitized display filename, MIME type, size, and disposition. It must not receive `storage_relative_path`, local paths, hashes, sender filename storage hints, preview URLs, or opener/download targets through `load_mail_shell`.
 
 Attachment bytes are not encrypted at rest in the current implementation. This is documented in `docs/architecture/local-cache-encryption.md`; do not claim attachment storage is encrypted until a reviewed encryption design covers attachment files and preview materialization.
 
@@ -73,6 +75,8 @@ PDF and ZIP can be stored when validated but are not previewable in the current 
 - Display filename sanitization.
 - Preview user-intent, type allowlist, and size-limit checks.
 - Auto-open remaining forbidden.
+
+`src-tauri/src/mail_shell.rs` tests cover safe attachment metadata projection, display filename sanitization in the reader snapshot, and storage-path redaction from serialized shell data.
 
 `pnpm check` runs these tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 
