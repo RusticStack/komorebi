@@ -328,6 +328,9 @@
         "missing": "credential missing",
         "present": "credential present"
       },
+      "compatibility": {
+        "generic": "Use only providers that support IMAP/SMTP password or app-password sign-in. Gmail and Microsoft use OAuth instead."
+      },
       "errors": {
         "createUnavailable": "Account setup is unavailable in this runtime.",
         "oauthReauthUnavailable": "OAuth reauthentication is unavailable in this runtime.",
@@ -357,6 +360,7 @@
       },
       "heading": "Accounts",
       "notices": {
+        "connectionReady": "IMAP and SMTP login validated.",
         "created": "{{email}} was added.",
         "reauthed": "Account credentials were replaced.",
         "removed": "Account was removed.",

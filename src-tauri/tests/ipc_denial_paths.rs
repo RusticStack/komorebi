@@ -6,11 +6,14 @@ use std::{
 };
 
 use komorebi_lib::{
+    account_connection::{
+        AccountConnectionTestError, GenericAccountConnectionConfig, GenericAccountConnectionTester,
+    },
     account_management::{
         create_account_from_connection, get_account_auth_status_from_connection,
         reauth_account_from_connection, remove_account_from_connection,
-        test_account_connection_request, AccountAuthStatusRequest, AccountCredentialStore,
-        AccountReauthRequest, AccountRemovalRequest, AccountSetupRequest,
+        test_account_connection_request_with_tester, AccountAuthStatusRequest,
+        AccountCredentialStore, AccountReauthRequest, AccountRemovalRequest, AccountSetupRequest,
     },
     attachment_safety::MAX_ATTACHMENT_BYTES,
     composer::{
@@ -405,9 +408,25 @@ fn account_management_commands_reject_bad_auth_ids_payloads_and_credential_failu
     .expect_err("unknown account removal is rejected");
     assert_eq!(invalid_removal.reason, "account was not found");
 
-    let config_check =
-        test_account_connection_request(account_setup_request()).expect("configuration validates");
-    assert_eq!(config_check.status, "configuration-ready");
+    let mut connection_tester = RecordingGenericConnectionTester::default();
+    let config_check = test_account_connection_request_with_tester(
+        account_setup_request(),
+        &mut connection_tester,
+    )
+    .expect("live generic setup validates");
+    assert_eq!(config_check.status, "connection-ready");
+    assert_eq!(connection_tester.calls.len(), 1);
+
+    let mut failed_connection_tester = RecordingGenericConnectionTester {
+        error: Some(AccountConnectionTestError::AuthenticationRejected { protocol: "IMAP" }),
+        ..Default::default()
+    };
+    let live_login_error = test_account_connection_request_with_tester(
+        account_setup_request(),
+        &mut failed_connection_tester,
+    )
+    .expect_err("live login failure is rejected");
+    assert_eq!(live_login_error.reason, "IMAP authentication failed");
 }
 
 fn migrated_connection() -> Connection {
@@ -671,5 +690,25 @@ impl AccountCredentialStore for RecordingAccountCredentialStore {
         slot: CredentialSlot,
     ) -> Result<bool, CredentialError> {
         Ok(self.secrets.contains_key(&(account_id.to_string(), slot)))
+    }
+}
+
+#[derive(Default)]
+struct RecordingGenericConnectionTester {
+    calls: Vec<GenericAccountConnectionConfig>,
+    error: Option<AccountConnectionTestError>,
+}
+
+impl GenericAccountConnectionTester for RecordingGenericConnectionTester {
+    fn test_generic_account(
+        &mut self,
+        config: &GenericAccountConnectionConfig,
+    ) -> Result<(), AccountConnectionTestError> {
+        self.calls.push(config.clone());
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+
+        Ok(())
     }
 }

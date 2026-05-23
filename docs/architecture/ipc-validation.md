@@ -13,12 +13,12 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `stage_composer_attachment`: typed user-selected byte staging with backend-generated storage paths.
 - `send_composer_email`: typed send request routed through Rust SMTP/draft/credential boundaries.
 - `list_recent_recipients`: typed local recent-recipient autocomplete query.
-- `create_account`: typed generic account setup that enforces provider/auth policy before credential and metadata writes and rejects direct Gmail/Microsoft secret handoff.
+- `create_account`: typed generic account setup that enforces provider/auth policy, runs live generic IMAP/SMTP login checks before credential and metadata writes, and rejects direct Gmail/Microsoft secret handoff.
 - `reauth_account`: typed generic credential rotation for an existing account and rejection path for Gmail/Microsoft OAuth accounts.
 - `start_oauth_account_setup`: typed Gmail/Microsoft OAuth loopback setup that validates account metadata/client id, opens the browser from Rust, validates callback state, exchanges the authorization code in Rust, requires a refresh token, and stores it without exposing secrets to React.
 - `start_oauth_account_reauth`: typed Gmail/Microsoft OAuth loopback reauthentication that validates account id/client id and rotates the refresh token only after backend token exchange.
 - `remove_account`: typed account removal with credential deletion before metadata/cache cleanup.
-- `test_account_connection`: typed configuration and credential-policy validation without persistence.
+- `test_account_connection`: typed generic IMAP/SMTP setup login validation without persistence.
 - `get_account_auth_status`: typed redacted auth-status lookup.
 
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
@@ -27,7 +27,7 @@ Composer commands validate account/draft/attachment ids, payload sizes, address 
 
 The composer frontend sanitizer is `src/mail/composer/composerRichText.ts`. It is the reviewed source for rich HTML that may cross IPC: only the supported TipTap subset is preserved, and inline styles are reduced to whitelisted alignment, color, background-color, font-size, and font-family values before Rust accepts `DraftHtml` or `SanitizedHtml` wrappers.
 
-Account-management commands validate provider kind, auth kind, account id shape, email/username shape, host names, ports, security mode, display-name and secret payload size, and credential backend success before side effects. Gmail and Microsoft password/app-password setup is rejected before any credential write. Public generic account commands reject Gmail/Microsoft refresh-token handoff so those providers must use `start_oauth_account_setup`/`start_oauth_account_reauth`. OAuth loopback commands additionally validate callback path, state, provider error codes, authorization-code bounds, OAuth client ID, timeout bounds, and refresh-token presence before metadata or credential mutation. Account metadata is inserted only after credential storage succeeds. `test_account_connection` is currently a configuration validation command, not a live IMAP/SMTP login.
+Account-management commands validate provider kind, auth kind, account id shape, email/username shape, host names, host labels, ports, security mode, display-name and secret payload size, and credential backend success before side effects. Secret values containing CR/LF/NUL are rejected before protocol work. Gmail and Microsoft password/app-password setup is rejected before any credential write. Public generic account commands reject Gmail/Microsoft refresh-token handoff so those providers must use `start_oauth_account_setup`/`start_oauth_account_reauth`. OAuth loopback commands additionally validate callback path, state, provider error codes, authorization-code bounds, OAuth client ID, timeout bounds, and refresh-token presence before metadata or credential mutation. Generic `test_account_connection` validates the setup shape, requires TLS or STARTTLS, performs backend-owned IMAP LOGIN and SMTP AUTH, and writes no credentials or metadata. Generic `create_account` runs the same live login check before writing the credential, then inserts account metadata only after credential storage succeeds.
 
 The code source of truth is `src-tauri/src/ipc_validation.rs`.
 
@@ -96,7 +96,7 @@ Rust tests cover:
 - Validation errors not echoing sensitive input values.
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
 - Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, sanitized rich-HTML handling, and send validation before SMTP work.
-- Account-management denial paths for unsupported provider/auth combinations, invalid account ids, oversized account fields, direct Gmail/Microsoft secret-handoff rejection, credential-store failure before metadata persistence, unknown account removal, and redacted auth status.
+- Account-management denial paths for unsupported provider/auth combinations, invalid account ids, invalid hosts, plaintext transport, protocol-injection secrets, oversized account fields, direct Gmail/Microsoft secret-handoff rejection, live generic login failure before credential persistence, credential-store failure before metadata persistence, unknown account removal, and redacted auth status.
 - OAuth loopback denial paths for unsupported generic-provider setup, denied consent/cancellation, callback state mismatch, timeout, invalid grant, provider errors, missing refresh token, and non-OAuth reauthentication targets.
 - `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search input, unowned account/folder/message scope, oversized search/composer/recent-recipient/attachment/account payloads, account credential failure, and unauthorized mail actions rejected before fake-store mutation.
 

@@ -104,7 +104,7 @@ describe("AccountSignatureSettings", () => {
     const onTestAccountConnection = vi.fn().mockResolvedValue({
       authKind: "app_password",
       providerKind: "generic_imap_smtp",
-      status: "configuration-ready",
+      status: "connection-ready",
     });
     const onAccountChanged = vi.fn();
 
@@ -117,6 +117,12 @@ describe("AccountSignatureSettings", () => {
         onTestAccountConnection={onTestAccountConnection}
       />,
     );
+
+    expect(
+      screen.getByText(
+        "Use only providers that support IMAP/SMTP password or app-password sign-in. Gmail and Microsoft use OAuth instead.",
+      ),
+    ).toBeVisible();
 
     fireEvent.change(screen.getByLabelText("Email address"), {
       target: { value: "person@example.com" },
@@ -138,7 +144,9 @@ describe("AccountSignatureSettings", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Test setup" }));
-    expect(await screen.findByText("Configuration validated.")).toBeVisible();
+    expect(
+      await screen.findByText("IMAP and SMTP login validated."),
+    ).toBeVisible();
     expect(onTestAccountConnection).toHaveBeenCalledWith({
       authKind: "app_password",
       displayEmail: "person@example.com",

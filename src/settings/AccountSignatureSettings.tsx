@@ -228,6 +228,9 @@ export function AccountSignatureSettings({
 
           {accountForm.providerKind === "generic_imap_smtp" ? (
             <>
+              <p className="account-form__hint">
+                {t("settings.accounts.compatibility.generic")}
+              </p>
               <label>
                 <span>{t("settings.accounts.fields.authKind")}</span>
                 <select
@@ -575,8 +578,14 @@ export function AccountSignatureSettings({
       return;
     }
     await runAccountAction(async () => {
-      await onTestAccountConnection(buildSetupRequest());
-      setAccountNotice(t("settings.accounts.notices.testReady"));
+      const response = await onTestAccountConnection(buildSetupRequest());
+      setAccountNotice(
+        t(
+          response.status === "connection-ready"
+            ? "settings.accounts.notices.connectionReady"
+            : "settings.accounts.notices.testReady",
+        ),
+      );
     });
   }
 

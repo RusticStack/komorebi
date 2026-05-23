@@ -20,9 +20,10 @@ The Rust implementation is split across:
 - `src-tauri/src/oauth_loopback.rs`: backend-owned Gmail/Microsoft authorization browser launch, loopback callback listener, state validation, token exchange, and refresh-token storage handoff.
 - `src-tauri/src/token_lifecycle.rs`: backend-only refresh/reconnect/remove workflow.
 - `src-tauri/src/credentials.rs`: Windows Credential Manager secret storage for long-lived secrets.
-- `src-tauri/src/account_management.rs`: typed generic setup, generic reauthentication, removal, configuration validation, redacted auth-status commands, and public-command denial for direct Gmail/Microsoft secret handoff.
+- `src-tauri/src/account_management.rs`: typed generic setup, generic reauthentication, removal, live generic setup connection validation, redacted auth-status commands, and public-command denial for direct Gmail/Microsoft secret handoff.
+- `src-tauri/src/account_connection.rs`: backend-owned generic IMAP LOGIN and SMTP AUTH setup checks over TLS or STARTTLS.
 
-The settings UI can now submit generic account setup, Gmail/Microsoft OAuth setup, OAuth reauthentication, generic reauthentication, removal, configuration validation, and redacted auth-status requests through typed Tauri commands. Gmail and Microsoft remain OAuth2/XOAUTH2-only. Their setup and reauthentication forms collect only non-secret account metadata plus an OAuth client ID, then call backend-owned loopback commands. React never receives authorization codes, access tokens, refresh tokens, provider token JSON, or credential target names.
+The settings UI can now submit generic account setup, Gmail/Microsoft OAuth setup, OAuth reauthentication, generic reauthentication, removal, live generic setup validation, and redacted auth-status requests through typed Tauri commands. Gmail and Microsoft remain OAuth2/XOAUTH2-only. Their setup and reauthentication forms collect only non-secret account metadata plus an OAuth client ID, then call backend-owned loopback commands. React never receives authorization codes, access tokens, refresh tokens, provider token JSON, or credential target names.
 
 ## Provider Matrix
 
@@ -45,7 +46,7 @@ Current policy:
 - Generic IMAP/SMTP + manual password/app password -> `Allowed` with password-style SASL for compatible providers.
 - Generic IMAP/SMTP + OAuth2 -> `UnsupportedUntilImplemented` until provider-specific issuer/scopes/token behavior are defined.
 
-`create_account` is now the public generic-provider setup command. Its public IPC path rejects Gmail and Microsoft so a frontend cannot submit provider refresh tokens directly. The OAuth loopback helper exchanges the authorization code inside Rust and then uses the lower-level account insertion boundary to write the approved refresh token to Windows Credential Manager before inserting account metadata. If credential storage fails, no account row is inserted. If account metadata insertion fails after a credential write, the command best-effort deletes the just-written account secrets. `reauth_account` is the public generic credential-rotation command and rejects existing Gmail/Microsoft OAuth accounts; `start_oauth_account_reauth` rotates those accounts only after the backend loopback/token exchange succeeds. `remove_account` deletes account secrets before deleting or soft-removing local account metadata.
+`create_account` is now the public generic-provider setup command. Its public IPC path rejects Gmail and Microsoft so a frontend cannot submit provider refresh tokens directly. For generic IMAP/SMTP, Rust validates host names, ports, TLS/STARTTLS modes, username, and provider/auth policy, then performs live IMAP LOGIN and SMTP AUTH from the backend before writing the credential or inserting account metadata. If the live login check fails, no credential or account row is written. If credential storage fails after a successful check, no account row is inserted. If account metadata insertion fails after a credential write, the command best-effort deletes the just-written account secrets. The OAuth loopback helper exchanges the authorization code inside Rust and then uses the lower-level account insertion boundary to write the approved refresh token to Windows Credential Manager before inserting account metadata. `reauth_account` is the public generic credential-rotation command and rejects existing Gmail/Microsoft OAuth accounts; `start_oauth_account_reauth` rotates those accounts only after the backend loopback/token exchange succeeds. `remove_account` deletes account secrets before deleting or soft-removing local account metadata.
 
 ## OAuth Details
 
@@ -72,6 +73,7 @@ XOAUTH2 SASL initial responses are generated in Rust as base64-encoded `user=<ad
 - Gmail and Microsoft setup screens must use OAuth2 loopback and must not include password, app-password, refresh-token, or "advanced generic" fallback fields.
 - Generic setup must clearly say it is for compatible IMAP/SMTP providers only.
 - Generic setup copy must not mention Gmail, Outlook, Microsoft 365, Exchange Online, or Hotmail as examples.
+- Generic setup testing must show live IMAP/SMTP login success only from the redacted `connection-ready` response and must not surface passwords, SMTP AUTH payloads, IMAP LOGIN commands, credential target names, or raw protocol lines.
 - OAuth setup errors should map cancellation, callback timeout, state mismatch, invalid grant, and provider errors to UI-safe text; never expose token or credential internals.
 
 ## Credential Storage Relationship
@@ -82,12 +84,13 @@ This policy controls which secrets are allowed to reach the credential backend d
 - Gmail/Microsoft access tokens are memory-only by default.
 - Generic password/app-password secrets use the `generic-password` credential slot.
 - Rejected provider/auth pairs must never write to Windows Credential Manager or SQLite.
+- Generic `test_account_connection` runs the live login check without persistence. Generic `create_account` runs the same check before secret storage and account metadata insertion.
 
 ## Remaining Work
 
 - Add provider setup documentation for registering OAuth clients and redirect URIs.
 - Add richer UI states for pending authorization, callback failure, reconnect-needed, and account removal.
-- Add live generic IMAP/SMTP login testing once the live adapters exist. Current `test_account_connection` validates only configuration and credential policy.
+- Add live sync/send adapter verification and opt-in live-account smoke tests before claiming broad provider support.
 
 ## References
 

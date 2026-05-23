@@ -202,7 +202,7 @@ The Settings drawer uses `AccountSignatureSettings` for account management and s
 
 - compatible generic IMAP/SMTP setup with host, port, security, username, and password/app-password fields
 - Gmail and Microsoft setup as OAuth2-only forms using non-secret account metadata plus OAuth client ID, then `start_oauth_account_setup`
-- setup validation through `test_account_connection`, currently configuration/policy validation only
+- live generic IMAP/SMTP setup validation through `test_account_connection`
 - generic reauthentication through `reauth_account`
 - Gmail/Microsoft OAuth reauthentication through `start_oauth_account_reauth`
 - account removal through `remove_account`
@@ -258,11 +258,10 @@ Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unr
 
 Rust composer and SMTP tests cover sanitized rich composer HTML persistence and outgoing MIME serialization for strikethrough, tables, code blocks, font styles, colors, highlights, and alignment.
 
-No test uses real mailbox data, real credentials, or live provider connections.
+No automated test uses real mailbox data, real credentials, or live provider connections. Generic setup includes a backend live-login path for user-entered providers at runtime; tests cover it with local protocol fixtures and fake testers only.
 
 ## Not Implemented
 
-- Live provider login testing from setup.
 - TanStack Query integration.
 - Live reply/forward routing.
 - Remote-content preference persistence and allowlisting.

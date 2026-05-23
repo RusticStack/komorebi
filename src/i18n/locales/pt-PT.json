@@ -328,6 +328,9 @@
         "missing": "credencial em falta",
         "present": "credencial presente"
       },
+      "compatibility": {
+        "generic": "Use apenas fornecedores que suportem inicio de sessao IMAP/SMTP com palavra-passe ou palavra-passe de aplicacao. Gmail e Microsoft usam OAuth."
+      },
       "errors": {
         "createUnavailable": "A configuracao de conta esta indisponivel neste runtime.",
         "oauthReauthUnavailable": "A reautenticacao OAuth esta indisponivel neste runtime.",
@@ -357,6 +360,7 @@
       },
       "heading": "Contas",
       "notices": {
+        "connectionReady": "Inicio de sessao IMAP e SMTP validado.",
         "created": "{{email}} foi adicionada.",
         "reauthed": "As credenciais da conta foram substituidas.",
         "removed": "A conta foi removida.",

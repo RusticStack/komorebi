@@ -56,10 +56,10 @@ Absence of a permission is the denial mechanism. Do not add broad explicit deny 
 - `stage_composer_attachment`: typed user-selected byte staging into backend-generated app-data paths; no frontend filesystem path permission.
 - `send_composer_email`: typed SMTP send orchestration through the Rust send boundary, credential resolver, staged attachment streamer, and confirmed-send persistence.
 - `list_recent_recipients`: read-only account-scoped local SQLite autocomplete suggestions from confirmed sends.
-- `create_account`: typed generic-provider account setup that stores secrets in Windows Credential Manager before metadata insert and rejects direct Gmail/Microsoft secret handoff.
+- `create_account`: typed generic-provider account setup that runs live IMAP/SMTP login validation before secret storage, stores secrets in Windows Credential Manager before metadata insert, and rejects direct Gmail/Microsoft secret handoff.
 - `reauth_account`: typed generic replacement secret storage for an existing account's approved credential slot and rejection path for Gmail/Microsoft OAuth accounts.
 - `remove_account`: typed credential deletion and account metadata/cache cleanup.
-- `test_account_connection`: typed configuration and provider/auth validation without persistence.
+- `test_account_connection`: typed live generic IMAP/SMTP login validation without persistence.
 - `get_account_auth_status`: typed redacted account status and credential-presence lookup.
 - `start_oauth_account_setup`: typed Gmail/Microsoft OAuth browser loopback setup; validates state/PKCE, exchanges the callback code in Rust, stores refresh tokens through the credential backend, and returns only redacted account setup status.
 - `start_oauth_account_reauth`: typed Gmail/Microsoft OAuth browser loopback reauthentication for existing OAuth accounts; rotates refresh tokens only after backend exchange.

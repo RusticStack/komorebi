@@ -247,7 +247,7 @@ export type AccountSetupResponse = {
 export type AccountConnectionTestResponse = {
   providerKind: AccountProviderKind;
   authKind: AccountAuthKind;
-  status: "configuration-ready";
+  status: "configuration-ready" | "connection-ready";
 };
 
 export type AccountRemovalResponse = {

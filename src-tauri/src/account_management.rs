@@ -11,6 +11,10 @@ use sha2::{Digest, Sha256};
 use tauri::Manager;
 
 use crate::{
+    account_connection::{
+        AccountConnectionTestError, GenericAccountConnectionConfig, GenericAccountConnectionTester,
+        LiveGenericAccountConnectionTester, MailTransportSecurity,
+    },
     auth::{evaluate_account_setup_auth_policy, AuthKind, AuthPolicy, ProviderKind},
     credentials::{
         credential_target_name, CredentialError, CredentialSlot, WindowsCredentialManager,
@@ -171,6 +175,12 @@ impl From<CredentialError> for AccountCommandError {
     }
 }
 
+impl From<AccountConnectionTestError> for AccountCommandError {
+    fn from(value: AccountConnectionTestError) -> Self {
+        Self::new(value.to_string())
+    }
+}
+
 pub trait AccountCredentialStore {
     fn write_account_secret(
         &mut self,
@@ -216,15 +226,25 @@ impl AccountCredentialStore for WindowsCredentialManager {
 }
 
 #[tauri::command]
-pub fn create_account(
+pub async fn create_account(
     app: tauri::AppHandle,
     request: AccountSetupRequest,
 ) -> Result<AccountSetupResponse, AccountCommandError> {
-    reject_direct_major_provider_oauth_setup(&request)?;
-    let cache_path = mail_cache_path(&app)?;
-    let mut credentials = WindowsCredentialManager;
+    tauri::async_runtime::spawn_blocking(move || {
+        reject_direct_major_provider_oauth_setup(&request)?;
+        let cache_path = mail_cache_path(&app)?;
+        let mut credentials = WindowsCredentialManager;
+        let mut connection_tester = LiveGenericAccountConnectionTester::default();
 
-    create_account_from_path(&cache_path, &mut credentials, request)
+        create_account_from_path_with_connection_tester(
+            &cache_path,
+            &mut credentials,
+            &mut connection_tester,
+            request,
+        )
+    })
+    .await
+    .map_err(|error| AccountCommandError::new(error.to_string()))?
 }
 
 #[tauri::command]
@@ -251,10 +271,15 @@ pub fn remove_account(
 }
 
 #[tauri::command]
-pub fn test_account_connection(
+pub async fn test_account_connection(
     request: AccountSetupRequest,
 ) -> Result<AccountConnectionTestResponse, AccountCommandError> {
-    test_account_connection_request(request)
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut connection_tester = LiveGenericAccountConnectionTester::default();
+        test_account_connection_request_with_tester(request, &mut connection_tester)
+    })
+    .await
+    .map_err(|error| AccountCommandError::new(error.to_string()))?
 }
 
 fn reject_direct_major_provider_oauth_setup(
@@ -327,6 +352,22 @@ pub fn create_account_from_path(
     create_account_from_connection(&connection, credentials, request)
 }
 
+pub fn create_account_from_path_with_connection_tester(
+    cache_path: &Path,
+    credentials: &mut impl AccountCredentialStore,
+    connection_tester: &mut impl GenericAccountConnectionTester,
+    request: AccountSetupRequest,
+) -> Result<AccountSetupResponse, AccountCommandError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    create_account_from_connection_with_connection_tester(
+        &connection,
+        credentials,
+        connection_tester,
+        request,
+    )
+}
+
 pub fn create_account_from_connection(
     connection: &Connection,
     credentials: &mut impl AccountCredentialStore,
@@ -337,6 +378,41 @@ pub fn create_account_from_connection(
     if account_exists(connection, &account_id)? {
         return Err(AccountCommandError::new("account already exists"));
     }
+
+    credentials.write_account_secret(
+        &account_id,
+        validated.credential_slot,
+        &SecretString::new(validated.secret.clone()),
+    )?;
+
+    let credential_ref = credential_target_name(&account_id, validated.credential_slot)?;
+    let insert_result = insert_account(connection, &validated, &credential_ref);
+
+    match insert_result {
+        Ok(account) => Ok(AccountSetupResponse {
+            account,
+            credential_stored: true,
+        }),
+        Err(error) => {
+            let _ = credentials.delete_account_secrets(&account_id);
+            Err(error)
+        }
+    }
+}
+
+pub fn create_account_from_connection_with_connection_tester(
+    connection: &Connection,
+    credentials: &mut impl AccountCredentialStore,
+    connection_tester: &mut impl GenericAccountConnectionTester,
+    request: AccountSetupRequest,
+) -> Result<AccountSetupResponse, AccountCommandError> {
+    let validated = validate_setup_request(request)?;
+    let account_id = validated.account_id.clone();
+    if account_exists(connection, &account_id)? {
+        return Err(AccountCommandError::new("account already exists"));
+    }
+
+    test_validated_generic_connection(&validated, connection_tester)?;
 
     credentials.write_account_secret(
         &account_id,
@@ -375,10 +451,7 @@ pub fn reauth_account_from_connection(
     request: AccountReauthRequest,
 ) -> Result<AccountSetupResponse, AccountCommandError> {
     validate_entity_id("account_id", &request.account_id)?;
-    validate_payload_size("secret", request.secret.as_bytes(), MAX_TEXT_FIELD_BYTES)?;
-    if request.secret.trim().is_empty() {
-        return Err(AccountCommandError::new("secret is required"));
-    }
+    validate_secret_text(&request.secret)?;
 
     let existing = load_account_for_management(connection, &request.account_id)?
         .ok_or_else(|| AccountCommandError::new("account was not found"))?;
@@ -479,6 +552,26 @@ pub fn test_account_connection_request(
     })
 }
 
+pub fn test_account_connection_request_with_tester(
+    request: AccountSetupRequest,
+    connection_tester: &mut impl GenericAccountConnectionTester,
+) -> Result<AccountConnectionTestResponse, AccountCommandError> {
+    reject_direct_major_provider_oauth_setup(&request)?;
+    let validated = validate_setup_request(request)?;
+    let status = if validated.provider_kind == ProviderKind::GenericImapSmtp {
+        test_validated_generic_connection(&validated, connection_tester)?;
+        "connection-ready"
+    } else {
+        "configuration-ready"
+    };
+
+    Ok(AccountConnectionTestResponse {
+        provider_kind: validated.provider_kind_schema().into(),
+        auth_kind: validated.auth_kind_schema().into(),
+        status: status.into(),
+    })
+}
+
 pub fn get_account_auth_status_from_path(
     cache_path: &Path,
     credentials: &mut impl AccountCredentialStore,
@@ -560,10 +653,7 @@ fn validate_setup_request(
     let username = normalize_non_empty("username", request.username, MAX_EMAIL_BYTES)?;
     validate_email_shape("username", &username)?;
     let display_name = normalize_optional_text("display_name", request.display_name)?;
-    validate_payload_size("secret", request.secret.as_bytes(), MAX_TEXT_FIELD_BYTES)?;
-    if request.secret.trim().is_empty() {
-        return Err(AccountCommandError::new("secret is required"));
-    }
+    validate_secret_text(&request.secret)?;
 
     let account_id = match request.account_id {
         Some(account_id) => {
@@ -648,6 +738,47 @@ fn insert_account(
 
     load_account_for_management(connection, &request.account_id)?
         .ok_or_else(|| AccountCommandError::new("account was not found after insert"))
+}
+
+fn test_validated_generic_connection(
+    request: &ValidatedAccountSetup,
+    connection_tester: &mut impl GenericAccountConnectionTester,
+) -> Result<(), AccountCommandError> {
+    if request.provider_kind != ProviderKind::GenericImapSmtp {
+        return Ok(());
+    }
+
+    connection_tester.test_generic_account(&generic_connection_config(request)?)?;
+    Ok(())
+}
+
+fn generic_connection_config(
+    request: &ValidatedAccountSetup,
+) -> Result<GenericAccountConnectionConfig, AccountCommandError> {
+    Ok(GenericAccountConnectionConfig {
+        username: request.username.clone(),
+        secret: SecretString::new(request.secret.clone()),
+        imap_host: request
+            .imap_host
+            .clone()
+            .ok_or_else(|| AccountCommandError::new("imap_host is required"))?,
+        imap_port: request
+            .imap_port
+            .ok_or_else(|| AccountCommandError::new("imap_port is required"))?,
+        imap_security: MailTransportSecurity::from_schema(
+            request.imap_security.as_deref().unwrap_or_default(),
+        )?,
+        smtp_host: request
+            .smtp_host
+            .clone()
+            .ok_or_else(|| AccountCommandError::new("smtp_host is required"))?,
+        smtp_port: request
+            .smtp_port
+            .ok_or_else(|| AccountCommandError::new("smtp_port is required"))?,
+        smtp_security: MailTransportSecurity::from_schema(
+            request.smtp_security.as_deref().unwrap_or_default(),
+        )?,
+    })
 }
 
 fn load_account_for_management(
@@ -777,6 +908,23 @@ fn normalize_optional_text(
     Ok(Some(value.to_string()))
 }
 
+fn validate_secret_text(value: &str) -> Result<(), AccountCommandError> {
+    validate_payload_size("secret", value.as_bytes(), MAX_TEXT_FIELD_BYTES)?;
+    if value.trim().is_empty() {
+        return Err(AccountCommandError::new("secret is required"));
+    }
+    if value
+        .chars()
+        .any(|character| matches!(character, '\r' | '\n' | '\0'))
+    {
+        return Err(AccountCommandError::new(
+            "secret contains unsupported control characters",
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_email_shape(field: &'static str, value: &str) -> Result<(), AccountCommandError> {
     if value.contains(char::is_whitespace)
         || value.contains('<')
@@ -812,6 +960,12 @@ fn validate_host(
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
     {
         return Err(AccountCommandError::new(format!("{field} is invalid")));
+    }
+
+    for label in value.split('.') {
+        if label.is_empty() || label.len() > 63 || label.starts_with('-') || label.ends_with('-') {
+            return Err(AccountCommandError::new(format!("{field} is invalid")));
+        }
     }
 
     Ok(value)
@@ -926,6 +1080,26 @@ mod tests {
             slot: CredentialSlot,
         ) -> Result<bool, CredentialError> {
             Ok(self.secrets.contains_key(&(account_id.to_string(), slot)))
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeGenericConnectionTester {
+        calls: Vec<GenericAccountConnectionConfig>,
+        error: Option<AccountConnectionTestError>,
+    }
+
+    impl GenericAccountConnectionTester for FakeGenericConnectionTester {
+        fn test_generic_account(
+            &mut self,
+            config: &GenericAccountConnectionConfig,
+        ) -> Result<(), AccountConnectionTestError> {
+            self.calls.push(config.clone());
+            if let Some(error) = &self.error {
+                return Err(error.clone());
+            }
+
+            Ok(())
         }
     }
 
@@ -1155,12 +1329,28 @@ mod tests {
             .reason
             .contains("imap_host is invalid"));
 
+        let mut bad_host_label = generic_request();
+        bad_host_label.smtp_host = Some("-smtp.example.com".into());
+        assert!(validate_setup_request(bad_host_label)
+            .expect_err("bad host label")
+            .reason
+            .contains("smtp_host is invalid"));
+
         let mut plaintext_transport = generic_request();
         plaintext_transport.smtp_security = Some("none".into());
         assert!(validate_setup_request(plaintext_transport)
             .expect_err("plaintext transport")
             .reason
             .contains("smtp_security must use TLS or STARTTLS"));
+
+        let mut protocol_injection_secret = generic_request();
+        protocol_injection_secret.secret = "secret\r\nA003 LOGOUT".into();
+        assert_eq!(
+            validate_setup_request(protocol_injection_secret)
+                .expect_err("protocol injection secret")
+                .reason,
+            "secret contains unsupported control characters"
+        );
 
         let mut oversized = generic_request();
         oversized.display_name = Some("x".repeat(MAX_DISPLAY_NAME_BYTES + 1));
@@ -1247,5 +1437,104 @@ mod tests {
 
         assert_eq!(response.status, "configuration-ready");
         assert_eq!(response.provider_kind, "generic_imap_smtp");
+    }
+
+    #[test]
+    fn live_connection_test_attempts_generic_imap_and_smtp_without_persistence() {
+        let mut tester = FakeGenericConnectionTester::default();
+
+        let response = test_account_connection_request_with_tester(generic_request(), &mut tester)
+            .expect("generic connection validates");
+
+        assert_eq!(response.status, "connection-ready");
+        assert_eq!(response.provider_kind, "generic_imap_smtp");
+        assert_eq!(tester.calls.len(), 1);
+        assert_eq!(tester.calls[0].username, "person@example.com");
+        assert_eq!(tester.calls[0].imap_host, "imap.example.com");
+        assert_eq!(tester.calls[0].imap_port, 993);
+        assert_eq!(tester.calls[0].imap_security, MailTransportSecurity::Tls);
+        assert_eq!(tester.calls[0].smtp_host, "smtp.example.com");
+        assert_eq!(tester.calls[0].smtp_port, 587);
+        assert_eq!(
+            tester.calls[0].smtp_security,
+            MailTransportSecurity::StartTls
+        );
+    }
+
+    #[test]
+    fn live_connection_test_rejects_major_provider_secret_handoff_before_network() {
+        let mut request = generic_request();
+        request.account_id = Some("acct_gmail".into());
+        request.provider_kind = "gmail".into();
+        request.auth_kind = "oauth2".into();
+        request.secret = "refresh-token".into();
+        let mut tester = FakeGenericConnectionTester::default();
+
+        let error = test_account_connection_request_with_tester(request, &mut tester)
+            .expect_err("major provider setup test must use loopback");
+
+        assert_eq!(
+            error.reason,
+            "Gmail and Microsoft account setup must use the OAuth browser flow"
+        );
+        assert!(tester.calls.is_empty());
+    }
+
+    #[test]
+    fn create_generic_account_runs_live_connection_test_before_metadata_insert() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        let mut tester = FakeGenericConnectionTester::default();
+
+        let response = create_account_from_connection_with_connection_tester(
+            &connection,
+            &mut credentials,
+            &mut tester,
+            generic_request(),
+        )
+        .expect("create account after connection test");
+
+        assert_eq!(response.account.id, "acct_generic");
+        assert_eq!(tester.calls.len(), 1);
+        assert_eq!(
+            credentials
+                .secrets
+                .get(&("acct_generic".into(), CredentialSlot::GenericPassword))
+                .map(String::as_str),
+            Some("app-password"),
+        );
+        let account_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(account_count, 1);
+    }
+
+    #[test]
+    fn create_generic_account_does_not_store_secret_when_live_login_fails() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        let mut tester = FakeGenericConnectionTester {
+            error: Some(AccountConnectionTestError::AuthenticationRejected { protocol: "IMAP" }),
+            ..Default::default()
+        };
+
+        let error = create_account_from_connection_with_connection_tester(
+            &connection,
+            &mut credentials,
+            &mut tester,
+            generic_request(),
+        )
+        .expect_err("connection failure rejects setup");
+
+        assert_eq!(error.reason, "IMAP authentication failed");
+        assert_eq!(tester.calls.len(), 1);
+        assert!(!credentials.deleted.contains("acct_generic"));
+        assert!(!credentials
+            .secrets
+            .contains_key(&("acct_generic".into(), CredentialSlot::GenericPassword)));
+        let account_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(account_count, 0);
     }
 }

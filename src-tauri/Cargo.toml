@@ -22,6 +22,7 @@ ammonia = "4.1.2"
 base64 = "0.22.1"
 lettre = { version = "0.11.22", features = ["builder", "smtp-transport", "native-tls"] }
 mail-parser = "0.11.3"
+native-tls = "0.2.14"
 rand = "0.10.1"
 reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "form", "json", "native-tls"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }

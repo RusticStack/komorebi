@@ -7,7 +7,7 @@ Last reviewed: 2026-05-23.
 
 Komorebi will store mail-account secrets in Windows Credential Manager through the Rust backend. Windows Credential Manager entries are user-scoped and protected by the Windows credential subsystem/DPAPI. The frontend must never receive raw passwords, refresh tokens, access tokens, credential blobs, or decrypted secret material.
 
-The secret-store implementation lives in `src-tauri/src/credentials.rs`. It uses a narrow Rust abstraction over the Windows `CredWriteW`, `CredReadW`, and `CredDeleteW` APIs through `windows-sys`, so call sites do not depend on raw Win32 API shape. Generic account setup, generic reauthentication, removal, and redacted auth-status commands live in `src-tauri/src/account_management.rs`; Gmail/Microsoft loopback setup and OAuth reauthentication live in `src-tauri/src/oauth_loopback.rs`.
+The secret-store implementation lives in `src-tauri/src/credentials.rs`. It uses a narrow Rust abstraction over the Windows `CredWriteW`, `CredReadW`, and `CredDeleteW` APIs through `windows-sys`, so call sites do not depend on raw Win32 API shape. Generic account setup, generic reauthentication, removal, and redacted auth-status commands live in `src-tauri/src/account_management.rs`; live generic setup login validation lives in `src-tauri/src/account_connection.rs`; Gmail/Microsoft loopback setup and OAuth reauthentication live in `src-tauri/src/oauth_loopback.rs`.
 
 No credential storage may be implemented with browser storage, Tauri Store, SQLite, plain files, logs, diagnostics bundles, or environment variables. `tauri-plugin-store` may hold non-secret preferences only.
 
@@ -73,11 +73,12 @@ Rules:
 1. React submits generic IMAP/SMTP setup data, including the provider password/app-password, to `create_account`; Gmail/Microsoft setup submits only metadata plus OAuth client ID to `start_oauth_account_setup`.
 2. Rust validates provider/auth mode and rejects plaintext persistence outside the credential backend. Public `create_account` and `reauth_account` reject Gmail/Microsoft refresh-token handoff so the loopback command is the only frontend-callable major-provider path.
 3. For Gmail/Microsoft, Rust opens the system browser, receives the loopback callback, validates state, exchanges the authorization code, and extracts the refresh token inside the backend.
-4. Rust writes the approved secret to Windows Credential Manager.
-5. Rust writes the SQLite account metadata with `credential_ref` only after the credential write succeeds.
-6. Sync/send code resolves credentials by `account_id` inside Rust.
-7. Rust refreshes OAuth tokens inside Rust and stores new refresh tokens only through the credential backend, following `docs/architecture/token-lifecycle.md`.
-8. Rust returns auth status, errors, and expiry metadata to React, never the secret value.
+4. For generic IMAP/SMTP setup, Rust runs the backend-owned live IMAP LOGIN and SMTP AUTH check over TLS or STARTTLS before persisting the secret. This check returns only a redacted success/error status to React.
+5. Rust writes the approved secret to Windows Credential Manager.
+6. Rust writes the SQLite account metadata with `credential_ref` only after the credential write succeeds.
+7. Sync/send code resolves credentials by `account_id` inside Rust.
+8. Rust refreshes OAuth tokens inside Rust and stores new refresh tokens only through the credential backend, following `docs/architecture/token-lifecycle.md`.
+9. Rust returns auth status, errors, and expiry metadata to React, never the secret value.
 
 ## Clearing And Rotation
 
@@ -91,9 +92,9 @@ Account removal must run as a single typed backend workflow:
 6. Remove account metadata, folder sync state, drafts, and signatures only after secret deletion has succeeded or after the user confirms a documented retry/failure path.
 7. Write a redacted local audit event such as `account_removed`, never the email password or token.
 
-Credential rotation must write the replacement credential first, verify it can authenticate or refresh, then replace `credential_ref`/metadata. Failed rotation leaves the previous credential intact.
+Credential rotation must preserve the previous credential until replacement storage succeeds. Once live reauth verification is wired, it must also verify provider acceptance before marking the account connected.
 
-Current `reauth_account` performs validated generic credential-slot replacement and marks the local account connected. Current `start_oauth_account_reauth` performs backend-owned Gmail/Microsoft authorization-code exchange before rotating the refresh token. Neither path performs a live IMAP/SMTP login because live adapters are still future work. Add live verification before claiming credential rotation proves provider acceptance for mailbox protocols.
+Current `create_account` and `test_account_connection` perform live generic IMAP/SMTP setup login checks in Rust without returning secrets, protocol payloads, or credential refs to React. Current `reauth_account` performs validated generic credential-slot replacement and marks the local account connected; it does not yet run the live generic login check, so credential rotation must not be described as proof of provider acceptance. Current `start_oauth_account_reauth` performs backend-owned Gmail/Microsoft authorization-code exchange before rotating the refresh token.
 
 Token refresh, reconnect-needed status, provider revocation handling, and the provider OAuth HTTP client are defined in `docs/architecture/token-lifecycle.md` and enforced by `src-tauri/src/token_lifecycle.rs` plus `src-tauri/src/oauth.rs`.
 
@@ -103,7 +104,7 @@ Token refresh, reconnect-needed status, provider revocation handling, and the pr
 - No frontend API may expose `get_password`, `get_token`, `export_secret`, raw credential target names, or arbitrary credential reads.
 - Current account commands are narrowly typed: `create_account`, `reauth_account`, `start_oauth_account_setup`, `start_oauth_account_reauth`, `remove_account`, `get_account_auth_status`, and `test_account_connection`.
 - `get_account_auth_status` may return booleans, expiry times, provider names, and redacted error codes only.
-- `test_account_connection` currently validates configuration shape and credential policy only. It must not be described as a live provider login until live adapters are wired and tested.
+- `test_account_connection` performs a live generic IMAP/SMTP setup login check without persistence. It validates TLS/STARTTLS configuration and provider/auth policy before opening network connections.
 - IPC validation must reject unknown account IDs, unsupported provider/auth combinations, oversized payloads, arbitrary credential target names, and raw SQL.
 
 ## Diagnostics
