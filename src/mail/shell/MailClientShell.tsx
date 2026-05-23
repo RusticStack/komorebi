@@ -25,6 +25,7 @@ import {
 } from "../composer/TipTapComposer";
 import { AccountSignatureSettings } from "../../settings/AccountSignatureSettings";
 import {
+  accountLocalPreferences,
   createMailShellState,
   emptyMailShellData,
   errorMailShellLoadState,
@@ -33,6 +34,7 @@ import {
   mergeMailShellData,
   messagesForScope,
   readyMailShellLoadState,
+  searchResultIsVisibleInScope,
   selectAccountScope,
   selectFolderScope,
   selectUnifiedScope,
@@ -56,6 +58,9 @@ import {
   type AccountConnectionTestResponse,
   type AccountAuthStatusRequest,
   type AccountAuthStatusView,
+  type AccountManagementView,
+  type AccountSettingsUpdateRequest,
+  type AccountSettingsUpdateResponse,
 } from "./mailShellState";
 
 export type MailSearchFunction = (
@@ -83,6 +88,9 @@ export type AccountConnectionTestFunction = (
 export type AccountAuthStatusFunction = (
   request: AccountAuthStatusRequest,
 ) => Promise<AccountAuthStatusView>;
+export type AccountSettingsUpdateFunction = (
+  request: AccountSettingsUpdateRequest,
+) => Promise<AccountSettingsUpdateResponse>;
 
 export type MailClientShellProps = {
   initialData?: MailShellData;
@@ -100,6 +108,7 @@ export type MailClientShellProps = {
   startOAuthAccountSetup?: OAuthAccountSetupFunction;
   startOAuthAccountReauth?: OAuthAccountReauthFunction;
   removeAccount?: AccountRemoveFunction;
+  updateAccountSettings?: AccountSettingsUpdateFunction;
   testAccountConnection?: AccountConnectionTestFunction;
   getAccountAuthStatus?: AccountAuthStatusFunction;
 };
@@ -148,6 +157,7 @@ export function MailClientShell({
   startOAuthAccountSetup,
   startOAuthAccountReauth,
   removeAccount,
+  updateAccountSettings,
   testAccountConnection,
   getAccountAuthStatus,
 }: MailClientShellProps) {
@@ -184,7 +194,11 @@ export function MailClientShell({
       : "debouncing"
     : "idle";
   const effectiveSearchResults =
-    isBackendSearchActive && hasFreshSearchResults ? searchState.results : [];
+    isBackendSearchActive && hasFreshSearchResults
+      ? searchState.results.filter((message) =>
+          searchResultIsVisibleInScope(state, message),
+        )
+      : [];
   const visibleMessages = isBackendSearchActive
     ? effectiveSearchResults
     : scopedMessages;
@@ -360,6 +374,69 @@ export function MailClientShell({
         loadState: errorMailShellLoadState(),
       }));
     }
+  }
+
+  async function saveAccountSettings(
+    request: AccountSettingsUpdateRequest,
+  ): Promise<AccountSettingsUpdateResponse> {
+    if (updateAccountSettings) {
+      const response = await updateAccountSettings(request);
+      if (loadMailShellData) {
+        await reloadMailShell();
+      } else {
+        applyAccountSettingsResponse(response);
+      }
+      return response;
+    }
+
+    const account = state.data.accounts.find(
+      (candidate) => candidate.id === request.accountId,
+    );
+    if (!account) {
+      throw new Error(t("settings.accounts.errors.settingsUnavailable"));
+    }
+
+    const response: AccountSettingsUpdateResponse = {
+      account: {
+        id: account.id,
+        providerKind: account.providerKind ?? "generic_imap_smtp",
+        displayEmail: account.email,
+        displayName: request.displayName?.trim() || null,
+        username: account.email,
+        authKind: account.authKind ?? "manual_password",
+        authStatus: authStatusForManagement(account.status),
+      },
+      signatureHtml: request.signatureHtml.trim() || null,
+      localPreferences: request.localPreferences,
+    };
+
+    applyAccountSettingsResponse(response);
+
+    return response;
+  }
+
+  function applyAccountSettingsResponse(
+    response: AccountSettingsUpdateResponse,
+  ) {
+    setState((current) => ({
+      ...current,
+      data: {
+        ...current.data,
+        accounts: current.data.accounts.map((currentAccount) =>
+          currentAccount.id === response.account.id
+            ? {
+                ...currentAccount,
+                displayName: response.account.displayName,
+                label:
+                  response.account.displayName?.trim() ||
+                  response.account.displayEmail,
+                signatureHtml: response.signatureHtml,
+                localPreferences: response.localPreferences,
+              }
+            : currentAccount,
+        ),
+      },
+    }));
   }
 
   useEffect(() => {
@@ -728,24 +805,14 @@ export function MailClientShell({
               id: account.id,
               label: account.label,
               email: account.email,
+              displayName: account.displayName ?? null,
               providerKind: account.providerKind,
               authKind: account.authKind,
               signatureHtml: account.signatureHtml,
+              localPreferences: accountLocalPreferences(account),
             }))}
             initialAccountId={state.selectedAccountId}
-            onSaveSignature={(accountId, signatureHtml) => {
-              setState((current) => ({
-                ...current,
-                data: {
-                  ...current.data,
-                  accounts: current.data.accounts.map((account) =>
-                    account.id === accountId
-                      ? { ...account, signatureHtml }
-                      : account,
-                  ),
-                },
-              }));
-            }}
+            onSaveAccountSettings={saveAccountSettings}
             onAccountChanged={() => {
               if (loadMailShellData) {
                 void reloadMailShell();
@@ -1450,6 +1517,20 @@ function accountStatusLabel(
   t: TFunction,
 ) {
   return t(`mail.account.status.${status}`);
+}
+
+function authStatusForManagement(
+  status: MailShellData["accounts"][number]["status"],
+): AccountManagementView["authStatus"] {
+  switch (status) {
+    case "connected":
+    case "syncing":
+      return "connected";
+    case "reconnect-needed":
+      return "reconnect_needed";
+    default:
+      return "disconnected";
+  }
 }
 
 function unreadCountForScope(state: MailShellState) {

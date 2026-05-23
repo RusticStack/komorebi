@@ -15,6 +15,7 @@ use crate::{
         AccountConnectionTestError, GenericAccountConnectionConfig, GenericAccountConnectionTester,
         LiveGenericAccountConnectionTester, MailTransportSecurity,
     },
+    account_signatures::{AccountSignatureError, AccountSignatureHtml},
     auth::{evaluate_account_setup_auth_policy, AuthKind, AuthPolicy, ProviderKind},
     credentials::{
         credential_target_name, CredentialError, CredentialSlot, WindowsCredentialManager,
@@ -32,6 +33,8 @@ const MAX_EMAIL_BYTES: usize = 320;
 const MAX_HOST_BYTES: usize = 253;
 const MAX_DISPLAY_NAME_BYTES: usize = 256;
 const REMOVED_ACCOUNT_PREFIX: &str = "removed";
+const ACCOUNT_LOCAL_PREFERENCES_PREFIX: &str = "account:";
+const ACCOUNT_LOCAL_PREFERENCES_SUFFIX: &str = ":local_preferences";
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -71,11 +74,43 @@ pub struct AccountAuthStatusRequest {
     pub account_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountLocalPreferences {
+    #[serde(default = "default_include_in_unified_inbox")]
+    pub include_in_unified_inbox: bool,
+}
+
+impl Default for AccountLocalPreferences {
+    fn default() -> Self {
+        Self {
+            include_in_unified_inbox: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSettingsUpdateRequest {
+    pub account_id: String,
+    pub display_name: Option<String>,
+    pub signature_html: String,
+    pub local_preferences: AccountLocalPreferences,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSetupResponse {
     pub account: AccountManagementView,
     pub credential_stored: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSettingsUpdateResponse {
+    pub account: AccountManagementView,
+    pub signature_html: Option<String>,
+    pub local_preferences: AccountLocalPreferences,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -175,8 +210,20 @@ impl From<CredentialError> for AccountCommandError {
     }
 }
 
+impl From<AccountSignatureError> for AccountCommandError {
+    fn from(value: AccountSignatureError) -> Self {
+        Self::new(value.to_string())
+    }
+}
+
 impl From<AccountConnectionTestError> for AccountCommandError {
     fn from(value: AccountConnectionTestError) -> Self {
+        Self::new(value.to_string())
+    }
+}
+
+impl From<serde_json::Error> for AccountCommandError {
+    fn from(value: serde_json::Error) -> Self {
         Self::new(value.to_string())
     }
 }
@@ -268,6 +315,15 @@ pub fn remove_account(
     let mut credentials = WindowsCredentialManager;
 
     remove_account_from_path(&cache_path, &mut credentials, request)
+}
+
+#[tauri::command]
+pub fn update_account_settings(
+    app: tauri::AppHandle,
+    request: AccountSettingsUpdateRequest,
+) -> Result<AccountSettingsUpdateResponse, AccountCommandError> {
+    let cache_path = mail_cache_path(&app)?;
+    update_account_settings_from_path(&cache_path, request)
 }
 
 #[tauri::command]
@@ -531,12 +587,74 @@ pub fn remove_account_from_connection(
             params![request.account_id, removed_username, removed_credential_ref],
         )?;
     }
+    delete_account_local_preferences(connection, &request.account_id)?;
 
     Ok(AccountRemovalResponse {
         account_id: request.account_id,
         credentials_deleted: true,
         local_cache_deleted: request.delete_local_cache,
         metadata_removed: true,
+    })
+}
+
+pub fn update_account_settings_from_path(
+    cache_path: &Path,
+    request: AccountSettingsUpdateRequest,
+) -> Result<AccountSettingsUpdateResponse, AccountCommandError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    update_account_settings_from_connection(&connection, request)
+}
+
+pub fn update_account_settings_from_connection(
+    connection: &Connection,
+    request: AccountSettingsUpdateRequest,
+) -> Result<AccountSettingsUpdateResponse, AccountCommandError> {
+    validate_entity_id("account_id", &request.account_id)?;
+    ensure_active_account(connection, &request.account_id)?;
+    let display_name = normalize_optional_text("display_name", request.display_name)?;
+    let sanitized = AccountSignatureHtml::sanitize(&request.signature_html)?;
+    let signature_html = sanitized
+        .as_ref()
+        .map(|signature| signature.as_str().to_string());
+    let preferences_json = serde_json::to_string(&request.local_preferences)?;
+    let settings_key = account_local_preferences_key(&request.account_id);
+
+    let transaction = connection.unchecked_transaction()?;
+    let changed = transaction.execute(
+        "UPDATE accounts
+         SET display_name = ?2,
+             signature_html = ?3,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1
+           AND removed_at IS NULL
+           AND auth_status != 'removed'",
+        params![
+            &request.account_id,
+            display_name.as_deref(),
+            signature_html.as_deref()
+        ],
+    )?;
+    if changed != 1 {
+        return Err(AccountCommandError::new("account was not found"));
+    }
+    transaction.execute(
+        "INSERT INTO settings (key, value_json, value_type)
+         VALUES (?1, ?2, 'object')
+         ON CONFLICT(key) DO UPDATE SET
+           value_json = excluded.value_json,
+           value_type = excluded.value_type,
+           updated_at = CURRENT_TIMESTAMP",
+        params![settings_key, preferences_json],
+    )?;
+    transaction.commit()?;
+
+    let account = load_account_for_management(connection, &request.account_id)?
+        .ok_or_else(|| AccountCommandError::new("account was not found after settings update"))?;
+    Ok(AccountSettingsUpdateResponse {
+        account,
+        signature_html,
+        local_preferences: request.local_preferences,
     })
 }
 
@@ -588,22 +706,33 @@ pub fn get_account_auth_status_from_connection(
     request: AccountAuthStatusRequest,
 ) -> Result<AccountAuthStatusView, AccountCommandError> {
     validate_entity_id("account_id", &request.account_id)?;
+    ensure_active_account(connection, &request.account_id)?;
     let account = load_account_for_management(connection, &request.account_id)?
         .ok_or_else(|| AccountCommandError::new("account was not found"))?;
     let provider = provider_from_schema(&account.provider_kind)?;
     let auth_kind = auth_from_schema(&account.auth_kind)?;
     let credential_slot = allowed_credential_slot(provider, auth_kind)?;
     let credential_present = credentials.account_secret_exists(&account.id, credential_slot)?;
+    let auth_status = if credential_present {
+        account.auth_status
+    } else {
+        connection.execute(
+            "UPDATE accounts
+             SET auth_status = 'reconnect_needed',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1
+               AND removed_at IS NULL
+               AND auth_status != 'removed'",
+            params![account.id],
+        )?;
+        "reconnect_needed".into()
+    };
 
     Ok(AccountAuthStatusView {
         account_id: account.id,
         provider_kind: account.provider_kind,
         auth_kind: account.auth_kind,
-        auth_status: if credential_present {
-            account.auth_status
-        } else {
-            "reconnect_needed".into()
-        },
+        auth_status,
         credential_present,
     })
 }
@@ -820,6 +949,69 @@ fn account_exists(connection: &Connection, account_id: &str) -> Result<bool, rus
         params![account_id],
         |row| row.get(0),
     )
+}
+
+fn ensure_active_account(
+    connection: &Connection,
+    account_id: &str,
+) -> Result<(), AccountCommandError> {
+    let exists: bool = connection.query_row(
+        "SELECT EXISTS(
+           SELECT 1
+           FROM accounts
+           WHERE id = ?1
+             AND removed_at IS NULL
+             AND auth_status != 'removed'
+         )",
+        params![account_id],
+        |row| row.get(0),
+    )?;
+    if exists {
+        Ok(())
+    } else {
+        Err(AccountCommandError::new("account was not found"))
+    }
+}
+
+pub fn load_account_local_preferences_from_connection(
+    connection: &Connection,
+    account_id: &str,
+) -> Result<AccountLocalPreferences, AccountCommandError> {
+    validate_entity_id("account_id", account_id)?;
+    let value_json = connection
+        .query_row(
+            "SELECT value_json
+             FROM settings
+             WHERE key = ?1",
+            params![account_local_preferences_key(account_id)],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    value_json
+        .map(|value| serde_json::from_str::<AccountLocalPreferences>(&value))
+        .transpose()
+        .map_err(Into::into)
+        .map(|preferences| preferences.unwrap_or_default())
+}
+
+fn delete_account_local_preferences(
+    connection: &Connection,
+    account_id: &str,
+) -> Result<(), AccountCommandError> {
+    connection.execute(
+        "DELETE FROM settings WHERE key = ?1",
+        params![account_local_preferences_key(account_id)],
+    )?;
+    Ok(())
+}
+
+pub fn account_local_preferences_key(account_id: &str) -> String {
+    format!("{ACCOUNT_LOCAL_PREFERENCES_PREFIX}{account_id}{ACCOUNT_LOCAL_PREFERENCES_SUFFIX}")
+}
+
+fn default_include_in_unified_inbox() -> bool {
+    true
 }
 
 fn allowed_credential_slot(
@@ -1392,6 +1584,18 @@ mod tests {
         let mut credentials = FakeAccountCredentialStore::default();
         create_account_from_connection(&connection, &mut credentials, generic_request())
             .expect("create account");
+        update_account_settings_from_connection(
+            &connection,
+            AccountSettingsUpdateRequest {
+                account_id: "acct_generic".into(),
+                display_name: Some("Personal".into()),
+                signature_html: "<p>Regards</p>".into(),
+                local_preferences: AccountLocalPreferences {
+                    include_in_unified_inbox: false,
+                },
+            },
+        )
+        .expect("persist local preferences");
 
         let response = remove_account_from_connection(
             &connection,
@@ -1407,6 +1611,14 @@ mod tests {
         assert!(response.local_cache_deleted);
         assert!(credentials.deleted.contains("acct_generic"));
         assert!(!account_exists(&connection, "acct_generic").unwrap());
+        let preference_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key = ?1",
+                params![account_local_preferences_key("acct_generic")],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preference_count, 0);
     }
 
     #[test]
@@ -1428,6 +1640,134 @@ mod tests {
 
         assert_eq!(status.auth_status, "reconnect_needed");
         assert!(!status.credential_present);
+        let stored_status: String = connection
+            .query_row(
+                "SELECT auth_status FROM accounts WHERE id = 'acct_generic'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_status, "reconnect_needed");
+    }
+
+    #[test]
+    fn update_account_settings_persists_display_name_signature_and_local_preferences() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        create_account_from_connection(&connection, &mut credentials, generic_request())
+            .expect("create account");
+
+        let response = update_account_settings_from_connection(
+            &connection,
+            AccountSettingsUpdateRequest {
+                account_id: "acct_generic".into(),
+                display_name: Some("  Updated Personal  ".into()),
+                signature_html: r#"<p onclick="alert(1)">Regards <a href="https://example.com">Me</a><img src="https://tracker.example/pixel.gif"></p>"#.into(),
+                local_preferences: AccountLocalPreferences {
+                    include_in_unified_inbox: false,
+                },
+            },
+        )
+        .expect("persist account settings");
+
+        assert_eq!(
+            response.account.display_name.as_deref(),
+            Some("Updated Personal")
+        );
+        assert_eq!(
+            response.local_preferences,
+            AccountLocalPreferences {
+                include_in_unified_inbox: false
+            }
+        );
+        let signature_html = response.signature_html.expect("sanitized signature");
+        assert!(signature_html.contains("Regards"));
+        assert!(signature_html.contains("https://example.com"));
+        assert!(!signature_html.contains("onclick"));
+        assert!(!signature_html.contains("<img"));
+        assert!(!signature_html.contains("tracker.example"));
+
+        let stored: (Option<String>, Option<String>, String) = connection
+            .query_row(
+                "SELECT accounts.display_name, accounts.signature_html, settings.value_json
+                 FROM accounts
+                 JOIN settings ON settings.key = ?2
+                 WHERE accounts.id = ?1",
+                params![
+                    "acct_generic",
+                    account_local_preferences_key("acct_generic")
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored.0.as_deref(), Some("Updated Personal"));
+        assert_eq!(stored.1.as_deref(), Some(signature_html.as_str()));
+        assert_eq!(
+            serde_json::from_str::<AccountLocalPreferences>(&stored.2).unwrap(),
+            AccountLocalPreferences {
+                include_in_unified_inbox: false
+            }
+        );
+    }
+
+    #[test]
+    fn update_account_settings_rejects_invalid_unknown_removed_and_oversized_values() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        create_account_from_connection(&connection, &mut credentials, generic_request())
+            .expect("create account");
+
+        let mut invalid_id = settings_request();
+        invalid_id.account_id = "../secret".into();
+        assert!(
+            update_account_settings_from_connection(&connection, invalid_id)
+                .expect_err("invalid account id rejected")
+                .reason
+                .contains("account_id is invalid")
+        );
+
+        let mut unknown_id = settings_request();
+        unknown_id.account_id = "acct_missing".into();
+        assert_eq!(
+            update_account_settings_from_connection(&connection, unknown_id)
+                .expect_err("unknown account rejected")
+                .reason,
+            "account was not found"
+        );
+
+        let mut oversized_display = settings_request();
+        oversized_display.display_name = Some("x".repeat(MAX_DISPLAY_NAME_BYTES + 1));
+        assert!(
+            update_account_settings_from_connection(&connection, oversized_display)
+                .expect_err("oversized display name rejected")
+                .reason
+                .contains("display_name exceeds")
+        );
+
+        let mut oversized_signature = settings_request();
+        oversized_signature.signature_html = "x".repeat(MAX_TEXT_FIELD_BYTES + 1);
+        assert!(
+            update_account_settings_from_connection(&connection, oversized_signature)
+                .expect_err("oversized signature rejected")
+                .reason
+                .contains("signature_html exceeds")
+        );
+
+        remove_account_from_connection(
+            &connection,
+            &mut credentials,
+            AccountRemovalRequest {
+                account_id: "acct_generic".into(),
+                delete_local_cache: false,
+            },
+        )
+        .expect("soft remove account");
+        assert_eq!(
+            update_account_settings_from_connection(&connection, settings_request())
+                .expect_err("removed account rejected")
+                .reason,
+            "account was not found"
+        );
     }
 
     #[test]
@@ -1536,5 +1876,14 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
             .unwrap();
         assert_eq!(account_count, 0);
+    }
+
+    fn settings_request() -> AccountSettingsUpdateRequest {
+        AccountSettingsUpdateRequest {
+            account_id: "acct_generic".into(),
+            display_name: Some("Personal".into()),
+            signature_html: "<p>Regards</p>".into(),
+            local_preferences: AccountLocalPreferences::default(),
+        }
     }
 }

@@ -19,6 +19,7 @@ import {
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
   testAccountConnectionFromTauri,
+  updateAccountSettingsFromTauri,
 } from "./mail/shell/mailShellDataSource";
 
 function App(props: MailClientShellProps) {
@@ -45,6 +46,9 @@ function App(props: MailClientShellProps) {
     ? startOAuthAccountReauthFromTauri
     : undefined;
   const runtimeRemoveAccount = isRuntime ? removeAccountFromTauri : undefined;
+  const runtimeUpdateAccountSettings = isRuntime
+    ? updateAccountSettingsFromTauri
+    : undefined;
   const runtimeTestAccount = isRuntime
     ? testAccountConnectionFromTauri
     : undefined;
@@ -75,6 +79,9 @@ function App(props: MailClientShellProps) {
         props.startOAuthAccountReauth ?? runtimeStartOAuthAccountReauth
       }
       removeAccount={props.removeAccount ?? runtimeRemoveAccount}
+      updateAccountSettings={
+        props.updateAccountSettings ?? runtimeUpdateAccountSettings
+      }
       testAccountConnection={props.testAccountConnection ?? runtimeTestAccount}
       getAccountAuthStatus={
         props.getAccountAuthStatus ?? runtimeGetAccountAuthStatus

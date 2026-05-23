@@ -131,6 +131,36 @@ describe("mailShellState", () => {
     ]);
   });
 
+  it("uses account local preferences to exclude accounts from unified scopes only", () => {
+    const data: MailShellData = {
+      ...stateFixture,
+      accounts: stateFixture.accounts.map((account) =>
+        account.id === "acct_work"
+          ? {
+              ...account,
+              localPreferences: { includeInUnifiedInbox: false },
+            }
+          : account,
+      ),
+    };
+    const unified = createMailShellState(data);
+
+    expect(messagesForScope(unified).map((message) => message.id)).toEqual([
+      "msg_personal_inbox",
+    ]);
+    expect(
+      messagesForScope({
+        ...unified,
+        searchQuery: "invoice",
+      }).map((message) => message.id),
+    ).toEqual([]);
+
+    const work = selectAccountScope(unified, "acct_work");
+    expect(messagesForScope(work).map((message) => message.id)).toEqual([
+      "msg_work_inbox",
+    ]);
+  });
+
   it("preserves selected messages across compatible cache reloads and clears stale backend rows", () => {
     const selected = {
       ...selectFolderScope(

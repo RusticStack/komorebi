@@ -26,6 +26,7 @@ import {
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
   testAccountConnectionFromTauri,
+  updateAccountSettingsFromTauri,
 } from "./mailShellDataSource";
 
 const shellResponse: MailShellData = {
@@ -211,6 +212,17 @@ describe("mailShellDataSource", () => {
       accountId: "acct_generic",
       deleteLocalCache: true,
     };
+    const accountSettingsRequest = {
+      accountId: "acct_generic",
+      displayName: "Personal",
+      localPreferences: { includeInUnifiedInbox: false },
+      signatureHtml: "<p>Regards</p>",
+    };
+    const accountSettingsResponse = {
+      account: setupResponse.account,
+      localPreferences: { includeInUnifiedInbox: false },
+      signatureHtml: "<p>Regards</p>",
+    };
     const removalResponse = {
       accountId: "acct_generic",
       credentialsDeleted: true,
@@ -234,6 +246,7 @@ describe("mailShellDataSource", () => {
       .mockResolvedValueOnce(setupResponse)
       .mockResolvedValueOnce(setupResponse)
       .mockResolvedValueOnce(removalResponse)
+      .mockResolvedValueOnce(accountSettingsResponse)
       .mockResolvedValueOnce(connectionResponse)
       .mockResolvedValueOnce(authStatusResponse)
       .mockResolvedValueOnce(setupResponse)
@@ -248,6 +261,9 @@ describe("mailShellDataSource", () => {
     await expect(removeAccountFromTauri(removalRequest)).resolves.toBe(
       removalResponse,
     );
+    await expect(
+      updateAccountSettingsFromTauri(accountSettingsRequest),
+    ).resolves.toBe(accountSettingsResponse);
     await expect(testAccountConnectionFromTauri(setupRequest)).resolves.toBe(
       connectionResponse,
     );
@@ -270,16 +286,19 @@ describe("mailShellDataSource", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(3, "remove_account", {
       request: removalRequest,
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(4, "test_account_connection", {
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "update_account_settings", {
+      request: accountSettingsRequest,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "test_account_connection", {
       request: setupRequest,
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(5, "get_account_auth_status", {
+    expect(invokeMock).toHaveBeenNthCalledWith(6, "get_account_auth_status", {
       request: authStatusRequest,
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(6, "start_oauth_account_setup", {
+    expect(invokeMock).toHaveBeenNthCalledWith(7, "start_oauth_account_setup", {
       request: oauthSetupRequest,
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(7, "start_oauth_account_reauth", {
+    expect(invokeMock).toHaveBeenNthCalledWith(8, "start_oauth_account_reauth", {
       request: oauthReauthRequest,
     });
   });

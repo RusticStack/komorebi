@@ -6,9 +6,12 @@ import type {
   AccountAuthKind,
   AccountAuthStatusView,
   AccountConnectionTestResponse,
+  AccountLocalPreferences,
   AccountManagementView,
   AccountAuthStatusRequest,
   AccountProviderKind,
+  AccountSettingsUpdateRequest,
+  AccountSettingsUpdateResponse,
   OAuthAccountProviderKind,
   OAuthAccountReauthRequest,
   OAuthAccountSetupRequest,
@@ -24,18 +27,23 @@ export type SignatureAccountOption = {
   id: string;
   label: string;
   email: string;
+  displayName?: string | null;
   providerKind?: AccountProviderKind;
   authKind?: AccountAuthKind;
   signatureHtml: string | null;
+  localPreferences?: AccountLocalPreferences;
 };
 
 export type AccountSignatureSettingsProps = {
   accounts: SignatureAccountOption[];
   initialAccountId?: string | null;
-  onSaveSignature: (
+  onSaveSignature?: (
     accountId: string,
     signatureHtml: string | null,
   ) => void | Promise<void>;
+  onSaveAccountSettings?: (
+    request: AccountSettingsUpdateRequest,
+  ) => Promise<AccountSettingsUpdateResponse>;
   onAccountChanged?: () => void;
   onCreateAccount?: (
     request: AccountSetupRequest,
@@ -93,10 +101,15 @@ const defaultAccountForm: AccountFormState = {
   smtpSecurity: "starttls",
 };
 
+const defaultLocalPreferences: AccountLocalPreferences = {
+  includeInUnifiedInbox: true,
+};
+
 export function AccountSignatureSettings({
   accounts,
   initialAccountId,
   onSaveSignature,
+  onSaveAccountSettings,
   onAccountChanged,
   onCreateAccount,
   onReauthAccount,
@@ -112,11 +125,14 @@ export function AccountSignatureSettings({
     initialAccountId ?? accounts[0]?.id ?? "",
   );
   const [draftsByAccount, setDraftsByAccount] = useState<Record<string, string>>(
-    () =>
-      Object.fromEntries(
-        accounts.map((account) => [account.id, account.signatureHtml ?? ""]),
-      ),
+    {},
   );
+  const [displayNamesByAccount, setDisplayNamesByAccount] = useState<
+    Record<string, string>
+  >({});
+  const [preferencesByAccount, setPreferencesByAccount] = useState<
+    Record<string, AccountLocalPreferences>
+  >({});
   const [accountForm, setAccountForm] = useState<AccountFormState>(
     defaultAccountForm,
   );
@@ -127,14 +143,31 @@ export function AccountSignatureSettings({
   const [authStatus, setAuthStatus] = useState<AccountAuthStatusView | null>(
     null,
   );
+  const activeSelectedAccountId = accounts.some(
+    (account) => account.id === selectedAccountId,
+  )
+    ? selectedAccountId
+    : accounts.find((account) => account.id === initialAccountId)?.id ??
+      accounts[0]?.id ??
+      "";
   const selectedAccount =
-    accounts.find((account) => account.id === selectedAccountId) ?? null;
+    accounts.find((account) => account.id === activeSelectedAccountId) ?? null;
   const selectedAccountUsesOAuth =
     selectedAccount?.authKind === "oauth2" &&
     selectedAccount.providerKind !== "generic_imap_smtp";
   const draftHtml = selectedAccount
     ? draftsByAccount[selectedAccount.id] ?? selectedAccount.signatureHtml ?? ""
     : "";
+  const selectedDisplayName = selectedAccount
+    ? displayNamesByAccount[selectedAccount.id] ??
+      selectedAccount.displayName ??
+      ""
+    : "";
+  const selectedPreferences = selectedAccount
+    ? preferencesByAccount[selectedAccount.id] ??
+      selectedAccount.localPreferences ??
+      defaultLocalPreferences
+    : defaultLocalPreferences;
   const sanitized = useMemo(
     () => sanitizeSignatureHtml(draftHtml),
     [draftHtml],
@@ -367,57 +400,102 @@ export function AccountSignatureSettings({
         </form>
 
         {selectedAccount ? (
-          <form
-            className="account-form account-form--compact"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleReauthAccount();
-            }}
-          >
-            <h4>{t("settings.accounts.sections.selected")}</h4>
-            <p>
-              {selectedAccount.label} - {selectedAccount.email}
-            </p>
-            <label>
-              <span>
-                {selectedAccountUsesOAuth
-                  ? t("settings.accounts.fields.oauthClientId")
-                  : t("settings.accounts.fields.reauthSecret")}
-              </span>
-              <input
-                type={selectedAccountUsesOAuth ? "text" : "password"}
-                value={reauthSecret}
-                onChange={(event) => setReauthSecret(event.target.value)}
-              />
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={deleteLocalCache}
-                onChange={(event) => setDeleteLocalCache(event.target.checked)}
-              />
-              <span>{t("settings.accounts.fields.deleteLocalCache")}</span>
-            </label>
-            <div className="settings-panel__actions">
-              <button
-                type="button"
-                onClick={() => void handleLoadAuthStatus()}
-                disabled={!onGetAccountAuthStatus}
-              >
-                {t("settings.accounts.actions.status")}
-              </button>
-              <button type="submit" disabled={!canSubmitReauth()}>
-                {t("settings.accounts.actions.reauth")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRemoveAccount()}
-                disabled={!onRemoveAccount}
-              >
-                {t("settings.accounts.actions.remove")}
-              </button>
-            </div>
-          </form>
+          <>
+            <form
+              className="account-form account-form--compact"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSaveAccountSettings();
+              }}
+            >
+              <h4>{t("settings.accounts.sections.preferences")}</h4>
+              <p>
+                {selectedAccount.label} - {selectedAccount.email}
+              </p>
+              <label>
+                <span>{t("settings.accounts.fields.accountDisplayName")}</span>
+                <input
+                  value={selectedDisplayName}
+                  onChange={(event) => {
+                    setDisplayNamesByAccount((current) => ({
+                      ...current,
+                      [selectedAccount.id]: event.target.value,
+                    }));
+                  }}
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={selectedPreferences.includeInUnifiedInbox}
+                  onChange={(event) => {
+                    setPreferencesByAccount((current) => ({
+                      ...current,
+                      [selectedAccount.id]: {
+                        includeInUnifiedInbox: event.target.checked,
+                      },
+                    }));
+                  }}
+                />
+                <span>
+                  {t("settings.accounts.fields.includeInUnifiedInbox")}
+                </span>
+              </label>
+              <div className="settings-panel__actions">
+                <button type="submit" disabled={!canSaveAccountSettings()}>
+                  {t("settings.accounts.actions.saveSettings")}
+                </button>
+              </div>
+            </form>
+            <form
+              className="account-form account-form--compact"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleReauthAccount();
+              }}
+            >
+              <h4>{t("settings.accounts.sections.authentication")}</h4>
+              <label>
+                <span>
+                  {selectedAccountUsesOAuth
+                    ? t("settings.accounts.fields.oauthClientId")
+                    : t("settings.accounts.fields.reauthSecret")}
+                </span>
+                <input
+                  type={selectedAccountUsesOAuth ? "text" : "password"}
+                  value={reauthSecret}
+                  onChange={(event) => setReauthSecret(event.target.value)}
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={deleteLocalCache}
+                  onChange={(event) => setDeleteLocalCache(event.target.checked)}
+                />
+                <span>{t("settings.accounts.fields.deleteLocalCache")}</span>
+              </label>
+              <div className="settings-panel__actions">
+                <button
+                  type="button"
+                  onClick={() => void handleLoadAuthStatus()}
+                  disabled={!onGetAccountAuthStatus}
+                >
+                  {t("settings.accounts.actions.status")}
+                </button>
+                <button type="submit" disabled={!canSubmitReauth()}>
+                  {t("settings.accounts.actions.reauth")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRemoveAccount()}
+                  disabled={!onRemoveAccount}
+                >
+                  {t("settings.accounts.actions.remove")}
+                </button>
+              </div>
+            </form>
+          </>
         ) : (
           <p className="empty-note">{t("mail.states.noAccounts")}</p>
         )}
@@ -454,16 +532,13 @@ export function AccountSignatureSettings({
               return;
             }
 
-            void onSaveSignature(
-              selectedAccount.id,
-              sanitized.html.trim() || null,
-            );
+            void handleSaveAccountSettings();
           }}
         >
           <label>
             <span>{t("settings.fields.account")}</span>
             <select
-              value={selectedAccountId}
+              value={activeSelectedAccountId}
               onChange={(event) => setSelectedAccountId(event.target.value)}
             >
               {accounts.map((account) => (
@@ -566,6 +641,58 @@ export function AccountSignatureSettings({
     return selectedAccountUsesOAuth
       ? Boolean(onStartOAuthAccountReauth)
       : Boolean(onReauthAccount);
+  }
+
+  function canSaveAccountSettings() {
+    return Boolean(selectedAccount && (onSaveAccountSettings || onSaveSignature));
+  }
+
+  async function handleSaveAccountSettings() {
+    if (!selectedAccount) {
+      setAccountError(t("settings.accounts.errors.settingsUnavailable"));
+      return;
+    }
+
+    const signatureHtml = sanitized.html.trim();
+    if (!onSaveAccountSettings) {
+      if (!onSaveSignature) {
+        setAccountError(t("settings.accounts.errors.settingsUnavailable"));
+        return;
+      }
+
+      await runAccountAction(async () => {
+        await onSaveSignature(selectedAccount.id, signatureHtml || null);
+        setDraftsByAccount((current) => ({
+          ...current,
+          [selectedAccount.id]: signatureHtml,
+        }));
+        setAccountNotice(t("settings.accounts.notices.settingsSaved"));
+      });
+      return;
+    }
+
+    await runAccountAction(async () => {
+      const response = await onSaveAccountSettings({
+        accountId: selectedAccount.id,
+        displayName: selectedDisplayName.trim() || null,
+        signatureHtml,
+        localPreferences: selectedPreferences,
+      });
+      setDisplayNamesByAccount((current) => ({
+        ...current,
+        [selectedAccount.id]:
+          response.account.displayName ?? response.account.displayEmail,
+      }));
+      setDraftsByAccount((current) => ({
+        ...current,
+        [selectedAccount.id]: response.signatureHtml ?? "",
+      }));
+      setPreferencesByAccount((current) => ({
+        ...current,
+        [selectedAccount.id]: response.localPreferences,
+      }));
+      setAccountNotice(t("settings.accounts.notices.settingsSaved"));
+    });
   }
 
   async function handleTestAccount() {
@@ -689,11 +816,11 @@ export function AccountSignatureSettings({
       return;
     }
     await runAccountAction(async () => {
-      setAuthStatus(
-        await onGetAccountAuthStatus({
-          accountId: selectedAccount.id,
-        }),
-      );
+      const status = await onGetAccountAuthStatus({
+        accountId: selectedAccount.id,
+      });
+      setAuthStatus(status);
+      onAccountChanged?.();
     });
   }
 

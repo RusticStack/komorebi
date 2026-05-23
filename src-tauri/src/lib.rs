@@ -32,6 +32,7 @@ pub fn run() {
             account_management::create_account,
             account_management::reauth_account,
             account_management::remove_account,
+            account_management::update_account_settings,
             account_management::test_account_connection,
             account_management::get_account_auth_status,
             oauth_loopback::start_oauth_account_setup,

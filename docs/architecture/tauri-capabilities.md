@@ -8,7 +8,7 @@ Komorebi's main webview grants only reviewed feature-specific Tauri permissions.
 
 - `app.security.capabilities` must be `["default"]` until another window or capability is intentionally introduced.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
-- `default.permissions` contains only reviewed mail-shell, composer, account-management, and OAuth loopback commands: `allow-load-mail-shell`, `allow-search-mail`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, and `allow-start-oauth-account-reauth`.
+- `default.permissions` contains only reviewed mail-shell, composer, account-management, and OAuth loopback commands: `allow-load-mail-shell`, `allow-search-mail`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-update-account-settings`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, and `allow-start-oauth-account-reauth`.
 - No remote origins are allowed to use Tauri APIs.
 - `app.security.csp` is a reviewed production content security policy. It keeps script execution local-only, blocks object/frame/worker/form/embed surfaces, denies remote network/image/script sources by default, permits only Tauri IPC in `connect-src`, and permits `data:`/`blob:` images plus inline CSS for the current TipTap rich editor and sanitized rich HTML behavior.
 - `app.security.devCsp` is separate and limited to local Vite/HMR plus Tauri IPC. Do not copy development `unsafe-eval`, localhost, or WebSocket allowances into the production CSP.
@@ -59,6 +59,7 @@ Absence of a permission is the denial mechanism. Do not add broad explicit deny 
 - `create_account`: typed generic-provider account setup that runs live IMAP/SMTP login validation before secret storage, stores secrets in Windows Credential Manager before metadata insert, and rejects direct Gmail/Microsoft secret handoff.
 - `reauth_account`: typed generic replacement secret storage for an existing account's approved credential slot and rejection path for Gmail/Microsoft OAuth accounts.
 - `remove_account`: typed credential deletion and account metadata/cache cleanup.
+- `update_account_settings`: typed account display-name, sanitized signature HTML, and local unified-inbox preference persistence with active-account validation.
 - `test_account_connection`: typed live generic IMAP/SMTP login validation without persistence.
 - `get_account_auth_status`: typed redacted account status and credential-presence lookup.
 - `start_oauth_account_setup`: typed Gmail/Microsoft OAuth browser loopback setup; validates state/PKCE, exchanges the callback code in Rust, stores refresh tokens through the credential backend, and returns only redacted account setup status.

@@ -49,6 +49,61 @@ describe("AccountSignatureSettings", () => {
     expect(signatureHtml).not.toContain("tracker.example");
   });
 
+  it("persists display name, signature, and local preferences through the typed account settings callback", async () => {
+    const onSaveAccountSettings = vi.fn().mockResolvedValue({
+      account: {
+        authKind: "app_password",
+        authStatus: "connected",
+        displayEmail: "sender@example.com",
+        displayName: "Sender",
+        id: "acct_1",
+        providerKind: "generic_imap_smtp",
+        username: "sender@example.com",
+      },
+      localPreferences: { includeInUnifiedInbox: false },
+      signatureHtml: "<p>Regards</p>",
+    });
+
+    render(
+      <AccountSignatureSettings
+        accounts={[
+          {
+            authKind: "app_password",
+            displayName: "Personal",
+            email: "sender@example.com",
+            id: "acct_1",
+            label: "Personal",
+            localPreferences: { includeInUnifiedInbox: true },
+            providerKind: "generic_imap_smtp",
+            signatureHtml: null,
+          },
+        ]}
+        onSaveAccountSettings={onSaveAccountSettings}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Account display name"), {
+      target: { value: "Sender" },
+    });
+    fireEvent.click(screen.getByLabelText("Include in unified inbox"));
+    fireEvent.change(screen.getByLabelText("Signature HTML"), {
+      target: {
+        value: '<p onclick="alert(1)">Regards<script>alert(1)</script></p>',
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() =>
+      expect(onSaveAccountSettings).toHaveBeenCalledWith({
+        accountId: "acct_1",
+        displayName: "Sender",
+        localPreferences: { includeInUnifiedInbox: false },
+        signatureHtml: "<p>Regards</p>",
+      }),
+    );
+    expect(await screen.findByText("Account settings were saved.")).toBeVisible();
+  });
+
   it("loads each account signature and can intentionally clear it", () => {
     const onSaveSignature = vi.fn();
     render(

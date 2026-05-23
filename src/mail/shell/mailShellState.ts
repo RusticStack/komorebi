@@ -21,11 +21,17 @@ export type MailAccount = {
   id: string;
   label: string;
   email: string;
+  displayName?: string | null;
   providerKind?: AccountProviderKind;
   authKind?: AccountAuthKind;
   status: AccountStatus;
   unreadCount: number;
   signatureHtml: string | null;
+  localPreferences?: AccountLocalPreferences;
+};
+
+export type AccountLocalPreferences = {
+  includeInUnifiedInbox: boolean;
 };
 
 export type MailFolder = {
@@ -265,6 +271,19 @@ export type AccountAuthStatusView = {
   credentialPresent: boolean;
 };
 
+export type AccountSettingsUpdateRequest = {
+  accountId: string;
+  displayName: string | null;
+  signatureHtml: string;
+  localPreferences: AccountLocalPreferences;
+};
+
+export type AccountSettingsUpdateResponse = {
+  account: AccountManagementView;
+  signatureHtml: string | null;
+  localPreferences: AccountLocalPreferences;
+};
+
 export type MailShellLoadState = {
   accounts: LoadStatus;
   folders: LoadStatus;
@@ -291,6 +310,10 @@ export const readyMailShellLoadState: MailShellLoadState = {
   accounts: "ready",
   folders: "ready",
   messages: "ready",
+};
+
+export const defaultAccountLocalPreferences: AccountLocalPreferences = {
+  includeInUnifiedInbox: true,
 };
 
 export function createMailShellState(
@@ -326,7 +349,18 @@ export function errorMailShellLoadState(): MailShellLoadState {
 
 export function foldersForScope(state: MailShellState) {
   if (state.unifiedInbox || !state.selectedAccountId) {
-    return state.data.folders;
+    const unifiedAccountIds = new Set(
+      state.data.accounts
+        .filter(
+          (account) =>
+            accountLocalPreferences(account).includeInUnifiedInbox,
+        )
+        .map((account) => account.id),
+    );
+
+    return state.data.folders.filter((folder) =>
+      unifiedAccountIds.has(folder.accountId),
+    );
   }
 
   return state.data.folders.filter(
@@ -419,30 +453,11 @@ function withPreservedSelection(state: MailShellState): MailShellState {
 
 export function messagesForScope(state: MailShellState) {
   const query = state.searchQuery.trim().toLocaleLowerCase();
-  const scopedFolders = new Map(
-    foldersForScope(state).map((folder) => [folder.id, folder]),
-  );
 
   return state.data.messages.filter((message) => {
-    const folder = scopedFolders.get(message.folderId);
-    if (!folder) {
+    if (!messageMatchesNavigationScope(state, message, Boolean(query))) {
       return false;
     }
-
-    if (state.selectedFolderId) {
-      if (message.folderId !== state.selectedFolderId) {
-        return false;
-      }
-    } else if (state.unifiedInbox && !query && folder.kind !== "inbox") {
-      return false;
-    }
-
-    if (!state.unifiedInbox && state.selectedAccountId) {
-      if (message.accountId !== state.selectedAccountId) {
-        return false;
-      }
-    }
-
     if (!query) {
       return true;
     }
@@ -455,6 +470,58 @@ export function messagesForScope(state: MailShellState) {
       message.bodyText ?? "",
     ].some((value) => value.toLocaleLowerCase().includes(query));
   });
+}
+
+export function searchResultIsVisibleInScope(
+  state: MailShellState,
+  message: MailMessage,
+) {
+  return messageMatchesNavigationScope(state, message, true);
+}
+
+export function accountLocalPreferences(
+  account: Pick<MailAccount, "localPreferences">,
+): AccountLocalPreferences {
+  return account.localPreferences ?? defaultAccountLocalPreferences;
+}
+
+function messageMatchesNavigationScope(
+  state: MailShellState,
+  message: MailMessage,
+  includeUnifiedNonInbox: boolean,
+) {
+  const account = state.data.accounts.find(
+    (candidate) => candidate.id === message.accountId,
+  );
+  if (!account) {
+    return false;
+  }
+
+  if (
+    state.unifiedInbox &&
+    !accountLocalPreferences(account).includeInUnifiedInbox
+  ) {
+    return false;
+  }
+
+  const folder = state.data.folders.find(
+    (candidate) =>
+      candidate.id === message.folderId &&
+      candidate.accountId === message.accountId,
+  );
+  if (!folder) {
+    return false;
+  }
+
+  if (state.selectedFolderId) {
+    return message.folderId === state.selectedFolderId;
+  }
+
+  if (state.unifiedInbox) {
+    return includeUnifiedNonInbox || folder.kind === "inbox";
+  }
+
+  return !state.selectedAccountId || message.accountId === state.selectedAccountId;
 }
 
 export function selectedMessage(state: MailShellState) {

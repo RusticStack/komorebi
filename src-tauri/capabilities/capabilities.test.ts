@@ -123,6 +123,7 @@ const accountCommandNames = new Set([
   "create_account",
   "reauth_account",
   "remove_account",
+  "update_account_settings",
   "test_account_connection",
   "get_account_auth_status",
 ]);
@@ -208,6 +209,7 @@ describe("Tauri capabilities", () => {
       "allow-create-account",
       "allow-reauth-account",
       "allow-remove-account",
+      "allow-update-account-settings",
       "allow-test-account-connection",
       "allow-get-account-auth-status",
       "allow-start-oauth-account-setup",
@@ -258,6 +260,7 @@ describe("Tauri capabilities", () => {
       "create_account",
       "reauth_account",
       "remove_account",
+      "update_account_settings",
       "test_account_connection",
       "get_account_auth_status",
       "start_oauth_account_setup",

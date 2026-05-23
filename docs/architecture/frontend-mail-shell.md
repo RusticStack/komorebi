@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management UI, and Gmail/Microsoft OAuth loopback UI wiring implemented; live sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, and Gmail/Microsoft OAuth loopback UI wiring implemented; live sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -207,8 +207,9 @@ The Settings drawer uses `AccountSignatureSettings` for account management and s
 - Gmail/Microsoft OAuth reauthentication through `start_oauth_account_reauth`
 - account removal through `remove_account`
 - redacted auth status through `get_account_auth_status`
+- display-name, signature HTML, and per-account unified-inbox preference persistence through `update_account_settings`, followed by a `load_mail_shell` cache reload
 
-With no accounts it still shows the accountless settings state plus the add-account form. With account data it can edit the local in-memory account signature model. Persisting signatures through a frontend-callable SQLite command remains future settings work.
+With no accounts it still shows the accountless settings state plus the add-account form. With account data it edits persisted account display metadata, local unified-inbox preferences, and sanitized signatures through typed account commands. Signature previews continue to use `SafeEmailBody`.
 
 The Gmail/Microsoft setup and reauth controls never ask for passwords, app passwords, refresh tokens, authorization codes, or access tokens. The backend command opens the system browser and returns only a redacted setup response or error reason. The generic Test setup button is disabled for OAuth providers because provider consent is validated by the loopback flow, not by a secret-bearing configuration test.
 
@@ -243,6 +244,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - 10,000-message virtualized rendering with bounded DOM row count and stable row state during scroll
 - composer drawer entry
 - settings drawer entry
+- settings account preference/signature save command and cache reload
 - loading/error shell states
 - first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
 

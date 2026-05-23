@@ -12,8 +12,10 @@ use komorebi_lib::{
     account_management::{
         create_account_from_connection, get_account_auth_status_from_connection,
         reauth_account_from_connection, remove_account_from_connection,
-        test_account_connection_request_with_tester, AccountAuthStatusRequest,
-        AccountCredentialStore, AccountReauthRequest, AccountRemovalRequest, AccountSetupRequest,
+        test_account_connection_request_with_tester, update_account_settings_from_connection,
+        AccountAuthStatusRequest, AccountCredentialStore, AccountLocalPreferences,
+        AccountReauthRequest, AccountRemovalRequest, AccountSettingsUpdateRequest,
+        AccountSetupRequest,
     },
     attachment_safety::MAX_ATTACHMENT_BYTES,
     composer::{
@@ -375,6 +377,53 @@ fn account_management_commands_reject_bad_auth_ids_payloads_and_credential_failu
 
     create_account_from_connection(&connection, &mut credentials, account_setup_request())
         .expect("create account after denial checks");
+
+    let settings_response = update_account_settings_from_connection(
+        &connection,
+        AccountSettingsUpdateRequest {
+            account_id: ACCOUNT_ID.into(),
+            display_name: Some("Inbox Owner".into()),
+            signature_html: "<p>Regards</p>".into(),
+            local_preferences: AccountLocalPreferences {
+                include_in_unified_inbox: false,
+            },
+        },
+    )
+    .expect("account settings update succeeds");
+    assert_eq!(
+        settings_response.local_preferences,
+        AccountLocalPreferences {
+            include_in_unified_inbox: false
+        }
+    );
+
+    let mut invalid_settings_id = AccountSettingsUpdateRequest {
+        account_id: "../secret".into(),
+        display_name: Some("Inbox Owner".into()),
+        signature_html: "<p>Regards</p>".into(),
+        local_preferences: AccountLocalPreferences::default(),
+    };
+    let invalid_settings_error =
+        update_account_settings_from_connection(&connection, invalid_settings_id.clone())
+            .expect_err("settings invalid account id is rejected");
+    assert!(invalid_settings_error
+        .reason
+        .contains("account_id is invalid"));
+
+    invalid_settings_id.account_id = "acct_missing".into();
+    let unknown_settings_error =
+        update_account_settings_from_connection(&connection, invalid_settings_id.clone())
+            .expect_err("settings unknown account is rejected");
+    assert_eq!(unknown_settings_error.reason, "account was not found");
+
+    invalid_settings_id.account_id = ACCOUNT_ID.into();
+    invalid_settings_id.display_name = Some("x".repeat(257));
+    let oversized_settings_error =
+        update_account_settings_from_connection(&connection, invalid_settings_id)
+            .expect_err("settings oversized display name is rejected");
+    assert!(oversized_settings_error
+        .reason
+        .contains("display_name exceeds"));
 
     let bad_reauth = reauth_account_from_connection(
         &connection,

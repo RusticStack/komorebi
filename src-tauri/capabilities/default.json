@@ -14,6 +14,7 @@
     "allow-create-account",
     "allow-reauth-account",
     "allow-remove-account",
+    "allow-update-account-settings",
     "allow-test-account-connection",
     "allow-get-account-auth-status",
     "allow-start-oauth-account-setup",

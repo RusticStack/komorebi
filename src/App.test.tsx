@@ -876,6 +876,72 @@ describe("App", () => {
     ).toBeVisible();
   });
 
+  it("saves account settings through the typed command and reloads the cache snapshot", async () => {
+    const updatedMail: MailShellData = {
+      ...fixtureMail,
+      accounts: fixtureMail.accounts.map((account) =>
+        account.id === "acct_personal"
+          ? {
+              ...account,
+              displayName: "Sender",
+              label: "Sender",
+              localPreferences: { includeInUnifiedInbox: false },
+              signatureHtml: "<p>Regards</p>",
+            }
+          : account,
+      ),
+    };
+    const loadMailShellData = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureMail)
+      .mockResolvedValueOnce(updatedMail);
+    const updateAccountSettings = vi.fn().mockResolvedValue({
+      account: {
+        authKind: "oauth2",
+        authStatus: "connected",
+        displayEmail: "person@example.com",
+        displayName: "Sender",
+        id: "acct_personal",
+        providerKind: "gmail",
+        username: "person@example.com",
+      },
+      localPreferences: { includeInUnifiedInbox: false },
+      signatureHtml: "<p>Regards</p>",
+    });
+
+    render(
+      <App
+        loadMailShellData={loadMailShellData}
+        updateAccountSettings={updateAccountSettings}
+      />,
+    );
+
+    expect(await screen.findByText("Roadmap review")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+
+    fireEvent.change(within(settings).getByLabelText("Account display name"), {
+      target: { value: "Sender" },
+    });
+    fireEvent.click(within(settings).getByLabelText("Include in unified inbox"));
+    fireEvent.change(within(settings).getByLabelText("Signature HTML"), {
+      target: { value: "<p>Regards</p>" },
+    });
+    fireEvent.click(within(settings).getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() =>
+      expect(updateAccountSettings).toHaveBeenCalledWith({
+        accountId: "acct_personal",
+        displayName: "Sender",
+        localPreferences: { includeInUnifiedInbox: false },
+        signatureHtml: "<p>Regards</p>",
+      }),
+    );
+    await waitFor(() => expect(loadMailShellData).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Account settings were saved.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Sender/ })).toBeVisible();
+  });
+
   it("renders loading and error states for the shell surfaces", () => {
     const loadState: MailShellLoadState = {
       accounts: "loading",

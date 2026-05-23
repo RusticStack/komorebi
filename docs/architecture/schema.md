@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning, and per-account signatures implemented.
+Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning, per-account signatures, and per-account local preferences implemented.
 Last reviewed: 2026-05-23.
 
 ## Implementation
@@ -27,14 +27,16 @@ Staged composer attachment persistence is implemented by migration `006_composer
 
 Local recent-recipient persistence is implemented by migration `007_recent_recipients.sql` and `src-tauri/src/composer.rs`. Confirmed composer sends update account-scoped rows used only for local autocomplete.
 
-Per-account signature persistence is implemented in `src-tauri/src/account_signatures.rs` through the existing `accounts.signature_html` column. Signatures are sanitized account metadata and are not credentials.
+Per-account signature persistence is implemented in `src-tauri/src/account_signatures.rs` and `src-tauri/src/account_management.rs` through the existing `accounts.signature_html` column. Signatures are sanitized account metadata and are not credentials.
+
+Per-account local preferences are implemented in `src-tauri/src/account_management.rs` through the existing JSON `settings` table using keys shaped as `account:{account_id}:local_preferences`. The current preference is `includeInUnifiedInbox`, which `load_mail_shell` and `search_mail` use to exclude opted-out accounts from unified views while leaving explicit account scope usable. No schema migration was required because `settings` already stores validated JSON objects.
 
 ## Tables
 
 The current schema defines:
 
 - `schema_migrations`: applied migration history.
-- `settings`: global preferences stored as validated JSON values.
+- `settings`: global and scoped preferences stored as validated JSON values, including per-account local preferences under `account:{account_id}:local_preferences`.
 - `accounts`: non-secret account metadata and credential references only.
 - `folders`: provider folders, special-use classification, preserved provider attributes, sync counters, UIDVALIDITY, and sync status.
 - `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata.
@@ -104,6 +106,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - SQLite account rows never include password, app-password, access-token, refresh-token, client-secret, authorization-code, or authorization-header columns.
 - `accounts.credential_ref` is the only persisted secret reference and is unique.
 - `accounts.signature_html` stores optional sanitized HTML account metadata. Empty signatures store `NULL`.
+- Per-account local preference rows in `settings` store validated JSON objects and are deleted during account removal.
 - Generic IMAP/SMTP accounts must include IMAP and SMTP host, port, and security metadata.
 - Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
 - `folders.attributes_json` must be valid JSON and stores normalized provider LIST/XLIST/SPECIAL-USE attributes for roles the current enum does not model directly.

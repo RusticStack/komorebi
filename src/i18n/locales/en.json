@@ -316,6 +316,7 @@
         "oauth": "Start OAuth",
         "reauth": "Reauthenticate",
         "remove": "Remove account",
+        "saveSettings": "Save settings",
         "status": "Check status",
         "test": "Test setup"
       },
@@ -338,14 +339,17 @@
         "oauthTestUnavailable": "OAuth setup is completed through the browser flow.",
         "reauthUnavailable": "Reauthentication is unavailable for this account.",
         "removeUnavailable": "Account removal is unavailable for this account.",
+        "settingsUnavailable": "Account settings persistence is unavailable for this account.",
         "statusUnavailable": "Auth status is unavailable for this account.",
         "testUnavailable": "Account setup testing is unavailable in this runtime."
       },
       "fields": {
+        "accountDisplayName": "Account display name",
         "authKind": "Authentication",
         "deleteLocalCache": "Delete local cache for this account",
         "displayEmail": "Email address",
         "displayName": "Display name",
+        "includeInUnifiedInbox": "Include in unified inbox",
         "imapHost": "IMAP host",
         "imapPort": "IMAP port",
         "imapSecurity": "IMAP security",
@@ -364,6 +368,7 @@
         "created": "{{email}} was added.",
         "reauthed": "Account credentials were replaced.",
         "removed": "Account was removed.",
+        "settingsSaved": "Account settings were saved.",
         "testReady": "Configuration validated."
       },
       "providers": {
@@ -372,8 +377,10 @@
         "microsoft": "Microsoft"
       },
       "sections": {
+        "authentication": "Authentication",
         "incoming": "Incoming mail",
         "outgoing": "Outgoing mail",
+        "preferences": "Preferences",
         "selected": "Selected account"
       },
       "security": {

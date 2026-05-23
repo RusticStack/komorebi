@@ -15,6 +15,8 @@ import type {
   AccountAuthStatusRequest,
   AccountAuthStatusView,
   AccountConnectionTestResponse,
+  AccountSettingsUpdateRequest,
+  AccountSettingsUpdateResponse,
   OAuthAccountReauthRequest,
   OAuthAccountSetupRequest,
   AccountReauthRequest,
@@ -34,6 +36,7 @@ const LIST_RECENT_RECIPIENTS_COMMAND = "list_recent_recipients";
 const CREATE_ACCOUNT_COMMAND = "create_account";
 const REAUTH_ACCOUNT_COMMAND = "reauth_account";
 const REMOVE_ACCOUNT_COMMAND = "remove_account";
+const UPDATE_ACCOUNT_SETTINGS_COMMAND = "update_account_settings";
 const TEST_ACCOUNT_CONNECTION_COMMAND = "test_account_connection";
 const GET_ACCOUNT_AUTH_STATUS_COMMAND = "get_account_auth_status";
 const START_OAUTH_ACCOUNT_SETUP_COMMAND = "start_oauth_account_setup";
@@ -146,6 +149,14 @@ export async function removeAccountFromTauri(
   request: AccountRemovalRequest,
 ): Promise<AccountRemovalResponse> {
   return invoke<AccountRemovalResponse>(REMOVE_ACCOUNT_COMMAND, { request });
+}
+
+export async function updateAccountSettingsFromTauri(
+  request: AccountSettingsUpdateRequest,
+): Promise<AccountSettingsUpdateResponse> {
+  return invoke<AccountSettingsUpdateResponse>(UPDATE_ACCOUNT_SETTINGS_COMMAND, {
+    request,
+  });
 }
 
 export async function testAccountConnectionFromTauri(

@@ -30,11 +30,19 @@ pub struct MailShellAccount {
     pub id: String,
     pub label: String,
     pub email: String,
+    pub display_name: Option<String>,
     pub provider_kind: String,
     pub auth_kind: String,
     pub status: String,
     pub unread_count: u32,
     pub signature_html: Option<String>,
+    pub local_preferences: MailShellAccountLocalPreferences,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailShellAccountLocalPreferences {
+    pub include_in_unified_inbox: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -220,6 +228,7 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
            accounts.id,
            COALESCE(NULLIF(accounts.display_name, ''), accounts.display_email) AS label,
            accounts.display_email,
+           accounts.display_name,
            accounts.provider_kind,
            accounts.auth_kind,
            CASE
@@ -242,8 +251,17 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
              ),
              0
            ) AS unread_count,
-           accounts.signature_html
+           accounts.signature_html,
+           CASE
+             WHEN COALESCE(
+               json_extract(account_preferences.value_json, '$.includeInUnifiedInbox'),
+               1
+             ) = 0 THEN 0
+             ELSE 1
+           END AS include_in_unified_inbox
          FROM accounts
+         LEFT JOIN settings AS account_preferences
+           ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
          WHERE accounts.removed_at IS NULL
            AND accounts.auth_status != 'removed'
          ORDER BY accounts.display_email COLLATE NOCASE, accounts.id",
@@ -254,11 +272,15 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
             id: row.get(0)?,
             label: row.get(1)?,
             email: row.get(2)?,
-            provider_kind: row.get(3)?,
-            auth_kind: row.get(4)?,
-            status: row.get(5)?,
-            unread_count: checked_u32(row.get::<_, i64>(6)?, "account unread count")?,
-            signature_html: row.get(7)?,
+            display_name: row.get(3)?,
+            provider_kind: row.get(4)?,
+            auth_kind: row.get(5)?,
+            status: row.get(6)?,
+            unread_count: checked_u32(row.get::<_, i64>(7)?, "account unread count")?,
+            signature_html: row.get(8)?,
+            local_preferences: MailShellAccountLocalPreferences {
+                include_in_unified_inbox: row.get::<_, i64>(9)? != 0,
+            },
         })
     })?;
 
@@ -432,11 +454,20 @@ fn search_messages(
          JOIN accounts ON accounts.id = messages.account_id
          JOIN folders ON folders.account_id = messages.account_id
           AND folders.id = messages.folder_id
+         LEFT JOIN settings AS account_preferences
+           ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
          WHERE messages_fts MATCH ?1
            AND accounts.removed_at IS NULL
            AND accounts.auth_status != 'removed'
            AND (?2 IS NULL OR messages.account_id = ?2)
            AND (?3 IS NULL OR messages.folder_id = ?3)
+           AND (
+             ?2 IS NOT NULL
+             OR COALESCE(
+               json_extract(account_preferences.value_json, '$.includeInUnifiedInbox'),
+               1
+             ) != 0
+           )
          ORDER BY
            rank,
            COALESCE(messages.date_received, messages.internal_date, messages.created_at) DESC,
@@ -745,21 +776,29 @@ mod tests {
                     id: "acct_personal".to_string(),
                     label: "Personal".to_string(),
                     email: "person@example.com".to_string(),
+                    display_name: Some("Personal".to_string()),
                     provider_kind: "gmail".to_string(),
                     auth_kind: "oauth2".to_string(),
                     status: "connected".to_string(),
                     unread_count: 1,
                     signature_html: Some("<p>Personal signature</p>".to_string()),
+                    local_preferences: MailShellAccountLocalPreferences {
+                        include_in_unified_inbox: true,
+                    },
                 },
                 MailShellAccount {
                     id: "acct_work".to_string(),
                     label: "work@example.com".to_string(),
                     email: "work@example.com".to_string(),
+                    display_name: None,
                     provider_kind: "microsoft".to_string(),
                     auth_kind: "oauth2".to_string(),
                     status: "syncing".to_string(),
                     unread_count: 2,
                     signature_html: None,
+                    local_preferences: MailShellAccountLocalPreferences {
+                        include_in_unified_inbox: true,
+                    },
                 },
             ]
         );
@@ -969,6 +1008,56 @@ mod tests {
             archive_search.results[0].folder_id,
             "folder_personal_archive"
         );
+    }
+
+    #[test]
+    fn account_local_preferences_exclude_accounts_from_unified_search_only() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+        connection
+            .execute(
+                "INSERT INTO settings (key, value_json, value_type)
+                 VALUES (
+                   'account:acct_work:local_preferences',
+                   '{\"includeInUnifiedInbox\":false}',
+                   'object'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let snapshot = load_mail_shell_from_connection(&connection).unwrap();
+        let work_account = snapshot
+            .accounts
+            .iter()
+            .find(|account| account.id == "acct_work")
+            .expect("work account loaded");
+        assert!(!work_account.local_preferences.include_in_unified_inbox);
+
+        let unified_search = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice".to_string(),
+                account_id: None,
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+        assert!(unified_search.results.is_empty());
+
+        let account_search = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice".to_string(),
+                account_id: Some("acct_work".to_string()),
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+        assert_eq!(account_search.results.len(), 1);
+        assert_eq!(account_search.results[0].id, "msg_work");
     }
 
     #[test]

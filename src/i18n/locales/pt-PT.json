@@ -316,6 +316,7 @@
         "oauth": "Iniciar OAuth",
         "reauth": "Reautenticar",
         "remove": "Remover conta",
+        "saveSettings": "Guardar definicoes",
         "status": "Ver estado",
         "test": "Testar configuracao"
       },
@@ -338,14 +339,17 @@
         "oauthTestUnavailable": "A configuracao OAuth e concluida pelo fluxo do navegador.",
         "reauthUnavailable": "A reautenticacao esta indisponivel para esta conta.",
         "removeUnavailable": "A remocao de conta esta indisponivel para esta conta.",
+        "settingsUnavailable": "A persistencia das definicoes da conta esta indisponivel para esta conta.",
         "statusUnavailable": "O estado de autenticacao esta indisponivel para esta conta.",
         "testUnavailable": "O teste de configuracao de conta esta indisponivel neste runtime."
       },
       "fields": {
+        "accountDisplayName": "Nome apresentado da conta",
         "authKind": "Autenticacao",
         "deleteLocalCache": "Eliminar cache local desta conta",
         "displayEmail": "Endereco de email",
         "displayName": "Nome apresentado",
+        "includeInUnifiedInbox": "Incluir na caixa de entrada unificada",
         "imapHost": "Host IMAP",
         "imapPort": "Porta IMAP",
         "imapSecurity": "Seguranca IMAP",
@@ -364,6 +368,7 @@
         "created": "{{email}} foi adicionada.",
         "reauthed": "As credenciais da conta foram substituidas.",
         "removed": "A conta foi removida.",
+        "settingsSaved": "As definicoes da conta foram guardadas.",
         "testReady": "Configuracao validada."
       },
       "providers": {
@@ -372,8 +377,10 @@
         "microsoft": "Microsoft"
       },
       "sections": {
+        "authentication": "Autenticacao",
         "incoming": "Correio recebido",
         "outgoing": "Correio enviado",
+        "preferences": "Preferencias",
         "selected": "Conta selecionada"
       },
       "security": {
