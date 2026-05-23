@@ -90,7 +90,7 @@ This policy controls which secrets are allowed to reach the credential backend d
 
 - Add provider setup documentation for registering OAuth clients and redirect URIs.
 - Add richer UI states for pending authorization, callback failure, reconnect-needed, and account removal.
-- Add live sync/send adapter verification and opt-in live-account smoke tests before claiming broad provider support.
+- Add background live-sync worker orchestration, live SMTP adapter verification, provider setup docs, and opt-in live-account smoke tests before claiming broad provider support.
 
 ## References
 

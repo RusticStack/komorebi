@@ -1,13 +1,13 @@
 # IMAP Sync State Machine
 
-Status: initial Rust state machine, folder worker, folder/flag semantics, and SQLite cache integration implemented.
-Last reviewed: 2026-05-22.
+Status: Rust state machine, live IMAP protocol adapter, folder worker, folder/flag semantics, and SQLite cache integration implemented.
+Last reviewed: 2026-05-23.
 
 ## Current Scope
 
-The code source of truth is `src-tauri/src/imap_sync.rs`.
+The code sources of truth are `src-tauri/src/imap_sync.rs` and `src-tauri/src/imap_live.rs`.
 
-The initial sync layer is provider-agnostic. It does not connect to a live IMAP socket yet; instead, it defines `ImapSyncServer` and `ImapIdleServer` traits that a future `async-imap` adapter can implement and tests them with deterministic fake-server fixtures. This keeps UID, flag, expunge, IDLE, polling fallback, cancellation, reconnect, and cache-mutation semantics testable without real accounts.
+The sync engine is provider-agnostic and still runs behind `ImapSyncServer` and `ImapIdleServer` traits so sync semantics can be tested without real accounts. `src-tauri/src/imap_live.rs` now implements those traits with blocking `native-tls`/TCP IMAP protocol I/O. The project has not adopted Tokio or `async-imap`; evaluate that separately before changing the runtime model.
 
 Implemented now:
 
@@ -31,12 +31,19 @@ Implemented now:
 - Stable message ids shared with the MIME normalization boundary.
 - Server flag normalization for `\Seen`, `\Flagged`, `\Answered`, `\Draft`, `\Deleted`, `\Recent`, and provider/custom keywords.
 - Folder attribute normalization for IMAP LIST/XLIST/SPECIAL-USE style attributes, including supported special-use detection and preservation of unknown provider attributes.
+- Live IMAP connection setup over TLS or STARTTLS, with plaintext available only in tests.
+- Generic password `LOGIN` and Gmail/Microsoft-style OAuth `XOAUTH2` authentication without returning secrets to React.
+- Live `LIST`, `SELECT`, `UID SEARCH`, chunked `UID FETCH`, flag `UID STORE`, `EXPUNGE`, `CAPABILITY`, `IDLE`, reconnect, cancellation, timeout, max-literal, and redacted-error handling.
+- Live fetch mapping from RFC822/RFC5322 bytes to `RemoteMessage` through the MIME normalization boundary. Attachment metadata/file persistence from live fetch is still separate work.
+- Local socket tests for live adapter password auth, XOAUTH2, folder discovery, UID search/fetch, flag fetch/update, expunge, IDLE timeout/change handling, reconnect after network drop, cancellation, redacted auth errors, and parser edge cases.
 
 Not implemented by this task:
 
-- Live `async-imap` network adapter.
-- Live adapter calls into MIME normalization and attachment extraction/storage writes.
+- Tokio/`async-imap` integration or migration.
+- Background worker orchestration that starts live account workers on app startup/account changes.
+- Live attachment extraction/storage writes from fetched messages.
 - Live sync-status UI fed by background workers.
+- Opt-in live-provider smoke tests using user-provided test accounts.
 
 ## State Flow
 
@@ -154,6 +161,14 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - SELECT metadata with UIDVALIDITY, UIDNEXT, EXISTS, and EXPUNGE.
 - IDLE continuation, EXISTS wakeup, EXPUNGE notification, and clean DONE completion.
 
+`src-tauri/src/imap_live.rs` tests cover:
+
+- Live adapter mapping for password auth, LIST, SELECT, UID SEARCH, UID FETCH, flag fetch/update, EXPUNGE, CAPABILITY, and IDLE.
+- XOAUTH2 SASL response construction and redacted authentication failure.
+- IDLE timeout and cancellation behavior.
+- Reconnect after a dropped socket and reauthentication before further protocol work.
+- LIST and FETCH parser edge cases, including quoted folder names and missing UID denial.
+
 No test uses a real mailbox or real credentials.
 
 ## Documentation Sync
@@ -161,6 +176,7 @@ No test uses a real mailbox or real credentials.
 Keep this document synchronized with:
 
 - `src-tauri/src/imap_sync.rs`
+- `src-tauri/src/imap_live.rs`
 - `src-tauri/src/mime_normalization.rs`
 - `src-tauri/src/schema.rs`
 - `src-tauri/migrations/*.sql`

@@ -193,7 +193,7 @@ impl RemoteFlag {
             .collect()
     }
 
-    fn as_imap_string(&self) -> String {
+    pub(crate) fn as_imap_string(&self) -> String {
         match self {
             Self::Seen => "\\Seen".into(),
             Self::Flagged => "\\Flagged".into(),

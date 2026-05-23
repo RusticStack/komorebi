@@ -6,6 +6,7 @@ pub mod auth;
 pub mod composer;
 pub mod credentials;
 pub mod draft_persistence;
+pub mod imap_live;
 pub mod imap_sync;
 pub mod ipc_boundary;
 pub mod ipc_validation;

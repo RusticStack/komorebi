@@ -30,6 +30,15 @@ pub struct ParseInboundMimeRequest<'a> {
     pub internal_date: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ParseRemoteMessageRequest<'a> {
+    pub uid_validity: u64,
+    pub uid: u64,
+    pub raw_message: &'a [u8],
+    pub internal_date: Option<&'a str>,
+    pub flags: &'a BTreeSet<RemoteFlag>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedInboundMime {
     pub account_id: String,
@@ -160,51 +169,48 @@ pub fn parse_inbound_mime(
     normalize_message(request, &message)
 }
 
+pub fn parse_remote_message_from_raw_mime(
+    request: ParseRemoteMessageRequest<'_>,
+) -> Result<RemoteMessage, MimeParseError> {
+    if request.uid_validity == 0 || request.uid == 0 {
+        return Err(MimeParseError::InvalidUid);
+    }
+
+    if request.raw_message.is_empty() {
+        return Err(MimeParseError::EmptyMessage);
+    }
+
+    let message = MessageParser::default()
+        .parse(request.raw_message)
+        .ok_or(MimeParseError::Unparseable)?;
+    let has_attachments = message.attachments().next().is_some();
+
+    normalize_remote_message(
+        request.uid_validity,
+        request.uid,
+        request.raw_message.len(),
+        request.internal_date,
+        request.flags,
+        &message,
+        has_attachments,
+    )
+}
+
 fn normalize_message(
     request: ParseInboundMimeRequest<'_>,
     message: &Message<'_>,
 ) -> Result<ParsedInboundMime, MimeParseError> {
     let mut warnings = collect_encoding_warnings(message);
     let attachments = normalize_attachments(request, message, &mut warnings)?;
-    let from = collect_addresses(message.from());
-    let sender = from.first();
-    let body_text = message.body_text(0).map(cow_to_string);
-    let body_html = message.body_html(0).map(cow_to_string);
-    let snippet = message.body_preview(SNIPPET_LEN).map(cow_to_string);
-    let date_received = message
-        .date()
-        .map(|date| date.to_rfc3339())
-        .or_else(|| request.internal_date.map(str::to_string));
-
-    let remote_message = RemoteMessage {
-        uid_validity: request.uid_validity,
-        uid: request.uid,
-        provider_message_id: None,
-        rfc_message_id: message.message_id().map(str::to_string),
-        subject: message.subject().map_or_else(String::new, str::to_string),
-        sender_name: sender.and_then(|address| address.name.clone()),
-        sender_email: sender.and_then(|address| address.address.clone()),
-        to_addresses_json: serialize_addresses(&collect_addresses(message.to()))?,
-        cc_addresses_json: serialize_addresses(&collect_addresses(message.cc()))?,
-        bcc_addresses_json: serialize_addresses(&collect_addresses(message.bcc()))?,
-        reply_to_addresses_json: serialize_addresses(&collect_addresses(message.reply_to()))?,
-        date_received,
-        internal_date: request.internal_date.map(str::to_string),
-        flags: BTreeSet::<RemoteFlag>::new(),
-        body_text,
-        body_html,
-        snippet,
-        size_bytes: Some(
-            request
-                .raw_message
-                .len()
-                .try_into()
-                .map_err(|_| MimeParseError::SizeOverflow)?,
-        ),
-        has_attachments: !attachments.is_empty(),
-        in_reply_to: first_header_text(message.in_reply_to()),
-        references_json: serialize_text_list(&header_texts(message.references()))?,
-    };
+    let remote_message = normalize_remote_message(
+        request.uid_validity,
+        request.uid,
+        request.raw_message.len(),
+        request.internal_date,
+        &BTreeSet::new(),
+        message,
+        !attachments.is_empty(),
+    )?;
 
     Ok(ParsedInboundMime {
         account_id: request.account_id.to_string(),
@@ -218,6 +224,54 @@ fn normalize_message(
         message: remote_message,
         attachments,
         warnings,
+    })
+}
+
+fn normalize_remote_message(
+    uid_validity: u64,
+    uid: u64,
+    raw_message_len: usize,
+    internal_date: Option<&str>,
+    flags: &BTreeSet<RemoteFlag>,
+    message: &Message<'_>,
+    has_attachments: bool,
+) -> Result<RemoteMessage, MimeParseError> {
+    let from = collect_addresses(message.from());
+    let sender = from.first();
+    let body_text = message.body_text(0).map(cow_to_string);
+    let body_html = message.body_html(0).map(cow_to_string);
+    let snippet = message.body_preview(SNIPPET_LEN).map(cow_to_string);
+    let date_received = message
+        .date()
+        .map(|date| date.to_rfc3339())
+        .or_else(|| internal_date.map(str::to_string));
+
+    Ok(RemoteMessage {
+        uid_validity,
+        uid,
+        provider_message_id: None,
+        rfc_message_id: message.message_id().map(str::to_string),
+        subject: message.subject().map_or_else(String::new, str::to_string),
+        sender_name: sender.and_then(|address| address.name.clone()),
+        sender_email: sender.and_then(|address| address.address.clone()),
+        to_addresses_json: serialize_addresses(&collect_addresses(message.to()))?,
+        cc_addresses_json: serialize_addresses(&collect_addresses(message.cc()))?,
+        bcc_addresses_json: serialize_addresses(&collect_addresses(message.bcc()))?,
+        reply_to_addresses_json: serialize_addresses(&collect_addresses(message.reply_to()))?,
+        date_received,
+        internal_date: internal_date.map(str::to_string),
+        flags: flags.clone(),
+        body_text,
+        body_html,
+        snippet,
+        size_bytes: Some(
+            raw_message_len
+                .try_into()
+                .map_err(|_| MimeParseError::SizeOverflow)?,
+        ),
+        has_attachments,
+        in_reply_to: first_header_text(message.in_reply_to()),
+        references_json: serialize_text_list(&header_texts(message.references()))?,
     })
 }
 

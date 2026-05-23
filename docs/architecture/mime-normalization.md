@@ -1,7 +1,7 @@
 # MIME Normalization
 
 Status: inbound parser boundary implemented in Rust.
-Last reviewed: 2026-05-22.
+Last reviewed: 2026-05-23.
 
 ## Current Scope
 
@@ -13,9 +13,9 @@ Komorebi normalizes raw inbound RFC822/RFC5322 message bytes with the Rust `mail
 - `ParsedAttachmentRecord` for the `attachments` table fields that can be derived before attachment bytes are written to app storage.
 - `MimeParseWarning` entries for accepted-but-risky parts, such as decoding problems or attachments that fail storage safety checks.
 
-`persist_parsed_inbound_mime` writes the normalized message and attachment metadata to a migrated SQLite database in one transaction. It does not write attachment bytes to disk.
+`parse_remote_message_from_raw_mime` maps fetched RFC822/RFC5322 bytes into a `RemoteMessage` without persisting attachment metadata. The live IMAP adapter uses this narrower helper for protocol fetches. `persist_parsed_inbound_mime` writes the normalized message and attachment metadata to a migrated SQLite database in one transaction. It does not write attachment bytes to disk.
 
-This task implements normalization, metadata persistence, and fixture tests. It does not connect to a live IMAP socket, persist attachment files, or expose parser commands to React.
+This task implements normalization, metadata persistence, a live-adapter message mapping helper, and fixture tests. It does not persist attachment files or expose parser commands to React.
 
 ## Message Record Rules
 
@@ -91,12 +91,13 @@ Malformed-but-parseable messages are accepted when stable records can still be p
 - Idempotent SQLite persistence of normalized message rows and attachment metadata.
 - Missing multipart closing boundary with a recoverable body.
 - Empty message, invalid UID, and invalid account/folder id denial paths.
+- Raw-message-to-`RemoteMessage` mapping used by the live IMAP adapter.
 
 No test uses a real mailbox, real account, or real user message. Fixture files are synthetic and documented in `src-tauri/fixtures/mime/README.md`.
 
 ## Not Implemented
 
-- Live `async-imap` adapter integration that fetches raw RFC822 bytes and calls this boundary.
+- Live-fetched attachment metadata persistence through `persist_parsed_inbound_mime`.
 - Persisting attachment bytes to app-generated storage paths.
 - Inline image resolution in the React reader.
 
@@ -108,6 +109,7 @@ Keep this document synchronized with:
 
 - `src-tauri/src/mime_normalization.rs`
 - `src-tauri/src/imap_sync.rs`
+- `src-tauri/src/imap_live.rs`
 - `src-tauri/src/attachment_safety.rs`
 - `docs/architecture/sync-state-machine.md`
 - `docs/architecture/attachment-safety.md`
