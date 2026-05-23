@@ -10,8 +10,26 @@ Komorebi's main webview grants only reviewed feature-specific Tauri permissions.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
 - `default.permissions` contains only reviewed mail-shell and composer commands: `allow-load-mail-shell`, `allow-search-mail`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-send-composer-email`, and `allow-list-recent-recipients`.
 - No remote origins are allowed to use Tauri APIs.
+- `app.security.csp` is a reviewed production content security policy. It keeps script execution local-only, blocks object/frame/worker/form/embed surfaces, denies remote network/image/script sources by default, permits only Tauri IPC in `connect-src`, and permits `data:`/`blob:` images plus inline CSS for the current TipTap rich editor and sanitized rich HTML behavior.
+- `app.security.devCsp` is separate and limited to local Vite/HMR plus Tauri IPC. Do not copy development `unsafe-eval`, localhost, or WebSocket allowances into the production CSP.
 
 Tauri capability files are kept as standalone files and referenced by identifier in `tauri.conf.json`. This avoids the Tauri default where every file in `src-tauri/capabilities` is enabled automatically when `security.capabilities` is omitted.
+
+## Content Security Policy
+
+Production CSP in `src-tauri/tauri.conf.json` is:
+
+```text
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; manifest-src 'self'
+```
+
+The intentional allowances are narrow:
+
+- `style-src 'unsafe-inline'` is required for current rich editor and sanitized rich email/signature style attributes.
+- `img-src data: blob:` is required for user-selected inline composer images before they are staged through the backend.
+- `connect-src ipc: http://ipc.localhost` is required for Tauri IPC.
+
+The production CSP must not include wildcard sources, `unsafe-eval`, localhost development servers, remote `http`/`https` sources, broad frame/object/media/worker allowances, or unreviewed custom schemes. Future features that need external link opening, remote content, attachment preview materialization, workers, or media must update this policy and its tests with the feature-specific threat model.
 
 ## Denied By Default
 
@@ -69,6 +87,8 @@ Rules for likely future plugins:
 - The default capability targets only the main window and grants only the reviewed mail-shell and composer command permissions.
 - Forbidden plugin permissions, remote origins, wildcard windows, and unreviewed custom-command registrations are absent.
 - Rust does not register forbidden Tauri plugins.
+- Production CSP exactly matches the reviewed source list and rejects wildcard, `unsafe-eval`, localhost, and remote HTTPS broadening.
+- Development CSP exactly matches the reviewed local Vite/HMR and Tauri IPC source list.
 
 Run `pnpm tauri build --no-bundle` after capability, Tauri config, or build script changes to make Tauri validate the configuration without requiring installer tooling.
 

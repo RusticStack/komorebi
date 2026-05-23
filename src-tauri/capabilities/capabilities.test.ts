@@ -21,6 +21,8 @@ type TauriConfig = {
   app?: {
     security?: {
       capabilities?: unknown;
+      csp?: unknown;
+      devCsp?: unknown;
     };
   };
 };
@@ -66,6 +68,42 @@ const forbiddenAttachmentOpenCommands = [
   "extract_attachment",
 ];
 
+const expectedProductionCsp = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self'",
+  "connect-src 'self' ipc: http://ipc.localhost",
+  "media-src 'none'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "worker-src 'none'",
+  "child-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "manifest-src 'self'",
+].join("; ");
+
+const expectedDevelopmentCsp = [
+  "default-src 'self' http://localhost:1420",
+  "script-src 'self' 'unsafe-eval' http://localhost:1420",
+  "style-src 'self' 'unsafe-inline' http://localhost:1420",
+  "img-src 'self' data: blob: http://localhost:1420",
+  "font-src 'self' data: http://localhost:1420",
+  "connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 ws://localhost:1421",
+  "media-src 'none'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "worker-src 'none'",
+  "child-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "manifest-src 'self'",
+].join("; ");
+
 const capabilityFileNames = readdirSync(capabilityDir).filter((fileName) =>
   fileName.endsWith(".json"),
 );
@@ -91,6 +129,36 @@ describe("Tauri capabilities", () => {
 
     expect(tauriConfig.app?.security?.capabilities).toEqual(["default"]);
     expect(capabilityFileNames).toEqual(["default.json"]);
+  });
+
+  it("keeps a restrictive production CSP for the main webview", () => {
+    const tauriConfig = readJson<TauriConfig>(tauriConfigPath);
+    const csp = tauriConfig.app?.security?.csp;
+
+    expect(csp).toBe(expectedProductionCsp);
+    expect(csp).not.toContain("*");
+    expect(csp).not.toContain("'unsafe-eval'");
+    expect(csp).not.toContain("http://localhost");
+    expect(csp).not.toContain("https:");
+    expect(csp).toContain("connect-src 'self' ipc: http://ipc.localhost");
+    expect(csp).toContain("img-src 'self' data: blob:");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+  });
+
+  it("keeps development CSP limited to local Vite and Tauri IPC", () => {
+    const tauriConfig = readJson<TauriConfig>(tauriConfigPath);
+    const devCsp = tauriConfig.app?.security?.devCsp;
+
+    expect(devCsp).toBe(expectedDevelopmentCsp);
+    expect(devCsp).not.toContain("*");
+    expect(devCsp).not.toContain("https:");
+    expect(devCsp).toContain("http://localhost:1420");
+    expect(devCsp).toContain("ws://localhost:1420");
+    expect(devCsp).toContain("ws://localhost:1421");
+    expect(devCsp).toContain("connect-src 'self' ipc: http://ipc.localhost");
+    expect(devCsp).toContain("object-src 'none'");
+    expect(devCsp).toContain("frame-ancestors 'none'");
   });
 
   it("keeps the main window limited to reviewed mail-shell and composer commands", () => {

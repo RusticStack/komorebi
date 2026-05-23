@@ -50,6 +50,9 @@ Purpose: prevent credential leakage, unsafe IPC, local-system exposure, and dest
   Evidence: `docs/architecture/token-lifecycle.md` defines backend-only refresh, reconnect-needed state, revocation, and removal cleanup. `src-tauri/src/token_lifecycle.rs` implements the lifecycle behind trait boundaries, with tests for refresh, invalid grants, reconnect-needed states, account removal cleanup, and provider revocation failures.
 - [x] Define least-privilege Tauri capabilities.
   Evidence: `src-tauri/tauri.conf.json` explicitly enables only `default`; `src-tauri/capabilities/default.json` grants only reviewed shell/composer commands; `src-tauri/capabilities/capabilities.test.ts` denies SQL, filesystem, opener, shell/process, HTTP, wildcard, broad plugin, attachment open/save/download, and unreviewed custom-command surfaces by absence.
+- [x] Set and test a restrictive Tauri CSP.
+  Evidence: `src-tauri/tauri.conf.json` now defines a production CSP that restricts default/script/style/image/font/connect/media/object/frame/worker/form/base/ancestor/manifest sources. Production script sources are `self` only; production connect sources are limited to `self`, Tauri IPC (`ipc:`), and `http://ipc.localhost`; production image sources allow `self`, `data:`, and `blob:` for packaged assets and TipTap inline-image/editor behavior; inline CSS is allowed only because the composer/sanitized rich HTML uses style attributes. `devCsp` is separately limited to local Vite/HMR and Tauri IPC. `src-tauri/capabilities/capabilities.test.ts` now fails if the production or development CSP is removed, changed from the reviewed source list, wildcarded, or broadened to production `unsafe-eval`, localhost, or remote HTTPS sources.
+  Acceptance: complete as of 2026-05-23. `pnpm check` and `pnpm tauri build --no-bundle` pass with the reviewed CSP.
 - [x] Keep privileged mutations in Rust commands.
   Evidence: `docs/architecture/ipc-and-mutation-boundaries.md` and `src-tauri/src/ipc_boundary.rs` keep server-affecting mail actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation Rust-owned. Frontend SQL is disabled and tested as unavailable.
 - [x] Add input validation for every current IPC command.
@@ -60,12 +63,6 @@ Purpose: prevent credential leakage, unsafe IPC, local-system exposure, and dest
   Evidence: `docs/architecture/attachment-safety.md` and `src-tauri/src/attachment_safety.rs` define app-generated paths, display-only sender filenames, content type/size limits, preview eligibility, auto-open denial, and path traversal protection. Composer staging uses backend-generated app-data paths; reader attachments are inert metadata only.
 - [x] Define destructive mail action semantics.
   Evidence: `docs/architecture/destructive-mail-actions.md` and `src-tauri/src/mail_actions.rs` implement typed move/archive/delete-to-trash/mark-read/expunge plans with confirmation, undo metadata where possible, retry classification, and fake-store tests.
-
-### Remaining Security Work
-
-- [ ] Set and test a restrictive Tauri CSP.
-  Evidence: `src-tauri/tauri.conf.json` currently has `"csp": null`, while `AGENTS.md` requires a restrictive CSP and the app intentionally treats frontend XSS as an IPC risk. Sanitized email rendering exists, but the desktop shell itself is not locked by a reviewed content security policy.
-  Acceptance: `tauri.conf.json` defines a CSP compatible with the Vite/Tauri build, app assets, TipTap/editor behavior, and safe email rendering; capability tests or config tests fail if CSP is removed or broadened unexpectedly; `pnpm check` and `pnpm tauri build --no-bundle` pass.
 
 ## P2 - Data Model, Migrations, And Backend Mail Primitives
 
