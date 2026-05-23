@@ -20,6 +20,7 @@
     "test:frontend": "vitest run",
     "test:e2e": "playwright test",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
+    "perf:mail-shell": "playwright test --config playwright.perf.config.ts",
     "fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "check": "pnpm fmt:check && pnpm lint && pnpm test && pnpm build"
   },

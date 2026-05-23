@@ -131,6 +131,14 @@ Run the Playwright fixture smoke test:
 pnpm test:e2e
 ```
 
+Run the local mail-shell performance benchmark:
+
+```powershell
+pnpm perf:mail-shell
+```
+
+The benchmark launches the test-only `/e2e/` Vite entry with a generated 10,000-message mailbox and representative attachment metadata. It reports browser heap usage, search latency, and virtualized list interaction timings in the Playwright output and attached JSON report under ignored `test-results/perf/`.
+
 If Chromium browser binaries are missing on a fresh machine, install them with:
 
 ```powershell

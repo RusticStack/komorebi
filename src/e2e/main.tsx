@@ -17,6 +17,12 @@ import type {
   RecentRecipientSearchRequest,
   RecentRecipientSuggestion,
 } from "../mail/shell/mailShellState";
+import {
+  createPerformanceMailFixture,
+  normalizePerformanceMessageCount,
+  searchPerformanceMailFixture,
+  type PerformanceFixtureMetadata,
+} from "../perf/mailPerformanceFixtures";
 
 type E2eEvent =
   | { name: "load-mail-shell" }
@@ -30,6 +36,7 @@ type E2eEvent =
 declare global {
   interface Window {
     __KOMOREBI_E2E_EVENTS__?: E2eEvent[];
+    __KOMOREBI_PERF_FIXTURE__?: PerformanceFixtureMetadata;
   }
 }
 
@@ -155,11 +162,23 @@ const archiveSearchResult: MailMessage = {
   unread: false,
 };
 
+const urlParams = new URLSearchParams(window.location.search);
+const performanceFixture =
+  urlParams.get("fixture") === "performance"
+    ? createPerformanceMailFixture({
+        messageCount: normalizePerformanceMessageCount(
+          Number(urlParams.get("messages")),
+        ),
+      })
+    : null;
+const activeMail = performanceFixture?.data ?? fixtureMail;
+window.__KOMOREBI_PERF_FIXTURE__ = performanceFixture?.metadata;
+
 async function loadMailShellData(): Promise<MailShellData> {
   e2eEvents.push({ name: "load-mail-shell" });
-  await delay(50);
+  await delay(performanceFixture ? 0 : 50);
 
-  return clone(fixtureMail);
+  return clone(activeMail);
 }
 
 async function searchMail(
@@ -167,13 +186,17 @@ async function searchMail(
   signal: AbortSignal,
 ): Promise<MailSearchResponse> {
   e2eEvents.push({ name: "search-mail", request });
-  await delay(75, signal);
+  await delay(performanceFixture ? 0 : 75, signal);
+
+  if (performanceFixture) {
+    return clone(searchPerformanceMailFixture(activeMail, request));
+  }
 
   const query = request.query.toLocaleLowerCase();
   const results =
     query === "phoenix"
       ? [archiveSearchResult]
-      : fixtureMail.messages.filter((message) =>
+      : activeMail.messages.filter((message) =>
           [
             message.sender,
             message.senderEmail,
@@ -319,6 +342,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       loadRecentRecipients={listRecentRecipients}
       saveComposerDraft={saveComposerDraft}
       searchMail={searchMail}
+      searchDebounceMs={performanceFixture ? 25 : undefined}
       sendComposerMail={sendComposerMail}
       stageComposerAttachment={stageComposerAttachment}
     />
