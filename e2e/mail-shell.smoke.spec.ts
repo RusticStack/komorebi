@@ -44,6 +44,9 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
   await page.getByRole("button", { name: "Compose" }).click();
   const composer = page.getByRole("dialog", { name: "Composer" });
   await expect(composer).toBeVisible();
+  await expect(
+    composer.getByText("Drafts stay local to this device until sent or discarded."),
+  ).toBeVisible();
 
   await composer.getByLabel("To").fill("qa@example.com");
   await composer.getByLabel("Subject").fill("E2E smoke send");

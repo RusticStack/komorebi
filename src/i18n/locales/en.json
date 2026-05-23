@@ -318,6 +318,7 @@
       "draftFailed": "Draft save failed",
       "draftNotSaved": "Draft not saved",
       "draftSaved": "Draft saved",
+      "localOnlyDraft": "Drafts stay local to this device until sent or discarded.",
       "needsAttention": "Composer needs attention",
       "savingDraft": "Saving draft",
       "sending": "Sending message",

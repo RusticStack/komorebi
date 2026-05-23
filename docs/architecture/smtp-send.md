@@ -21,6 +21,7 @@ Komorebi sends outbound mail through a backend-only boundary that:
 - Converts a supplied active draft id to sent state only after confirmed SMTP acceptance.
 - Updates local-only recent-recipient autocomplete rows after confirmed composer sends.
 - Stores the exact RFC822 payload for provider policies that need a later IMAP Sent-folder APPEND.
+- Does not upload active drafts to provider Drafts folders; draft autosave remains local-only until sent or discarded.
 
 The module remains the SMTP source of truth. The frontend does not call it directly; `src-tauri/src/composer.rs` exposes `send_composer_email` as the reviewed Tauri command wrapper. That wrapper validates the active draft request, staged attachment ownership, and sanitized body payloads before resolving credentials or calling SMTP.
 The wrapper also deduplicates To/CC/BCC recipients before send and best-effort updates `recent_recipients` after SMTP acceptance.

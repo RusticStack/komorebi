@@ -42,7 +42,7 @@ The current schema defines:
 - `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, provider metadata, and MIME parser-warning JSON.
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
 - `smtp_send_receipts`: confirmed outbound SMTP send receipts recorded after provider acceptance.
-- `composer_drafts`: local composer draft autosave state.
+- `composer_drafts`: local-only composer draft autosave state; rows are not provider Drafts-folder uploads.
 - `composer_attachments`: staged outbound composer attachment metadata and backend-generated storage references.
 - `recent_recipients`: account-scoped local-only autocomplete rows populated after confirmed composer sends.
 - `sent_mail_copies`: provider-aware Sent-folder copy/upload state for confirmed sends, including temporary pending APPEND payloads for providers that require IMAP Sent upload.

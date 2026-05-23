@@ -389,6 +389,11 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
     const composer = screen.getByRole("dialog", { name: "Composer" });
+    expect(
+      within(composer).getByText(
+        "Drafts stay local to this device until sent or discarded.",
+      ),
+    ).toBeVisible();
 
     fireEvent.change(within(composer).getByLabelText("To"), {
       target: { value: "Recipient <recipient@example.com>" },

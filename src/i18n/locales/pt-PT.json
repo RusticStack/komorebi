@@ -318,6 +318,7 @@
       "draftFailed": "Falha ao guardar rascunho",
       "draftNotSaved": "Rascunho nao guardado",
       "draftSaved": "Rascunho guardado",
+      "localOnlyDraft": "Os rascunhos ficam apenas neste dispositivo ate serem enviados ou descartados.",
       "needsAttention": "O compositor precisa de atencao",
       "savingDraft": "A guardar rascunho",
       "sending": "A enviar mensagem",

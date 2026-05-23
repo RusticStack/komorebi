@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting and local-only draft disclosure, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -196,6 +196,7 @@ The composer drawer uses TipTap through `src/mail/composer/TipTapComposer.tsx`. 
 - inline image picker for raster image types, inserted into the editor as a data URL and persisted/sent as a backend staged attachment CID
 - per-account signature insertion using the existing signature sanitizer/helper
 - debounced local draft autosave plus manual Save draft
+- draft-retention status copy stating drafts stay local to this device until sent or discarded
 - Discard action
 - Send action with visible progress states returned by the Rust send boundary
 
@@ -216,7 +217,7 @@ Recent-recipient autocomplete is local-only. Confirmed sends update the `recent_
 Current composer limits:
 
 - Draft reload after app restart is backend-supported but not surfaced in the drawer yet.
-- Provider Drafts-folder upload is not implemented.
+- Provider Drafts-folder upload is intentionally deferred; active drafts are local-only until sent or discarded.
 - Reply/forward routing into the composer is not implemented.
 - Live SMTP sends require configured account credentials and stored OAuth client config for Gmail/Microsoft; pending Microsoft/generic Sent APPEND upload is handled by the backend scheduler after confirmed send, while live smoke coverage is ignored and user-opt-in only.
 
@@ -261,7 +262,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - selected-message preservation for compatible scope changes
 - safe message detail rendering with sanitized HTML, remote image blocking, inert attachment metadata, and disabled reply/forward/remote-content controls
 - local fixture search and FTS-backed search with debounce, cancellation, result origin labels, no-match state, no-index state, and retryable error state
-- TipTap composer address validation, duplicate recipient handling, keyboard autocomplete from recent recipients, signature insertion, draft save, attachment staging, inline image CID conversion, send command request shape, send progress, and validation errors
+- TipTap composer address validation, duplicate recipient handling, keyboard autocomplete from recent recipients, signature insertion, local-only draft disclosure, draft save, attachment staging, inline image CID conversion, send command request shape, send progress, and validation errors
 - TipTap rich formatting extension output and sanitizer behavior in `src/mail/composer/TipTapComposer.test.tsx`
 - message selection and reader rendering
 - keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
@@ -277,7 +278,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 
 `src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup, composer autosave, generic account commands, OAuth loopback commands, sync-status event subscription, and cancellation before invoke or after a stale response.
 
-`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, runs backend-shaped search, opens a search result in the reader, opens the composer, sends through typed fixture handlers, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
+`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, runs backend-shaped search, opens a search result in the reader, opens the composer, verifies the local-only draft disclosure, sends through typed fixture handlers, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
 
 `perf/mail-shell.benchmark.spec.ts` covers a browser-level benchmark path against the same test-only `/e2e/` entry with `?fixture=performance`. It uses the deterministic generator in `src/perf/mailPerformanceFixtures.ts` to populate 10,000 synthetic messages and representative attachment metadata, then reports Chromium heap usage, search latency, virtualized scroll timing, selected-row timing, and mounted row count through `pnpm perf:mail-shell` and `playwright.perf.config.ts`. The benchmark also guards the browser virtualizer path by requiring fewer than 80 mounted message rows for the 10,000-message fixture.
 

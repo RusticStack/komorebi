@@ -1,6 +1,6 @@
 # Draft And Sent Persistence
 
-Status: backend local draft persistence, frontend autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is not registered.
+Status: backend local draft persistence, frontend autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is intentionally deferred and drafts are local-only until sent or discarded.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -10,6 +10,7 @@ The code source of truth is `src-tauri/src/draft_persistence.rs` and the fronten
 Komorebi persists composer drafts locally in SQLite and links successful sends to provider-aware Sent-copy state:
 
 - Active drafts are stored in `composer_drafts`.
+- Active drafts are local-only; they are not uploaded to provider Drafts folders.
 - Autosave updates the same active draft and increments `autosave_revision`.
 - Restart recovery loads active drafts by account from SQLite.
 - Intentional discard marks the draft `discarded` and clears subject, recipients, body, and attachment ids.
@@ -77,6 +78,8 @@ Autosave never accepts raw filesystem paths or attachment filenames; only backen
 
 The frontend TipTap composer debounces autosave and also exposes a manual Save draft action. It sends sanitized editor HTML and plain text to Rust; the backend wraps HTML in `DraftHtml` and rejects script tags, JavaScript URLs, inline event handlers, oversized payloads, invalid ids, unknown accounts, and unknown staged attachment ids. Rich formatting is allowed only after `src/mail/composer/composerRichText.ts` reduces it to the supported table, code, alignment, font, color, and highlight subset.
 
+The composer status copy tells users that drafts stay local to the device until sent or discarded. Do not remove or soften this copy unless provider Drafts upload exists with retry, delete, conflict, and cleanup semantics.
+
 The same draft id can be autosaved repeatedly while active. Autosaving a discarded or sent draft is rejected instead of reviving stale private content.
 
 ## Discard
@@ -109,6 +112,12 @@ When a draft id is present:
 If SMTP delivery fails, no receipt is inserted and the draft remains active.
 
 After SMTP acceptance, the composer wrapper best-effort updates local recent-recipient rows from the deduplicated To/CC/BCC set. This cache is local-only and must not be synced or treated as a provider contact list.
+
+## Provider Drafts Policy
+
+Provider Drafts-folder upload is not part of the current product surface. Active drafts remain in the local SQLite cache and staged composer attachment directory only. They are cleared when the user intentionally discards the draft or after SMTP acceptance converts the draft to sent state.
+
+This avoids partial server Drafts writes, duplicate provider drafts, stale remote draft cleanup problems, and provider-specific conflict semantics until a dedicated upload worker is designed. Any future provider Drafts sync must define IMAP APPEND/replace/delete behavior, retry state, duplicate detection, provider-specific folder selection, and failure recovery before exposing UI that implies server-synced drafts.
 
 ## Provider Sent Policy
 
@@ -180,7 +189,7 @@ Normal tests use no live mailbox, live SMTP server, real account, or real creden
 ## Not Implemented
 
 - Frontend draft reload/reopen UI after restart.
-- Draft upload to provider Drafts folders.
+- Provider Drafts-folder upload remains intentionally deferred; current UI/docs disclose local-only drafts.
 - Live IMAP/provider verification beyond the ignored SMTP smoke test.
 
 ## References

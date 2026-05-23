@@ -1143,6 +1143,11 @@ textarea:disabled {
   font-size: 0.88rem;
 }
 
+.composer-status small {
+  color: #716d66;
+  line-height: 1.35;
+}
+
 .composer-status ol {
   color: #716d66;
   font-size: 0.8rem;

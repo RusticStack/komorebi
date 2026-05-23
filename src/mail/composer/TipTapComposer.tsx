@@ -941,6 +941,9 @@ function ComposerStatus({
   return (
     <div className="composer-status" role="status">
       <span>{statusText}</span>
+      {sendStatus !== "sent" ? (
+        <small>{t("composer.status.localOnlyDraft")}</small>
+      ) : null}
       {progress.length > 0 ? (
         <ol>
           {progress.map((item) => (
