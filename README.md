@@ -125,6 +125,18 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-features
 cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
 ```
 
+Run the Playwright fixture smoke test:
+
+```powershell
+pnpm test:e2e
+```
+
+If Chromium browser binaries are missing on a fresh machine, install them with:
+
+```powershell
+pnpm exec playwright install chromium
+```
+
 ## Generated Outputs
 
 Do not commit generated dependency, build, or runtime outputs such as `node_modules/`, `dist/`, `src-tauri/target/`, `src-tauri/gen/`, local app-data directories, disposable SQLite databases, or diagnostics logs.

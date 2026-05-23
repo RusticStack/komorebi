@@ -240,6 +240,8 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 
 `src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup and composer autosave, and cancellation before invoke or after a stale response.
 
+`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, runs backend-shaped search, opens a search result in the reader, opens the composer, sends through typed fixture handlers, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
+
 Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, missing-label fallback ownership, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
 
 Rust composer and SMTP tests cover sanitized rich composer HTML persistence and outgoing MIME serialization for strikethrough, tables, code blocks, font styles, colors, highlights, and alignment.
