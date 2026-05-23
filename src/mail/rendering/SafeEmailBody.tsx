@@ -1,4 +1,5 @@
 import { useMemo, type MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import {
   sanitizeEmailHtml,
   type SafeEmailLink,
@@ -16,6 +17,7 @@ export function SafeEmailBody({
   bodyText,
   onOpenExternalLink,
 }: SafeEmailBodyProps) {
+  const { t } = useTranslation();
   const sanitized = useMemo(
     () => (bodyHtml ? sanitizeEmailHtml(bodyHtml) : null),
     [bodyHtml],
@@ -59,7 +61,7 @@ export function SafeEmailBody({
 
       {sanitized?.remoteContentBlocked ? (
         <p className="safe-email-body__notice" role="status">
-          Remote content blocked
+          {t("safeEmail.remoteContentBlocked")}
         </p>
       ) : null}
     </div>
@@ -67,8 +69,10 @@ export function SafeEmailBody({
 }
 
 function PlainTextEmailBody({ text }: { text: string }) {
+  const { t } = useTranslation();
+
   if (!text) {
-    return <p className="safe-email-body__empty">No message body.</p>;
+    return <p className="safe-email-body__empty">{t("safeEmail.emptyBody")}</p>;
   }
 
   return <pre className="safe-email-body__plain">{text}</pre>;

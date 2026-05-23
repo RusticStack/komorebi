@@ -8,6 +8,9 @@ import {
   type KeyboardEvent,
 } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { useLocaleFormatters } from "../../i18n";
 import {
   FONT_FAMILIES,
   FONT_SIZES,
@@ -99,6 +102,7 @@ export function TipTapComposer({
   sendMail,
   onClose,
 }: TipTapComposerProps) {
+  const { t } = useTranslation();
   const [accountId, setAccountId] = useState(
     initialAccountId ?? accounts[0]?.id ?? "",
   );
@@ -128,7 +132,7 @@ export function TipTapComposer({
     content: bodyHtml,
     editorProps: {
       attributes: {
-        "aria-label": "Message body",
+        "aria-label": t("composer.aria.body"),
         "aria-multiline": "true",
         class: "composer-editor",
         role: "textbox",
@@ -182,7 +186,7 @@ export function TipTapComposer({
   }): Promise<ComposerDraftSaveResponse | null> {
     if (!saveDraft) {
       if (showErrors) {
-        setValidationErrors(["Draft saving is unavailable in this runtime."]);
+        setValidationErrors([t("composer.errors.draftSaveUnavailable")]);
         setDraftStatus("error");
       }
       return null;
@@ -210,7 +214,7 @@ export function TipTapComposer({
     } catch {
       setDraftStatus("error");
       if (showErrors) {
-        setValidationErrors(["Draft could not be saved."]);
+        setValidationErrors([t("composer.errors.draftCouldNotSave")]);
       }
       return null;
     }
@@ -225,7 +229,7 @@ export function TipTapComposer({
     try {
       await discardDraft({ accountId, draftId });
     } catch {
-      setValidationErrors(["Draft could not be discarded."]);
+      setValidationErrors([t("composer.errors.draftCouldNotDiscard")]);
       setDraftStatus("error");
       return;
     }
@@ -241,7 +245,7 @@ export function TipTapComposer({
       return;
     }
     if (!stageAttachment) {
-      setValidationErrors(["Attachment staging is unavailable in this runtime."]);
+      setValidationErrors([t("composer.errors.stageUnavailable")]);
       return;
     }
 
@@ -276,7 +280,11 @@ export function TipTapComposer({
             .run();
         }
       } catch {
-        setValidationErrors([`${file.name || "Attachment"} could not be staged.`]);
+        setValidationErrors([
+          t("composer.errors.attachmentCouldNotStage", {
+            filename: file.name || t("composer.errors.unknownAttachment"),
+          }),
+        ]);
         return;
       }
     }
@@ -316,7 +324,7 @@ export function TipTapComposer({
 
     const parsed = safeComposerLink(linkInput);
     if (!parsed) {
-      setValidationErrors(["Link URL must be http, https, or mailto without embedded credentials."]);
+      setValidationErrors([t("composer.errors.linkUnsafe")]);
       return;
     }
 
@@ -384,7 +392,7 @@ export function TipTapComposer({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!sendMail) {
-      setValidationErrors(["Sending is unavailable in this runtime."]);
+      setValidationErrors([t("composer.errors.sendingUnavailable")]);
       setSendStatus("error");
       return;
     }
@@ -400,7 +408,7 @@ export function TipTapComposer({
 
     setValidationErrors([]);
     setRecipientNotices(request.duplicateNotices);
-    setProgress(["Saving draft", "Sending message"]);
+    setProgress([t("composer.status.savingDraft"), t("composer.status.sending")]);
     const saved = await saveDraftNow({ showErrors: true });
     if (!saved) {
       setSendStatus("error");
@@ -412,11 +420,11 @@ export function TipTapComposer({
       const response = await sendMail(request.value);
       setSendStatus("sent");
       setDraftStatus("sent");
-      setProgress(response.progress.map(sendProgressLabel));
+      setProgress(response.progress.map((item) => sendProgressLabel(item, t)));
     } catch {
       setSendStatus("error");
       setProgress([]);
-      setValidationErrors(["Message could not be sent. The draft remains saved."]);
+      setValidationErrors([t("composer.errors.sendFailed")]);
     }
   }
 
@@ -435,7 +443,7 @@ export function TipTapComposer({
         errors: string[];
         duplicateNotices: string[];
       } {
-    const recipients = parseRecipientFields(toInput, ccInput, bccInput);
+    const recipients = parseRecipientFields(toInput, ccInput, bccInput, t);
     const errors = [...recipients.errors];
     const sanitizedHtml = sanitizeComposerHtml(
       editor?.getHTML() ?? bodyHtml,
@@ -445,16 +453,16 @@ export function TipTapComposer({
     const htmlHasContent = composerHtmlHasContent(sanitizedHtml);
 
     if (!accountId) {
-      errors.push("Choose a sending account.");
+      errors.push(t("composer.errors.accountRequired"));
     }
     if (
       requireSendReady &&
       recipients.to.length + recipients.cc.length + recipients.bcc.length === 0
     ) {
-      errors.push("Add at least one recipient.");
+      errors.push(t("composer.errors.recipientRequired"));
     }
     if (requireSendReady && !cleanedBodyText && !htmlHasContent) {
-      errors.push("Add a message body.");
+      errors.push(t("composer.errors.bodyRequired"));
     }
 
     return {
@@ -476,39 +484,39 @@ export function TipTapComposer({
 
   if (accounts.length === 0) {
     return (
-      <section className="composer-panel" aria-label="Composer">
+      <section className="composer-panel" aria-label={t("composer.aria.composer")}>
         <header className="settings-panel__header">
           <div>
-            <p className="eyebrow">Composer</p>
-            <h2>New message</h2>
+            <p className="eyebrow">{t("composer.aria.composer")}</p>
+            <h2>{t("composer.heading")}</h2>
           </div>
           <button type="button" onClick={onClose}>
-            Close
+            {t("common.actions.close")}
           </button>
         </header>
-        <section className="empty-panel" aria-label="Composer unavailable">
-          <h3>No account available</h3>
-          <p>Add and connect an account before composing mail.</p>
+        <section className="empty-panel" aria-label={t("composer.aria.unavailable")}>
+          <h3>{t("composer.empty.heading")}</h3>
+          <p>{t("composer.empty.body")}</p>
         </section>
       </section>
     );
   }
 
   return (
-    <section className="composer-panel" aria-label="Composer">
+    <section className="composer-panel" aria-label={t("composer.aria.composer")}>
       <header className="settings-panel__header">
         <div>
-          <p className="eyebrow">{activeAccount?.email ?? "Composer"}</p>
-          <h2>New message</h2>
+          <p className="eyebrow">{activeAccount?.email ?? t("composer.aria.composer")}</p>
+          <h2>{t("composer.heading")}</h2>
         </div>
         <button type="button" onClick={onClose}>
-          Close
+          {t("common.actions.close")}
         </button>
       </header>
 
       <form className="composer-form" onSubmit={handleSubmit}>
         <label>
-          <span>From</span>
+          <span>{t("composer.fields.from")}</span>
           <select
             value={accountId}
             onChange={(event) => {
@@ -529,7 +537,7 @@ export function TipTapComposer({
           <RecipientAutocompleteField
             accountId={accountId}
             autoFocus
-            label="To"
+            label={t("composer.fields.to")}
             loadRecentRecipients={loadRecentRecipients}
             value={toInput}
             onChange={(value) => {
@@ -540,7 +548,7 @@ export function TipTapComposer({
           />
           <RecipientAutocompleteField
             accountId={accountId}
-            label="CC"
+            label={t("composer.fields.cc")}
             loadRecentRecipients={loadRecentRecipients}
             value={ccInput}
             onChange={(value) => {
@@ -551,7 +559,7 @@ export function TipTapComposer({
           />
           <RecipientAutocompleteField
             accountId={accountId}
-            label="BCC"
+            label={t("composer.fields.bcc")}
             loadRecentRecipients={loadRecentRecipients}
             value={bccInput}
             onChange={(value) => {
@@ -563,7 +571,7 @@ export function TipTapComposer({
         </div>
 
         <label>
-          <span>Subject</span>
+          <span>{t("composer.fields.subject")}</span>
           <input
             type="text"
             value={subject}
@@ -574,38 +582,38 @@ export function TipTapComposer({
           />
         </label>
 
-        <div className="composer-toolbar" aria-label="Formatting controls">
-          <FormatButton editor={editor} command="bold" label="Bold" />
-          <FormatButton editor={editor} command="italic" label="Italic" />
-          <FormatButton editor={editor} command="strike" label="Strikethrough" />
-          <FormatButton editor={editor} command="code" label="Inline code" />
-          <FormatButton editor={editor} command="codeBlock" label="Code block" />
-          <FormatButton editor={editor} command="bulletList" label="Bulleted list" />
-          <FormatButton editor={editor} command="orderedList" label="Numbered list" />
-          <FormatButton editor={editor} command="blockquote" label="Block quote" />
+        <div className="composer-toolbar" aria-label={t("composer.aria.formattingControls")}>
+          <FormatButton editor={editor} command="bold" label={t("composer.format.bold")} />
+          <FormatButton editor={editor} command="italic" label={t("composer.format.italic")} />
+          <FormatButton editor={editor} command="strike" label={t("composer.format.strikethrough")} />
+          <FormatButton editor={editor} command="code" label={t("composer.format.inlineCode")} />
+          <FormatButton editor={editor} command="codeBlock" label={t("composer.format.codeBlock")} />
+          <FormatButton editor={editor} command="bulletList" label={t("composer.format.bulletedList")} />
+          <FormatButton editor={editor} command="orderedList" label={t("composer.format.numberedList")} />
+          <FormatButton editor={editor} command="blockquote" label={t("composer.format.blockquote")} />
           <label className="composer-compact-control">
-            <span>Font family</span>
+            <span>{t("composer.format.fontFamily")}</span>
             <select
               value=""
               onChange={(event) => applyFontFamily(event.target.value)}
               disabled={!editor}
             >
-              <option value="">Default</option>
+              <option value="">{t("composer.format.default")}</option>
               {FONT_FAMILIES.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </option>
               ))}
             </select>
           </label>
           <label className="composer-compact-control">
-            <span>Font size</span>
+            <span>{t("composer.format.fontSize")}</span>
             <select
               value=""
               onChange={(event) => applyFontSize(event.target.value)}
               disabled={!editor}
             >
-              <option value="">Default</option>
+              <option value="">{t("composer.format.default")}</option>
               {FONT_SIZES.map((size) => (
                 <option key={size} value={size}>
                   {size}
@@ -614,47 +622,47 @@ export function TipTapComposer({
             </select>
           </label>
           <label className="composer-compact-control">
-            <span>Text color</span>
+            <span>{t("composer.format.textColor")}</span>
             <select
               value=""
               onChange={(event) => applyTextColor(event.target.value)}
               disabled={!editor}
             >
-              <option value="">Default</option>
+              <option value="">{t("composer.format.default")}</option>
               {TEXT_COLORS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </option>
               ))}
             </select>
           </label>
           <label className="composer-compact-control">
-            <span>Highlight</span>
+            <span>{t("composer.format.highlight")}</span>
             <select
               value=""
               onChange={(event) => applyHighlight(event.target.value)}
               disabled={!editor}
             >
-              <option value="">None</option>
+              <option value="">{t("composer.format.none")}</option>
               {HIGHLIGHT_COLORS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </option>
               ))}
             </select>
           </label>
-          <div className="composer-button-group" aria-label="Text alignment">
+          <div className="composer-button-group" aria-label={t("composer.format.alignmentLabel")}>
             <button type="button" onClick={() => applyAlignment("left")} disabled={!editor}>
-              Align left
+              {t("composer.format.alignLeft")}
             </button>
             <button type="button" onClick={() => applyAlignment("center")} disabled={!editor}>
-              Align center
+              {t("composer.format.alignCenter")}
             </button>
             <button type="button" onClick={() => applyAlignment("right")} disabled={!editor}>
-              Align right
+              {t("composer.format.alignRight")}
             </button>
           </div>
-          <div className="composer-button-group" aria-label="Table controls">
+          <div className="composer-button-group" aria-label={t("composer.format.table.controlsLabel")}>
             <button
               type="button"
               onClick={() =>
@@ -666,32 +674,32 @@ export function TipTapComposer({
               }
               disabled={!editor}
             >
-              Insert table
+              {t("composer.format.table.insert")}
             </button>
             <button
               type="button"
               onClick={() => editor?.chain().focus().addRowAfter().run()}
               disabled={!editor || !editor.isActive("table")}
             >
-              Add row
+              {t("composer.format.table.addRow")}
             </button>
             <button
               type="button"
               onClick={() => editor?.chain().focus().addColumnAfter().run()}
               disabled={!editor || !editor.isActive("table")}
             >
-              Add column
+              {t("composer.format.table.addColumn")}
             </button>
             <button
               type="button"
               onClick={() => editor?.chain().focus().deleteTable().run()}
               disabled={!editor || !editor.isActive("table")}
             >
-              Delete table
+              {t("composer.format.table.delete")}
             </button>
           </div>
           <label className="composer-link-control">
-            <span>Link URL</span>
+            <span>{t("composer.fields.linkUrl")}</span>
             <input
               type="url"
               value={linkInput}
@@ -699,38 +707,38 @@ export function TipTapComposer({
             />
           </label>
           <button type="button" onClick={applyLink} disabled={!editor}>
-            Apply link
+            {t("composer.actions.applyLink")}
           </button>
           <button
             type="button"
             onClick={() => editor?.chain().focus().unsetLink().run()}
             disabled={!editor}
           >
-            Remove link
+            {t("composer.actions.removeLink")}
           </button>
           <button
             type="button"
             onClick={() => attachmentInputRef.current?.click()}
             disabled={!canUseBackend || sendStatus === "sending"}
           >
-            Attach
+            {t("composer.actions.attach")}
           </button>
           <button
             type="button"
             onClick={() => inlineImageInputRef.current?.click()}
             disabled={!canUseBackend || sendStatus === "sending"}
           >
-            Inline image
+            {t("composer.actions.inlineImage")}
           </button>
           <button
             type="button"
             onClick={insertSignature}
             disabled={!editor || !activeAccount?.signatureHtml}
           >
-            Insert signature
+            {t("composer.actions.insertSignature")}
           </button>
           <input
-            aria-label="Attachment picker"
+            aria-label={t("composer.aria.attachmentPicker")}
             className="visually-hidden"
             multiple
             ref={attachmentInputRef}
@@ -742,7 +750,7 @@ export function TipTapComposer({
           />
           <input
             accept="image/png,image/jpeg,image/gif,image/webp"
-            aria-label="Inline image picker"
+            aria-label={t("composer.aria.inlineImagePicker")}
             className="visually-hidden"
             ref={inlineImageInputRef}
             type="file"
@@ -788,20 +796,20 @@ export function TipTapComposer({
             onClick={() => void saveDraftNow({ showErrors: true })}
             disabled={sendStatus === "sending" || sendStatus === "sent"}
           >
-            Save draft
+            {t("composer.actions.saveDraft")}
           </button>
           <button
             type="button"
             onClick={() => void handleDiscardDraft()}
             disabled={sendStatus === "sending" || sendStatus === "sent"}
           >
-            Discard
+            {t("composer.actions.discard")}
           </button>
           <button
             type="submit"
             disabled={sendStatus === "sending" || sendStatus === "sent"}
           >
-            Send
+            {t("composer.actions.send")}
           </button>
         </div>
       </form>
@@ -878,22 +886,25 @@ function ComposerAttachmentList({
   attachments: ComposerAttachment[];
   onRemove: (attachmentId: string) => void;
 }) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+
   if (attachments.length === 0) {
     return null;
   }
 
   return (
-    <section className="composer-attachments" aria-label="Composer attachments">
+    <section className="composer-attachments" aria-label={t("composer.aria.attachments")}>
       <ul>
         {attachments.map((attachment) => (
           <li key={attachment.id}>
             <span>
               {attachment.displayFilename} - {attachment.contentType} -{" "}
-              {formatAttachmentSize(attachment.sizeBytes)}
+              {localeFormat.byteSize(attachment.sizeBytes)}
             </span>
-            <small>{attachment.disposition}</small>
+            <small>{t(`composer.attachments.disposition.${attachment.disposition}`)}</small>
             <button type="button" onClick={() => onRemove(attachment.id)}>
-              Remove
+              {t("composer.actions.remove")}
             </button>
           </li>
         ))}
@@ -911,20 +922,21 @@ function ComposerStatus({
   progress: string[];
   sendStatus: SendStatus;
 }) {
+  const { t } = useTranslation();
   const statusText =
     sendStatus === "sent"
-      ? "Message sent"
+      ? t("composer.status.sent")
       : sendStatus === "sending"
-        ? "Sending message"
+        ? t("composer.status.sending")
         : sendStatus === "error"
-          ? "Composer needs attention"
+          ? t("composer.status.needsAttention")
           : draftStatus === "saved"
-            ? "Draft saved"
+            ? t("composer.status.draftSaved")
             : draftStatus === "saving"
-              ? "Saving draft"
+              ? t("composer.status.savingDraft")
               : draftStatus === "error"
-                ? "Draft save failed"
-                : "Draft not saved";
+                ? t("composer.status.draftFailed")
+                : t("composer.status.draftNotSaved");
 
   return (
     <div className="composer-status" role="status">
@@ -1099,15 +1111,16 @@ function parseRecipientFields(
   toInput: string,
   ccInput: string,
   bccInput: string,
+  t: TFunction,
 ): ParsedRecipientFields {
-  const to = parseAddressList("To", toInput);
-  const cc = parseAddressList("CC", ccInput);
-  const bcc = parseAddressList("BCC", bccInput);
+  const to = parseAddressList("to", toInput, t);
+  const cc = parseAddressList("cc", ccInput, t);
+  const bcc = parseAddressList("bcc", bccInput, t);
   const seen = new Map<string, RecipientFieldName>();
   const duplicateNotices: string[] = [];
-  const dedupedTo = deduplicateParsedAddresses("to", "To", to.addresses, seen, duplicateNotices);
-  const dedupedCc = deduplicateParsedAddresses("cc", "CC", cc.addresses, seen, duplicateNotices);
-  const dedupedBcc = deduplicateParsedAddresses("bcc", "BCC", bcc.addresses, seen, duplicateNotices);
+  const dedupedTo = deduplicateParsedAddresses("to", to.addresses, seen, duplicateNotices, t);
+  const dedupedCc = deduplicateParsedAddresses("cc", cc.addresses, seen, duplicateNotices, t);
+  const dedupedBcc = deduplicateParsedAddresses("bcc", bcc.addresses, seen, duplicateNotices, t);
 
   return {
     bcc: dedupedBcc,
@@ -1120,19 +1133,21 @@ function parseRecipientFields(
 
 function deduplicateParsedAddresses(
   field: RecipientFieldName,
-  label: string,
   addresses: ComposerAddress[],
   seen: Map<string, RecipientFieldName>,
   duplicateNotices: string[],
+  t: TFunction,
 ) {
   const deduped: ComposerAddress[] = [];
   for (const address of addresses) {
     const normalized = normalizeEmailAddress(address.address);
     const firstField = seen.get(normalized);
     if (firstField) {
-      duplicateNotices.push(
-        `Duplicate recipient skipped: ${address.address} in ${label} already appears in ${recipientFieldLabel(firstField)}.`,
-      );
+      duplicateNotices.push(t("composer.autocomplete.duplicateSkipped", {
+        address: address.address,
+        fieldLabel: recipientFieldLabel(field, t),
+        firstFieldLabel: recipientFieldLabel(firstField, t),
+      }));
       continue;
     }
 
@@ -1143,7 +1158,11 @@ function deduplicateParsedAddresses(
   return deduped;
 }
 
-function parseAddressList(label: string, value: string): ParsedAddressList {
+function parseAddressList(
+  field: RecipientFieldName,
+  value: string,
+  t: TFunction,
+): ParsedAddressList {
   const tokens = value
     .split(/[,;\n]+/)
     .map((token) => token.trim())
@@ -1154,7 +1173,12 @@ function parseAddressList(label: string, value: string): ParsedAddressList {
   for (const token of tokens) {
     const parsed = parseAddressToken(token);
     if (!parsed) {
-      errors.push(`${label}: ${token} is not a valid email address.`);
+      errors.push(
+        t("composer.errors.invalidAddress", {
+          fieldLabel: recipientFieldLabel(field, t),
+          value: token,
+        }),
+      );
       continue;
     }
     addresses.push(parsed);
@@ -1214,14 +1238,14 @@ function normalizeEmailAddress(address: string) {
   return address.trim().toLocaleLowerCase();
 }
 
-function recipientFieldLabel(field: RecipientFieldName) {
+function recipientFieldLabel(field: RecipientFieldName, t: TFunction) {
   switch (field) {
     case "to":
-      return "To";
+      return t("composer.fields.to");
     case "cc":
-      return "CC";
+      return t("composer.fields.cc");
     case "bcc":
-      return "BCC";
+      return t("composer.fields.bcc");
   }
 }
 
@@ -1255,45 +1279,9 @@ function fileToDataUrl(file: File) {
   });
 }
 
-function sendProgressLabel(progress: ComposerSendResponse["progress"][number]) {
-  switch (progress) {
-    case "account-resolved":
-      return "Account resolved";
-    case "draft-prepared":
-      return "Draft prepared";
-    case "auth-resolved":
-      return "Authentication resolved";
-    case "attachment-streamed":
-      return "Attachments streamed";
-    case "mime-composed":
-      return "MIME composed";
-    case "smtp-accepted":
-      return "SMTP accepted";
-    case "sent-state-recorded":
-      return "Sent state recorded";
-    case "draft-finalized":
-      return "Draft finalized";
-  }
-}
-
-function formatAttachmentSize(sizeBytes: number) {
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-    return "0 B";
-  }
-
-  if (sizeBytes < 1024) {
-    return `${Math.round(sizeBytes)} B`;
-  }
-
-  const units = ["KB", "MB", "GB"];
-  let value = sizeBytes / 1024;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `${rounded} ${units[unitIndex]}`;
+function sendProgressLabel(
+  progress: ComposerSendResponse["progress"][number],
+  t: TFunction,
+) {
+  return t(`composer.sendProgress.${progress}`);
 }

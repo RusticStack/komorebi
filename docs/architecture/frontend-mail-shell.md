@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, TipTap composer with tested rich formatting, and local recent-recipient autocomplete implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, and local recent-recipient autocomplete implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -12,6 +12,7 @@ The code source of truth is:
 - `src/mail/shell/MailClientShell.tsx`
 - `src/mail/composer/TipTapComposer.tsx`
 - `src/mail/composer/composerRichText.ts`
+- `src/i18n/`
 - `src/App.tsx`
 - `src/App.css`
 - `src-tauri/src/mail_shell.rs`
@@ -95,6 +96,21 @@ Search UI states:
 - ready with no results: no-match state
 - unavailable index: no-index state
 - backend error: retryable search error state
+
+## Localization
+
+The frontend uses `i18next` and `react-i18next` through `src/i18n/index.ts`.
+
+- Supported languages are English (`en`) and Portuguese (`pt-PT`).
+- First-launch language detection reads `navigator.languages` and `navigator.language`, maps any Portuguese locale to `pt-PT`, maps English locales to `en`, and falls back to English.
+- Translation resources live in `src/i18n/locales/en.json` and `src/i18n/locales/pt-PT.json`.
+- Runtime shell, reader, settings, safe-message, and composer strings route through `t(...)`; the app name remains literal branding.
+- `src/i18n/localeFormat.ts` centralizes `Intl` formatting for message dates/times, unread and search-result counts, attachment sizes, and pluralized count/status text.
+- Message rows and reader headers format raw cache timestamps for the active locale. Unparseable legacy display strings are shown unchanged.
+- Account/folder unread badges, search result status counts, and attachment-size labels use the active locale's number formatting.
+- `pt-PT` resource completeness is tested against English resources.
+
+There is no language picker, persisted locale setting, relative date wording, or broad long-string screenshot corpus yet.
 
 ## Message List Virtualization
 
@@ -216,6 +232,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - composer drawer entry
 - settings drawer entry
 - loading/error shell states
+- first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
 
 Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
 
@@ -230,7 +247,7 @@ No test uses real mailbox data, real credentials, or live provider connections.
 - Live reply/forward routing.
 - Remote-content preference persistence and allowlisting.
 - Attachment preview/save commands.
-- i18n dictionaries.
+- Language picker, persisted locale preference, relative date wording, and broad translated-layout screenshot coverage.
 - E2E accessibility, axe, or real screen-reader harness.
 
 ## Documentation Sync
@@ -242,6 +259,7 @@ Keep this document synchronized with:
 - `src/mail/shell/MailClientShell.tsx`
 - `src/mail/composer/TipTapComposer.tsx`
 - `src/mail/composer/composerRichText.ts`
+- `src/i18n/`
 - `src-tauri/src/composer.rs`
 - `src/App.test.tsx`
 - `docs/architecture/message-rendering.md`

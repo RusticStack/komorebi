@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { vi } from "vitest";
 import App from "./App";
+import { formatDateTime } from "./i18n";
 import type {
   ComposerAttachment,
   ComposerAttachmentStageRequest,
@@ -79,7 +80,7 @@ const fixtureMail: MailShellData = {
       senderEmail: "ada@example.com",
       subject: "Roadmap review",
       preview: "Review notes for the local cache work.",
-      receivedAt: "09:30",
+      receivedAt: "2026-05-22T09:30:00",
       unread: true,
       flagged: false,
       bodyText: "Review notes for the local cache work.",
@@ -94,7 +95,7 @@ const fixtureMail: MailShellData = {
       senderEmail: "archive@example.com",
       subject: "Archived receipt",
       preview: "Stored outside the unified inbox.",
-      receivedAt: "Yesterday",
+      receivedAt: "2026-05-21T09:30:00",
       unread: false,
       flagged: false,
       bodyText: "Stored outside the unified inbox.",
@@ -109,7 +110,7 @@ const fixtureMail: MailShellData = {
       senderEmail: "finance@example.com",
       subject: "Invoice question",
       preview: "Can you confirm the invoice number?",
-      receivedAt: "08:15",
+      receivedAt: "2026-05-22T08:15:00",
       unread: true,
       flagged: true,
       bodyText: "Can you confirm the invoice number?",
@@ -143,7 +144,7 @@ const archiveSearchResult: MailMessage = {
   senderEmail: "research@example.com",
   subject: "Phoenix report",
   preview: "Phoenix appears only in the FTS-backed archive result.",
-  receivedAt: "07:45",
+  receivedAt: "2026-05-20T07:45:00",
   unread: false,
   flagged: false,
   bodyText: "Phoenix appears only in the FTS-backed archive result.",
@@ -184,9 +185,9 @@ function createLargeMailFixture(messageCount: number): MailShellData {
         senderEmail: `sender${index}@example.com`,
         subject: `Bulk message ${paddedIndex}`,
         preview: `Snippet for bulk message ${paddedIndex} remains stable while scrolling.`,
-        receivedAt: `${Math.floor(index / 60)
+        receivedAt: `2026-05-22T${(index % 24)
           .toString()
-          .padStart(2, "0")}:${(index % 60).toString().padStart(2, "0")}`,
+          .padStart(2, "0")}:${(index % 60).toString().padStart(2, "0")}:00`,
         unread: index % 2 === 0,
         flagged: index % 10 === 0 || index === messageCount - 1,
         bodyText: `Body for bulk message ${paddedIndex}.`,
@@ -803,7 +804,9 @@ describe("App", () => {
     });
     expect(firstMessage).toHaveTextContent("Sender 0");
     expect(firstMessage).toHaveTextContent("Flagged");
-    expect(firstMessage).toHaveTextContent("00:00");
+    expect(firstMessage).toHaveTextContent(
+      formatDateTime("2026-05-22T00:00:00", "en"),
+    );
     expect(firstMessage).toHaveTextContent(
       "Snippet for bulk message 00000 remains stable while scrolling.",
     );
@@ -820,7 +823,9 @@ describe("App", () => {
     expect(lastMessage).toHaveAttribute("aria-current", "true");
     expect(lastMessage).toHaveTextContent("Sender 9999");
     expect(lastMessage).toHaveTextContent("Flagged");
-    expect(lastMessage).toHaveTextContent("166:39");
+    expect(lastMessage).toHaveTextContent(
+      formatDateTime("2026-05-22T15:39:00", "en"),
+    );
     expect(lastMessage).toHaveTextContent(
       "Snippet for bulk message 09999 remains stable while scrolling.",
     );

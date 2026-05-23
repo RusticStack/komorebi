@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SafeEmailBody } from "../mail/rendering/SafeEmailBody";
 import { sanitizeSignatureHtml } from "../mail/signatures/signatureHtml";
 
@@ -25,6 +26,7 @@ export function AccountSignatureSettings({
   onSaveSignature,
   onClose,
 }: AccountSignatureSettingsProps) {
+  const { t } = useTranslation();
   const [selectedAccountId, setSelectedAccountId] = useState(
     initialAccountId ?? accounts[0]?.id ?? "",
   );
@@ -46,33 +48,33 @@ export function AccountSignatureSettings({
 
   if (accounts.length === 0) {
     return (
-      <section className="settings-panel" aria-label="Settings">
+      <section className="settings-panel" aria-label={t("settings.aria.panel")}>
         <header className="settings-panel__header">
           <div>
-            <p className="eyebrow">Settings</p>
-            <h2>Signatures</h2>
+            <p className="eyebrow">{t("settings.section")}</p>
+            <h2>{t("settings.heading")}</h2>
           </div>
           {onClose ? (
             <button type="button" onClick={onClose}>
-              Close
+              {t("common.actions.close")}
             </button>
           ) : null}
         </header>
-        <p className="empty-note">No accounts configured.</p>
+        <p className="empty-note">{t("mail.states.noAccounts")}</p>
       </section>
     );
   }
 
   return (
-    <section className="settings-panel" aria-label="Settings">
+    <section className="settings-panel" aria-label={t("settings.aria.panel")}>
       <header className="settings-panel__header">
         <div>
-          <p className="eyebrow">Settings</p>
-          <h2>Signatures</h2>
+          <p className="eyebrow">{t("settings.section")}</p>
+          <h2>{t("settings.heading")}</h2>
         </div>
         {onClose ? (
           <button type="button" onClick={onClose}>
-            Close
+            {t("common.actions.close")}
           </button>
         ) : null}
       </header>
@@ -92,7 +94,7 @@ export function AccountSignatureSettings({
         }}
       >
         <label>
-          <span>Account</span>
+          <span>{t("settings.fields.account")}</span>
           <select
             value={selectedAccountId}
             onChange={(event) => setSelectedAccountId(event.target.value)}
@@ -106,7 +108,7 @@ export function AccountSignatureSettings({
         </label>
 
         <label>
-          <span>Signature HTML</span>
+          <span>{t("settings.fields.signatureHtml")}</span>
           <textarea
             value={draftHtml}
             onChange={(event) => {
@@ -123,7 +125,7 @@ export function AccountSignatureSettings({
           />
         </label>
 
-        <section className="signature-preview" aria-label="Signature preview">
+        <section className="signature-preview" aria-label={t("settings.aria.preview")}>
           <SafeEmailBody bodyHtml={sanitized.html} bodyText={sanitized.plainText} />
         </section>
 
@@ -141,9 +143,9 @@ export function AccountSignatureSettings({
               }));
             }}
           >
-            Clear
+            {t("settings.actions.clear")}
           </button>
-          <button type="submit">Save signature</button>
+          <button type="submit">{t("settings.actions.saveSignature")}</button>
         </div>
       </form>
     </section>

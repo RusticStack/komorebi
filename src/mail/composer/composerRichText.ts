@@ -15,23 +15,23 @@ import DOMPurify, { type Config } from "dompurify";
 export type AlignmentValue = "left" | "center" | "right" | "justify";
 
 export const FONT_FAMILIES = [
-  { label: "System", value: "system-ui" },
-  { label: "Arial", value: "Arial" },
-  { label: "Georgia", value: "Georgia" },
-  { label: "Times", value: "Times New Roman" },
-  { label: "Mono", value: "Courier New" },
+  { labelKey: "composer.format.fontFamilies.system", value: "system-ui" },
+  { labelKey: "composer.format.fontFamilies.arial", value: "Arial" },
+  { labelKey: "composer.format.fontFamilies.georgia", value: "Georgia" },
+  { labelKey: "composer.format.fontFamilies.times", value: "Times New Roman" },
+  { labelKey: "composer.format.fontFamilies.mono", value: "Courier New" },
 ];
 export const FONT_SIZES = ["12px", "14px", "16px", "18px", "20px", "24px"];
 export const TEXT_COLORS = [
-  { label: "Charcoal", value: "#2d2d2d" },
-  { label: "Sage", value: "#5d7567" },
-  { label: "Terracotta", value: "#9a624f" },
-  { label: "Blue", value: "#315f8c" },
+  { labelKey: "composer.format.textColors.charcoal", value: "#2d2d2d" },
+  { labelKey: "composer.format.textColors.sage", value: "#5d7567" },
+  { labelKey: "composer.format.textColors.terracotta", value: "#9a624f" },
+  { labelKey: "composer.format.textColors.blue", value: "#315f8c" },
 ];
 export const HIGHLIGHT_COLORS = [
-  { label: "Honey", value: "#fff2a8" },
-  { label: "Sage", value: "#dfeadf" },
-  { label: "Terracotta", value: "#f4d6ca" },
+  { labelKey: "composer.format.highlightColors.honey", value: "#fff2a8" },
+  { labelKey: "composer.format.highlightColors.sage", value: "#dfeadf" },
+  { labelKey: "composer.format.highlightColors.terracotta", value: "#f4d6ca" },
 ];
 
 export const allowedFontFamilies = new Set(

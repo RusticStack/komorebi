@@ -1074,7 +1074,8 @@ textarea:focus-visible,
     max-width: 100vw;
     height: auto;
     min-height: 100vh;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .sidebar,
@@ -1083,6 +1084,7 @@ textarea:focus-visible,
     width: 100%;
     max-width: 100vw;
     min-width: 0;
+    overflow-x: hidden;
     border-right: 0;
   }
 
@@ -1108,6 +1110,11 @@ textarea:focus-visible,
     justify-self: start;
   }
 
+  .empty-panel p,
+  .reader-empty p {
+    max-width: 34ch;
+  }
+
   .list-toolbar,
   .search,
   .empty-panel,
@@ -1116,8 +1123,8 @@ textarea:focus-visible,
   .reader-actions,
   .reader-body,
   .reader-status {
-    width: 100vw;
-    max-width: 100vw;
+    width: 100%;
+    max-width: 100%;
   }
 
   .attachment-item {

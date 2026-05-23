@@ -1,0 +1,327 @@
+{
+  "app": {
+    "brandSubtitle": "Personal mail",
+    "scope": {
+      "allAccounts": "All accounts",
+      "local": "Local"
+    },
+    "sections": {
+      "accounts": "Accounts",
+      "app": "App",
+      "folders": "Folders",
+      "mailboxes": "Mailboxes",
+      "messages": "Messages",
+      "selectedMessage": "Selected message"
+    }
+  },
+  "common": {
+    "actions": {
+      "close": "Close",
+      "retry": "Retry",
+      "save": "Save"
+    },
+    "status": {
+      "errorState": "Error state",
+      "localCache": "Local cache"
+    },
+    "units": {
+      "bytes": {
+        "byte": "B",
+        "gigabyte": "GB",
+        "kilobyte": "KB",
+        "megabyte": "MB"
+      }
+    }
+  },
+  "mail": {
+    "account": {
+      "add": "Add account",
+      "aria": "{{label}} account, {{email}}, {{unread}} unread, {{status}}",
+      "status": {
+        "connected": "connected",
+        "offline": "offline",
+        "reconnect-needed": "reconnect needed",
+        "syncing": "syncing"
+      }
+    },
+    "attachments": {
+      "actionsLabel": "Attachment actions",
+      "attachmentFallback": "Attachment",
+      "heading": "Attachments",
+      "preview": "Preview",
+      "previewUnavailable": "Preview {{filename}} unavailable",
+      "previewUnavailableTitle": "Attachment preview requires a typed backend command.",
+      "save": "Save",
+      "saveUnavailable": "Save {{filename}} unavailable",
+      "saveUnavailableTitle": "Attachment saving requires a typed backend command.",
+      "disposition": {
+        "attachment": "attachment",
+        "inline": "inline"
+      }
+    },
+    "folders": {
+      "allMail": "All mail",
+      "aria": "{{name}} folder, {{unread}} unread, {{total}} messages",
+      "rootAria": "{{name}} folder, {{unread}} unread",
+      "unifiedInbox": "Unified Inbox"
+    },
+    "messages": {
+      "aria": "{{readState}}{{flagged}} message from {{sender}}, {{subject}}, {{receivedAt}}{{location}}",
+      "flagged": "Flagged",
+      "flaggedAria": ", flagged",
+      "location": "{{account}} / {{folder}}",
+      "noSubject": "(no subject)",
+      "read": "Read",
+      "unread": "Unread"
+    },
+    "reader": {
+      "actions": {
+        "label": "Message actions",
+        "archive": "Archive",
+        "archiveUnavailable": "Archive unavailable",
+        "archiveUnavailableTitle": "Archive is waiting for the typed mail-action command.",
+        "forward": "Forward",
+        "forwardUnavailable": "Forward unavailable",
+        "forwardUnavailableTitle": "Composer forward routing is not implemented yet.",
+        "loadRemote": "Load remote content",
+        "loadRemoteUnavailable": "Load remote content unavailable; remote resources are blocked by default",
+        "loadRemoteUnavailableTitle": "Remote resources stay blocked until a per-message or per-sender preference command exists.",
+        "markRead": "Mark read",
+        "markReadUnavailable": "Mark read unavailable",
+        "markUnread": "Mark unread",
+        "markUnreadUnavailable": "Mark unread unavailable",
+        "readStateUnavailableTitle": "Read-state changes are waiting for the typed mail-action command.",
+        "reply": "Reply",
+        "replyUnavailable": "Reply unavailable",
+        "replyUnavailableTitle": "Composer reply routing is not implemented yet."
+      },
+      "empty": {
+        "accountSetupRequired": "Account setup required",
+        "body": "Messages appear here after account setup and sync complete.",
+        "bodyWithMessages": "Select a message from the list to read it.",
+        "heading": "No message selected",
+        "label": "No selected message"
+      },
+      "error": {
+        "body": "Resolve the cache error before opening messages.",
+        "heading": "Message view unavailable",
+        "label": "Reader error"
+      },
+      "eyebrow": "Reader",
+      "loading": {
+        "body": "The local cache is being prepared.",
+        "heading": "Loading message view",
+        "label": "Reader loading",
+        "status": "Loading local cache"
+      },
+      "remoteBlocked": "Remote content blocked by default",
+      "selectedEyebrow": "Selected message"
+    },
+    "search": {
+      "error": {
+        "body": "The local FTS query could not be completed.",
+        "heading": "Search unavailable",
+        "label": "Search error"
+      },
+      "indexUnavailable": {
+        "body": "The local FTS index is missing or not ready.",
+        "heading": "Search index unavailable",
+        "label": "Search index unavailable"
+      },
+      "label": "Search mail",
+      "loading": {
+        "body": "Matching subject, sender, and body across active accounts.",
+        "heading": "Searching local index",
+        "label": "Searching messages"
+      },
+      "noMatches": {
+        "body": "Search found no local messages in the selected scope.",
+        "heading": "No matches",
+        "label": "No search results"
+      },
+      "placeholder": "Sender, subject, or body",
+      "status": {
+        "loading": "Searching local index",
+        "result_one": "{{formattedCount}} result",
+        "result_other": "{{formattedCount}} results",
+        "unavailable": "Search index unavailable"
+      }
+    },
+    "states": {
+      "accountsError": "Account list unavailable",
+      "accountsLoading": "Loading accounts",
+      "emptyFolder": {
+        "body": "This folder has no local mail yet.",
+        "heading": "No messages",
+        "label": "Empty folder"
+      },
+      "emptyInbox": {
+        "body": "Add an account to sync folders and messages into the local cache.",
+        "heading": "No mail loaded",
+        "label": "Empty inbox"
+      },
+      "foldersEmpty": "Folders appear after an account is added.",
+      "foldersError": "Folder list unavailable",
+      "foldersLoading": "Loading folders",
+      "messagesError": {
+        "body": "The local message cache could not be opened.",
+        "heading": "Mail unavailable",
+        "label": "Message error"
+      },
+      "messagesLoading": {
+        "body": "Reading the local cache.",
+        "heading": "Loading mail",
+        "label": "Loading messages"
+      },
+      "noAccounts": "No accounts configured."
+    },
+    "unreadCount_one": "{{formattedCount}} unread",
+    "unreadCount_other": "{{formattedCount}} unread",
+    "unifiedToggle": "Unified inbox"
+  },
+  "composer": {
+    "actions": {
+      "applyLink": "Apply link",
+      "attach": "Attach",
+      "compose": "Compose",
+      "discard": "Discard",
+      "inlineImage": "Inline image",
+      "insertSignature": "Insert signature",
+      "remove": "Remove",
+      "removeLink": "Remove link",
+      "saveDraft": "Save draft",
+      "send": "Send"
+    },
+    "aria": {
+      "attachmentPicker": "Attachment picker",
+      "attachments": "Composer attachments",
+      "body": "Message body",
+      "composer": "Composer",
+      "formattingControls": "Formatting controls",
+      "inlineImagePicker": "Inline image picker",
+      "unavailable": "Composer unavailable"
+    },
+    "attachments": {
+      "disposition": {
+        "attachment": "attachment",
+        "inline": "inline"
+      }
+    },
+    "autocomplete": {
+      "duplicateSkipped": "Duplicate recipient skipped: {{address}} in {{fieldLabel}} already appears in {{firstFieldLabel}}."
+    },
+    "empty": {
+      "body": "Add and connect an account before composing mail.",
+      "heading": "No account available"
+    },
+    "errors": {
+      "attachmentCouldNotStage": "{{filename}} could not be staged.",
+      "bodyRequired": "Add a message body.",
+      "draftCouldNotDiscard": "Draft could not be discarded.",
+      "draftCouldNotSave": "Draft could not be saved.",
+      "draftSaveUnavailable": "Draft saving is unavailable in this runtime.",
+      "invalidAddress": "{{fieldLabel}}: {{value}} is not a valid email address.",
+      "linkUnsafe": "Link URL must be http, https, or mailto without embedded credentials.",
+      "recipientRequired": "Add at least one recipient.",
+      "sendFailed": "Message could not be sent. The draft remains saved.",
+      "sendingUnavailable": "Sending is unavailable in this runtime.",
+      "stageUnavailable": "Attachment staging is unavailable in this runtime.",
+      "unknownAttachment": "Attachment",
+      "accountRequired": "Choose a sending account."
+    },
+    "fields": {
+      "account": "Account",
+      "bcc": "BCC",
+      "cc": "CC",
+      "from": "From",
+      "linkUrl": "Link URL",
+      "subject": "Subject",
+      "to": "To"
+    },
+    "format": {
+      "alignCenter": "Align center",
+      "alignLeft": "Align left",
+      "alignRight": "Align right",
+      "alignmentLabel": "Text alignment",
+      "blockquote": "Block quote",
+      "bold": "Bold",
+      "bulletedList": "Bulleted list",
+      "codeBlock": "Code block",
+      "default": "Default",
+      "fontFamily": "Font family",
+      "fontFamilies": {
+        "arial": "Arial",
+        "georgia": "Georgia",
+        "mono": "Mono",
+        "system": "System",
+        "times": "Times"
+      },
+      "fontSize": "Font size",
+      "highlight": "Highlight",
+      "highlightColors": {
+        "honey": "Honey",
+        "sage": "Sage",
+        "terracotta": "Terracotta"
+      },
+      "inlineCode": "Inline code",
+      "italic": "Italic",
+      "none": "None",
+      "numberedList": "Numbered list",
+      "strikethrough": "Strikethrough",
+      "table": {
+        "addColumn": "Add column",
+        "addRow": "Add row",
+        "controlsLabel": "Table controls",
+        "delete": "Delete table",
+        "insert": "Insert table"
+      },
+      "textColor": "Text color",
+      "textColors": {
+        "blue": "Blue",
+        "charcoal": "Charcoal",
+        "sage": "Sage",
+        "terracotta": "Terracotta"
+      }
+    },
+    "heading": "New message",
+    "status": {
+      "draftFailed": "Draft save failed",
+      "draftNotSaved": "Draft not saved",
+      "draftSaved": "Draft saved",
+      "needsAttention": "Composer needs attention",
+      "savingDraft": "Saving draft",
+      "sending": "Sending message",
+      "sent": "Message sent"
+    },
+    "sendProgress": {
+      "account-resolved": "Account resolved",
+      "attachment-streamed": "Attachments streamed",
+      "auth-resolved": "Authentication resolved",
+      "draft-finalized": "Draft finalized",
+      "draft-prepared": "Draft prepared",
+      "mime-composed": "MIME composed",
+      "sent-state-recorded": "Sent state recorded",
+      "smtp-accepted": "SMTP accepted"
+    }
+  },
+  "settings": {
+    "actions": {
+      "clear": "Clear",
+      "saveSignature": "Save signature"
+    },
+    "aria": {
+      "panel": "Settings",
+      "preview": "Signature preview"
+    },
+    "fields": {
+      "account": "Account",
+      "signatureHtml": "Signature HTML"
+    },
+    "heading": "Signatures",
+    "section": "Settings"
+  },
+  "safeEmail": {
+    "emptyBody": "No message body.",
+    "remoteContentBlocked": "Remote content blocked"
+  }
+}

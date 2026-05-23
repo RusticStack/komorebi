@@ -6,11 +6,14 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   useVirtualizer,
   type Rect,
   type Virtualizer,
 } from "@tanstack/react-virtual";
+import { useLocaleFormatters } from "../../i18n";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import {
   TipTapComposer,
@@ -103,6 +106,8 @@ export function MailClientShell({
   stageComposerAttachment,
   sendComposerMail,
 }: MailClientShellProps) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
   const [state, setState] = useState<MailShellState>(() =>
     createMailShellState(
       initialData,
@@ -155,8 +160,8 @@ export function MailClientShell({
   const hasAccounts = state.data.accounts.length > 0;
   const canCompose = hasAccounts && state.loadState.accounts === "ready";
   const listTitle = state.unifiedInbox
-    ? "Unified Inbox"
-    : activeFolder?.name ?? activeAccount?.label ?? "Inbox";
+    ? t("mail.folders.unifiedInbox")
+    : activeFolder?.name ?? activeAccount?.label ?? t("mail.folders.allMail");
 
   function patchState(update: Partial<MailShellState>) {
     setState((current) => ({
@@ -424,24 +429,24 @@ export function MailClientShell({
 
   return (
     <main className="app-shell" onKeyDown={handleShellKeyDown}>
-      <aside className="sidebar" aria-label="Mailboxes">
+      <aside className="sidebar" aria-label={t("app.sections.mailboxes")}>
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
             K
           </span>
           <div>
             <h1>Komorebi</h1>
-            <p>Personal mail</p>
+            <p>{t("app.brandSubtitle")}</p>
           </div>
         </div>
 
-        <section className="sidebar-section" aria-label="Accounts">
+        <section className="sidebar-section" aria-label={t("app.sections.accounts")}>
           <div className="section-heading">
-            <h2>Accounts</h2>
+            <h2>{t("app.sections.accounts")}</h2>
             <button
               className="icon-command"
               type="button"
-              aria-label="Add account"
+              aria-label={t("mail.account.add")}
               disabled
             >
               +
@@ -466,15 +471,15 @@ export function MailClientShell({
                 )
               }
             />
-            <span>Unified inbox</span>
+            <span>{t("mail.unifiedToggle")}</span>
           </label>
 
           <StatusList
             status={state.loadState.accounts}
-            loadingLabel="Loading accounts"
-            errorLabel="Account list unavailable"
+            loadingLabel={t("mail.states.accountsLoading")}
+            errorLabel={t("mail.states.accountsError")}
             empty={state.data.accounts.length === 0}
-            emptyLabel="No accounts configured."
+            emptyLabel={t("mail.states.noAccounts")}
             onRetry={loadMailShellData ? reloadMailShell : undefined}
           >
             {state.data.accounts.map((account, index) => (
@@ -486,7 +491,12 @@ export function MailClientShell({
                 }
                 type="button"
                 key={account.id}
-                aria-label={`${account.label} account, ${account.email}, ${account.unreadCount} unread, ${account.status}`}
+                aria-label={t("mail.account.aria", {
+                  email: account.email,
+                  label: account.label,
+                  status: accountStatusLabel(account.status, t),
+                  unread: localeFormat.count(account.unreadCount),
+                })}
                 ref={(element) => {
                   accountButtonRefs.current[index] = element;
                 }}
@@ -500,36 +510,45 @@ export function MailClientShell({
                 <span>{account.label}</span>
                 <small>{account.email}</small>
                 <span className="account-meta">
-                  <strong>{account.status}</strong>
-                  <span>{account.unreadCount} unread</span>
+                  <strong>{accountStatusLabel(account.status, t)}</strong>
+                  <span>{localeFormat.unreadCount(account.unreadCount)}</span>
                 </span>
               </button>
             ))}
           </StatusList>
         </section>
 
-        <nav className="sidebar-section" aria-label="Folders">
-          <h2>Folders</h2>
+        <nav className="sidebar-section" aria-label={t("app.sections.folders")}>
+          <h2>{t("app.sections.folders")}</h2>
           <StatusList
             status={state.loadState.folders}
-            loadingLabel="Loading folders"
-            errorLabel="Folder list unavailable"
+            loadingLabel={t("mail.states.foldersLoading")}
+            errorLabel={t("mail.states.foldersError")}
             empty={visibleFolders.length === 0}
-            emptyLabel="Folders appear after an account is added."
+            emptyLabel={t("mail.states.foldersEmpty")}
             onRetry={loadMailShellData ? reloadMailShell : undefined}
           >
             <button
               className={!state.selectedFolderId ? "folder is-active" : "folder"}
               type="button"
-              aria-label={`${state.unifiedInbox ? "Unified Inbox" : "All mail"} folder, ${unreadCountForScope(state)} unread`}
+              aria-label={t("mail.folders.rootAria", {
+                name: state.unifiedInbox
+                  ? t("mail.folders.unifiedInbox")
+                  : t("mail.folders.allMail"),
+                unread: localeFormat.count(unreadCountForScope(state)),
+              })}
               ref={(element) => {
                 folderButtonRefs.current[0] = element;
               }}
               onKeyDown={(event) => handleFolderKeyDown(event, 0)}
               onClick={() => setState((current) => selectFolderScope(current, null))}
             >
-              <span>{state.unifiedInbox ? "Unified Inbox" : "All mail"}</span>
-              <span>{unreadCountForScope(state)}</span>
+              <span>
+                {state.unifiedInbox
+                  ? t("mail.folders.unifiedInbox")
+                  : t("mail.folders.allMail")}
+              </span>
+              <span>{localeFormat.count(unreadCountForScope(state))}</span>
             </button>
             {visibleFolders.map((folder, index) => (
               <button
@@ -540,7 +559,11 @@ export function MailClientShell({
                 }
                 type="button"
                 key={folder.id}
-                aria-label={`${folder.name} folder, ${folder.unreadCount} unread, ${folder.totalCount} messages`}
+                aria-label={t("mail.folders.aria", {
+                  name: folder.name,
+                  total: localeFormat.count(folder.totalCount),
+                  unread: localeFormat.count(folder.unreadCount),
+                })}
                 ref={(element) => {
                   folderButtonRefs.current[index + 1] = element;
                 }}
@@ -550,29 +573,29 @@ export function MailClientShell({
                 }
               >
                 <span>{folder.name}</span>
-                <span>{folder.unreadCount}</span>
+                <span>{localeFormat.count(folder.unreadCount)}</span>
               </button>
             ))}
           </StatusList>
         </nav>
 
-        <section className="sidebar-section sidebar-section--footer" aria-label="App">
+        <section className="sidebar-section sidebar-section--footer" aria-label={t("app.sections.app")}>
           <button
             className="settings-button"
             type="button"
             ref={settingsButtonRef}
             onClick={() => openDrawer("settings", settingsButtonRef.current)}
           >
-            Settings
+            {t("settings.section")}
           </button>
         </section>
       </aside>
 
-      <section className="message-list" aria-label="Messages">
+      <section className="message-list" aria-label={t("app.sections.messages")}>
         <header className="list-toolbar">
           <div>
             <p className="eyebrow">
-              {state.unifiedInbox ? "All accounts" : activeAccount?.label ?? "Local"}
+              {state.unifiedInbox ? t("app.scope.allAccounts") : activeAccount?.label ?? t("app.scope.local")}
             </p>
             <h2>{listTitle}</h2>
           </div>
@@ -582,16 +605,16 @@ export function MailClientShell({
             disabled={!canCompose}
             onClick={() => openDrawer("composer", composeButtonRef.current)}
           >
-            Compose
+            {t("composer.actions.compose")}
           </button>
         </header>
 
         <label className="search">
-          <span>Search mail</span>
+          <span>{t("mail.search.label")}</span>
           <input
             ref={searchInputRef}
             type="search"
-            placeholder="Sender, subject, or body"
+            placeholder={t("mail.search.placeholder")}
             disabled={!hasAccounts || state.loadState.messages !== "ready"}
             value={state.searchQuery}
             onChange={(event) =>
@@ -633,7 +656,7 @@ export function MailClientShell({
 
       <section
         className="reader"
-        aria-label="Selected message"
+        aria-label={t("app.sections.selectedMessage")}
         ref={readerRef}
         tabIndex={-1}
       >
@@ -650,7 +673,7 @@ export function MailClientShell({
           className="settings-drawer"
           role="dialog"
           aria-modal="true"
-          aria-label="Settings"
+          aria-label={t("settings.aria.panel")}
           ref={drawerRef}
           tabIndex={-1}
           onKeyDown={handleDrawerKeyDown}
@@ -686,7 +709,7 @@ export function MailClientShell({
           className="composer-drawer"
           role="dialog"
           aria-modal="true"
-          aria-label="Composer"
+          aria-label={t("composer.aria.composer")}
           ref={drawerRef}
           tabIndex={-1}
           onKeyDown={handleDrawerKeyDown}
@@ -733,6 +756,9 @@ function SearchStatusLine({
   resultCount: number;
   status: MailSearchUiStatus;
 }) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+
   if (!isBackendSearchActive) {
     return null;
   }
@@ -740,7 +766,7 @@ function SearchStatusLine({
   if (status === "debouncing" || status === "loading") {
     return (
       <span className="search-status" role="status">
-        Searching local index
+        {t("mail.search.status.loading")}
       </span>
     );
   }
@@ -748,7 +774,7 @@ function SearchStatusLine({
   if (status === "unavailable") {
     return (
       <span className="search-status search-status--warning" role="status">
-        Search index unavailable
+        {t("mail.search.status.unavailable")}
       </span>
     );
   }
@@ -756,7 +782,7 @@ function SearchStatusLine({
   if (status === "error") {
     return (
       <span className="search-status search-status--warning" role="status">
-        Search unavailable
+        {t("mail.search.error.heading")}
       </span>
     );
   }
@@ -764,7 +790,7 @@ function SearchStatusLine({
   if (status === "ready") {
     return (
       <span className="search-status" role="status">
-        {resultCount} {resultCount === 1 ? "result" : "results"}
+        {localeFormat.searchResults(resultCount)}
       </span>
     );
   }
@@ -789,6 +815,8 @@ function StatusList({
   children: ReactNode;
   onRetry?: () => void;
 }) {
+  const { t } = useTranslation();
+
   if (status === "loading") {
     return <p className="empty-note status-note">{loadingLabel}</p>;
   }
@@ -798,7 +826,7 @@ function StatusList({
       <div className="status-note status-note--error" role="status">
         <p>{errorLabel}</p>
         <button type="button" onClick={onRetry} disabled={!onRetry}>
-          Retry
+          {t("common.actions.retry")}
         </button>
       </div>
     );
@@ -834,6 +862,7 @@ function MessageListState({
   onSelectMessage: (messageId: string) => void;
   onReadMessage: (messageId: string) => void;
 }) {
+  const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement | null>(null);
   const messageButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pendingFocusIndexRef = useRef<number | null>(null);
@@ -910,9 +939,9 @@ function MessageListState({
   if (state.loadState.messages === "loading") {
     return (
       <div className="messages">
-        <section className="empty-panel" aria-label="Loading messages">
-          <h3>Loading mail</h3>
-          <p>Reading the local cache.</p>
+        <section className="empty-panel" aria-label={t("mail.states.messagesLoading.label")}>
+          <h3>{t("mail.states.messagesLoading.heading")}</h3>
+          <p>{t("mail.states.messagesLoading.body")}</p>
         </section>
       </div>
     );
@@ -921,11 +950,11 @@ function MessageListState({
   if (state.loadState.messages === "error") {
     return (
       <div className="messages">
-        <section className="empty-panel error-panel" aria-label="Message error">
-          <h3>Mail unavailable</h3>
-          <p>The local message cache could not be opened.</p>
+        <section className="empty-panel error-panel" aria-label={t("mail.states.messagesError.label")}>
+          <h3>{t("mail.states.messagesError.heading")}</h3>
+          <p>{t("mail.states.messagesError.body")}</p>
           <button type="button" onClick={onRetry} disabled={!onRetry}>
-            Retry
+            {t("common.actions.retry")}
           </button>
         </section>
       </div>
@@ -935,9 +964,9 @@ function MessageListState({
   if (state.data.accounts.length === 0) {
     return (
       <div className="messages">
-        <section className="empty-panel" aria-label="Empty inbox">
-          <h3>No mail loaded</h3>
-          <p>Add an account to sync folders and messages into the local cache.</p>
+        <section className="empty-panel" aria-label={t("mail.states.emptyInbox.label")}>
+          <h3>{t("mail.states.emptyInbox.heading")}</h3>
+          <p>{t("mail.states.emptyInbox.body")}</p>
         </section>
       </div>
     );
@@ -949,9 +978,9 @@ function MessageListState({
   ) {
     return (
       <div className="messages">
-        <section className="empty-panel" aria-label="Searching messages">
-          <h3>Searching local index</h3>
-          <p>Matching subject, sender, and body across active accounts.</p>
+        <section className="empty-panel" aria-label={t("mail.search.loading.label")}>
+          <h3>{t("mail.search.loading.heading")}</h3>
+          <p>{t("mail.search.loading.body")}</p>
         </section>
       </div>
     );
@@ -960,9 +989,9 @@ function MessageListState({
   if (isBackendSearchActive && searchStatus === "unavailable") {
     return (
       <div className="messages">
-        <section className="empty-panel error-panel" aria-label="Search index unavailable">
-          <h3>Search index unavailable</h3>
-          <p>The local FTS index is missing or not ready.</p>
+        <section className="empty-panel error-panel" aria-label={t("mail.search.indexUnavailable.label")}>
+          <h3>{t("mail.search.indexUnavailable.heading")}</h3>
+          <p>{t("mail.search.indexUnavailable.body")}</p>
         </section>
       </div>
     );
@@ -971,11 +1000,11 @@ function MessageListState({
   if (isBackendSearchActive && searchStatus === "error") {
     return (
       <div className="messages">
-        <section className="empty-panel error-panel" aria-label="Search error">
-          <h3>Search unavailable</h3>
-          <p>The local FTS query could not be completed.</p>
+        <section className="empty-panel error-panel" aria-label={t("mail.search.error.label")}>
+          <h3>{t("mail.search.error.heading")}</h3>
+          <p>{t("mail.search.error.body")}</p>
           <button type="button" onClick={onRetrySearch}>
-            Retry
+            {t("common.actions.retry")}
           </button>
         </section>
       </div>
@@ -985,9 +1014,9 @@ function MessageListState({
   if (visibleMessages.length === 0 && state.searchQuery.trim()) {
     return (
       <div className="messages">
-        <section className="empty-panel" aria-label="No search results">
-          <h3>No matches</h3>
-          <p>Search found no local messages in the selected scope.</p>
+        <section className="empty-panel" aria-label={t("mail.search.noMatches.label")}>
+          <h3>{t("mail.search.noMatches.heading")}</h3>
+          <p>{t("mail.search.noMatches.body")}</p>
         </section>
       </div>
     );
@@ -996,9 +1025,9 @@ function MessageListState({
   if (visibleMessages.length === 0) {
     return (
       <div className="messages">
-        <section className="empty-panel" aria-label="Empty folder">
-          <h3>No messages</h3>
-          <p>This folder has no local mail yet.</p>
+        <section className="empty-panel" aria-label={t("mail.states.emptyFolder.label")}>
+          <h3>{t("mail.states.emptyFolder.heading")}</h3>
+          <p>{t("mail.states.emptyFolder.body")}</p>
         </section>
       </div>
     );
@@ -1021,7 +1050,7 @@ function MessageListState({
             return null;
           }
           const locationLabel = state.searchQuery.trim()
-            ? messageLocationLabel(message, accountById, folderById)
+            ? messageLocationLabel(message, accountById, folderById, t)
             : null;
 
           return (
@@ -1075,16 +1104,26 @@ function MessageRow({
   refCallback: (element: HTMLButtonElement | null) => void;
   rowCount: number;
 }) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+  const subject = message.subject || t("mail.messages.noSubject");
+  const receivedAt = localeFormat.dateTime(message.receivedAt);
+
   return (
     <button
       className={message.unread ? "message is-unread" : "message"}
       type="button"
       aria-current={isSelected ? "true" : undefined}
-      aria-label={`${message.unread ? "Unread" : "Read"}${
-        message.flagged ? ", flagged" : ""
-      } message from ${message.sender}, ${message.subject || "no subject"}, ${
-        message.receivedAt
-      }${locationLabel ? `, ${locationLabel}` : ""}`}
+      aria-label={t("mail.messages.aria", {
+        flagged: message.flagged ? t("mail.messages.flaggedAria") : "",
+        location: locationLabel ? `, ${locationLabel}` : "",
+        readState: message.unread
+          ? t("mail.messages.unread")
+          : t("mail.messages.read"),
+        receivedAt,
+        sender: message.sender,
+        subject,
+      })}
       aria-posinset={index + 1}
       aria-setsize={rowCount}
       data-message-index={index}
@@ -1096,15 +1135,15 @@ function MessageRow({
         <strong>{message.sender}</strong>
         <span className="message-row-meta">
           {message.flagged ? (
-            <span className="message-flag">Flagged</span>
+            <span className="message-flag">{t("mail.messages.flagged")}</span>
           ) : null}
           {locationLabel ? (
             <span className="message-location">{locationLabel}</span>
           ) : null}
-          <time>{message.receivedAt}</time>
+          <time dateTime={message.receivedAt}>{receivedAt}</time>
         </span>
       </div>
-      <h3>{message.subject || "(no subject)"}</h3>
+      <h3>{subject}</h3>
       <p>{message.preview}</p>
     </button>
   );
@@ -1114,11 +1153,15 @@ function messageLocationLabel(
   message: MailMessage,
   accountById: Map<string, { label: string }>,
   folderById: Map<string, { name: string }>,
+  t: TFunction,
 ) {
   const account = accountById.get(message.accountId);
   const folder = folderById.get(message.folderId);
 
-  return `${account?.label ?? "Account"} / ${folder?.name ?? "Folder"}`;
+  return t("mail.messages.location", {
+    account: account?.label ?? t("app.sections.accounts"),
+    folder: folder?.name ?? t("app.sections.folders"),
+  });
 }
 
 function ReaderPane({
@@ -1132,15 +1175,18 @@ function ReaderPane({
   hasVisibleMessages: boolean;
   onRetry?: () => void;
 }) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+
   if (state.loadState.messages === "loading") {
     return (
       <>
-        <section className="reader-empty" aria-label="Reader loading">
-          <p className="eyebrow">Reader</p>
-          <h2>Loading message view</h2>
-          <p>The local cache is being prepared.</p>
+        <section className="reader-empty" aria-label={t("mail.reader.loading.label")}>
+          <p className="eyebrow">{t("mail.reader.eyebrow")}</p>
+          <h2>{t("mail.reader.loading.heading")}</h2>
+          <p>{t("mail.reader.loading.body")}</p>
         </section>
-        <ReaderStatus text="Loading local cache" />
+        <ReaderStatus text={t("mail.reader.loading.status")} />
       </>
     );
   }
@@ -1148,15 +1194,15 @@ function ReaderPane({
   if (state.loadState.messages === "error") {
     return (
       <>
-        <section className="reader-empty" aria-label="Reader error">
-          <p className="eyebrow">Reader</p>
-          <h2>Message view unavailable</h2>
-          <p>Resolve the cache error before opening messages.</p>
+        <section className="reader-empty" aria-label={t("mail.reader.error.label")}>
+          <p className="eyebrow">{t("mail.reader.eyebrow")}</p>
+          <h2>{t("mail.reader.error.heading")}</h2>
+          <p>{t("mail.reader.error.body")}</p>
           <button type="button" onClick={onRetry} disabled={!onRetry}>
-            Retry
+            {t("common.actions.retry")}
           </button>
         </section>
-        <ReaderStatus text="Error state" />
+        <ReaderStatus text={t("common.status.errorState")} />
       </>
     );
   }
@@ -1164,20 +1210,20 @@ function ReaderPane({
   if (!message) {
     return (
       <>
-        <section className="reader-empty" aria-label="No selected message">
-          <p className="eyebrow">Reader</p>
-          <h2>No message selected</h2>
+        <section className="reader-empty" aria-label={t("mail.reader.empty.label")}>
+          <p className="eyebrow">{t("mail.reader.eyebrow")}</p>
+          <h2>{t("mail.reader.empty.heading")}</h2>
           <p>
             {hasVisibleMessages
-              ? "Select a message from the list to read it."
-              : "Messages appear here after account setup and sync complete."}
+              ? t("mail.reader.empty.bodyWithMessages")
+              : t("mail.reader.empty.body")}
           </p>
         </section>
         <ReaderStatus
           text={
             state.data.accounts.length === 0
-              ? "Account setup required"
-              : "Remote content blocked by default"
+              ? t("mail.reader.empty.accountSetupRequired")
+              : t("mail.reader.remoteBlocked")
           }
         />
       </>
@@ -1187,54 +1233,62 @@ function ReaderPane({
   return (
     <>
       <header className="reader-header">
-        <p className="eyebrow">Selected message</p>
-        <h2>{message.subject || "(no subject)"}</h2>
+        <p className="eyebrow">{t("mail.reader.selectedEyebrow")}</p>
+        <h2>{message.subject || t("mail.messages.noSubject")}</h2>
         <div className="sender-line">
           <span>{message.sender}</span>
-          <time>{message.receivedAt}</time>
+          <time dateTime={message.receivedAt}>
+            {localeFormat.dateTime(message.receivedAt)}
+          </time>
         </div>
       </header>
 
-      <div className="reader-actions" aria-label="Message actions">
+      <div className="reader-actions" aria-label={t("mail.reader.actions.label")}>
         <button
           type="button"
           disabled
-          title="Composer reply routing is not implemented yet."
-          aria-label="Reply unavailable"
+          title={t("mail.reader.actions.replyUnavailableTitle")}
+          aria-label={t("mail.reader.actions.replyUnavailable")}
         >
-          Reply
+          {t("mail.reader.actions.reply")}
         </button>
         <button
           type="button"
           disabled
-          title="Composer forward routing is not implemented yet."
-          aria-label="Forward unavailable"
+          title={t("mail.reader.actions.forwardUnavailableTitle")}
+          aria-label={t("mail.reader.actions.forwardUnavailable")}
         >
-          Forward
+          {t("mail.reader.actions.forward")}
         </button>
         <button
           type="button"
           disabled
-          title="Archive is waiting for the typed mail-action command."
-          aria-label="Archive unavailable"
+          title={t("mail.reader.actions.archiveUnavailableTitle")}
+          aria-label={t("mail.reader.actions.archiveUnavailable")}
         >
-          Archive
+          {t("mail.reader.actions.archive")}
         </button>
         <button
           type="button"
           disabled
-          title="Read-state changes are waiting for the typed mail-action command."
-          aria-label={`${message.unread ? "Mark read" : "Mark unread"} unavailable`}
+          title={t("mail.reader.actions.readStateUnavailableTitle")}
+          aria-label={
+            message.unread
+              ? t("mail.reader.actions.markReadUnavailable")
+              : t("mail.reader.actions.markUnreadUnavailable")
+          }
         >
-          {message.unread ? "Mark read" : "Mark unread"}
+          {message.unread
+            ? t("mail.reader.actions.markRead")
+            : t("mail.reader.actions.markUnread")}
         </button>
         <button
           type="button"
           disabled
-          title="Remote resources stay blocked until a per-message or per-sender preference command exists."
-          aria-label="Load remote content unavailable; remote resources are blocked by default"
+          title={t("mail.reader.actions.loadRemoteUnavailableTitle")}
+          aria-label={t("mail.reader.actions.loadRemoteUnavailable")}
         >
-          Load remote content
+          {t("mail.reader.actions.loadRemote")}
         </button>
       </div>
 
@@ -1243,23 +1297,27 @@ function ReaderPane({
         <AttachmentList attachments={message.attachments} />
       </article>
 
-      <ReaderStatus text="Remote content blocked by default" />
+      <ReaderStatus text={t("mail.reader.remoteBlocked")} />
     </>
   );
 }
 
 function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+
   if (attachments.length === 0) {
     return null;
   }
 
   return (
-    <section className="attachment-list" aria-label="Attachments">
-      <h3>Attachments</h3>
+    <section className="attachment-list" aria-label={t("mail.attachments.heading")}>
+      <h3>{t("mail.attachments.heading")}</h3>
       <ul>
         {attachments.map((attachment) => {
           const displayFilename =
-            attachment.displayFilename.trim() || "Attachment";
+            attachment.displayFilename.trim() ||
+            t("mail.attachments.attachmentFallback");
           const contentType =
             attachment.contentType.trim() || "application/octet-stream";
 
@@ -1268,26 +1326,30 @@ function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
               <div className="attachment-meta">
                 <strong>{displayFilename}</strong>
                 <span>
-                  {contentType} - {formatAttachmentSize(attachment.sizeBytes)}
+                  {contentType} - {localeFormat.byteSize(attachment.sizeBytes)}
                 </span>
-                <small>{attachment.disposition}</small>
+                <small>{t(`mail.attachments.disposition.${attachment.disposition}`)}</small>
               </div>
-              <div className="attachment-actions" aria-label="Attachment actions">
+              <div className="attachment-actions" aria-label={t("mail.attachments.actionsLabel")}>
                 <button
                   type="button"
                   disabled
-                  title="Attachment preview requires a typed backend command."
-                  aria-label={`Preview ${displayFilename} unavailable`}
+                  title={t("mail.attachments.previewUnavailableTitle")}
+                  aria-label={t("mail.attachments.previewUnavailable", {
+                    filename: displayFilename,
+                  })}
                 >
-                  Preview
+                  {t("mail.attachments.preview")}
                 </button>
                 <button
                   type="button"
                   disabled
-                  title="Attachment saving requires a typed backend command."
-                  aria-label={`Save ${displayFilename} unavailable`}
+                  title={t("mail.attachments.saveUnavailableTitle")}
+                  aria-label={t("mail.attachments.saveUnavailable", {
+                    filename: displayFilename,
+                  })}
                 >
-                  Save
+                  {t("mail.attachments.save")}
                 </button>
               </div>
             </li>
@@ -1299,15 +1361,24 @@ function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
 }
 
 function ReaderStatus({ text }: { text: string }) {
+  const { t } = useTranslation();
+
   return (
     <footer className="reader-status">
       <span>{text}</span>
-      <span>Local cache</span>
+      <span>{t("common.status.localCache")}</span>
     </footer>
   );
 }
 
 const ComposerDrawer = TipTapComposer;
+
+function accountStatusLabel(
+  status: MailShellData["accounts"][number]["status"],
+  t: TFunction,
+) {
+  return t(`mail.account.status.${status}`);
+}
 
 function unreadCountForScope(state: MailShellState) {
   const visibleFolders = foldersForScope(state);
@@ -1326,28 +1397,6 @@ function unreadCountForScope(state: MailShellState) {
   }
 
   return visibleFolders.reduce((total, folder) => total + folder.unreadCount, 0);
-}
-
-function formatAttachmentSize(sizeBytes: number) {
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-    return "0 B";
-  }
-
-  if (sizeBytes < 1024) {
-    return `${Math.round(sizeBytes)} B`;
-  }
-
-  const units = ["KB", "MB", "GB"];
-  let value = sizeBytes / 1024;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `${rounded} ${units[unitIndex]}`;
 }
 
 function nextIndexForKey(
