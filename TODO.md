@@ -4,321 +4,384 @@ Last audit refresh: 2026-05-23
 
 ## Audit Scope
 
-- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/frontend-mail-shell.md`, `docs/architecture/schema.md`, `docs/architecture/sync-state-machine.md`, `docs/architecture/mime-normalization.md`, `docs/architecture/smtp-send.md`, `docs/architecture/draft-and-sent-persistence.md`, `docs/architecture/account-signatures.md`, `docs/architecture/local-cache-encryption.md`, `docs/architecture/credential-model.md`, `docs/architecture/provider-auth.md`, `docs/architecture/token-lifecycle.md`, `docs/architecture/tauri-capabilities.md`, `docs/architecture/ipc-and-mutation-boundaries.md`, `docs/architecture/ipc-validation.md`, `docs/architecture/message-rendering.md`, `docs/architecture/attachment-safety.md`, and `docs/architecture/destructive-mail-actions.md`.
-- Local code inspected: React mail shell in `src/App.tsx`, `src/App.css`, and `src/mail/shell/`, TipTap composer, rich-text sanitizer/extensions, and recent-recipient autocomplete in `src/mail/composer/`, frontend i18n setup, locale resources, and locale formatter boundary in `src/i18n/`, safe email rendering boundary in `src/mail/rendering/`, signature sanitization/insertion helpers in `src/mail/signatures/`, account signature settings in `src/settings/`, Playwright fixture harnesses in `src/e2e/`, generated performance fixture code in `src/perf/` and `perf/`, Tauri/Rust shell in `src-tauri/`, SQLite migration SQL in `src-tauri/migrations/`, Rust schema migration runner in `src-tauri/src/schema.rs`, Rust mail-shell read model in `src-tauri/src/mail_shell.rs`, Rust composer command/recent-recipient boundary in `src-tauri/src/composer.rs`, Rust IMAP sync state machine, folder IDLE/polling worker, server flag/folder semantics normalization, and SQLite cache in `src-tauri/src/imap_sync.rs`, Rust MIME normalization in `src-tauri/src/mime_normalization.rs`, Rust SMTP send boundary in `src-tauri/src/smtp_send.rs`, Rust draft/Sent persistence in `src-tauri/src/draft_persistence.rs`, Rust account signature persistence in `src-tauri/src/account_signatures.rs`, Rust auth policy in `src-tauri/src/auth.rs`, Rust OAuth provider implementation in `src-tauri/src/oauth.rs`, Windows Credential Manager wrapper in `src-tauri/src/credentials.rs`, Rust token lifecycle in `src-tauri/src/token_lifecycle.rs`, Rust IPC boundary policy in `src-tauri/src/ipc_boundary.rs`, Rust IPC validation policy in `src-tauri/src/ipc_validation.rs`, Rust attachment safety policy in `src-tauri/src/attachment_safety.rs`, and Rust destructive mail-action policy in `src-tauri/src/mail_actions.rs`.
-- Local tests inspected: `src/App.test.tsx` tests for the accountless default shell, local-cache loader wiring, injected account/folder/message workflows, local fixture search, FTS-backed search debounce/cancellation, search result account/folder labels, no-index search state, keyboard navigation, reader focus, safe message detail rendering, remote image blocking, inert attachment metadata, disabled reply/forward/remote-content controls, locale-formatted message timestamps in virtualized rows, TipTap composer address validation, duplicate recipient handling, keyboard recent-recipient autocomplete, signature insertion, draft save/send request wiring, staged attachment/inline-image workflows, send progress, composer/settings dialog focus behavior, 10,000-message virtualized rendering, selection preservation, and loading/error states; `src/i18n/i18n.test.tsx` covers first-launch language detection, English fallback, `pt-PT` resource completeness, reusable locale formatter output, locale-aware `pt-PT` dates/times/counts/statuses/sizes in the shell, localized missing sender/attachment labels, and first-run Portuguese shell rendering; `src/mail/composer/TipTapComposer.test.tsx` covers rich formatting extension serialization and sanitizer policy; `src/mail/rendering/SafeEmailBody.test.tsx`; `src/mail/signatures/signatureHtml.test.ts`; `src/settings/AccountSignatureSettings.test.tsx`; `src-tauri/capabilities/capabilities.test.ts`; `src-tauri/tests/ipc_denial_paths.rs`; `src-tauri/src/composer.rs` unit tests for draft command mapping, rich composer HTML persistence, staged composer attachment storage, unsafe attachment denial, fake SMTP send through staged attachments, cleanup after confirmed send, duplicate recipient normalization, local recent-recipient persistence/search, and invalid recipient denial; `src-tauri/src/mail_shell.rs` unit tests for local-cache account/folder/message read models, FTS-backed search, search scope validation, missing-index reporting, safe attachment metadata projection, missing-label fallback ownership, unread counts, removed-account exclusion, credential-reference redaction, and attachment storage-path redaction; `src-tauri/src/schema.rs` unit tests for migration application, schema objects, constraints, JSON checks, identity uniqueness, folder semantics migration, SMTP send receipt migration, draft/Sent migration, composer attachment migration, recent-recipient migration, and foreign-key integrity; `src-tauri/src/imap_sync.rs` unit tests for fake IMAP folder discovery, initial fetch, incremental UID fetch, flag updates, full flag preservation, folder special-use/attribute normalization, unknown custom folder usability, expunge handling, UIDVALIDITY reset, IDLE mailbox wakeups, IDLE timeout refresh, polling fallback, capability-probe reconnect, IDLE-wait reconnect, cancellation, account removal, backoff, invalid fixture responses, and unknown-account denial; `src-tauri/src/mime_normalization.rs` unit tests for encoded headers, charsets, multipart alternatives, inline CID images, attachment metadata, malformed MIME, SQLite metadata persistence, and denial paths; `src-tauri/src/smtp_send.rs` unit tests for account transport resolution, MIME composition, rich composer HTML serialization, account signature insertion, auth resolution, attachment streaming/path denial, SMTP failure behavior, confirmed send receipts, source-draft finalization, and send validation denial paths; `src-tauri/src/draft_persistence.rs` unit tests for draft autosave/reload, discard cleanup, sent conversion, provider-aware Sent policies, sanitized HTML, and JSON denial; `src-tauri/src/account_signatures.rs` unit tests for signature persistence, sanitization, clearing, insertion, and denial paths; `src-tauri/src/auth.rs` unit tests for provider/auth policy; `src-tauri/src/oauth.rs` unit tests for OAuth URLs, PKCE, token exchange/refresh, revocation, and XOAUTH2; `src-tauri/src/credentials.rs` unit tests for credential target naming and redaction; `src-tauri/src/token_lifecycle.rs` unit tests for token refresh, reconnect-needed state, and account removal cleanup; `src-tauri/src/ipc_boundary.rs` unit tests for Rust-only privileged mutation categories and disabled frontend SQL policy; `src-tauri/src/ipc_validation.rs` unit tests for shared IPC denial paths; `src-tauri/src/attachment_safety.rs` unit tests for storage path, display filename, type/size, preview, and auto-open safety; `src-tauri/src/mail_actions.rs` unit tests for local mailbox action semantics.
-- Current frontend test refresh inspected and added `src/mail/shell/mailShellState.test.ts` for pure shell state/query scope behavior and `src/mail/shell/mailShellDataSource.test.ts` for Tauri command mapping, runtime detection, cancellation, recipient lookup, and composer autosave payload boundaries.
-- Current E2E test refresh inspected and added Playwright coverage in `e2e/mail-shell.smoke.spec.ts`, the test-only Vite entry `e2e/index.html`, and fixture harness `src/e2e/main.tsx`.
-- Current MIME fixture refresh inspected and added reusable synthetic `.eml` fixtures under `src-tauri/fixtures/mime/` plus Rust parser coverage that loads them from disk.
-- Local scripts inspected: `package.json` scripts for Vite build/dev/preview, Tauri CLI, frontend/Rust lint, frontend/Rust test, Playwright E2E smoke test, Playwright mail-shell performance benchmark, Rust format check, and root `check`.
-- Local config inspected: `.node-version`, `eslint.config.js`, `package.json`, `pnpm-lock.yaml`, `playwright.config.ts`, `playwright.perf.config.ts`, `rust-toolchain.toml`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `vitest.config.ts`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and `src-tauri/capabilities/default.json`.
-- Local generated/runtime surfaces inspected: `dist/`, `node_modules/`, `src-tauri/target/`, `src-tauri/gen/`, and `src-tauri/permissions/autogenerated/` were generated during verification and are ignored.
-- Repository state inspected: `git status --short --branch` succeeds on `main...origin/main`; current audit/code changes remain uncommitted until the user asks for a commit.
-- Generated docs from this audit: `AGENTS.md` and `TODO.md`.
-- External research inspected: OpenAI Codex `AGENTS.md` guidance, AGENTS.md standard, Codex best practices and execution-plan guidance, Tauri v2 SQL/security/capabilities/Stronghold/WebView2 docs, Windows Credential Manager Win32 docs, DOMPurify docs, RFC 9051, RFC 6851, `async-imap`, `lettre`, `mail-parser`, SQLite CREATE TABLE/foreign-key/PRAGMA/FTS5 external-content, rebuild, and integrity-check docs, Gmail IMAP/SMTP OAuth/XOAUTH2 and IMAP client settings docs, Microsoft Exchange Online OAuth/basic-auth/SMTP AUTH docs, Microsoft authorization-code/PKCE docs, Microsoft Support duplicate IMAP Sent items docs, OWASP XSS/file-upload/path-traversal guidance, TanStack Virtual/Query docs, i18next docs, and TipTap docs.
+- Local docs inspected: `Project Komorebi - Email Client Plan.md`, `README.md`, `AGENTS.md`, and every file under `docs/architecture/`.
+- Local code inspected: React shell/composer/settings/i18n/rendering/performance code under `src/`; Rust backend modules under `src-tauri/src/`; SQLite migrations under `src-tauri/migrations/`; Tauri capability/config/build files; Playwright E2E and performance harnesses.
+- Local tests inspected: frontend Vitest suites in `src/**/*.test.ts(x)`, capability guard tests, Rust unit tests, Rust integration tests in `src-tauri/tests/`, reusable MIME fixtures under `src-tauri/fixtures/mime/`, Playwright E2E smoke tests, and Playwright performance benchmarks.
+- Local scripts/config inspected: `package.json`, `pnpm-lock.yaml`, `.node-version`, `rust-toolchain.toml`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `vite.config.ts`, `vitest.config.ts`, `eslint.config.js`, `playwright.config.ts`, `playwright.perf.config.ts`, `tsconfig*.json`, `.gitignore`, `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json`, and `src-tauri/build.rs`.
+- Local generated/runtime surfaces inspected: ignored `dist/`, `node_modules/`, `src-tauri/target/`, `src-tauri/gen/`, `src-tauri/permissions/autogenerated/`, `test-results/`, and `playwright-report/` surfaces are generated or disposable and are not source.
+- Current verification run on 2026-05-23: `pnpm check`, `pnpm test:e2e`, `pnpm perf:mail-shell`, and `pnpm tauri build --no-bundle` pass. `pnpm build` and `pnpm tauri build --no-bundle` still report the known Vite large chunk warning for `dist/assets/index-CzfzElNf.js` at `796.26 kB` minified and `250.12 kB` gzip.
+- Current repository state at audit start: `git status --short --branch` was clean on `main...origin/main`; this TODO refresh remains uncommitted until the user asks for a commit.
+- Current implementation summary: Komorebi is fully scaffolded and verifiable as a Tauri/React/Rust local-cache mail shell with real migrations, safe rendering, command-backed composer, fake-backed sync/send primitives, fixtures, and tests. It is not yet a production connected email client because account setup, live IMAP/SMTP adapters, background worker orchestration, inbound attachment download/preview/save, reply/forward routing, provider Drafts upload, Sent-folder APPEND, full release packaging, and diagnostics remain active work.
 
 ## P0 - Repository Substrate And Executable Baseline
 
-Purpose: make the project real enough for agents and humans to build, test, and review. Risk: critical because no implementation can be verified yet. Scope guardrails: do not implement mail features before the scaffold, toolchain, and baseline checks exist.
+Purpose: keep the repository buildable and reviewable before feature work. Risk: critical because every later task depends on a reproducible scaffold. Scope guardrails: do not add mail-provider behavior here.
 
 ### Project Seed
 
 - [x] Preserve the product plan as the initial source of truth.
-  Evidence: `Project Komorebi - Email Client Plan.md` exists and defines Windows 10/11, Tauri v2, Rust, React/TypeScript, SQLite, multi-account IMAP/SMTP, i18n, search, and composer goals.
+  Evidence: `Project Komorebi - Email Client Plan.md` exists and defines Windows 10/11, Tauri v2, Rust, React/TypeScript, SQLite, multi-account IMAP/SMTP, i18n, search, composer, safe attachments, and zero-telemetry goals.
 - [x] Add a Codex operating contract.
-  Evidence: `AGENTS.md` exists from this audit and records current baseline failures, project-specific safety rules, architecture boundaries, and verification gates.
+  Evidence: `AGENTS.md` exists and records project-specific safety rules, command gates, architecture boundaries, generated artifact rules, current implementation limits, and stop-and-ask triggers.
 - [x] Add a production-readiness ledger.
-  Evidence: this `TODO.md` exists and records audited surfaces, missing implementation, priorities, acceptance criteria, and deferred work.
+  Evidence: this file exists and records inspected surfaces, completed implementation evidence, active gaps, acceptance criteria, and deferred work.
 - [x] Verify source control.
-  Evidence: `git status --short --branch` succeeds on `main...origin/main`; `git ls-files` tracks the project plan, `.gitignore`, `AGENTS.md`, and `TODO.md`.
-- [x] Add repository ignore rules and decide whether to commit the audit docs.
-  Evidence: tracked `.gitignore` excludes Node dependencies, frontend build/cache output, Rust/Tauri targets, generated Tauri schemas/permissions, bundle artifacts, local runtime/user-data directories, disposable SQLite databases, secrets, logs, diagnostics, and editor/OS noise. Current audit/code changes remain uncommitted because no commit was requested; `AGENTS.md` requires an explicit user request before committing.
+  Evidence: `git status --short --branch` succeeds on `main...origin/main`.
+- [x] Add repository ignore rules and decide whether to commit audit docs.
+  Evidence: tracked `.gitignore` excludes Node dependencies, frontend build/cache output, Rust/Tauri targets, generated Tauri schemas/permissions, bundle artifacts, local runtime/user-data directories, disposable SQLite databases, secrets, logs, diagnostics, and editor/OS noise. No commit was requested.
 - [x] Scaffold the Tauri v2 + React + TypeScript + Vite app.
-  Evidence: `package.json`, `pnpm-lock.yaml`, `src/`, `src-tauri/`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` now exist. `pnpm install` and `pnpm build` pass from the repo root. A controlled `pnpm tauri dev --no-watch` run compiled and launched `target\debug\komorebi.exe`, then the process tree was stopped after verification. The first screen is an accountless 3-pane mail-client shell with no seeded mailbox data, not the starter Tauri/Vite/React marketing page.
+  Evidence: `package.json`, `pnpm-lock.yaml`, `src/`, `src-tauri/`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json` exist. The first screen is the accountless 3-pane mail-client shell, not starter marketing content. `pnpm tauri build --no-bundle` builds `src-tauri/target/release/komorebi.exe`.
 - [x] Pin the development toolchain.
-  Evidence: `.node-version` pins Node `24.16.0`; `package.json` pins Node `24.16.0` and pnpm `10.33.2`; `pnpm-lock.yaml` exists; `rust-toolchain.toml` pins Rust `1.95.0`, `rustfmt`, `clippy`, and `x86_64-pc-windows-msvc`; `src-tauri/Cargo.lock` exists; `README.md` documents Windows C++ Build Tools and WebView2 expectations.
+  Evidence: `.node-version` pins Node `24.16.0`; `package.json` pins pnpm `10.33.2`; `rust-toolchain.toml` pins Rust `1.95.0`, `rustfmt`, `clippy`, and `x86_64-pc-windows-msvc`; lockfiles exist; `README.md` documents Windows C++ Build Tools and WebView2 expectations.
 - [x] Establish root check commands.
-  Evidence: `package.json` now defines `pnpm lint`, `pnpm lint:frontend`, `pnpm lint:rust`, `pnpm test`, `pnpm test:frontend`, `pnpm test:e2e`, `pnpm test:rust`, `pnpm fmt:check`, `pnpm build`, and `pnpm check`. `pnpm check` runs Rust format check, frontend ESLint, Rust clippy, frontend Vitest, Rust tests, and frontend build. `pnpm test:e2e` is a touched-area Playwright smoke check, not part of the ordinary root `check`. `src/App.test.tsx` verifies the accountless mail shell, disabled no-account controls, empty states, absence of fake mailbox data, and guards against the starter Tauri page returning. No baseline check failures remain for this task.
+  Evidence: `package.json` defines root `lint`, `test`, `build`, `fmt:check`, and `check` scripts plus E2E/perf scripts. `pnpm check` runs Rust format check, frontend ESLint, Rust clippy, frontend Vitest, Rust tests, and frontend build.
 
-## P1 - Privacy, Credential Safety, And User-Data Loss Prevention
+## P1 - Privacy, Credential Safety, And Tauri Authority
 
-Purpose: prevent the earliest design choices from leaking credentials, exposing local system access, or losing mail. Risk: critical because email clients handle sensitive account credentials and private message content. Scope guardrails: this priority should land before real account sync or send is connected.
+Purpose: prevent credential leakage, unsafe IPC, local-system exposure, and destructive mail mistakes. Risk: critical because email clients process private credentials and hostile content. Scope guardrails: no live sync/send/account setup should bypass these boundaries.
 
-### Credential And Provider Auth
+### Completed Security Foundations
 
 - [x] Define the credential model before implementing account add.
-  Evidence: `docs/architecture/credential-model.md` chooses Windows Credential Manager/DPAPI as the approved Windows-first secret backend, rejects Tauri Store/SQLite/browser storage/logs/diagnostics/frontend state for secrets, forbids plaintext passwords and tokens at rest, defines SQLite account metadata vs Credential Manager entries, and documents account removal, credential rotation, runtime access, and diagnostics clearing rules. `src-tauri/src/credentials.rs` implements namespaced Windows Credential Manager target names and `CredWriteW`/`CredReadW`/`CredDeleteW` storage behind the token lifecycle `CredentialStore` trait.
+  Evidence: `docs/architecture/credential-model.md` chooses Windows Credential Manager/DPAPI, rejects Tauri Store/SQLite/browser storage/logs/diagnostics/frontend state for secrets, and defines metadata vs secret storage. `src-tauri/src/credentials.rs` implements namespaced Windows Credential Manager target names and Win32 read/write/delete wrappers behind backend traits.
 - [x] Support modern authentication paths for major providers.
-  Evidence: `docs/architecture/provider-auth.md` requires OAuth2/XOAUTH2 for Gmail and Microsoft, rejects Gmail/Microsoft manual password and app-password fallback, and limits password/app-password setup to compatible generic IMAP/SMTP providers. `src-tauri/src/auth.rs` enforces the provider/auth matrix with Rust tests covering Gmail/Microsoft denial paths, current OAuth/XOAUTH2 allowed status, and generic password allowance. `src-tauri/src/oauth.rs` implements Gmail and Microsoft OAuth authorization URLs, provider scopes, PKCE S256, authorization-code exchange, refresh-token exchange, Google revocation, Microsoft revocation-unsupported reporting, and XOAUTH2 SASL response construction.
+  Evidence: `docs/architecture/provider-auth.md` requires Gmail and Microsoft OAuth2/XOAUTH2 and rejects password/app-password fallback. `src-tauri/src/auth.rs` enforces the provider/auth matrix. `src-tauri/src/oauth.rs` implements Gmail/Microsoft OAuth URL construction, PKCE, token exchange, refresh, Google revocation, Microsoft revocation-unsupported status, and XOAUTH2 SASL construction.
 - [x] Implement token refresh and revocation handling.
-  Evidence: `docs/architecture/token-lifecycle.md` defines backend-only token refresh, reconnect-needed status, provider revocation policy, local cleanup, and storage rules. `src-tauri/src/token_lifecycle.rs` implements the lifecycle behind credential-store, access-cache, OAuth-client, and account-data traits. `src-tauri/src/oauth.rs` provides the real provider HTTP client implementation used by the lifecycle, and `src-tauri/src/credentials.rs` provides the Windows credential backend. Tests prove expired tokens refresh without putting secrets in frontend-safe views, failed/missing refresh enters reconnect-needed state, account removal clears credentials/access cache/local cache/metadata, local cleanup still happens when provider revocation fails, invalid grants map safely, and provider revocation behavior is explicit.
-
-### Tauri And IPC Security
-
+  Evidence: `docs/architecture/token-lifecycle.md` defines backend-only refresh, reconnect-needed state, revocation, and removal cleanup. `src-tauri/src/token_lifecycle.rs` implements the lifecycle behind trait boundaries, with tests for refresh, invalid grants, reconnect-needed states, account removal cleanup, and provider revocation failures.
 - [x] Define least-privilege Tauri capabilities.
-  Evidence: `src-tauri/tauri.conf.json` explicitly enables only the `default` capability; `src-tauri/capabilities/default.json` targets only the `main` window and grants only reviewed mail-shell/composer commands: `allow-load-mail-shell`, `allow-search-mail`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-send-composer-email`, and `allow-list-recent-recipients`. `docs/architecture/tauri-capabilities.md` documents the denial policy for SQL, filesystem, opener, shell/process, HTTP, remote-origin, wildcard, and unreviewed custom-command access. `src-tauri/build.rs` keeps the app command ACL list explicit. `src-tauri/capabilities/capabilities.test.ts` reviews all capability JSON files plus Tauri config, forbidden Rust plugin registrations, and custom-command registration. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
+  Evidence: `src-tauri/tauri.conf.json` explicitly enables only `default`; `src-tauri/capabilities/default.json` grants only reviewed shell/composer commands; `src-tauri/capabilities/capabilities.test.ts` denies SQL, filesystem, opener, shell/process, HTTP, wildcard, broad plugin, attachment open/save/download, and unreviewed custom-command surfaces by absence.
 - [x] Keep privileged mutations in Rust commands.
-  Evidence: `docs/architecture/ipc-and-mutation-boundaries.md` defines Rust-only ownership for server-affecting mail actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation. `src-tauri/src/ipc_boundary.rs` encodes the same categories as `BoundaryOwner::RustCommand` and sets `FRONTEND_SQL_POLICY` to disabled. Rust tests prove every required privileged category has a boundary and frontend SQL remains disabled until a read-only scope is documented. `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependency/imports, frontend SQL loading, `sql:*` capability grants, forbidden local-system plugins, and unreviewed custom commands beyond `load_mail_shell`. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
-- [x] Add input validation for every IPC command.
-  Evidence: `load_mail_shell` is intentionally inputless, so React cannot provide arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, unbounded payloads, or entity IDs through it. `search_mail` is typed and read-only; it validates query size, rejects raw SQL-shaped queries and raw HTML, validates optional account/folder IDs, rejects unknown or out-of-scope folders, converts user text into sanitized FTS terms, and reports missing FTS index state without exposing raw SQL. Composer commands validate account/draft/attachment ids, staged attachment ownership, sanitized body wrappers, MIME/type/size, app-data storage scope, local recent-recipient account scope, duplicate recipients, and recipient addresses before send. They never accept frontend filesystem paths, raw SQL, credential material, or arbitrary provider commands. `docs/architecture/ipc-validation.md` defines the command validation contract. Rust tests cover denial paths for arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, oversized payloads, invalid ids, unknown account/folder/message IDs, redacted validation errors, search-specific query/scope denial, unsafe composer attachment content, duplicate recipient normalization, recent-recipient lookup/persistence, and invalid send addresses. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
-
-### Message Rendering And Attachments
-
+  Evidence: `docs/architecture/ipc-and-mutation-boundaries.md` and `src-tauri/src/ipc_boundary.rs` keep server-affecting mail actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation Rust-owned. Frontend SQL is disabled and tested as unavailable.
+- [x] Add input validation for every current IPC command.
+  Evidence: current commands are `load_mail_shell`, `search_mail`, `autosave_composer_draft`, `discard_composer_draft`, `stage_composer_attachment`, `send_composer_email`, and `list_recent_recipients`. `load_mail_shell` is inputless. Search and composer commands validate IDs, ownership, payload size, sanitized HTML, attachment bytes, app-data paths, and account scope before side effects. `src-tauri/tests/ipc_denial_paths.rs` covers command-level denial paths.
 - [x] Build a safe email HTML rendering boundary.
-  Evidence: `docs/architecture/message-rendering.md` defines the rendering boundary. `src/mail/rendering/emailHtml.ts` sanitizes untrusted email HTML with DOMPurify, removes scripts/event handlers/style/resource-loading attributes, blocks remote and inline resources by default, rewrites safe `http`/`https`/`mailto` links for delegated opening, strips unsafe links, and exposes plain text. `src/mail/rendering/SafeEmailBody.tsx` is the only sanctioned `dangerouslySetInnerHTML` sink and renders plain-text fallback without interpreting markup. `src/mail/rendering/xssFixtures.ts` and `src/mail/rendering/SafeEmailBody.test.tsx` cover hostile HTML fixtures, remote resource blocking, safe/unsafe links, and fallback rendering. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
+  Evidence: `docs/architecture/message-rendering.md`, `src/mail/rendering/emailHtml.ts`, and `src/mail/rendering/SafeEmailBody.tsx` implement a single sanctioned `dangerouslySetInnerHTML` boundary with DOMPurify sanitization, remote-resource blocking, delegated safe links, unsafe-link stripping, and plain-text fallback. XSS and bypass fixtures are tested.
 - [x] Design attachment storage and preview safety.
-  Evidence: `docs/architecture/attachment-safety.md` defines attachment storage and preview policy. `src-tauri/src/attachment_safety.rs` generates storage paths from validated account/folder/message/attachment IDs and canonical extensions, keeps sender filenames as sanitized display-only metadata, rejects path traversal in IDs, enforces 25 MiB storage and 5 MiB preview limits, validates declared type against sniffed bytes, rejects explicitly dangerous types, allows preview only for user-requested plain text and raster images, and keeps `AUTO_OPEN_ATTACHMENTS` false. Rust tests cover storage type validation, mismatches, oversized payloads, malicious filenames, path traversal IDs, filename sanitization, preview opt-in/type/size gates, and auto-open denial. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
+  Evidence: `docs/architecture/attachment-safety.md` and `src-tauri/src/attachment_safety.rs` define app-generated paths, display-only sender filenames, content type/size limits, preview eligibility, auto-open denial, and path traversal protection. Composer staging uses backend-generated app-data paths; reader attachments are inert metadata only.
 - [x] Define destructive mail action semantics.
-  Evidence: `docs/architecture/destructive-mail-actions.md` defines typed semantics for mark read/unread, move, archive, delete-to-trash, and expunge. `src-tauri/src/mail_actions.rs` implements typed `MailActionCommand` requests with user-confirmation state, retry attempts, action plans, undo metadata, retry decisions, validation before mutation, and a `MailActionStore` interface. Local mailbox-state tests prove mark-read, move, archive, and delete-to-trash mutate only the test store and produce undo where possible; delete-to-trash and expunge require confirmation; expunge removes deleted messages irreversibly; transient failures return retry advice without mutating state; invalid/unknown targets are rejected before mutation. Verification: `pnpm check` and `pnpm tauri build --no-bundle` pass.
+  Evidence: `docs/architecture/destructive-mail-actions.md` and `src-tauri/src/mail_actions.rs` implement typed move/archive/delete-to-trash/mark-read/expunge plans with confirmation, undo metadata where possible, retry classification, and fake-store tests.
 
-## P2 - Data Model, Migrations, And Sync Correctness
+### Remaining Security Work
 
-Purpose: make local cache and remote mail state accurate, recoverable, and searchable. Risk: high because incorrect sync can duplicate, hide, or delete mail. Scope guardrails: do not optimize UI before schema and sync invariants are nailed down.
+- [ ] Set and test a restrictive Tauri CSP.
+  Evidence: `src-tauri/tauri.conf.json` currently has `"csp": null`, while `AGENTS.md` requires a restrictive CSP and the app intentionally treats frontend XSS as an IPC risk. Sanitized email rendering exists, but the desktop shell itself is not locked by a reviewed content security policy.
+  Acceptance: `tauri.conf.json` defines a CSP compatible with the Vite/Tauri build, app assets, TipTap/editor behavior, and safe email rendering; capability tests or config tests fail if CSP is removed or broadened unexpectedly; `pnpm check` and `pnpm tauri build --no-bundle` pass.
 
-### Schema And Migrations
+## P2 - Data Model, Migrations, And Backend Mail Primitives
+
+Purpose: make local cache and mail protocol semantics accurate before live accounts are connected. Risk: high because identity, sync, MIME, and send mistakes can duplicate, hide, or corrupt mail. Scope guardrails: these are backend primitives and fake-backed integration layers, not proof of live provider support.
+
+### Schema And Local Cache
 
 - [x] Replace the rough schema with production SQLite migrations.
-  Evidence: `src-tauri/migrations/001_initial_schema.sql` defines `schema_migrations`, `settings`, `accounts`, `folders`, `messages`, `attachments`, `templates`, and `template_versions` with primary keys, foreign keys, unique constraints, partial unique indexes, query indexes, timestamp columns/triggers, JSON checks, non-secret account metadata, account/folder/message relations, attachment records, and future-compatible template versioning. Later migrations add FTS5, folder semantics, SMTP send receipts, drafts, staged composer attachments, and local recent-recipient autocomplete rows. `src-tauri/src/schema.rs` applies migrations transactionally, enables foreign keys, records `PRAGMA user_version`, rejects newer databases, and tests migration idempotency, required schema objects, constraints, cascades, timestamp triggers, folder semantics upgrades, recent-recipient uniqueness, and `PRAGMA foreign_key_check`.
+  Evidence: `src-tauri/migrations/001_initial_schema.sql` through `007_recent_recipients.sql` define settings, accounts, folders, messages, attachments, templates, template versions, FTS5, folder semantics, send receipts, drafts, staged composer attachments, recent recipients, primary keys, foreign keys, uniqueness, indexes, timestamp triggers, JSON checks, and schema-version tracking. `src-tauri/src/schema.rs` applies migrations transactionally, records `PRAGMA user_version`, rejects newer databases, and tests constraints, cascades, triggers, FTS, and upgrade paths.
 - [x] Separate IMAP UID identity from RFC message identity.
-  Evidence: `messages.id` is the local row id, while `messages.imap_uid`, `messages.uid_validity`, `messages.rfc_message_id`, and `messages.provider_message_id` are distinct columns. The partial unique index `ux_messages_imap_identity` prevents duplicate `(account_id, folder_id, uid_validity, imap_uid)` rows when IMAP identity exists, while RFC `Message-ID` is indexed but not unique. `schema.rs` tests prove duplicate UID in the same folder/UIDVALIDITY is rejected and the same UID/RFC message can exist in a different folder without collision.
+  Evidence: `messages.id`, `imap_uid`, `uid_validity`, `rfc_message_id`, and `provider_message_id` are distinct. The partial unique index `ux_messages_imap_identity` protects folder-scoped IMAP identity while allowing RFC message duplicates across folders/accounts.
 - [x] Implement FTS5 with consistency controls.
-  Evidence: `src-tauri/migrations/002_messages_fts.sql` creates `messages_fts` as an FTS5 external-content table over `messages.rowid`, indexes subject, sender name/email, text body, and HTML body, adds insert/update/delete triggers for indexed columns, and rebuilds the index during migration so version-1 databases with existing messages are backfilled. `src-tauri/src/schema.rs` exposes `search_messages_fts`, `rebuild_messages_fts`, and `check_messages_fts_integrity`. Tests prove search returns expected fixture rows, update/delete triggers keep results consistent, rebuild restores missing entries, version-1 upgrade rebuilds existing rows, and FTS integrity checks pass.
+  Evidence: `messages_fts` is an external-content FTS5 table with insert/update/delete triggers, rebuild support, and integrity checks. Rust tests prove fixture search, trigger consistency, rebuild recovery, versioned backfill, and integrity.
 - [x] Decide message-body and attachment encryption at rest.
-  Evidence: `docs/architecture/local-cache-encryption.md` explicitly decides that the current local mail cache is unencrypted: SQLite message metadata, `body_text`, `body_html`, active draft content, FTS5 indexed terms, attachment files, and attachment metadata are plaintext local cache content. `Project Komorebi - Email Client Plan.md`, `README.md`, `docs/architecture/schema.md`, `docs/architecture/attachment-safety.md`, `docs/architecture/draft-and-sent-persistence.md`, and `AGENTS.md` now distinguish local-first/zero-telemetry privacy from encrypted cached mail and forbid stronger encryption claims until a reviewed encryption design, migration, and tests exist. Account secrets remain separate in Windows Credential Manager.
+  Evidence: `docs/architecture/local-cache-encryption.md`, `README.md`, schema docs, attachment docs, and AGENTS state the current local mail cache is unencrypted: message bodies, active drafts, FTS terms, recent recipients, and attachment files are plaintext local cache content. Account secrets stay separate in Windows Credential Manager.
 
-### Sync Engine
+### Sync, MIME, Send, Drafts
 
 - [x] Build the initial IMAP sync state machine.
-  Evidence: `docs/architecture/sync-state-machine.md` documents the implemented state flow and current non-live scope. `src-tauri/src/imap_sync.rs` defines the provider-agnostic `ImapSyncServer` trait, `ImapSyncEngine`, cancellation token, backoff policy/waiters, sync reports, remote folder/message/flag models, and `SqliteSyncCache`. The engine discovers folders, upserts folder UIDVALIDITY/UIDNEXT/counts/special-use metadata, performs initial fetch for missing UIDs, fetches only new UIDs on incremental sync, refreshes flags for retained messages, deletes expunged UIDs, clears and refetches folders on UIDVALIDITY change, reconnects after transient server failures, respects cancellation during retry waits and cache mutation loops, and records bounded backoff delays. Fake IMAP fixture tests cover initial sync into migrated SQLite, FTS visibility, incremental UID fetch, flag changes, expunge handling, UIDVALIDITY reset, reconnect/backoff, cancellation, invalid server responses, and unknown account rejection before server calls. Live `async-imap` adapter, attachment extraction/storage, and account UI remain separate TODOs.
+  Evidence: `src-tauri/src/imap_sync.rs` implements provider-agnostic folder discovery, initial fetch, incremental UID fetch, flag refresh, expunge handling, UIDVALIDITY reset, reconnect, cancellation, backoff, and SQLite cache mutation behind traits. Tests use fake IMAP fixtures and disposable SQLite only.
 - [x] Implement IMAP IDLE with polling fallback.
-  Evidence: `src-tauri/src/imap_sync.rs` now defines `ImapIdleServer`, `IdleCapability`, `IdleWaitOutcome`, `FolderWorkerConfig`, `FolderWorkerReport`, and `ImapSyncEngine::run_folder_worker`. Each account/folder worker can wait for IDLE mailbox changes, refresh on IDLE timeout, fall back to polling when IDLE is unavailable or rejected, refresh through `sync_folder_by_remote_id`, reconnect and back off after transient IDLE capability-probe or wait drops, stop cleanly on account removal, and stop cleanly on app-exit cancellation. Fake IMAP tests cover mailbox-change wakeups, timeout refresh, polling fallback, reconnect/backoff after network drop, account removal, and cancellation. `docs/architecture/sync-state-machine.md`, `README.md`, and `AGENTS.md` document that this is provider-agnostic worker logic; the live `async-imap` adapter remains future work.
+  Evidence: `ImapIdleServer`, folder worker config/report types, IDLE wait outcomes, polling fallback, timeout refresh, reconnect/backoff, app-exit cancellation, and account-removal stop behavior are implemented and tested with fake workers.
 - [x] Normalize MIME parsing.
-  Evidence: `mail-parser` is selected and locked in `src-tauri/Cargo.toml`/`src-tauri/Cargo.lock`. `docs/architecture/mime-normalization.md` documents the backend-only normalization boundary. `src-tauri/src/mime_normalization.rs` parses raw RFC822/RFC5322 bytes into decoded `RemoteMessage` records plus stable `ParsedAttachmentRecord` metadata that matches the `attachments` schema shape, uses the same stable local message id derivation as `SqliteSyncCache`, and persists normalized message plus attachment metadata idempotently to migrated SQLite. Tests cover RFC2047 encoded headers, ISO-8859-1 and UTF-8 charset decoding, multipart plain/html alternatives, inline CID images, attachment metadata with path-like sender filenames, stable attachment ids, SQLite metadata persistence, malformed multipart recovery, invalid account/folder/UID denial, and empty-message rejection. Live `async-imap` adapter integration and attachment file persistence remain separate follow-ups.
+  Evidence: `mail-parser` is locked and used in `src-tauri/src/mime_normalization.rs` to parse raw RFC822/RFC5322 into decoded message records and stable attachment metadata. Tests cover encoded headers, charsets, multipart alternatives, inline CID images, attachments, malformed input, non-ASCII addresses, corpus fixtures, and SQLite persistence.
 - [x] Preserve server flags and folder semantics.
-  Evidence: `src-tauri/src/imap_sync.rs` now normalizes raw IMAP flag tokens through `RemoteFlag::from_imap_token`, maps `\Seen`, `\Flagged`, `\Answered`, `\Draft`, and `\Deleted` into boolean columns, preserves `\Recent` and provider/custom keywords in `flags_json`, detects folder roles from IMAP LIST/XLIST/SPECIAL-USE style attributes through `RemoteFolder::from_imap_attributes`, and stores normalized provider attributes in `folders.attributes_json` via migration `003_folder_semantics`. Tests cover standard flag mapping, custom flag preservation, sent/junk/all folder attribute detection, unknown provider attributes, and syncing a custom folder with messages intact.
-
-### Sending And Drafts
-
+  Evidence: standard IMAP flags map to boolean columns, `\Recent` and provider/custom keywords are preserved in `flags_json`, special-use folders are detected from attributes, unknown folders remain usable, and tests cover standard/custom cases.
 - [x] Implement SMTP send with account-specific transport.
-  Evidence: `docs/architecture/smtp-send.md` documents the send boundary and typed composer wrapper. `src-tauri/src/smtp_send.rs` implements typed `send_email` request/report/error models, account-specific SMTP host/port/security/signature resolution, Gmail/Microsoft default SMTP metadata, provider/auth policy enforcement, backend-only OAuth access-token refresh through `TokenLifecycle`, generic password lookup through Windows Credential Manager slots, outbound MIME composition through `lettre`, sanitized account signature insertion through `src-tauri/src/account_signatures.rs`, attachment ID-only streaming through app-generated storage paths, plaintext authenticated SMTP denial, progress events, safe transport errors, source-draft validation/finalization, and confirmed send receipt insertion only after SMTP acceptance. `src-tauri/src/composer.rs` exposes this through `send_composer_email` with active-draft validation, staged attachment streaming, and cleanup after confirmed send. `src-tauri/migrations/004_smtp_send_receipts.sql` records confirmed local send receipts. Tests cover generic send, Gmail XOAUTH2 defaults, account signature insertion, failed transport without receipt insertion, BCC header stripping, fake attachment chunk streaming, path traversal denial, URL-like SMTP host denial, unsafe HTML/recipient/body/id denial, plaintext SMTP denial, draft finalization only after success, composer wrapper fake send, and secret redaction. Live account setup and live SMTP tests remain follow-up work.
+  Evidence: `src-tauri/src/smtp_send.rs` resolves account SMTP metadata/auth, denies authenticated plaintext SMTP, refreshes OAuth access through Rust, looks up generic secrets in Windows Credential Manager, composes MIME with `lettre`, streams staged attachments through backend-owned paths, records confirmed send receipts only after SMTP acceptance, and is exposed by `send_composer_email`.
 - [x] Define sent-mail and draft persistence.
-  Evidence: `docs/architecture/draft-and-sent-persistence.md` documents local draft lifecycle, staged composer attachment lifecycle, local recent-recipient lifecycle, and provider-aware Sent behavior. `src-tauri/migrations/005_drafts_and_sent_mail.sql` adds `composer_drafts`, `sent_mail_copies`, and `smtp_send_receipts.source_draft_id`; `src-tauri/migrations/006_composer_attachments.sql` adds temporary staged outbound attachment rows; `src-tauri/migrations/007_recent_recipients.sql` adds account-scoped local autocomplete rows populated after confirmed sends. `src-tauri/src/draft_persistence.rs` implements autosave, reload/list active drafts, intentional discard with private-content clearing, confirmed-send draft conversion with private-content clearing, provider-aware Sent-copy policy resolution, and Sent-copy record insertion. `src-tauri/src/composer.rs` exposes autosave/discard/send/recent-recipient command wrappers, deduplicates recipients before persistence/send, updates local recent recipients after confirmed send, and cleans staged attachment rows/files after discard or confirmed send. `src-tauri/src/smtp_send.rs` validates source drafts before auth/network work and finalizes drafts plus Sent-copy state only after SMTP acceptance. Gmail is recorded as `provider_auto_copies/not_required`; Microsoft and generic providers are `imap_append/pending_upload` when a Sent folder is discovered or `local_receipt_only/unsupported` otherwise. Tests cover draft autosave surviving reload, discard clearing content, send conversion clearing content, failed send leaving drafts active, composer attachment staging/cleanup, recent-recipient persistence/search, schema migration from v4 to v5, v5 to v6, and v6 to v7, and provider Sent policies. IMAP APPEND for pending Sent uploads, provider Drafts-folder upload, and draft reload UI remain follow-up work.
+  Evidence: drafts, send receipts, staged composer attachments, local recent recipients, and provider-aware Sent-copy planning are migrated and implemented. Draft autosave/reload/discard/sent conversion exists in Rust; composer UI currently creates a new draft rather than reopening prior active drafts.
 - [x] Add per-account signatures.
-  Evidence: `docs/architecture/account-signatures.md` documents signature storage, sanitization, insertion, and settings behavior. `accounts.signature_html` stores optional sanitized account metadata. `src-tauri/src/account_signatures.rs` implements per-account load/update/clear, Rust `ammonia` sanitization, managed signature block replacement/removal, text-only signature derivation, and denial paths for invalid/unknown accounts. `src-tauri/src/smtp_send.rs` loads sender account signatures and sanitizes/inserts them during MIME composition. `src/mail/signatures/signatureHtml.ts` implements frontend DOMPurify sanitization and deterministic composer insertion helpers. `src/settings/AccountSignatureSettings.tsx` provides account selection, editing, clearing, sanitized preview through `SafeEmailBody`, and save callbacks; `src/App.tsx` exposes the accountless Settings entry without seeded account data. Tests cover Rust persistence/sanitization/insertion, SMTP signature insertion, frontend sanitizer behavior, settings editor save/clear/account-switch behavior, and app Settings opening. Live account loading/saving through Tauri commands remains part of account setup/IPC work.
+  Evidence: `accounts.signature_html`, `src-tauri/src/account_signatures.rs`, frontend signature helpers, settings component, and SMTP insertion code sanitize, persist, edit, preview, and insert per-account signatures in tested boundaries.
 
 ## P3 - Core Frontend UX
 
-Purpose: deliver the actual usable personal email client promised by the plan. Risk: high because a mail client must be fast, legible, accessible, and safe under large message counts. Scope guardrails: avoid decorative or marketing UI; build repeated workflows first.
+Purpose: provide the actual first-screen mail-client experience without fake production data. Risk: high because the app must be safe and usable before real accounts are connected. Scope guardrails: completed P3 work is local-cache backed or fixture injected; it is not a live account workflow.
 
-### Layout And Navigation
+### Layout, Reading, Search, Composer
 
 - [x] Build the 3-pane mail shell.
-  Evidence: `src/mail/shell/mailShellState.ts` defines frontend-local account, folder, message, selection, unified-inbox, search, and load-state models. `src/mail/shell/MailClientShell.tsx` renders account/folder navigation, a unified inbox toggle, search entry, message list, sanitized message detail, composer drawer entry, settings drawer entry, and loading/empty/error states. `src/App.tsx` uses that shell with empty default data, so runtime still has no seeded mailbox data. `src/App.test.tsx` verifies the accountless default, injected multi-account fixture workflows, search, composer/settings entries, and loading/error states.
-  Acceptance: complete for the state-driven first screen; account add/remove, live provider adapters, reply/forward routing, attachment preview/save, remote-content preferences, draft reload UI, and full connected-account behavior remain separate tasks.
+  Evidence: `src/mail/shell/MailClientShell.tsx` renders account/folder navigation, unified inbox toggle, search, virtualized message list, safe reader, composer entry, settings entry, and loading/empty/error states. `src/App.tsx` defaults to accountless data and does not seed mailbox content.
 - [x] Implement multi-account navigation.
-  Evidence: `src-tauri/src/mail_shell.rs` implements the inputless `load_mail_shell` command and local-cache read model for real app-data SQLite accounts, folders, unread counts, and a bounded recent-message snapshot. It applies migrations, excludes removed accounts, redacts credential references, and maps sync-folder unread counts into shell badges. `src/mail/shell/mailShellDataSource.ts` invokes that command only in Tauri runtime; plain browser/test runtime stays fixture/empty. `src/mail/shell/mailShellState.ts` and `src/mail/shell/MailClientShell.tsx` preserve selected messages when the new account/folder/unified scope still contains them and clear only out-of-scope selections. Tests cover disposable SQLite read models, credential redaction, loader wiring, unread badges, account/folder switching, and selection preservation.
-  Acceptance: complete for local-cache-backed navigation; account add/remove UI, persisted navigation preferences, live provider adapters, and paged/virtualized message loading remain separate tasks.
+  Evidence: `load_mail_shell` reads accounts, folders, unread counts, and recent message snapshots from the Tauri app-data SQLite cache. React preserves selected messages across compatible scope changes and clears stale selections when scope changes make them invalid.
 - [x] Add keyboard and accessibility support.
-  Evidence: `src/mail/shell/MailClientShell.tsx` now supports keyboard search focus, Arrow/Home/End navigation for account/folder/message buttons, Enter/Space message activation into the reader, modal composer/settings dialogs with initial focus, Escape close, focus trapping, and focus return. `src/App.css` exposes visible focus states for controls, the reader, and drawers. `src/App.test.tsx` verifies keyboard search, folder/message navigation, reader focus, composer/settings dialog focus behavior, Escape close, and focus return.
-
-### Message List, Reading, And Search
-
+  Evidence: tests cover search shortcuts, folder/message navigation, reader focus, modal focus trap, Escape close, focus return, and screen-reader labels; CSS includes visible focus states.
 - [x] Implement virtualized message list.
-  Evidence: `package.json` and `pnpm-lock.yaml` include `@tanstack/react-virtual`. `src/mail/shell/MailClientShell.tsx` renders the message list through `useVirtualizer` with deterministic message-id keys, fixed `136px` row geometry, overscan, keyboard scroll/focus restoration, row `aria-setsize`/`aria-posinset`, unread styling, visible flagged state, sender, subject, date, and snippet. `src/App.css` fixes row dimensions and clamps sender/subject/snippet content so row height does not shift. `src/App.test.tsx` injects 10,000 fixture messages, asserts the mounted DOM row count stays bounded, and verifies first/last row selection, unread/flagged state, sender, subject, date, snippet, focus, and reader state during scroll.
+  Evidence: `@tanstack/react-virtual` is installed; rows use deterministic keys and fixed geometry; tests inject 10,000 messages and assert bounded DOM rows plus stable selection/unread/flagged/sender/subject/date/snippet behavior.
 - [x] Implement safe message detail view.
-  Evidence: `src/mail/shell/mailShellState.ts` now carries safe attachment metadata on messages. `src-tauri/src/mail_shell.rs` projects only attachment id, sanitized display filename, MIME type, size, and disposition into the local-cache shell snapshot, while redacting credential references, storage-relative paths, local paths, and hashes. `src/mail/shell/MailClientShell.tsx` renders selected messages through `SafeEmailBody`, keeps remote resources blocked by default, shows an inert attachment list, and exposes disabled Reply, Forward, Archive, Mark read/unread, Load remote content, Preview, and Save controls until typed commands exist. `src/App.test.tsx` covers sanitized HTML detail rendering, plain body workflows, remote image blocking, disabled reply/forward/remote-content controls, safe attachment metadata, and 10,000-message reader stability. Rust mail-shell tests cover attachment display sanitization and storage-path redaction.
-  Acceptance: complete for safe local-cache detail display; live reply/forward routing, attachment preview/save commands, remote-content preference persistence, and connected account data remain separate tasks.
+  Evidence: selected messages render through `SafeEmailBody`, remote resources are blocked by default, attachment rows are inert metadata, and reply/forward/archive/mark-read/load-remote-content/preview/save controls are disabled until typed commands exist.
 - [x] Implement FTS-backed search UX.
-  Evidence: `src-tauri/src/mail_shell.rs` exposes the read-only `search_mail` command. It applies migrations, validates typed query/scope input, converts user text into bounded FTS terms, searches `messages_fts` across subject, sender name/email, text body, and HTML body, excludes removed accounts, supports optional account/folder scoping, returns full safe `MailShellMessage` rows with redacted attachment metadata, and reports missing FTS index state as `indexStatus: "unavailable"`. `src-tauri/build.rs`, `src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json`, and `src-tauri/capabilities/capabilities.test.ts` register and grant only `allow-search-mail` alongside `allow-load-mail-shell`. `src/mail/shell/mailShellDataSource.ts`, `src/App.tsx`, and `src/mail/shell/MailClientShell.tsx` wire runtime FTS search with debounce, abort/ignore stale responses, loading/empty/error/no-index states, and account/folder result labels. `src/App.test.tsx` covers debounce, cancellation, result origin labels, no-index state, and opening a search result outside the initial fixture list. Rust tests cover search success, account/folder scoping, missing-index reporting, query validation, and safe attachment projection.
-  Acceptance: complete for local-cache FTS search UX; persisted search preferences, advanced search syntax, highlighted snippets, and measured latency remain future work.
-
-### Composer
-
+  Evidence: `search_mail` queries SQLite FTS5 with typed validation, account/folder scope, safe message projection, missing-index reporting, and redacted attachment metadata. React debounces backend search, ignores stale responses, shows origin labels, and handles loading/empty/error/no-index states.
 - [x] Build the TipTap composer MVP.
-  Evidence: `src/mail/composer/TipTapComposer.tsx` implements the composer drawer with account selector, To/CC/BCC, subject, TipTap body editor, basic formatting buttons, bullet/ordered lists, blockquote, safe link apply/remove, file attachment picker, inline raster image picker, signature insertion, draft save/discard/send controls, debounced autosave, send progress, and validation errors. `src/mail/shell/mailShellDataSource.ts` wires `autosave_composer_draft`, `discard_composer_draft`, `stage_composer_attachment`, and `send_composer_email` in Tauri runtime. `src-tauri/src/composer.rs` validates active drafts, stages user-selected bytes under backend-generated app-data paths, streams staged attachments through the SMTP boundary, and cleans staged files after discard or confirmed send. `src/App.test.tsx` covers address validation, signature insertion, draft save request shape, staged attachment bytes, inline image CID conversion, send request shape, and progress rendering. Rust tests cover draft command mapping, staged attachment storage, unsafe attachment denial, fake SMTP send, cleanup, and invalid recipient denial.
-  Acceptance: complete for the MVP command-backed composer. Follow-ups remain for draft reload/reopen UI, reply/forward routing, provider Drafts upload, Sent-folder APPEND, recipient chips/address-book management, and live account/send verification.
+  Evidence: composer UI has account selector, To/CC/BCC, subject, TipTap body, formatting, lists, blockquote, safe links, attachment picker, inline image picker, signature insertion, autosave, discard, send, progress, and validation errors. Tauri runtime calls typed Rust draft/stage/send/recent-recipient commands.
 - [x] Add recipient autocomplete and duplicate handling.
-  Evidence: `src/mail/composer/TipTapComposer.tsx` now deduplicates parsed To/CC/BCC recipients before save/send with first occurrence winning, shows non-error duplicate notices, keeps malformed-address errors in the alert path, and renders keyboard-accessible combobox/listbox autocomplete fields. `src-tauri/migrations/007_recent_recipients.sql` adds account-scoped local-only recent-recipient rows. `src-tauri/src/composer.rs` exposes `list_recent_recipients`, validates account/query scope, updates recent recipients only after confirmed SMTP acceptance, and deduplicates recipients server-side before persistence/send. `src/App.test.tsx` covers keyboard autocomplete, duplicate handling, and malformed-address errors; Rust composer/schema tests cover dedupe, recent-recipient persistence/search, and migration v6 to v7.
-  Acceptance: complete for local recent-recipient autocomplete and duplicate handling. Contact import/sync, recipient chips, and richer address-book management remain future work.
+  Evidence: recent recipients are local-only and account-scoped; confirmed sends update the autocomplete table; frontend and backend deduplicate To/CC/BCC with first occurrence winning; malformed-address errors remain explicit.
 - [x] Add rich formatting beyond MVP only behind tests.
-  Evidence: `src/mail/composer/composerRichText.ts` centralizes the TipTap extension list and sanitizer for strikethrough, inline code, code blocks, tables, alignment, font family, font size, text colors, and highlights. `src/mail/composer/TipTapComposer.tsx` exposes those controls through the composer toolbar. `src/mail/composer/TipTapComposer.test.tsx` verifies extension serialization and sanitizer allow/deny behavior. `src-tauri/src/composer.rs` persists sanitized rich draft HTML, and `src-tauri/src/smtp_send.rs` serializes the same rich HTML into outgoing MIME through `lettre`.
-  Acceptance: complete for the reviewed rich-formatting subset. Future table resizing, arbitrary fonts/colors, markdown shortcuts, and block-based templates remain deferred until they have sanitizer and MIME tests.
-
-### Localization
-
+  Evidence: `composerRichText.ts` centralizes TipTap extensions and sanitizer policy for strikethrough, code, tables, alignment, font family/size, colors, and highlights. Frontend/Rust tests cover persistence, sanitization, and outgoing MIME serialization.
 - [x] Add i18n setup for English and `pt-PT`.
-  Evidence: `package.json` and `pnpm-lock.yaml` include `i18next` and `react-i18next`; `src/i18n/` configures first-launch detection from `navigator.languages`/`navigator.language`, English fallback, English and `pt-PT` JSON resources, and React integration. Runtime shell, reader, safe email rendering, settings, and composer strings route through translation keys; sender and attachment fallback labels are applied in React through i18n instead of English strings from the Rust cache read model; `src/i18n/i18n.test.tsx` verifies detection, fallback, `pt-PT` key completeness against English, localized fallback labels, and first-run Portuguese shell rendering. A runtime JSX scan only reports `Komorebi` as literal branding.
-  Acceptance: complete for implemented UI strings. Language picker and persisted language setting remain follow-ups.
+  Evidence: `i18next`/`react-i18next` are installed, English and `pt-PT` resources are complete for implemented UI, first-launch detection maps Portuguese locales to `pt-PT`, fallback is English, and tests scan touched UI strings.
 - [x] Add locale-aware formatting.
-  Evidence: `src/i18n/localeFormat.ts` centralizes active-language `Intl` formatting for counts, message dates/times, attachment byte sizes, unread-count text, and search-result status text. `src/mail/shell/MailClientShell.tsx` now formats account/folder unread counts, folder totals in ARIA labels, search result counts, message row/reader timestamps, and attachment sizes through this boundary. `src/mail/composer/TipTapComposer.tsx` formats staged attachment sizes through the same boundary. Frontend fixtures now use ISO-like raw timestamps instead of preformatted display strings. `src/i18n/i18n.test.tsx` covers reusable formatter output plus `pt-PT` UI rendering for counts, dates/times, account status, fallback labels, and attachment sizes.
-  Acceptance: complete for implemented UI surfaces. Relative date wording, persisted locale preferences, and broad translated-layout screenshots remain follow-ups.
+  Evidence: `src/i18n/localeFormat.ts` centralizes dates/times/counts/sizes/status formatting. Shell and composer use active-locale formatting for message dates, unread counts, search counts, attachment sizes, and statuses.
 
 ## P4 - Tests, Fixtures, And Verification Harnesses
 
-Purpose: create evidence that the client works without risking real mailboxes. Risk: high because mail parsing, sync, and rendering bugs are easy to miss manually. Scope guardrails: fixtures and fake servers should be small enough to run in CI.
+Purpose: prove current behavior without real mailboxes or credentials. Risk: high because mail parsing, sync, send, rendering, and IPC bugs are hard to catch manually. Scope guardrails: tests must stay synthetic, local, and disposable.
 
-### Test Infrastructure
+### Implemented Test Surfaces
 
 - [x] Add Rust unit and integration tests.
-  Evidence: Rust unit tests cover schema migrations, constraints, FTS5 search/rebuild/integrity behavior, folder semantics, SMTP send receipt, draft/Sent, composer attachment, and recent-recipient migrations, local-cache mail-shell read models, composer command mapping/staged attachment/send cleanup/recent-recipient behavior, rich composer HTML draft persistence and SMTP MIME serialization, fake IMAP sync state-machine and IDLE/polling worker behavior, flag/folder semantics normalization, MIME normalization, SMTP send boundary behavior, account signature persistence/insertion, draft/Sent persistence, provider auth policy, OAuth provider behavior, token lifecycle, IPC mutation-boundary policy, shared IPC input validation, attachment safety, and destructive mail-action semantics. `src-tauri/tests/rust_boundaries.rs` adds external-crate integration coverage for the public SQLite migration/FTS/MIME/mail-shell search contract, `SqliteSyncCache` UID/flag/expunge behavior, shared IPC validation, attachment path/preview safety, and credential target naming without touching live mailboxes or OS credential storage. `src-tauri/tests/protocol_fixtures.rs` adds local-loopback protocol fixture coverage for IMAP reconnect/IDLE/expunge/auth-failure/large-mailbox behavior and SMTP auth-failure/message-capture behavior. No live IMAP adapter, IMAP APPEND worker, or credential-backend integration tests exist yet.
-  Acceptance: complete as of 2026-05-23. `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs sync, schema, command validation, MIME, attachment, and credential-boundary tests.
+  Evidence: `cargo test --manifest-path src-tauri/Cargo.toml --all-features` runs 134 Rust unit tests plus integration suites for IPC denial paths, protocol fixtures, and cross-module boundaries. Coverage includes schema/FTS, sync state machine, IDLE/polling worker, folder/flag semantics, MIME normalization, SMTP send, draft/Sent persistence, composer commands, recent recipients, account signatures, provider auth, OAuth, token lifecycle, credential target naming, IPC boundaries/validation, attachment safety, destructive actions, local-cache read/search, fake IMAP/SMTP, and no live credentials/mailboxes.
 - [x] Add frontend tests.
-  Evidence: `src/App.test.tsx` covers the accountless shell, injected account/folder/message state workflows, local-cache loader wiring, retry after failed backend cache load, unified inbox behavior, unread badges, local fixture search, FTS-backed search debounce/cancellation, search result origin labels, no-index state, selected message rendering, safe message detail rendering, remote image blocking, inert attachment metadata, disabled reply/forward/remote-content controls, keyboard search focus, folder/message navigation, reader focus, dialog focus trapping, Escape close, focus return, 10,000-message virtualized rendering, selection preservation across compatible scope changes, TipTap composer validation/save/send/staged attachment/autocomplete/duplicate-recipient workflows, Settings entry, and loading/error states. `src/mail/shell/mailShellState.test.ts` covers deterministic unified/account/folder/local-search scope behavior plus cache-reload selection preservation and stale-row clearing. `src/mail/shell/mailShellDataSource.test.ts` covers Tauri runtime detection, typed `invoke` command payloads for `load_mail_shell`, `search_mail`, recent recipients, and composer autosave, plus abort-before-invoke and abort-after-response behavior. `src/i18n/i18n.test.tsx` covers language detection/fallback, `pt-PT` resource completeness, locale-aware formatting helpers, localized fallback labels, and Portuguese first-run/fixture rendering; `src/mail/composer/TipTapComposer.test.tsx` covers rich formatting serialization and sanitizer policy; `SafeEmailBody.test.tsx` covers renderer safety; `src/mail/signatures/signatureHtml.test.ts` and `src/settings/AccountSignatureSettings.test.tsx` cover signature sanitization, insertion helpers, and settings editor behavior. React Query is not implemented in the current frontend yet, so there is no QueryClient-specific test surface; draft reload UI, live account workflow tests, and E2E UI smoke tests remain separate tasks.
-  Acceptance: complete as of 2026-05-23. Vitest/React Testing Library cover state/query behavior, renderer safety, i18n, composer validation, and core navigation.
+  Evidence: `pnpm test:frontend` runs 10 Vitest files and 83 tests covering shell state, data source command mapping/cancellation, safe rendering, sanitizer bypasses, i18n, locale formatting, TipTap composer, signatures, settings, capability guards, virtualized 10,000-message rendering, FTS search UX, keyboard/accessibility workflows, disabled unsafe controls, and loading/error states.
 - [x] Add end-to-end UI smoke tests.
-  Evidence: `package.json` adds `pnpm test:e2e`; `@playwright/test` is locked in `pnpm-lock.yaml`; `playwright.config.ts` launches Vite in `e2e` mode at a fixed local port, writes failure artifacts under ignored `test-results/e2e`, and retains screenshots, video, traces, and an HTML report on failure. `e2e/index.html` and `src/e2e/main.tsx` define a test-only Vite entry that injects fixture accounts, folders, messages, backend-shaped FTS search, draft save, recent-recipient, attachment, and send handlers without touching production startup or real mailboxes. `e2e/mail-shell.smoke.spec.ts` loads `/e2e/`, waits for fixture mail, navigates inbox and archive scope, opens message detail, runs search, opens an FTS-only result, opens the composer, sends a message through typed fixture handlers, and asserts the send event.
-  Acceptance: complete as of 2026-05-23. `pnpm test:e2e` launches the frontend fixture harness, exercises inbox/search/message/detail/composer navigation, and captures Playwright failure artifacts.
-
-### Fixture Contracts
-
+  Evidence: `pnpm test:e2e` passes one Playwright smoke path against the test-only `/e2e/` entry. It loads fixture mail, navigates inbox/archive/search/detail/composer, sends through typed fixture handlers, and captures screenshots/video/traces on failure.
 - [x] Create a MIME fixture corpus.
-  Evidence: `src-tauri/fixtures/mime/` contains synthetic reusable `.eml` fixtures plus a README coverage matrix. `encoded-portuguese-japanese-alternative.eml` covers RFC 2047 encoded headers, Portuguese text, Japanese/non-ASCII display names, ISO-8859-1 plain text, and UTF-8 HTML/plain alternatives. `nested-related-attachments.eml` covers nested multipart, CID inline image metadata, and sender attachment filename traversal. `malformed-boundary.eml` covers a missing closing boundary with recoverable body text. `phishing-xss-html-alternative.eml` covers phishing links, remote resources, script tags, inline event handlers, and plain-text fallback. `src-tauri/src/mime_normalization.rs` now loads the corpus from `CARGO_MANIFEST_DIR` and asserts parser output for subjects, addresses, bodies, inline CID image records, attachments, malformed-boundary survival, and hostile HTML preservation for the rendering boundary.
-  Acceptance: complete as of 2026-05-23. The reusable fixture corpus includes encoded headers, Portuguese text, Japanese/non-ASCII names, HTML + plain alternatives, nested multipart, CID images, attachments, malformed boundaries, phishing links, and XSS payloads.
+  Evidence: reusable synthetic `.eml` fixtures cover encoded Portuguese/Japanese headers, non-ASCII names, HTML/plain alternatives, nested multipart, CID images, attachments, malformed boundaries, phishing links, remote resources, and XSS payloads.
 - [x] Create fake IMAP/SMTP test surfaces.
-  Evidence: `src-tauri/src/imap_sync.rs` includes a fake IMAP fixture for sync state-machine and folder-worker tests, including reconnects, expunges, UIDVALIDITY reset, IDLE wakeups, IDLE timeout refresh, polling fallback, account removal, cancellation, and invalid responses. `src-tauri/src/smtp_send.rs` includes fake SMTP sender, auth resolver, and attachment store surfaces for backend send tests. `src-tauri/tests/protocol_fixtures.rs` now adds local-loopback protocol fixtures: fake IMAP serves tagged commands, forced reconnect after greeting, LOGIN denial, SELECT metadata, expunge notifications, UID SEARCH over 10,000 UIDs, high-UID FETCH, and IDLE EXISTS/EXPUNGE updates; fake SMTP serves EHLO/AUTH/MAIL/RCPT/DATA/QUIT, records DATA payloads, and denies AUTH without sending mail. The fixtures use only synthetic localhost sockets and no real accounts.
-  Acceptance: complete as of 2026-05-23. Sync and send fixture tests run locally without real accounts; fake servers simulate reconnects, IDLE updates, expunges, auth failures, and large mailboxes.
+  Evidence: Rust fake fixtures cover sync state-machine behavior; `src-tauri/tests/protocol_fixtures.rs` adds localhost protocol-level IMAP/SMTP fixtures for reconnects, IDLE updates, expunges, auth failures, SMTP data capture, and 10,000 UID mailboxes.
 - [x] Create performance fixtures.
-  Evidence: `src/perf/mailPerformanceFixtures.ts` deterministically generates a local-only 10,000-message mailbox across two accounts with unread/flagged variation, searchable sender/subject/body terms, HTML-body rows, and representative attachment metadata for PDF, PNG inline image, plain text, and ZIP payloads. `src/perf/mailPerformanceFixtures.test.ts` verifies fixture scale, attachment coverage, search behavior, and count bounds. `src/e2e/main.tsx` loads the generated fixture only for `/e2e/?fixture=performance`, while the normal E2E smoke fixture remains small. `src/App.css` now constrains the browser message-list grid item with `min-height: 0` and `overflow: hidden` so the virtualizer does not mount the full spacer. `playwright.perf.config.ts`, `perf/mail-shell.benchmark.spec.ts`, and `package.json` script `pnpm perf:mail-shell` run the browser benchmark and report Chromium heap usage, initial load, backend-shaped search latency, virtualized scroll timing, selected-row timing, and mounted row count as console output plus an attached JSON report under ignored `test-results/perf/`; the benchmark guards that fewer than 80 rows are mounted for the 10,000-message fixture.
-  Acceptance: complete as of 2026-05-23. Generated local fixtures populate 10,000+ messages and representative attachments; benchmark scripts report memory, search latency, and list interaction metrics without real mailboxes.
-
-### Security Regression Tests
-
+  Evidence: `pnpm perf:mail-shell` passes with a generated 10,000-message fixture and reports `initialLoadMs: 171.8`, `searchLatencyMs: 51.8`, `scrollToLastRowMs: 16.1`, `selectLastRowMs: 54.1`, 12 mounted rows after scroll, and Chromium used heap below 27 MB in the browser harness on this audit run.
 - [x] Test HTML sanitization bypass cases.
-  Evidence: `src/mail/rendering/xssFixtures.ts` now includes a categorized sanitizer bypass corpus for mixed-case and broken script tags, mixed-case event handlers, encoded and null-split `javascript:` URLs, disallowed `data:` URLs, CSS `@import` and `url(...)` abuse, SVG `foreignObject`/`xlink` payloads, MathML annotation payloads, malformed unclosed markup, known post-sanitization mutation shapes, and attacker-supplied `data-komorebi-*` metadata. `src/mail/rendering/emailHtml.ts` strips reserved Komorebi link metadata before link rewriting and counts remote CSS imports/URLs before style removal. `src/mail/rendering/SafeEmailBody.test.tsx` asserts the corpus removes hostile tags/attributes/values, remains safe after browser insertion and serialization, blocks CSS-hidden remote resources, and refuses to delegate clicks from attacker-supplied internal link metadata.
-  Acceptance: complete as of 2026-05-23. Script tags, event handlers, `javascript:` URLs, data URLs where disallowed, CSS abuse, SVG/MathML abuse, malformed parser cases, and post-sanitization mutation cases are covered.
+  Evidence: `xssFixtures.ts` and `SafeEmailBody.test.tsx` cover scripts, event handlers, `javascript:` URLs, disallowed data URLs, CSS abuse, SVG/MathML abuse, malformed parser cases, post-sanitization mutation cases, and attacker-supplied Komorebi link metadata.
 - [x] Test attachment path traversal and unsafe open paths.
-  Evidence: `src-tauri/src/attachment_safety.rs` unit tests cover malicious sender filenames, path traversal in storage IDs, and auto-open denial. `src-tauri/src/composer.rs` now adds filesystem regression tests proving staged attachment writes ignore sender path components, do not create or overwrite sibling files outside app data, store bytes under generated `composer-attachments/<account>/<draft>/<id>.<ext>` paths, and reject corrupted `composer_attachments.storage_relative_path` values containing parent traversal or absolute paths before opening/streaming. `src-tauri/capabilities/capabilities.test.ts` now fails if attachment open/preview/save/download/extract commands or frontend opener APIs are introduced without a reviewed command/capability design. Reader attachment Preview/Save controls remain disabled in frontend tests because real inbound attachment commands do not exist yet.
-  Acceptance: complete as of 2026-05-23 for existing attachment surfaces. Malicious filenames cannot escape the app directory or overwrite sibling files in composer staging; corrupted stored paths are rejected before streaming; auto-open and opener/download command surfaces remain denied until typed commands exist.
+  Evidence: attachment safety tests cover malicious filenames, traversal IDs, unsafe MIME, size limits, preview intent, and auto-open denial; composer tests cover generated app-data staging paths and corrupted stored path rejection; capability tests deny opener/download/preview/extraction surfaces.
 - [x] Test IPC denial paths.
-  Evidence: `src-tauri/tests/ipc_denial_paths.rs` now exercises public command-level surfaces against disposable SQLite/temp state. It verifies `search_mail` rejects raw SQL-shaped queries, raw HTML, oversized queries, invalid account IDs, unknown accounts, and folders outside account scope without echoing hostile input; shared path validation rejects frontend-supplied cache paths. It verifies composer command entry points reject invalid account IDs, oversized subjects, unsanitized body HTML, unknown/unowned staged attachment IDs, oversized attachment bytes, invalid recent-recipient account IDs, unknown recent-recipient accounts, and oversized recent-recipient queries. It also verifies typed server-affecting mail actions reject unknown accounts, unowned folders, unknown messages, invalid target folder IDs, unconfirmed delete-to-trash, and unconfirmed expunge before mutating the fake store.
-  Acceptance: complete as of 2026-05-23. Invalid IDs, arbitrary paths, raw SQL, unowned account/folder/message IDs, oversized payloads, and unauthorized operations are rejected in command-level regression tests.
+  Evidence: `src-tauri/tests/ipc_denial_paths.rs` exercises public command-level surfaces against disposable SQLite/temp state and fake stores, proving invalid IDs, arbitrary frontend paths, raw SQL/HTML, unowned scope, oversized payloads, and unauthorized server-affecting operations are rejected before side effects.
 
-## P5 - CI, Packaging, And Release Readiness
+## P5 - Connected Accounts And Live Mail Integration
 
-Purpose: make releases repeatable and auditable on Windows. Risk: medium-high because unsigned or unverified desktop releases can fail users or train agents to trust broken builds. Scope guardrails: release automation should come after the scaffold and basic tests are stable.
+Purpose: turn the tested local-cache shell and fake-backed protocol primitives into a real personal email client. Risk: critical because this is the difference between a working shell and production mail support. Scope guardrails: use only synthetic tests by default; live provider tests require explicit user-provided test accounts and opt-in.
 
-### CI
+### Account Setup And Auth UX
+
+- [ ] Implement account setup, reauthentication, and account removal commands plus UI.
+  Evidence: `src-tauri/src/lib.rs` and `src-tauri/build.rs` register no `create_account`, `reauth_account`, `remove_account`, `test_account_connection`, or `get_account_auth_status` commands. The settings drawer currently exposes signature editing only and no account add/remove workflow.
+  Acceptance: users can add Gmail, Microsoft, and compatible generic IMAP/SMTP accounts through typed Tauri commands; auth policy is enforced before secret writes; metadata persists only after credential storage succeeds; reauth and removal are available from settings; denial paths cover unsupported provider/auth combinations, bad IDs, oversized fields, and credential-store failure.
+- [ ] Implement Gmail/Microsoft OAuth loopback callback flow.
+  Evidence: Rust can build provider OAuth URLs and exchange/refresh tokens, but there is no command that starts OAuth, opens a browser, listens on a loopback redirect, validates state/PKCE, stores refresh tokens, or maps callback errors to UI states.
+  Acceptance: OAuth start/callback/finish is backend-owned; React never sees codes or tokens after handoff; loopback listener handles cancellation, CSRF state mismatch, denied consent, timeout, invalid grant, and provider errors; Gmail/Microsoft setup never falls back to passwords.
+- [ ] Implement generic IMAP/SMTP setup and test-connection flow.
+  Evidence: schema and auth policy support generic provider host/port/security metadata and password/app-password credential slots, but no UI/command collects, validates, tests, or stores these rows.
+  Acceptance: generic setup validates host names, ports, TLS/STARTTLS, username, provider compatibility copy, credential storage, and test IMAP/SMTP login without sending secrets to React or logs.
+- [ ] Persist account preferences and signatures through typed account commands.
+  Evidence: account signature persistence exists in Rust and the settings component edits injected account data, but there is no frontend-callable account/signature persistence command or real-account settings wiring.
+  Acceptance: account display name, signature HTML, local preferences, and auth status update through validated Rust commands; settings reload from SQLite after save; signature previews keep using `SafeEmailBody`.
+
+### Live IMAP And Sync Workers
+
+- [ ] Implement the live IMAP adapter.
+  Evidence: `src-tauri/src/imap_sync.rs` defines `ImapSyncServer`/`ImapIdleServer` traits and fake/protocol fixtures, but `src-tauri/Cargo.toml` has no direct `async-imap` dependency and no live network adapter maps TLS, STARTTLS, LOGIN/XOAUTH2, SELECT, UID SEARCH/FETCH, STORE, EXPUNGE, or IDLE into the state machine.
+  Acceptance: a live adapter supports TLS/STARTTLS, OAuth XOAUTH2, compatible generic password auth, folder discovery, UID search/fetch, flag fetch/update, expunge, IDLE, reconnect, cancellation, timeouts, redacted errors, and fake/protocol tests for parser edge cases before optional live-account smoke tests.
+- [ ] Orchestrate background sync workers for all configured accounts.
+  Evidence: sync worker primitives exist, but `src-tauri/src/lib.rs` starts no app-managed account workers and there is no scheduler tied to account lifecycle, app exit, or settings changes.
+  Acceptance: app startup loads active accounts, starts per-account/folder workers, stops them on removal/app exit, reports status to local cache/UI, bounds concurrency, applies backoff, and never runs against removed accounts.
+- [ ] Fetch raw MIME and persist normalized bodies through the live adapter.
+  Evidence: MIME normalization can parse raw bytes and persist records, but live IMAP fetch integration is not wired and current sync fixtures provide already-normalized `RemoteMessage` values.
+  Acceptance: live fetch retrieves RFC822/RFC5322 bytes, calls `parse_inbound_mime`, writes message bodies/attachments through `SqliteSyncCache`, preserves parser warnings, and updates FTS consistently.
+- [ ] Persist inbound attachment bytes under app-generated storage paths.
+  Evidence: MIME parsing produces safe metadata and `attachment_safety` defines path/type rules, but inbound `attachments.storage_relative_path` remains `NULL` until a future download/storage worker writes bytes.
+  Acceptance: validated inbound attachment bytes are written under backend-generated app-data paths with hashes, size/type checks, cleanup behavior, and tests proving malicious filenames cannot affect storage.
+- [ ] Surface sync/auth status and reconnect-needed workflows in the UI.
+  Evidence: the shell can display `connected`, `syncing`, `reconnect-needed`, and `offline` statuses from account rows, but there is no live worker or reauth UI feeding those statuses.
+  Acceptance: accounts show syncing/idle/offline/reconnect-needed/error/last-successful-sync states; reconnect launches the provider-specific auth flow; user-visible errors remain redacted and actionable.
+
+### Live Send, Drafts, And Sent Copies
+
+- [ ] Verify live SMTP send through configured accounts.
+  Evidence: SMTP send boundary, fake SMTP sender, and localhost protocol fixture exist, but no live account setup or opt-in live SMTP test surface exists.
+  Acceptance: configured Gmail/Microsoft/generic accounts can send through the typed composer command; live-send smoke tests are opt-in and use user-provided test accounts only; progress/error states map safely to UI.
+- [ ] Implement IMAP APPEND for pending Sent uploads.
+  Evidence: `sent_mail_copies` records Microsoft/generic provider plans as `imap_append/pending_upload` when a Sent folder exists, and `draft_persistence.rs` notes the APPEND worker is not implemented.
+  Acceptance: confirmed sends that require provider Sent upload are appended once to the correct Sent folder, retry safely, avoid duplicate Gmail Sent copies, update `sent_mail_copies`, and handle append failures without losing local send receipts.
+- [ ] Implement provider Drafts-folder upload or explicitly keep drafts local-only in UI copy.
+  Evidence: backend local draft persistence exists and provider Drafts upload is documented as future work; the composer UI autosaves locally only.
+  Acceptance: either provider Drafts upload is implemented with sync/retry/delete semantics, or user-facing copy and docs clearly state drafts are local-only until sent/discarded.
+- [ ] Implement draft reload/reopen UI.
+  Evidence: Rust can reload active drafts, but the TipTap composer currently creates a new draft id per drawer session and the shell has no drafts list/reopen route.
+  Acceptance: active drafts survive restart and are visible/reopenable from the UI; reopening restores recipients, subject, rich body, signature state, and staged attachments without duplicating send state.
+
+## P6 - Reader Actions, Attachments, And Mail Operations
+
+Purpose: complete the daily reader and organization workflows expected from a desktop email client. Risk: high because unsafe downloads, remote content, and destructive actions can leak data or mutate server state incorrectly. Scope guardrails: every new operation needs typed Rust commands, capability review, and denial-path tests.
+
+### Reader And Attachment Workflows
+
+- [ ] Implement typed attachment preview, save, and download commands.
+  Evidence: reader Preview/Save controls are disabled; capability tests intentionally reject `open_attachment`, `preview_attachment`, `save_attachment`, `download_attachment`, and opener APIs; no command returns preview bytes or saves to a user-selected destination.
+  Acceptance: preview/save/download commands validate account/folder/message/attachment ownership, app-generated source paths, content hash, size, MIME/type sniffing, preview allowlist, and explicit user intent; save destinations cannot overwrite unexpectedly or escape chosen scope; auto-open remains forbidden.
+- [ ] Implement attachment preview UI for allowed types only.
+  Evidence: `attachment_safety` allows explicit preview decisions for text and raster images, but the frontend only shows inert metadata and disabled controls.
+  Acceptance: plain text and raster image previews are opt-in, bounded by size, rendered in safe UI surfaces, and tested; PDF, ZIP, SVG, HTML, executable, script, installer, and Office binary previews remain denied unless a later reviewed policy adds them.
+- [ ] Implement remote-content preference workflow.
+  Evidence: email HTML sanitizer blocks remote resources and the reader exposes a disabled `Load remote content` entry point; no per-message or per-sender preference exists.
+  Acceptance: users can allow remote content narrowly for a message or sender, preferences persist with clear scope, remote URLs are validated/proxied or loaded only by explicit consent, and tests cover tracking-pixel/link abuse cases.
+- [ ] Implement safe external link opening.
+  Evidence: safe links are rewritten for delegated opening, but the opener plugin is not installed and there is no typed command that validates and opens links.
+  Acceptance: external `http`, `https`, and `mailto` links open only after validation and user intent; embedded credentials, scripts, local paths, custom schemes, and rewritten attacker metadata are denied; Tauri opener permissions remain scoped.
+
+### Mail Actions And Composer Routing
+
+- [ ] Wire move/archive/delete/mark-read/expunge to UI and IPC.
+  Evidence: `src-tauri/src/mail_actions.rs` defines typed semantics, but no Tauri command or enabled UI path invokes those actions; reader controls remain disabled.
+  Acceptance: UI actions call typed Rust commands, confirmation and undo flows match documented semantics, fake server/local state tests cover retries and failure, and no hard delete is the default delete path.
+- [ ] Implement reply and forward routing into the composer.
+  Evidence: reader Reply and Forward controls are disabled; composer has no source-message context, quoted-body handling, header preservation, or attachment-forward policy.
+  Acceptance: reply/reply-all/forward prefill recipients, subject prefixes, quote blocks, references/in-reply-to metadata, optional attachment forwarding, and send request metadata while preserving sanitizer and draft semantics.
+- [ ] Implement paged or incremental message loading beyond the bounded snapshot.
+  Evidence: `load_mail_shell` returns a bounded recent-message snapshot and search can open result rows outside that snapshot, but normal folder browsing is not paged against SQLite.
+  Acceptance: large folders load incrementally from the local cache without overfetching; virtualization remains stable; selection and keyboard behavior survive page loads.
+- [ ] Add advanced search UX only after local FTS is measured.
+  Evidence: current search is plain text over subject/sender/body with origin labels and no advanced syntax, highlighted snippets, saved searches, or search history.
+  Acceptance: any advanced syntax is parsed safely, documented, scoped by account/folder, highlighted without XSS, and covered by FTS tests plus latency benchmarks.
+
+### Localization And Preferences
+
+- [ ] Add language picker and persisted locale preference.
+  Evidence: first-launch language detection and English/`pt-PT` resources work, but there is no UI setting or persisted `settings` row for language override.
+  Acceptance: user can change language in settings, preference persists locally, initial detection only applies when no preference exists, and all touched strings remain covered by resource completeness tests.
+- [ ] Add relative date wording and long-string screenshot coverage.
+  Evidence: locale formatting uses `Intl` absolute date/time/count/size output, but no relative date copy or broad translated layout screenshots exist.
+  Acceptance: relative labels are locale-aware and tested; desktop and narrow screenshots verify English and `pt-PT` strings do not overflow or overlap.
+
+## P7 - CI, Packaging, And Release Readiness
+
+Purpose: make release builds repeatable, auditable, and safe on Windows. Risk: medium-high because unsigned or unverified desktop releases can fail users or normalize broken builds. Scope guardrails: release automation comes after core checks are stable and must not publish artifacts without explicit release policy.
+
+### CI And Quality Gates
 
 - [ ] Add Windows CI.
   Evidence: no `.github/workflows` or equivalent CI config exists.
-  Acceptance: CI runs frontend install/lint/test/build, Rust fmt/clippy/test, and Tauri build or package smoke on Windows.
-- [ ] Add dependency and license review.
-  Evidence: dependency manifests exist and `rusqlite` with bundled SQLite was added for schema migrations, but there is no dependency/license/advisory review workflow yet.
-  Acceptance: production dependency additions are reviewed for license/security; Rust and npm advisories are checked by CI or documented manual commands.
+  Acceptance: CI runs `pnpm install`, `pnpm check`, `pnpm test:e2e`, `pnpm tauri build --no-bundle`, and relevant artifact checks on Windows with the pinned toolchain.
+- [ ] Add dependency, license, and advisory review.
+  Evidence: manifests and lockfiles exist, but there is no npm/Rust advisory, license, or production-dependency review workflow.
+  Acceptance: production dependency changes run documented license/security checks; CI or manual release docs include `cargo audit`/RustSec and npm advisory equivalents or justified alternatives.
 - [ ] Add generated-artifact checks.
-  Evidence: `.gitignore` excludes generated outputs, but there is no CI/review automation yet to reject generated dependency/build/runtime artifacts.
-  Acceptance: CI or review docs prevent committing `node_modules`, `dist`, `target`, runtime DBs, fixture-generated blobs, and installer outputs unless explicitly intended.
+  Evidence: `.gitignore` excludes generated outputs, but no CI/review automation rejects generated dependency/build/runtime artifacts.
+  Acceptance: CI or review scripts fail if `node_modules`, `dist`, `target`, runtime DBs, local diagnostics, fixture-generated blobs, or installer outputs are accidentally staged.
+- [ ] Add Tauri-shell E2E or WebDriver smoke coverage.
+  Evidence: Playwright E2E covers the browser `/e2e/` harness, not the packaged or dev Tauri shell.
+  Acceptance: a Tauri-shell smoke test launches the desktop app, verifies accountless first-run UI and command bridge availability, captures failure artifacts, and runs in CI or a documented Windows release check.
 
 ### Windows Release
 
-- [ ] Configure app identity and installer metadata.
-  Evidence: `src-tauri/tauri.conf.json` defines product name, version, bundle identifier, window defaults, and icon paths, but publisher metadata, installer behavior, uninstall behavior, and release-package verification are not complete.
-  Acceptance: product name, bundle identifier, icons, version, publisher metadata, install path, and uninstall behavior are configured and tested.
+- [ ] Configure app identity, publisher, and installer metadata.
+  Evidence: `tauri.conf.json` has product name, version, bundle identifier, window defaults, and icons, but publisher metadata, install path, installer behavior, and uninstall behavior are not verified.
+  Acceptance: product name, bundle identifier, publisher, icons, version, install/uninstall behavior, and package metadata are configured and tested.
 - [ ] Define code-signing plan.
-  Evidence: no release docs exist.
-  Acceptance: signing certificate requirements, local/CI signing flow, unsigned-build policy, and verification commands are documented before public release.
-- [ ] Verify WebView2 prerequisite behavior.
-  Evidence: plan relies on WebView2 but no installer exists.
-  Acceptance: installer behavior is tested on supported Windows targets or documented according to Tauri behavior; failure path is user-readable.
+  Evidence: no release signing docs or signing automation exist.
+  Acceptance: certificate requirements, local/CI signing flow, unsigned-build policy, timestamping, and verification commands are documented before public release.
+- [ ] Verify full bundle/installer and WebView2 prerequisite behavior.
+  Evidence: `pnpm tauri build --no-bundle` passes and builds the release executable, but full installer output and WebView2 prerequisite behavior are untested.
+  Acceptance: `pnpm tauri build` installer artifacts are produced and tested on supported Windows targets; WebView2 missing/outdated behavior has a user-readable path.
 - [ ] Defer updater until security prerequisites exist.
   Evidence: no updater exists.
-  Acceptance: if updater is added, update URL, signing, rollback, user consent, and privacy behavior are documented and tested.
+  Acceptance: if updater is added, update URL, signing, rollback, user consent, privacy behavior, and failure handling are documented and tested before enabling it.
 
-## P6 - Observability, Privacy Operations, And Supportability
+## P8 - Observability, Privacy Operations, And Data Lifecycle
 
-Purpose: help users diagnose sync issues without violating the zero-telemetry promise. Risk: medium because silent failures make email clients unusable, but logs can leak private data. Scope guardrails: local diagnostics only unless an explicit opt-in is implemented.
+Purpose: let users diagnose and manage the app without violating the zero-telemetry promise. Risk: medium because silent sync failures are unusable, but logs can leak mail content. Scope guardrails: diagnostics are local-only unless an explicit opt-in exists.
 
-### Local Diagnostics
+### Local Diagnostics And Status
 
 - [ ] Add structured local logging with redaction.
-  Evidence: no logging exists.
-  Acceptance: logs include sync state, provider errors, retries, and command failures while redacting tokens, passwords, message bodies, subject lines by default, and sensitive addresses where practical.
-- [ ] Add a diagnostics/export flow.
-  Evidence: no UI exists.
-  Acceptance: user can export a redacted diagnostic bundle that excludes credentials and private message content; export path is user-selected.
+  Evidence: there is no logging subsystem.
+  Acceptance: logs include sync state, provider errors, retries, command failures, and migration status while redacting credentials, tokens, message bodies, subject lines by default, and sensitive addresses where practical.
+- [ ] Add diagnostics/export flow.
+  Evidence: there is no diagnostics UI or export command.
+  Acceptance: users can export a redacted local diagnostic bundle to a user-selected path; the bundle excludes credentials, tokens, raw message bodies, attachment bytes, and private subject lines unless the user explicitly includes synthetic fixtures.
 - [ ] Add health/status indicators.
-  Evidence: no sync worker or UI exists.
-  Acceptance: per-account status shows connected, syncing, idle, offline, auth needed, error, and last successful sync without requiring logs.
+  Evidence: status values exist in account rows and shell projections, but no live worker feeds account health and no status panel explains failures.
+  Acceptance: per-account UI shows connected, syncing, idle, offline, auth needed, error, retrying, and last successful sync with redacted details.
 
 ### Privacy And Data Lifecycle
 
-- [ ] Write a zero-telemetry privacy statement.
-  Evidence: README and architecture docs state zero telemetry and local-first constraints, but there is no complete user-facing privacy statement covering all stored local data, account network calls, diagnostics, and removal/cache behavior.
-  Acceptance: README or docs state what data is stored locally, what network calls happen, what is never collected, and how users remove account/cache data.
-- [ ] Define account removal and cache cleanup.
-  Evidence: `docs/architecture/token-lifecycle.md` defines credential/token cleanup behavior and local cache deletion hooks for account removal, but user-facing retention choices, UI flow, sync-worker stop orchestration, and full cache cleanup implementation remain missing.
-  Acceptance: removing an account revokes/wipes credentials, stops sync, and offers clear local cache deletion/retention behavior.
+- [ ] Write a complete zero-telemetry privacy statement.
+  Evidence: README and architecture docs state zero telemetry/local-first constraints, but no complete user-facing privacy statement covers stored local data, provider network calls, diagnostics, cache removal, or unencrypted local cache implications.
+  Acceptance: docs state what is stored locally, what network calls happen, what is never collected, how diagnostics work, and how users remove accounts/cache.
+- [ ] Implement user-facing account removal and cache cleanup choices.
+  Evidence: token lifecycle has backend cleanup primitives, but no UI command flow stops sync workers, revokes credentials, deletes/retains cache by user choice, and explains consequences.
+  Acceptance: account removal stops workers, revokes where supported, wipes Credential Manager entries, clears access caches, and offers explicit local cache deletion/retention with rollback/failure handling.
 - [ ] Define backup/export/import posture.
-  Evidence: not covered by plan.
-  Acceptance: either implemented or documented as unsupported; local cache backup does not expose unencrypted secrets.
+  Evidence: backup/export/import is not covered by the plan or implementation.
+  Acceptance: either unsupported status is documented, or export/import is implemented without exposing secrets and with clear warnings that local mail cache content is currently unencrypted.
 
-## P7 - Documentation, Maintainability, And Agent Continuity
+## P9 - Documentation, Stack Alignment, And Agent Continuity
 
-Purpose: keep future autonomous work scoped and reviewable. Risk: medium because stale docs can cause unsafe implementation choices. Scope guardrails: docs should describe real behavior, not intended behavior, unless clearly marked as planned.
+Purpose: keep docs accurate enough for future agents and humans to avoid rediscovering current traps. Risk: medium because stale docs can cause unsafe or wasteful implementation choices. Scope guardrails: docs must distinguish implemented behavior from planned behavior.
 
 ### Human Docs
 
 - [x] Add README setup and usage docs.
-  Evidence: `README.md` covers project goals, pinned toolchain, Windows prerequisites, setup, dev/build/check commands, generated output rules, privacy/security posture, current frontend shell/local-cache navigation/composer behavior, and current limitations for account setup, live adapters, provider Drafts upload, Sent-folder APPEND, and local-cache encryption.
+  Evidence: `README.md` covers project goals, pinned toolchain, Windows prerequisites, setup, dev/build/check commands, generated output rules, privacy/security posture, current local-cache shell/composer behavior, and current limitations.
 - [x] Add architecture documentation.
-  Evidence: `docs/architecture/` now documents frontend mail-shell/composer behavior, credential storage, provider auth, token lifecycle, Tauri capabilities, IPC/mutation boundaries, IPC validation, schema/migrations/FTS, sync state machine, MIME normalization, SMTP send, draft/Sent/staged composer attachment/recent-recipient persistence, account signatures, local cache encryption posture, safe message rendering, attachment safety, and destructive mail-action semantics.
+  Evidence: `docs/architecture/` documents frontend shell/composer, credential storage, provider auth, token lifecycle, Tauri capabilities, IPC boundaries, IPC validation, schema/FTS, sync, MIME, SMTP send, draft/Sent persistence, account signatures, local-cache encryption posture, safe rendering, attachment safety, and destructive actions.
 - [ ] Add provider setup guides.
-  Evidence: no account setup docs exist.
-  Acceptance: Gmail, Microsoft/Outlook, and generic IMAP/SMTP setup requirements are documented with supported auth modes and known limitations.
+  Evidence: no Gmail, Microsoft, or generic IMAP/SMTP setup guide exists, and account setup UI is not implemented.
+  Acceptance: docs explain supported auth modes, OAuth app/redirect requirements, generic provider requirements, unsupported flows, and known provider limitations without asking users to use Gmail/Microsoft passwords.
+- [ ] Resolve stack drift between the plan and installed code.
+  Evidence: the product plan still names Tailwind CSS, `@tanstack/react-query`, Tokio, and `async-imap` as stack choices, but current `package.json` has no Tailwind or React Query dependency and `src-tauri/Cargo.toml` has no direct Tokio or `async-imap` dependency. `AGENTS.md` now marks Tailwind, React Query, Tokio, and live adapter dependencies as planned or not current. The app currently uses plain CSS, local React state/data-source helpers, Tauri async runtime, and provider-agnostic fake-backed IMAP traits.
+  Acceptance: either the planned stack pieces are installed and used with tests, or the product plan/README/TODO wording is updated to mark them as future/optional rather than implemented.
+- [ ] Fix product-plan encoding damage if the codename text is kept.
+  Evidence: `Project Komorebi - Email Client Plan.md` currently shows mojibake for the Japanese codename text.
+  Acceptance: the plan is saved with correct UTF-8 text or the damaged text is replaced with ASCII-only wording without changing product scope.
 
 ### Agent Docs
 
+- [x] Refresh this ledger for the current audit.
+  Evidence: this 2026-05-23 refresh promotes connected-account, live-adapter, download/preview, CSP, release, diagnostics, performance, compatibility, and stack-drift gaps into explicit active tasks with evidence.
 - [ ] Keep `AGENTS.md` updated as implementation lands.
-  Evidence: `AGENTS.md` names the scaffolded commands, generated paths, known baseline gaps, current toolchain/check setup, and implemented credential/auth/token/capability/IPC/rendering/attachment/destructive-action/schema/sync/MIME/SMTP boundaries; this remains an ongoing maintenance task as implementation lands.
-  Acceptance: AGENTS stays synchronized with actual commands, known baseline failures, generated paths, and project-specific traps from real bugs.
-- [ ] Keep this ledger current.
-  Evidence: this ledger is updated through the P3 locale-formatting work on 2026-05-23.
-  Acceptance: completed tasks are checked with evidence; broad tasks are reopened as narrower follow-ups; last audit date is updated after each full audit.
-- [ ] Add execution-plan template only if long-running tasks need it.
-  Evidence: no `.agent/PLANS.md` exists.
-  Acceptance: if added, `AGENTS.md` explains when to use it and the template is self-contained enough for multi-hour Codex work.
+  Evidence: `AGENTS.md` captures current boundaries, known gaps, and current-vs-planned stack status after this audit, but it remains an ongoing maintenance surface.
+  Acceptance: AGENTS stays synchronized with actual commands, installed stack, baseline failures, generated paths, current limitations, and project-specific traps.
+- [ ] Add an execution-plan template only if long-running tasks need it.
+  Evidence: no `.agent/PLANS.md` or equivalent exists.
+  Acceptance: if added, AGENTS explains when to use it and the template is self-contained enough for multi-hour Codex work.
 
-## P8 - Performance, Compatibility, And Product Claims
+## P10 - Performance, Compatibility, And Product Claims
 
-Purpose: prove the product promises under realistic Windows desktop conditions. Risk: medium because premature claims create trust and release risk. Scope guardrails: benchmarks must use representative fixtures and release builds.
+Purpose: prove product claims under realistic Windows desktop conditions. Risk: medium because premature performance and compatibility claims undermine trust. Scope guardrails: benchmark release builds with representative local data before documenting numeric claims.
 
 ### Performance
 
-- [ ] Measure memory footprint.
-  Evidence: plan promises sub-50MB memory footprint. `pnpm perf:mail-shell` now reports Chromium heap usage for a generated 10,000-message browser fixture, but no release-build Tauri-shell measurements exist for idle, sync, composer, or live-adapter scenarios.
-  Acceptance: release-build measurements on Windows are recorded for idle, 10,000-message inbox, search, sync, and composer scenarios; docs only claim numbers that are measured.
-- [ ] Review frontend bundle size after TipTap rich editor and i18n growth.
-  Evidence: `pnpm build` passes, but the Vite production build warns that the main JS chunk is larger than 500 kB after minification after adding the richer TipTap editor extension set plus i18n/locale-formatting wiring; current build output is `dist/assets/index-JA0mSshm.js` at `795.99 kB` minified, `250.02 kB` gzip.
-  Acceptance: either code-split composer/editor-only dependencies behind the composer drawer, tune the build with documented chunk thresholds, or record measured release impact showing the warning is acceptable.
-- [ ] Measure search latency.
-  Evidence: plan promises instantaneous local search and FTS-backed frontend search now exists. `pnpm perf:mail-shell` reports browser-harness search latency for a generated 10,000-message fixture, but there are no release-build SQLite/FTS latency baselines, thresholds, or multi-size trend reports yet.
-  Acceptance: benchmark reports query latency across representative message counts and body sizes; slow paths have regression thresholds.
+- [ ] Measure release-build memory footprint.
+  Evidence: the browser performance harness reports Chromium heap below 27 MB used for the synthetic 10,000-message fixture on this audit run, but the plan promises sub-50MB memory and there are no release-build Tauri-shell measurements for idle, sync, composer, live adapter, or attachment-heavy scenarios.
+  Acceptance: release-build Windows measurements cover idle, 10,000-message inbox, search, composer, sync, and attachment scenarios; docs only claim measured numbers.
+- [ ] Review frontend bundle size after TipTap/i18n growth.
+  Evidence: `pnpm build` passes, but Vite warns that `dist/assets/index-CzfzElNf.js` is `796.26 kB` minified and `250.12 kB` gzip.
+  Acceptance: composer/editor-only dependencies are code-split, Rollup chunks are tuned, or a documented release measurement justifies the current bundle size and warning threshold.
+- [ ] Measure SQLite/FTS search latency on persisted databases.
+  Evidence: `pnpm perf:mail-shell` reports browser-harness search latency of `51.8 ms` for a generated in-memory fixture path, but there are no release-build SQLite/FTS baselines across persisted database sizes and body lengths.
+  Acceptance: benchmark reports query latency across representative message counts/body sizes with regression thresholds and distinguishes frontend harness latency from SQLite FTS latency.
 - [ ] Measure sync and attachment handling.
-  Evidence: fake-backed sync, attachment safety, MIME metadata parsing, SMTP attachment streaming boundaries, and representative frontend attachment metadata fixtures exist, but no live adapter, attachment file persistence worker, or sync/attachment benchmark harness exists.
-  Acceptance: benchmarks cover initial sync, incremental sync, reconnect, large mailbox, large attachment metadata, and attachment download without excessive memory growth.
+  Evidence: fake sync and attachment safety tests exist, but there is no live adapter, inbound attachment persistence worker, or benchmark covering large initial sync, incremental sync, reconnect, or large attachment downloads.
+  Acceptance: benchmarks cover initial sync, incremental sync, reconnect, IDLE wakeups, large mailbox, attachment download/storage, preview, and memory growth.
 
 ### Compatibility
 
 - [ ] Validate Windows 10/11 support.
-  Evidence: plan targets Windows 10/11 but no builds exist.
-  Acceptance: tested Windows versions, WebView2 behavior, installer behavior, and known OS-specific limitations are documented.
-- [ ] Validate international content.
-  Evidence: plan includes English and Portuguese, codename contains Japanese text, Rust MIME parser tests cover some non-ASCII headers/addresses, and English/`pt-PT` UI resource plus locale-formatting coverage exists. There is still no broad international fixture corpus or screenshot coverage for long translated strings.
-  Acceptance: fixtures verify non-ASCII names, subjects, body text, filenames, dates, and right-sized UI rendering in English and `pt-PT`.
+  Evidence: toolchain and WebView2 prerequisites are documented, and `pnpm tauri build --no-bundle` builds a Windows release executable locally, but no supported Windows matrix or installer validation exists.
+  Acceptance: Windows 10 and Windows 11 builds, WebView2 behavior, installer behavior, credential backend behavior, and known OS limitations are documented.
+- [ ] Validate international content beyond current unit tests.
+  Evidence: English/`pt-PT` UI resources and MIME tests cover some Portuguese/Japanese/non-ASCII content, but there is no broad screenshot corpus for long translated strings, non-ASCII filenames, RTL-like stress text, or mixed-script address lists.
+  Acceptance: fixtures and screenshots verify non-ASCII names, subjects, body text, filenames, dates, counts, and UI rendering in English and `pt-PT` without overflow.
 
 ## Deferred And Future Scope
 
 These items are not active production-readiness blockers for the first stable personal email client unless the user promotes them.
 
 - [ ] Block-based template builder.
-  Evidence: plan labels templates as future/post-launch.
+  Evidence: the plan labels templates as future/post-launch; schema includes future-compatible template tables only.
   Acceptance if promoted: TipTap custom node schema, drag/drop UX, persistence, sanitization, preview, send serialization, and tests exist.
 - [ ] Template save/edit/load workflow.
-  Evidence: plan labels template persistence as future.
+  Evidence: template tables exist for future compatibility, but no UI or command uses them.
   Acceptance if promoted: templates are stored locally, versioned, sanitized, searchable, and insertable into composer without corrupting drafts.
 - [ ] Non-Windows platforms.
-  Evidence: plan targets Windows 10/11 only.
+  Evidence: current target is Windows 10/11 only.
   Acceptance if promoted: macOS/Linux prerequisites, WebView behavior, packaging, signing, and OS credential storage are researched and tested.
 - [ ] Cloud sync, AI features, analytics, or remote services.
-  Evidence: plan promises local-first zero telemetry and does not require these.
+  Evidence: the plan promises local-first zero telemetry and does not require these.
   Acceptance if promoted: explicit user approval, privacy review, threat model, opt-in UX, and docs are required before implementation.
