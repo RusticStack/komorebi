@@ -67,6 +67,7 @@ Rules:
 - `generic-password` stores a provider app password or manual password only for compatible generic IMAP/SMTP providers. Gmail and Microsoft must use OAuth2/XOAUTH2, as defined in `docs/architecture/provider-auth.md`.
 - Credential payloads are serialized by Rust only. React sends generic-provider setup secrets once over a typed command and never receives the stored value back. Gmail/Microsoft setup sends only account metadata plus OAuth client ID; the backend-owned loopback command receives the authorization code, exchanges it, and stores the refresh token without exposing it to React.
 - The Windows credential username may be `provider_kind:account_id`; the display email stays in SQLite metadata.
+- Non-secret OAuth runtime metadata may be stored in SQLite settings as `account:{account_id}:oauth_client` with only the OAuth client id and loopback redirect URI. Tokens, authorization codes, and provider token JSON must never be stored there.
 
 ## Runtime Access Flow
 
@@ -76,7 +77,7 @@ Rules:
 4. For generic IMAP/SMTP setup, Rust runs the backend-owned live IMAP LOGIN and SMTP AUTH check over TLS or STARTTLS before persisting the secret. This check returns only a redacted success/error status to React.
 5. Rust writes the approved secret to Windows Credential Manager.
 6. Rust writes the SQLite account metadata with `credential_ref` only after the credential write succeeds.
-7. Sync/send code resolves credentials by `account_id` inside Rust.
+7. Sync/send code resolves credentials by `account_id` inside Rust. Background sync uses the stored non-secret OAuth client metadata only to reconstruct the backend refresh client.
 8. Rust refreshes OAuth tokens inside Rust and stores new refresh tokens only through the credential backend, following `docs/architecture/token-lifecycle.md`.
 9. Rust returns auth status, errors, and expiry metadata to React, never the secret value.
 

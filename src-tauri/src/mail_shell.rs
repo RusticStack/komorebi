@@ -233,6 +233,8 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
            accounts.auth_kind,
            CASE
              WHEN accounts.auth_status = 'reconnect_needed' THEN 'reconnect-needed'
+             WHEN json_extract(sync_worker_status.value_json, '$.state') = 'syncing' THEN 'syncing'
+             WHEN json_extract(sync_worker_status.value_json, '$.state') = 'error' THEN 'offline'
              WHEN accounts.auth_status = 'connected'
               AND EXISTS (
                 SELECT 1
@@ -262,6 +264,8 @@ fn load_accounts(connection: &Connection) -> rusqlite::Result<Vec<MailShellAccou
          FROM accounts
          LEFT JOIN settings AS account_preferences
            ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
+         LEFT JOIN settings AS sync_worker_status
+           ON sync_worker_status.key = 'account:' || accounts.id || ':sync_worker_status'
          WHERE accounts.removed_at IS NULL
            AND accounts.auth_status != 'removed'
          ORDER BY accounts.display_email COLLATE NOCASE, accounts.id",
@@ -829,6 +833,32 @@ mod tests {
             .messages
             .iter()
             .all(|message| message.account_id != "acct_removed"));
+    }
+
+    #[test]
+    fn account_sync_worker_status_feeds_shell_status_before_folders_exist() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+        connection
+            .execute(
+                "INSERT INTO settings (key, value_type, value_json)
+                 VALUES (
+                   'account:acct_personal:sync_worker_status',
+                   'object',
+                   '{\"state\":\"syncing\",\"updatedAt\":1779552000}'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        let snapshot = load_mail_shell_from_connection(&connection).unwrap();
+        let personal = snapshot
+            .accounts
+            .iter()
+            .find(|account| account.id == "acct_personal")
+            .unwrap();
+
+        assert_eq!(personal.status, "syncing");
     }
 
     #[test]

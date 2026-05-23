@@ -15,7 +15,7 @@ use crate::{
         RemoteFlagUpdate, RemoteFolder, RemoteFolderStatus, RemoteMessage, SyncCancellationToken,
         SyncError,
     },
-    mime_normalization::{parse_remote_message_from_raw_mime, ParseRemoteMessageRequest},
+    mime_normalization::{parse_inbound_mime, ParseInboundMimeRequest},
     oauth::build_xoauth2_initial_response,
     token_lifecycle::SecretString,
 };
@@ -347,6 +347,7 @@ impl ImapSyncServer for LiveImapAdapter {
         &mut self,
         account_id: &str,
         remote_id: &str,
+        folder_id: &str,
         uid_validity: u64,
         uids: &[u64],
     ) -> Result<Vec<RemoteMessage>, SyncError> {
@@ -370,7 +371,12 @@ impl ImapSyncServer for LiveImapAdapter {
                 .iter()
                 .filter(|response| is_untagged_fetch(&response.text()))
             {
-                messages.push(parse_message_fetch_response(response, uid_validity)?);
+                messages.push(parse_message_fetch_response(
+                    account_id,
+                    folder_id,
+                    response,
+                    uid_validity,
+                )?);
             }
         }
 
@@ -1185,6 +1191,8 @@ fn parse_search_uids(responses: &[ImapResponse]) -> BTreeSet<u64> {
 }
 
 fn parse_message_fetch_response(
+    account_id: &str,
+    folder_id: &str,
     response: &ImapResponse,
     uid_validity: u64,
 ) -> Result<RemoteMessage, SyncError> {
@@ -1202,12 +1210,18 @@ fn parse_message_fetch_response(
         })?;
     let raw_message = ensure_message_has_body_separator(raw_message);
 
-    let parsed = parse_remote_message_from_raw_mime(ParseRemoteMessageRequest {
+    let parsed = parse_inbound_mime(ParseInboundMimeRequest {
+        account_id,
+        folder_id,
         uid_validity,
         uid,
         raw_message: &raw_message,
         internal_date: internal_date.as_deref(),
-        flags: &flags,
+    })
+    .map(|mut parsed| {
+        parsed.message.flags = flags.clone();
+        parsed.message.size_bytes = declared_size.or(parsed.message.size_bytes);
+        parsed.message
     })
     .unwrap_or_else(|_| {
         fallback_remote_message(
@@ -1219,10 +1233,7 @@ fn parse_message_fetch_response(
         )
     });
 
-    Ok(RemoteMessage {
-        size_bytes: declared_size.or(parsed.size_bytes),
-        ..parsed
-    })
+    Ok(parsed)
 }
 
 fn parse_flag_updates(
@@ -1354,6 +1365,9 @@ fn fallback_remote_message(
         snippet: None,
         size_bytes: raw_message.len().try_into().ok(),
         has_attachments: false,
+        parsed_from_raw_mime: false,
+        attachment_records: Vec::new(),
+        mime_parse_warnings_json: "[]".into(),
     }
 }
 
@@ -1390,7 +1404,12 @@ fn header_value(headers: &[(String, String)], name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        imap_sync::{ImapSyncEngine, NoopBackoffWaiter, SqliteSyncCache},
+        schema::{apply_migrations, search_messages_fts},
+    };
     use base64::{engine::general_purpose, Engine as _};
+    use rusqlite::Connection;
     use std::{
         io::{BufRead, BufReader},
         net::{SocketAddr, TcpListener},
@@ -1435,7 +1454,7 @@ mod tests {
         assert_eq!(status.unread_count, 1);
 
         let messages = adapter
-            .fetch_messages("acct_live", "INBOX", 777, &[1, 2])
+            .fetch_messages("acct_live", "INBOX", "folder_live_inbox", 777, &[1, 2])
             .unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].subject, "Hello from live IMAP");
@@ -1490,6 +1509,75 @@ mod tests {
             .any(|command| command.contains("UID STORE 1 +FLAGS")));
         assert!(commands.iter().any(|command| command.ends_with("EXPUNGE")));
         assert!(commands.iter().any(|command| command.ends_with("IDLE")));
+    }
+
+    #[test]
+    fn live_sync_persists_raw_mime_bodies_attachments_warnings_and_fts() {
+        let server = ScriptedImapServer::start(|stream, commands| {
+            let mut script = ImapScript::new(stream, commands);
+            script.greet();
+            script.expect_login_ok();
+            script.expect_tagged("LIST", &[r#"* LIST (\HasNoChildren \Inbox) "/" "INBOX""#]);
+            script.expect_select("INBOX", 1);
+            script.expect_search("1");
+            script.expect_search("");
+            let line = script.read_command();
+            assert!(line.contains("UID FETCH 1"));
+            let tag = line.split_whitespace().next().unwrap().to_string();
+            let raw = raw_message_with_attachment();
+            script.write_literal_fetch(1, "\\Seen", &raw);
+            script.write(&format!("{tag} OK FETCH completed\r\n"));
+        });
+        let mut adapter = LiveImapAdapter::connect(password_config(&server)).unwrap();
+        let mut connection = Connection::open_in_memory().unwrap();
+        apply_migrations(&mut connection).unwrap();
+        seed_live_account(&connection);
+        let mut cache = SqliteSyncCache::new(&connection);
+
+        ImapSyncEngine::default()
+            .sync_account(
+                &mut adapter,
+                &mut cache,
+                "acct_live",
+                &SyncCancellationToken::new(),
+                &mut NoopBackoffWaiter,
+            )
+            .unwrap();
+
+        let message: (String, Option<String>, i64, String) = connection
+            .query_row(
+                "SELECT id, body_text, has_attachments, mime_parse_warnings_json
+                 FROM messages
+                 WHERE account_id = 'acct_live'
+                   AND imap_uid = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(message.1.as_deref(), Some("Live MIME searchable body"));
+        assert_eq!(message.2, 1);
+        assert!(message.3.contains("attachment_not_storage_safe"));
+
+        let attachment: (String, String, i64, Option<String>) = connection
+            .query_row(
+                "SELECT message_id, display_filename, size_bytes, storage_relative_path
+                 FROM attachments
+                 WHERE account_id = 'acct_live'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(attachment.0, message.0);
+        assert_eq!(attachment.1, "unsafe.bin");
+        assert!(attachment.2 > 0);
+        assert_eq!(attachment.3, None);
+
+        let search = search_messages_fts(&connection, "searchable", 10).unwrap();
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].subject, "Live MIME Persistence");
+
+        drop(adapter);
+        server.join();
     }
 
     #[test]
@@ -1630,7 +1718,8 @@ mod tests {
             suffix: ")".into(),
         };
         assert_eq!(
-            parse_message_fetch_response(&response, 1).expect_err("uid is required"),
+            parse_message_fetch_response("acct_live", "folder_live_inbox", &response, 1)
+                .expect_err("uid is required"),
             SyncError::InvalidRemoteState {
                 reason: "IMAP FETCH response omitted UID"
             }
@@ -1656,6 +1745,46 @@ mod tests {
             "Message-ID: <uid-{uid}@example.com>\r\nSubject: {subject}\r\nFrom: Alice <alice@example.com>\r\nTo: Bob <bob@example.com>\r\nDate: Fri, 22 May 2026 12:00:00 +0000\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBody for UID {uid}"
         )
         .into_bytes()
+    }
+
+    fn raw_message_with_attachment() -> Vec<u8> {
+        b"Message-ID: <live-persist@example.com>\r\nSubject: Live MIME Persistence\r\nFrom: Alice <alice@example.com>\r\nTo: Bob <bob@example.com>\r\nDate: Fri, 22 May 2026 12:00:00 +0000\r\nContent-Type: multipart/mixed; boundary=\"mix\"\r\n\r\n--mix\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLive MIME searchable body\r\n--mix\r\nContent-Type: application/x-msdownload; name=\"../unsafe.bin\"\r\nContent-Disposition: attachment; filename=\"../unsafe.bin\"\r\n\r\nunsupported bytes!\r\n--mix--\r\n".to_vec()
+    }
+
+    fn seed_live_account(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO accounts (
+                   id,
+                   provider_kind,
+                   display_email,
+                   username,
+                   auth_kind,
+                   credential_ref,
+                   imap_host,
+                   imap_port,
+                   imap_security,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security
+                 )
+                 VALUES (
+                   'acct_live',
+                   'generic_imap_smtp',
+                   'live@example.com',
+                   'live@example.com',
+                   'app_password',
+                   'komorebi:test:live',
+                   '127.0.0.1',
+                   993,
+                   'tls',
+                   'smtp.example.com',
+                   465,
+                   'tls'
+                 )",
+                [],
+            )
+            .unwrap();
     }
 
     struct ScriptedImapServer {

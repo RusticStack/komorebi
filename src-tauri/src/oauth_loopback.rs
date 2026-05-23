@@ -9,6 +9,7 @@ use std::{
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use url::Url;
 
 use crate::{
@@ -28,6 +29,7 @@ use crate::{
         OAuthHttpClient, ReqwestOAuthHttpClient,
     },
     schema::{apply_migrations, SchemaMigrationError},
+    sync_scheduler::{store_account_oauth_client_config, BackgroundSyncScheduler},
     token_lifecycle::SecretString,
 };
 
@@ -120,25 +122,31 @@ pub async fn start_oauth_account_setup(
     app: tauri::AppHandle,
     request: OAuthAccountSetupRequest,
 ) -> Result<AccountSetupResponse, OAuthAccountCommandError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cache_path = mail_cache_path(&app)?;
-        let receiver = TcpOAuthLoopbackReceiver::bind()?;
-        let browser = SystemBrowser;
-        let http = ReqwestOAuthHttpClient::default();
-        let mut credentials = WindowsCredentialManager;
+    let cache_path = mail_cache_path(&app)?;
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
+    let response = tauri::async_runtime::spawn_blocking({
+        let cache_path = cache_path.clone();
+        move || {
+            let receiver = TcpOAuthLoopbackReceiver::bind()?;
+            let browser = SystemBrowser;
+            let http = ReqwestOAuthHttpClient::default();
+            let mut credentials = WindowsCredentialManager;
 
-        start_oauth_account_setup_from_path(
-            &cache_path,
-            &mut credentials,
-            &receiver,
-            &browser,
-            &http,
-            request,
-            now_seconds(),
-        )
+            start_oauth_account_setup_from_path(
+                &cache_path,
+                &mut credentials,
+                &receiver,
+                &browser,
+                &http,
+                request,
+                now_seconds(),
+            )
+        }
     })
     .await
-    .map_err(|error| OAuthAccountCommandError::new(error.to_string()))?
+    .map_err(|error| OAuthAccountCommandError::new(error.to_string()))??;
+    let _ = scheduler.refresh_account(cache_path, &response.account.id);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -146,25 +154,31 @@ pub async fn start_oauth_account_reauth(
     app: tauri::AppHandle,
     request: OAuthAccountReauthRequest,
 ) -> Result<AccountSetupResponse, OAuthAccountCommandError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cache_path = mail_cache_path(&app)?;
-        let receiver = TcpOAuthLoopbackReceiver::bind()?;
-        let browser = SystemBrowser;
-        let http = ReqwestOAuthHttpClient::default();
-        let mut credentials = WindowsCredentialManager;
+    let cache_path = mail_cache_path(&app)?;
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
+    let response = tauri::async_runtime::spawn_blocking({
+        let cache_path = cache_path.clone();
+        move || {
+            let receiver = TcpOAuthLoopbackReceiver::bind()?;
+            let browser = SystemBrowser;
+            let http = ReqwestOAuthHttpClient::default();
+            let mut credentials = WindowsCredentialManager;
 
-        start_oauth_account_reauth_from_path(
-            &cache_path,
-            &mut credentials,
-            &receiver,
-            &browser,
-            &http,
-            request,
-            now_seconds(),
-        )
+            start_oauth_account_reauth_from_path(
+                &cache_path,
+                &mut credentials,
+                &receiver,
+                &browser,
+                &http,
+                request,
+                now_seconds(),
+            )
+        }
     })
     .await
-    .map_err(|error| OAuthAccountCommandError::new(error.to_string()))?
+    .map_err(|error| OAuthAccountCommandError::new(error.to_string()))??;
+    let _ = scheduler.refresh_account(cache_path, &response.account.id);
+    Ok(response)
 }
 
 pub trait OAuthLoopbackReceiver {
@@ -218,7 +232,7 @@ pub fn start_oauth_account_setup_from_connection(
         now,
     )?;
 
-    create_account_from_connection(
+    let response = create_account_from_connection(
         connection,
         credentials,
         AccountSetupRequest {
@@ -237,7 +251,15 @@ pub fn start_oauth_account_setup_from_connection(
             smtp_security: None,
         },
     )
-    .map_err(Into::into)
+    .map_err(OAuthAccountCommandError::from)?;
+    store_account_oauth_client_config(
+        connection,
+        &response.account.id,
+        &validated.client_id,
+        receiver.redirect_uri(),
+    )
+    .map_err(|error| OAuthAccountCommandError::new(error.reason))?;
+    Ok(response)
 }
 
 pub fn start_oauth_account_reauth_from_path(
@@ -285,15 +307,23 @@ pub fn start_oauth_account_reauth_from_connection(
         now,
     )?;
 
-    reauth_account_from_connection(
+    let response = reauth_account_from_connection(
         connection,
         credentials,
         AccountReauthRequest {
-            account_id: account.account_id,
+            account_id: account.account_id.clone(),
             secret: refresh_token.expose_secret().to_string(),
         },
     )
-    .map_err(Into::into)
+    .map_err(OAuthAccountCommandError::from)?;
+    store_account_oauth_client_config(
+        connection,
+        &account.account_id,
+        &client_id,
+        receiver.redirect_uri(),
+    )
+    .map_err(|error| OAuthAccountCommandError::new(error.reason))?;
+    Ok(response)
 }
 
 fn run_loopback_token_flow(

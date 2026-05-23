@@ -17,11 +17,33 @@ pub mod oauth;
 pub mod oauth_loopback;
 pub mod schema;
 pub mod smtp_send;
+pub mod sync_scheduler;
 pub mod token_lifecycle;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(sync_scheduler::BackgroundSyncScheduler::default())
+        .setup(|app| {
+            let cache_path = account_management::mail_cache_path(app.handle())?;
+            let scheduler = app
+                .state::<sync_scheduler::BackgroundSyncScheduler>()
+                .inner()
+                .clone();
+            let _ = scheduler.start_all_configured_accounts(cache_path);
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let scheduler = window
+                    .state::<sync_scheduler::BackgroundSyncScheduler>()
+                    .inner()
+                    .clone();
+                scheduler.stop_all();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             mail_shell::load_mail_shell,
             mail_shell::search_mail,

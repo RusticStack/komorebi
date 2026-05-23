@@ -1,11 +1,11 @@
 # IMAP Sync State Machine
 
-Status: Rust state machine, live IMAP protocol adapter, folder worker, folder/flag semantics, and SQLite cache integration implemented.
+Status: Rust state machine, live IMAP protocol adapter, app-managed background scheduler, folder worker, folder/flag semantics, and SQLite cache integration implemented.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
 
-The code sources of truth are `src-tauri/src/imap_sync.rs` and `src-tauri/src/imap_live.rs`.
+The code sources of truth are `src-tauri/src/imap_sync.rs`, `src-tauri/src/imap_live.rs`, and `src-tauri/src/sync_scheduler.rs`.
 
 The sync engine is provider-agnostic and still runs behind `ImapSyncServer` and `ImapIdleServer` traits so sync semantics can be tested without real accounts. `src-tauri/src/imap_live.rs` now implements those traits with blocking `native-tls`/TCP IMAP protocol I/O. The project has not adopted Tokio or `async-imap`; evaluate that separately before changing the runtime model.
 
@@ -34,15 +34,22 @@ Implemented now:
 - Live IMAP connection setup over TLS or STARTTLS, with plaintext available only in tests.
 - Generic password `LOGIN` and Gmail/Microsoft-style OAuth `XOAUTH2` authentication without returning secrets to React.
 - Live `LIST`, `SELECT`, `UID SEARCH`, chunked `UID FETCH`, flag `UID STORE`, `EXPUNGE`, `CAPABILITY`, `IDLE`, reconnect, cancellation, timeout, max-literal, and redacted-error handling.
-- Live fetch mapping from RFC822/RFC5322 bytes to `RemoteMessage` through the MIME normalization boundary. Attachment metadata/file persistence from live fetch is still separate work.
+- Live fetch parsing from RFC822/RFC5322 bytes through the MIME normalization boundary, including SQLite persistence for message bodies, attachment metadata, parser-warning JSON, and FTS-visible content.
 - Local socket tests for live adapter password auth, XOAUTH2, folder discovery, UID search/fetch, flag fetch/update, expunge, IDLE timeout/change handling, reconnect after network drop, cancellation, redacted auth errors, and parser edge cases.
+- App-managed background scheduler registered in `src-tauri/src/lib.rs`.
+- Startup loading of active `connected` accounts from the local SQLite cache.
+- Account worker restart on account setup, reauthentication, and account settings save.
+- Account worker stop on account removal and Tauri window close.
+- Bounded concurrent account workers and capped per-account folder workers.
+- Worker status persisted to `settings` as `account:{account_id}:sync_worker_status`, with `load_mail_shell` projecting active sync/error state into account status.
+- Non-secret OAuth client runtime metadata persisted as `account:{account_id}:oauth_client` so backend sync workers can refresh Gmail/Microsoft access tokens without exposing tokens to React.
+- Scheduler tests for active-account startup, restart, removal stop, concurrency bounds, status persistence, and OAuth runtime metadata cleanup.
 
 Not implemented by this task:
 
 - Tokio/`async-imap` integration or migration.
-- Background worker orchestration that starts live account workers on app startup/account changes.
-- Live attachment extraction/storage writes from fetched messages.
-- Live sync-status UI fed by background workers.
+- Live attachment byte storage writes from fetched messages.
+- User-visible last-successful-sync/error details beyond current account `connected`/`syncing`/`offline`/`reconnect-needed` projection.
 - Opt-in live-provider smoke tests using user-provided test accounts.
 
 ## State Flow
@@ -77,6 +84,42 @@ Transient server failures retry within `BackoffPolicy`. Each retry calls `ImapSy
 
 The worker returns `FolderWorkerReport` instead of treating normal shutdown as a failure. `Cancelled` represents app exit or account-worker stop. `AccountRemoved` represents account deletion or local metadata removal. Both paths avoid live server mutation and are safe to surface as stopped worker states.
 
+## Background Scheduler
+
+`BackgroundSyncScheduler` is the only app-managed path that starts live sync work automatically.
+
+Startup behavior:
+
+1. Tauri setup opens the app data SQLite cache and applies migrations.
+2. Active accounts are loaded from `accounts` where `removed_at IS NULL` and `auth_status = 'connected'`.
+3. Workers already owned by the scheduler but no longer active are cancelled and joined.
+4. Each active account gets one account worker, subject to the global account-worker concurrency limiter.
+
+Account lifecycle behavior:
+
+1. Generic account setup starts a worker only after live IMAP/SMTP setup checks, credential storage, and account metadata persistence succeed.
+2. OAuth account setup and reauthentication store only the refresh token in Windows Credential Manager and store non-secret OAuth client runtime metadata in SQLite before the scheduler starts or restarts that account.
+3. Generic reauthentication restarts the account worker after credential rotation.
+4. Account settings save restarts the account worker so sync ownership observes current account state.
+5. Account removal cancels and joins the worker before credentials/local metadata are removed, and removal deletes scheduler status/OAuth metadata rows.
+6. Window close calls `stop_all`, cancelling and joining all owned workers.
+
+Worker behavior:
+
+1. The account worker checks local account eligibility before network work.
+2. Generic accounts read the approved generic credential from Windows Credential Manager.
+3. Gmail/Microsoft accounts refresh OAuth access tokens in Rust through `TokenLifecycle`; React never receives refresh tokens or access tokens.
+4. The worker runs one account-level sync to discover/update folders and messages.
+5. It then starts a capped, priority-ordered set of per-folder IDLE/poll workers, with Inbox prioritized.
+6. Removed or non-connected accounts are rejected before live network work; `SqliteSyncCache::account_exists` also stops worker loops after removal.
+7. Worker errors write a redacted status row; credential/token failures mark the account `reconnect_needed`.
+
+Concurrency rules:
+
+- The scheduler currently allows two concurrent account workers by default.
+- Each account starts at most six folder workers by default, ordered by folder kind and display name.
+- Folder workers use the sync engine's backoff policy and cancellation-aware waits.
+
 ## Cache Rules
 
 `SqliteSyncCache` mutates only the existing schema:
@@ -87,6 +130,8 @@ The worker returns `FolderWorkerReport` instead of treating normal shutdown as a
 - Message rows are matched by `(account_id, folder_id, uid_validity, imap_uid)`.
 - Local message IDs are backend-generated stable IDs derived from account, folder, UIDVALIDITY, and UID.
 - MIME normalization uses the same stable message ID derivation for attachment records.
+- Live-fetched MIME warnings are stored as checked JSON in `messages.mime_parse_warnings_json`.
+- Live-fetched attachment metadata is replaced from the parsed MIME part set when a raw-message fetch is persisted; attachment file bytes remain unset until a storage worker writes `attachments.storage_relative_path`.
 - IMAP flags are stored in `flags_json`; standard flags also update boolean columns.
 - Message inserts and body updates flow through the existing `messages_fts` triggers.
 
@@ -168,6 +213,7 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - IDLE timeout and cancellation behavior.
 - Reconnect after a dropped socket and reauthentication before further protocol work.
 - LIST and FETCH parser edge cases, including quoted folder names and missing UID denial.
+- Raw `BODY.PEEK[]` sync persistence for parsed body text, attachment metadata, MIME warning JSON, and FTS search results.
 
 No test uses a real mailbox or real credentials.
 
@@ -177,6 +223,7 @@ Keep this document synchronized with:
 
 - `src-tauri/src/imap_sync.rs`
 - `src-tauri/src/imap_live.rs`
+- `src-tauri/src/sync_scheduler.rs`
 - `src-tauri/src/mime_normalization.rs`
 - `src-tauri/src/schema.rs`
 - `src-tauri/migrations/*.sql`

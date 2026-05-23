@@ -1,6 +1,6 @@
 # MIME Normalization
 
-Status: inbound parser boundary implemented in Rust.
+Status: inbound parser boundary and live-fetch persistence implemented in Rust.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -13,9 +13,9 @@ Komorebi normalizes raw inbound RFC822/RFC5322 message bytes with the Rust `mail
 - `ParsedAttachmentRecord` for the `attachments` table fields that can be derived before attachment bytes are written to app storage.
 - `MimeParseWarning` entries for accepted-but-risky parts, such as decoding problems or attachments that fail storage safety checks.
 
-`parse_remote_message_from_raw_mime` maps fetched RFC822/RFC5322 bytes into a `RemoteMessage` without persisting attachment metadata. The live IMAP adapter uses this narrower helper for protocol fetches. `persist_parsed_inbound_mime` writes the normalized message and attachment metadata to a migrated SQLite database in one transaction. It does not write attachment bytes to disk.
+`parse_inbound_mime` maps fetched RFC822/RFC5322 bytes into a `RemoteMessage`, attachment metadata, and parser warnings. The live IMAP adapter calls this boundary for `BODY.PEEK[]` responses and hands the schema-shaped records to `SqliteSyncCache`, which persists message bodies, attachment metadata, warning JSON, and FTS-indexed content in the normal sync transaction. `persist_parsed_inbound_mime` remains a direct test/helper path for writing the same normalized records to SQLite. None of these paths writes attachment bytes to disk.
 
-This task implements normalization, metadata persistence, a live-adapter message mapping helper, and fixture tests. It does not persist attachment files or expose parser commands to React.
+This task implements normalization, metadata persistence, live-adapter raw MIME persistence, warning storage, and fixture tests. It does not persist attachment files or expose parser commands to React.
 
 ## Message Record Rules
 
@@ -67,11 +67,15 @@ The parser runs `validate_attachment_for_storage` for every parsed attachment. A
 
 Attachment metadata persistence is idempotent by stable attachment id. `storage_relative_path` stays `NULL` until a later download/storage worker writes bytes under an app-generated path.
 
+Live sync replaces a live-fetched message's attachment metadata with the current parsed set when the message was derived from raw MIME. Fixture-only `RemoteMessage` values that are already normalized keep the older fake-server behavior and do not delete attachment rows.
+
 ## Malformed Input
 
 The boundary rejects empty messages and invalid account/folder/UID identity. Parser-level failures return `MimeParseError::Unparseable`.
 
 Malformed-but-parseable messages are accepted when stable records can still be produced. Parts marked by `mail-parser` as having encoding problems produce `MimeParseWarning::EncodingProblem` instead of crashing or discarding the entire message.
+
+Accepted warnings are serialized into `messages.mime_parse_warnings_json` as checked JSON. This keeps risky-but-parseable state available for future diagnostics without logging private message content.
 
 ## Tests
 
@@ -91,13 +95,13 @@ Malformed-but-parseable messages are accepted when stable records can still be p
 - Idempotent SQLite persistence of normalized message rows and attachment metadata.
 - Missing multipart closing boundary with a recoverable body.
 - Empty message, invalid UID, and invalid account/folder id denial paths.
-- Raw-message-to-`RemoteMessage` mapping used by the live IMAP adapter.
+- Raw-message parsing used by the live IMAP adapter.
+- Live IMAP fixture sync that persists parsed body text, attachment metadata, parser warnings, and FTS-searchable terms from `BODY.PEEK[]`.
 
 No test uses a real mailbox, real account, or real user message. Fixture files are synthetic and documented in `src-tauri/fixtures/mime/README.md`.
 
 ## Not Implemented
 
-- Live-fetched attachment metadata persistence through `persist_parsed_inbound_mime`.
 - Persisting attachment bytes to app-generated storage paths.
 - Inline image resolution in the React reader.
 

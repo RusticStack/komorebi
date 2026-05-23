@@ -1,13 +1,13 @@
 # Token Lifecycle
 
-Status: accepted and implemented for the backend lifecycle and provider HTTP client layer.
-Last reviewed: 2026-05-22.
+Status: accepted and implemented for the backend lifecycle, provider HTTP client layer, composer send boundary, and background sync scheduler.
+Last reviewed: 2026-05-23.
 
 ## Decision
 
 Token refresh, token revocation, reconnect-needed state, and account-removal cleanup are Rust-backend responsibilities. React receives only redacted account-auth status and must never receive access tokens, refresh tokens, authorization headers, credential target names, or provider token response bodies.
 
-The enforceable lifecycle core lives in `src-tauri/src/token_lifecycle.rs`. It is intentionally written behind traits so Windows Credential Manager, OAuth HTTP clients, SQLite account state, and sync workers can be connected without changing frontend behavior. The Windows credential implementation lives in `src-tauri/src/credentials.rs`; the provider OAuth HTTP implementation lives in `src-tauri/src/oauth.rs`.
+The enforceable lifecycle core lives in `src-tauri/src/token_lifecycle.rs`. It is intentionally written behind traits so Windows Credential Manager, OAuth HTTP clients, SQLite account state, composer send, and sync workers can be connected without changing frontend behavior. The Windows credential implementation lives in `src-tauri/src/credentials.rs`; the provider OAuth HTTP implementation lives in `src-tauri/src/oauth.rs`; background sync access-token refresh is orchestrated from `src-tauri/src/sync_scheduler.rs`.
 
 ## Refresh Flow
 
@@ -67,6 +67,7 @@ Generic OAuth provider revocation is unsupported until provider-specific revocat
 - If refresh-token rotation cannot be stored, the access token is discarded and the account enters reconnect-needed state.
 - Account removal deletes Credential Manager entries regardless of provider revocation outcome.
 - SQLite account metadata stores auth status and credential references only; it never stores tokens.
+- SQLite may store non-secret OAuth runtime metadata under `account:{account_id}:oauth_client` so Rust workers can reconstruct a provider refresh client. That row must contain only the OAuth client id and loopback redirect URI, never access tokens, refresh tokens, authorization codes, or token responses.
 
 ## Test Coverage
 

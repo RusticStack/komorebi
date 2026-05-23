@@ -25,6 +25,7 @@ use crate::{
         MAX_TEXT_FIELD_BYTES,
     },
     schema::{apply_migrations, SchemaMigrationError},
+    sync_scheduler::{delete_account_sync_scheduler_settings, BackgroundSyncScheduler},
     token_lifecycle::SecretString,
 };
 
@@ -222,6 +223,12 @@ impl From<AccountConnectionTestError> for AccountCommandError {
     }
 }
 
+impl From<crate::sync_scheduler::SyncSchedulerError> for AccountCommandError {
+    fn from(value: crate::sync_scheduler::SyncSchedulerError) -> Self {
+        Self::new(value.reason)
+    }
+}
+
 impl From<serde_json::Error> for AccountCommandError {
     fn from(value: serde_json::Error) -> Self {
         Self::new(value.to_string())
@@ -277,21 +284,27 @@ pub async fn create_account(
     app: tauri::AppHandle,
     request: AccountSetupRequest,
 ) -> Result<AccountSetupResponse, AccountCommandError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        reject_direct_major_provider_oauth_setup(&request)?;
-        let cache_path = mail_cache_path(&app)?;
-        let mut credentials = WindowsCredentialManager;
-        let mut connection_tester = LiveGenericAccountConnectionTester::default();
+    let cache_path = mail_cache_path(&app)?;
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
+    let response = tauri::async_runtime::spawn_blocking({
+        let cache_path = cache_path.clone();
+        move || {
+            reject_direct_major_provider_oauth_setup(&request)?;
+            let mut credentials = WindowsCredentialManager;
+            let mut connection_tester = LiveGenericAccountConnectionTester::default();
 
-        create_account_from_path_with_connection_tester(
-            &cache_path,
-            &mut credentials,
-            &mut connection_tester,
-            request,
-        )
+            create_account_from_path_with_connection_tester(
+                &cache_path,
+                &mut credentials,
+                &mut connection_tester,
+                request,
+            )
+        }
     })
     .await
-    .map_err(|error| AccountCommandError::new(error.to_string()))?
+    .map_err(|error| AccountCommandError::new(error.to_string()))??;
+    let _ = scheduler.refresh_account(cache_path, &response.account.id);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -300,10 +313,13 @@ pub fn reauth_account(
     request: AccountReauthRequest,
 ) -> Result<AccountSetupResponse, AccountCommandError> {
     let cache_path = mail_cache_path(&app)?;
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
     reject_direct_major_provider_oauth_reauth_from_path(&cache_path, &request.account_id)?;
     let mut credentials = WindowsCredentialManager;
 
-    reauth_account_from_path(&cache_path, &mut credentials, request)
+    let response = reauth_account_from_path(&cache_path, &mut credentials, request)?;
+    let _ = scheduler.refresh_account(cache_path, &response.account.id);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -312,6 +328,9 @@ pub fn remove_account(
     request: AccountRemovalRequest,
 ) -> Result<AccountRemovalResponse, AccountCommandError> {
     let cache_path = mail_cache_path(&app)?;
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
+    let account_id = request.account_id.clone();
+    let _ = scheduler.stop_account(&account_id);
     let mut credentials = WindowsCredentialManager;
 
     remove_account_from_path(&cache_path, &mut credentials, request)
@@ -323,7 +342,10 @@ pub fn update_account_settings(
     request: AccountSettingsUpdateRequest,
 ) -> Result<AccountSettingsUpdateResponse, AccountCommandError> {
     let cache_path = mail_cache_path(&app)?;
-    update_account_settings_from_path(&cache_path, request)
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
+    let response = update_account_settings_from_path(&cache_path, request)?;
+    let _ = scheduler.refresh_account(cache_path, &response.account.id);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -588,6 +610,7 @@ pub fn remove_account_from_connection(
         )?;
     }
     delete_account_local_preferences(connection, &request.account_id)?;
+    delete_account_sync_scheduler_settings(connection, &request.account_id)?;
 
     Ok(AccountRemovalResponse {
         account_id: request.account_id,

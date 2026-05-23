@@ -10,6 +10,9 @@ use std::{
     time::Duration,
 };
 
+use crate::mime_normalization::{
+    AttachmentDisposition, AttachmentPreviewKind, ParsedAttachmentRecord,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
@@ -229,6 +232,9 @@ pub struct RemoteMessage {
     pub snippet: Option<String>,
     pub size_bytes: Option<u64>,
     pub has_attachments: bool,
+    pub parsed_from_raw_mime: bool,
+    pub attachment_records: Vec<ParsedAttachmentRecord>,
+    pub mime_parse_warnings_json: String,
 }
 
 impl RemoteMessage {
@@ -255,6 +261,9 @@ impl RemoteMessage {
             snippet: Some(format!("Fixture body for UID {uid}")),
             size_bytes: Some(128),
             has_attachments: false,
+            parsed_from_raw_mime: false,
+            attachment_records: Vec::new(),
+            mime_parse_warnings_json: "[]".into(),
         }
     }
 }
@@ -405,7 +414,7 @@ impl SyncCancellationToken {
         self.cancelled.load(Ordering::SeqCst)
     }
 
-    fn ensure_not_cancelled(&self) -> Result<(), SyncError> {
+    pub(crate) fn ensure_not_cancelled(&self) -> Result<(), SyncError> {
         if self.is_cancelled() {
             return Err(SyncError::Cancelled);
         }
@@ -511,6 +520,7 @@ pub trait ImapSyncServer {
         &mut self,
         account_id: &str,
         remote_id: &str,
+        folder_id: &str,
         uid_validity: u64,
         uids: &[u64],
     ) -> Result<Vec<RemoteMessage>, SyncError>;
@@ -1080,6 +1090,7 @@ impl ImapSyncEngine {
             let messages = server.fetch_messages(
                 account_id,
                 &folder.remote_id,
+                &folder_id,
                 status.uid_validity,
                 &new_uids,
             )?;
@@ -1448,6 +1459,78 @@ impl<'connection> SqliteSyncCache<'connection> {
     pub fn new(connection: &'connection Connection) -> Self {
         Self { connection }
     }
+
+    fn replace_message_attachments(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        message_id: &str,
+        attachments: &[ParsedAttachmentRecord],
+    ) -> Result<(), SyncError> {
+        for attachment in attachments {
+            if attachment.account_id != account_id
+                || attachment.folder_id != folder_id
+                || attachment.message_id != message_id
+            {
+                return Err(SyncError::Cache {
+                    reason: "parsed attachment ownership does not match parsed message".into(),
+                });
+            }
+        }
+
+        self.connection.execute(
+            "DELETE FROM attachments
+             WHERE account_id = ?1
+               AND folder_id = ?2
+               AND message_id = ?3",
+            params![account_id, folder_id, message_id],
+        )?;
+
+        for attachment in attachments {
+            let preview_kind = attachment.preview_kind.map(attachment_preview_schema_value);
+            self.connection.execute(
+                "INSERT INTO attachments (
+                   id,
+                   account_id,
+                   folder_id,
+                   message_id,
+                   content_id,
+                   disposition,
+                   sender_filename,
+                   display_filename,
+                   canonical_mime,
+                   content_type,
+                   size_bytes,
+                   storage_relative_path,
+                   sha256,
+                   is_inline,
+                   preview_kind
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13, ?14)",
+                params![
+                    &attachment.id,
+                    &attachment.account_id,
+                    &attachment.folder_id,
+                    &attachment.message_id,
+                    &attachment.content_id,
+                    attachment_disposition_schema_value(attachment.disposition),
+                    &attachment.sender_filename,
+                    &attachment.display_filename,
+                    attachment
+                        .sniffed_content_type
+                        .as_deref()
+                        .unwrap_or(&attachment.declared_content_type),
+                    &attachment.declared_content_type,
+                    u64_to_i64(attachment.size_bytes)?,
+                    &attachment.sha256,
+                    bool_to_i64(attachment.disposition == AttachmentDisposition::Inline),
+                    preview_kind
+                ],
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 impl SyncCache for SqliteSyncCache<'_> {
@@ -1671,6 +1754,7 @@ impl SyncCache for SqliteSyncCache<'_> {
                is_deleted,
                has_attachments,
                flags_json,
+               mime_parse_warnings_json,
                body_text,
                body_html,
                snippet,
@@ -1680,7 +1764,7 @@ impl SyncCache for SqliteSyncCache<'_> {
              VALUES (
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-               ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, 'synced'
+               ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, 'synced'
              )
              ON CONFLICT(id) DO UPDATE SET
                imap_uid = excluded.imap_uid,
@@ -1705,6 +1789,7 @@ impl SyncCache for SqliteSyncCache<'_> {
                is_deleted = excluded.is_deleted,
                has_attachments = excluded.has_attachments,
                flags_json = excluded.flags_json,
+               mime_parse_warnings_json = excluded.mime_parse_warnings_json,
                body_text = excluded.body_text,
                body_html = excluded.body_html,
                snippet = excluded.snippet,
@@ -1736,12 +1821,22 @@ impl SyncCache for SqliteSyncCache<'_> {
                 flag_state.is_deleted,
                 bool_to_i64(message.has_attachments),
                 flags_json,
+                &message.mime_parse_warnings_json,
                 &message.body_text,
                 &message.body_html,
                 &message.snippet,
                 optional_u64_to_i64(message.size_bytes)?
             ],
         )?;
+
+        if message.parsed_from_raw_mime {
+            self.replace_message_attachments(
+                account_id,
+                folder_id,
+                &message_id,
+                &message.attachment_records,
+            )?;
+        }
 
         Ok(())
     }
@@ -1928,6 +2023,20 @@ fn flags_json(flags: &BTreeSet<RemoteFlag>) -> Result<String, SyncError> {
 fn folder_attributes_json(attributes: &BTreeSet<String>) -> Result<String, SyncError> {
     let values: Vec<&str> = attributes.iter().map(String::as_str).collect();
     serde_json::to_string(&values).map_err(SyncError::cache)
+}
+
+fn attachment_disposition_schema_value(disposition: AttachmentDisposition) -> &'static str {
+    match disposition {
+        AttachmentDisposition::Attachment => "attachment",
+        AttachmentDisposition::Inline => "inline",
+    }
+}
+
+fn attachment_preview_schema_value(preview_kind: AttachmentPreviewKind) -> &'static str {
+    match preview_kind {
+        AttachmentPreviewKind::PlainText => "plain_text",
+        AttachmentPreviewKind::RasterImage => "raster_image",
+    }
 }
 
 fn bool_to_i64(value: bool) -> i64 {
@@ -2132,6 +2241,7 @@ mod tests {
             &mut self,
             _account_id: &str,
             remote_id: &str,
+            _folder_id: &str,
             uid_validity: u64,
             uids: &[u64],
         ) -> Result<Vec<RemoteMessage>, SyncError> {

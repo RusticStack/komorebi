@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning, per-account signatures, and per-account local preferences implemented.
+Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning, per-account signatures, per-account local preferences, and MIME parse-warning storage implemented.
 Last reviewed: 2026-05-23.
 
 ## Implementation
@@ -17,7 +17,7 @@ The Rust backend owns migrations. React and frontend SQL must not create, migrat
 
 Initial sync cache mutation is implemented in `src-tauri/src/imap_sync.rs` through `SqliteSyncCache`. The sync state machine writes folders and messages through backend-generated local IDs while preserving remote `remote_id`, UID, and UIDVALIDITY identity.
 
-Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.rs`. It parses raw message bytes into the message columns used by `SqliteSyncCache`, stable attachment metadata records that match the `attachments` table shape, and an idempotent SQLite persistence helper for message plus attachment metadata.
+Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.rs`. It parses raw message bytes into the message columns used by `SqliteSyncCache`, stable attachment metadata records that match the `attachments` table shape, checked parser-warning JSON, and an idempotent SQLite persistence helper for message plus attachment metadata.
 
 Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
 
@@ -39,7 +39,7 @@ The current schema defines:
 - `settings`: global and scoped preferences stored as validated JSON values, including per-account local preferences under `account:{account_id}:local_preferences`.
 - `accounts`: non-secret account metadata and credential references only.
 - `folders`: provider folders, special-use classification, preserved provider attributes, sync counters, UIDVALIDITY, and sync status.
-- `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, and provider metadata.
+- `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, provider metadata, and MIME parser-warning JSON.
 - `attachments`: attachment metadata with display filenames and app-generated storage references.
 - `smtp_send_receipts`: confirmed outbound SMTP send receipts recorded after provider acceptance.
 - `composer_drafts`: local composer draft autosave state.
@@ -111,6 +111,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
 - `folders.attributes_json` must be valid JSON and stores normalized provider LIST/XLIST/SPECIAL-USE attributes for roles the current enum does not model directly.
 - Messages must store `imap_uid` and `uid_validity` together, or neither for local-only states.
+- `messages.mime_parse_warnings_json` must be valid JSON and stores parser warnings from accepted raw MIME fetches without logging message content.
 - Attachments reference their owning message through `(account_id, folder_id, message_id)` and cascade with the account/message.
 - Template JSON and setting JSON must pass `json_valid`.
 - Global template names and per-account template names are deduplicated separately.
@@ -146,6 +147,7 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - Draft/Sent migration adds `composer_drafts`, `sent_mail_copies`, and `smtp_send_receipts.source_draft_id` to version-4 databases.
 - Composer attachment migration adds `composer_attachments`, staged attachment indexes, and timestamp trigger to version-5 databases.
 - Recent-recipient migration adds `recent_recipients`, autocomplete indexes, uniqueness, and timestamp trigger to version-6 databases.
+- MIME parse-warning migration adds `messages.mime_parse_warnings_json` with a checked `[]` default to version-7 databases.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 

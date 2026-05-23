@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, and Gmail/Microsoft OAuth loopback UI wiring implemented; live sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync worker status projection implemented.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -16,6 +16,7 @@ The code source of truth is:
 - `src/App.tsx`
 - `src/App.css`
 - `src-tauri/src/mail_shell.rs`
+- `src-tauri/src/sync_scheduler.rs`
 
 The shell is the first screen of the app. It is not a landing page and it does not seed fake mailbox data in production/default render.
 
@@ -61,6 +62,7 @@ The navigation state is frontend-local. Cache reads come from the Rust `load_mai
 - returns redacted account metadata, folder counts, and a bounded recent-message snapshot
 - returns only display-safe attachment metadata for snapshot messages: id, sanitized display filename, MIME type, byte size, and disposition
 - maps folder unread counts from sync state into account/folder/unified unread badges
+- maps `account:{account_id}:sync_worker_status` rows plus folder `sync_state` into account status values for the shell
 - never returns `credential_ref`, passwords, tokens, attachment storage paths, storage-relative filenames, checksums, or raw SQL results
 
 `load_mail_shell` has no frontend-supplied arguments. It is exposed through `load_mail_shell`, `src-tauri/build.rs`, and the `allow-load-mail-shell` capability permission.

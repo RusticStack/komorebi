@@ -4,7 +4,7 @@ Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has no live inbound attachment download, preview, or open commands yet. The reader can display inert attachment metadata from the local cache, but it does not receive storage paths or preview URLs. The TipTap composer can stage user-selected outbound attachment bytes through a typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist or preview untrusted attachment content with ad hoc path handling.
+Komorebi has no live inbound attachment download, preview, or open commands yet. Live MIME sync can persist inert inbound attachment metadata from fetched messages, and the reader can display that local-cache metadata, but it does not receive storage paths or preview URLs. The TipTap composer can stage user-selected outbound attachment bytes through a typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist or preview untrusted attachment content with ad hoc path handling.
 
 The storage/preview code source of truth is `src-tauri/src/attachment_safety.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`. Composer staging is implemented in `src-tauri/src/composer.rs`.
 

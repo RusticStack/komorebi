@@ -23,7 +23,7 @@ The Rust implementation is split across:
 - `src-tauri/src/account_management.rs`: typed generic setup, generic reauthentication, removal, live generic setup connection validation, redacted auth-status commands, and public-command denial for direct Gmail/Microsoft secret handoff.
 - `src-tauri/src/account_connection.rs`: backend-owned generic IMAP LOGIN and SMTP AUTH setup checks over TLS or STARTTLS.
 
-The settings UI can now submit generic account setup, Gmail/Microsoft OAuth setup, OAuth reauthentication, generic reauthentication, removal, live generic setup validation, and redacted auth-status requests through typed Tauri commands. Gmail and Microsoft remain OAuth2/XOAUTH2-only. Their setup and reauthentication forms collect only non-secret account metadata plus an OAuth client ID, then call backend-owned loopback commands. React never receives authorization codes, access tokens, refresh tokens, provider token JSON, or credential target names.
+The settings UI can now submit generic account setup, Gmail/Microsoft OAuth setup, OAuth reauthentication, generic reauthentication, removal, live generic setup validation, and redacted auth-status requests through typed Tauri commands. Gmail and Microsoft remain OAuth2/XOAUTH2-only. Their setup and reauthentication forms collect only non-secret account metadata plus an OAuth client ID, then call backend-owned loopback commands. React never receives authorization codes, access tokens, refresh tokens, provider token JSON, or credential target names. The backend stores the non-secret OAuth client id and loopback redirect URI in SQLite settings so background sync/send code can refresh access tokens without another frontend secret handoff.
 
 ## Provider Matrix
 
@@ -88,7 +88,7 @@ This policy controls which secrets are allowed to reach the credential backend d
 
 ## Remaining Work
 
-- Add provider setup documentation for registering OAuth clients and redirect URIs.
+- Add provider setup documentation for registering OAuth clients and loopback redirect URIs.
 - Add richer UI states for pending authorization, callback failure, reconnect-needed, and account removal.
 - Add background live-sync worker orchestration, live SMTP adapter verification, provider setup docs, and opt-in live-account smoke tests before claiming broad provider support.
 

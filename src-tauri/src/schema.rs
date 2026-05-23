@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 7;
+pub const LATEST_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -47,6 +47,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 7,
         name: "recent_recipients",
         sql: include_str!("../migrations/007_recent_recipients.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "mime_parse_warnings",
+        sql: include_str!("../migrations/008_mime_parse_warnings.sql"),
     },
 ];
 
@@ -474,6 +479,7 @@ mod tests {
                     "to_addresses_json",
                     "body_text",
                     "body_html",
+                    "mime_parse_warnings_json",
                     "created_at",
                     "updated_at",
                 ]
@@ -975,7 +981,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2, 3, 4, 5, 6, 7]
+            vec![2, 3, 4, 5, 6, 7, 8]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -1022,7 +1028,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![3, 4, 5, 6, 7]
+            vec![3, 4, 5, 6, 7, 8]
         );
         let attributes_json = connection
             .query_row(
@@ -1061,7 +1067,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![4, 5, 6, 7]
+            vec![4, 5, 6, 7, 8]
         );
         connection
             .execute(
@@ -1154,7 +1160,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![5, 6, 7]
+            vec![5, 6, 7, 8]
         );
         connection
             .execute(
@@ -1246,7 +1252,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![6, 7]
+            vec![6, 7, 8]
         );
         connection
             .execute(
@@ -1304,7 +1310,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![7]
+            vec![7, 8]
         );
         connection
             .execute(
@@ -1339,6 +1345,53 @@ mod tests {
                    'recent.person@example.com',
                    'recent.person@example.com'
                  )",
+                [],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn mime_parse_warnings_migration_adds_message_warning_json_to_v7_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..7] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 7;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 7);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![8]
+        );
+        let warnings_json: String = connection
+            .query_row(
+                "SELECT mime_parse_warnings_json FROM messages WHERE id = 'msg_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(warnings_json, "[]");
+        assert!(connection
+            .execute(
+                "UPDATE messages
+                 SET mime_parse_warnings_json = 'not-json'
+                 WHERE id = 'msg_1'",
                 [],
             )
             .is_err());

@@ -9,7 +9,7 @@ use crate::ipc_validation::{validate_entity_id, IpcValidationError};
 use mail_parser::{
     Addr, Address, HeaderValue, Message, MessageParser, MessagePart, MimeHeaders, PartType,
 };
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
@@ -76,15 +76,6 @@ pub enum AttachmentDisposition {
     Inline,
 }
 
-impl AttachmentDisposition {
-    fn schema_value(self) -> &'static str {
-        match self {
-            Self::Attachment => "attachment",
-            Self::Inline => "inline",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentPreviewKind {
@@ -92,7 +83,8 @@ pub enum AttachmentPreviewKind {
     RasterImage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum MimeParseWarning {
     EncodingProblem {
         part_index: usize,
@@ -202,7 +194,7 @@ fn normalize_message(
 ) -> Result<ParsedInboundMime, MimeParseError> {
     let mut warnings = collect_encoding_warnings(message);
     let attachments = normalize_attachments(request, message, &mut warnings)?;
-    let remote_message = normalize_remote_message(
+    let mut remote_message = normalize_remote_message(
         request.uid_validity,
         request.uid,
         request.raw_message.len(),
@@ -211,6 +203,9 @@ fn normalize_message(
         message,
         !attachments.is_empty(),
     )?;
+    remote_message.parsed_from_raw_mime = true;
+    remote_message.attachment_records = attachments.clone();
+    remote_message.mime_parse_warnings_json = serialize_mime_warnings(&warnings)?;
 
     Ok(ParsedInboundMime {
         account_id: request.account_id.to_string(),
@@ -272,6 +267,9 @@ fn normalize_remote_message(
         has_attachments,
         in_reply_to: first_header_text(message.in_reply_to()),
         references_json: serialize_text_list(&header_texts(message.references()))?,
+        parsed_from_raw_mime: false,
+        attachment_records: Vec::new(),
+        mime_parse_warnings_json: "[]".into(),
     })
 }
 
@@ -284,70 +282,6 @@ pub fn persist_parsed_inbound_mime(
     {
         let mut cache = SqliteSyncCache::new(&transaction);
         cache.upsert_message(&parsed.account_id, &parsed.folder_id, &parsed.message)?;
-    }
-
-    for attachment in &parsed.attachments {
-        if attachment.account_id != parsed.account_id
-            || attachment.folder_id != parsed.folder_id
-            || attachment.message_id != parsed.message_id
-        {
-            return Err(SyncError::Cache {
-                reason: "parsed attachment ownership does not match parsed message".into(),
-            });
-        }
-
-        let preview_kind = attachment.preview_kind.map(preview_kind_schema_value);
-        transaction.execute(
-            "INSERT INTO attachments (
-               id,
-               account_id,
-               folder_id,
-               message_id,
-               content_id,
-               disposition,
-               sender_filename,
-               display_filename,
-               canonical_mime,
-               content_type,
-               size_bytes,
-               storage_relative_path,
-               sha256,
-               is_inline,
-               preview_kind
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13, ?14)
-             ON CONFLICT(id) DO UPDATE SET
-               content_id = excluded.content_id,
-               disposition = excluded.disposition,
-               sender_filename = excluded.sender_filename,
-               display_filename = excluded.display_filename,
-               canonical_mime = excluded.canonical_mime,
-               content_type = excluded.content_type,
-               size_bytes = excluded.size_bytes,
-               sha256 = excluded.sha256,
-               is_inline = excluded.is_inline,
-               preview_kind = excluded.preview_kind,
-               updated_at = CURRENT_TIMESTAMP",
-            params![
-                &attachment.id,
-                &attachment.account_id,
-                &attachment.folder_id,
-                &attachment.message_id,
-                &attachment.content_id,
-                attachment.disposition.schema_value(),
-                &attachment.sender_filename,
-                &attachment.display_filename,
-                attachment
-                    .sniffed_content_type
-                    .as_deref()
-                    .unwrap_or(&attachment.declared_content_type),
-                &attachment.declared_content_type,
-                u64_to_db_i64(attachment.size_bytes, "attachment size_bytes")?,
-                &attachment.sha256,
-                bool_to_i64(attachment.disposition == AttachmentDisposition::Inline),
-                preview_kind
-            ],
-        )?;
     }
 
     transaction.commit()?;
@@ -457,6 +391,10 @@ fn serialize_addresses(addresses: &[MailAddressRecord]) -> Result<String, MimePa
 
 fn serialize_text_list(values: &[String]) -> Result<String, MimeParseError> {
     Ok(serde_json::to_string(values)?)
+}
+
+fn serialize_mime_warnings(warnings: &[MimeParseWarning]) -> Result<String, MimeParseError> {
+    Ok(serde_json::to_string(warnings)?)
 }
 
 fn first_header_text(value: &HeaderValue<'_>) -> Option<String> {
@@ -617,23 +555,6 @@ fn canonical_content_type(content_type: AttachmentContentType) -> String {
         AttachmentContentType::Zip => "application/zip",
     }
     .to_string()
-}
-
-fn preview_kind_schema_value(value: AttachmentPreviewKind) -> &'static str {
-    match value {
-        AttachmentPreviewKind::PlainText => "plain_text",
-        AttachmentPreviewKind::RasterImage => "raster_image",
-    }
-}
-
-fn bool_to_i64(value: bool) -> i64 {
-    i64::from(value)
-}
-
-fn u64_to_db_i64(value: u64, field: &'static str) -> Result<i64, SyncError> {
-    i64::try_from(value).map_err(|_| SyncError::Cache {
-        reason: format!("{field} does not fit in SQLite INTEGER"),
-    })
 }
 
 impl From<PreviewKind> for AttachmentPreviewKind {
@@ -945,6 +866,8 @@ JVBERi0xLjQKJUVPRgo=
         let second = parse_inbound_mime(request(raw)).expect("message parses again");
 
         assert!(first.message.has_attachments);
+        assert!(first.message.parsed_from_raw_mime);
+        assert_eq!(first.message.attachment_records, first.attachments);
         assert_eq!(first.attachments, second.attachments);
         assert_eq!(first.attachments.len(), 2);
 
@@ -1009,6 +932,8 @@ Content-Transfer-Encoding: base64
             Some("Body survives even when the final boundary is absent.")
         );
         assert!(!parsed.attachments.is_empty());
+        assert_eq!(parsed.message.attachment_records, parsed.attachments);
+        assert!(!parsed.warnings.is_empty());
     }
 
     #[test]
@@ -1038,15 +963,23 @@ Tm90ZSBib2R5
         persist_parsed_inbound_mime(&mut connection, &parsed).expect("persist parsed MIME");
         persist_parsed_inbound_mime(&mut connection, &parsed).expect("persist is idempotent");
 
-        let message: (String, Option<String>, Option<String>, i64) = connection
+        let message: (String, Option<String>, Option<String>, i64, String) = connection
             .query_row(
-                "SELECT id, in_reply_to, body_text, has_attachments
+                "SELECT id, in_reply_to, body_text, has_attachments, mime_parse_warnings_json
                  FROM messages
                  WHERE account_id = 'account_01'
                    AND folder_id = 'folder_inbox'
                    AND imap_uid = 7",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .expect("message row");
 
@@ -1054,6 +987,7 @@ Tm90ZSBib2R5
         assert_eq!(message.1.as_deref(), Some("previous@example.com"));
         assert_eq!(message.2.as_deref(), Some("Persisted body"));
         assert_eq!(message.3, 1);
+        assert_eq!(message.4, parsed.message.mime_parse_warnings_json);
 
         let attachment: (i64, String, String, String, i64, i64, Option<String>) = connection
             .query_row(
