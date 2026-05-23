@@ -1,7 +1,17 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { vi } from "vitest";
 import App from "./App";
 import type {
+  MailMessage,
+  MailSearchRequest,
+  MailSearchResponse,
   MailShellData,
   MailShellLoadState,
 } from "./mail/shell/mailShellState";
@@ -114,6 +124,22 @@ const fixtureMail: MailShellData = {
       ],
     },
   ],
+};
+
+const archiveSearchResult: MailMessage = {
+  id: "msg_search_archive",
+  accountId: "acct_personal",
+  folderId: "folder_personal_archive",
+  sender: "Research",
+  senderEmail: "research@example.com",
+  subject: "Phoenix report",
+  preview: "Phoenix appears only in the FTS-backed archive result.",
+  receivedAt: "07:45",
+  unread: false,
+  flagged: false,
+  bodyText: "Phoenix appears only in the FTS-backed archive result.",
+  bodyHtml: null,
+  attachments: [],
 };
 
 function createLargeMailFixture(messageCount: number): MailShellData {
@@ -299,6 +325,116 @@ describe("App", () => {
     ).toBeDisabled();
     expect(reader).not.toHaveTextContent("AppData");
     expect(reader).not.toHaveTextContent("att_invoice.pdf");
+  });
+
+  it("debounces and cancels FTS-backed search while identifying result account and folder", async () => {
+    vi.useFakeTimers();
+
+    const abortedQueries: string[] = [];
+    const pendingSearches: Array<{
+      query: string;
+      resolve: (response: MailSearchResponse) => void;
+    }> = [];
+    const searchMail = vi.fn((request: MailSearchRequest, signal: AbortSignal) => {
+      signal.addEventListener("abort", () => {
+        abortedQueries.push(request.query);
+      });
+
+      return new Promise<MailSearchResponse>((resolve) => {
+        pendingSearches.push({ query: request.query, resolve });
+      });
+    });
+
+    try {
+      render(
+        <App
+          initialData={fixtureMail}
+          searchDebounceMs={200}
+          searchMail={searchMail}
+        />,
+      );
+
+      fireEvent.change(screen.getByRole("searchbox"), {
+        target: { value: "pho" },
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(199);
+      });
+      expect(searchMail).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(searchMail).toHaveBeenCalledTimes(1);
+      expect(pendingSearches[0].query).toBe("pho");
+
+      fireEvent.change(screen.getByRole("searchbox"), {
+        target: { value: "phoenix" },
+      });
+      expect(abortedQueries).toContain("pho");
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(searchMail).toHaveBeenCalledTimes(2);
+      expect(pendingSearches[1].query).toBe("phoenix");
+
+      await act(async () => {
+        pendingSearches[1].resolve({
+          indexStatus: "ready",
+          query: "phoenix",
+          results: [archiveSearchResult],
+        });
+      });
+
+      expect(screen.getByText("Phoenix report")).toBeVisible();
+      expect(screen.getByText("Personal / Archive")).toBeVisible();
+      expect(screen.queryByText("Roadmap review")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /Phoenix report/ }));
+      expect(
+        within(screen.getByRole("region", { name: "Selected message" })).getByRole(
+          "heading",
+          { name: "Phoenix report" },
+        ),
+      ).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the no-index state when backend FTS is unavailable", async () => {
+    const searchMail = vi.fn().mockResolvedValue({
+      indexStatus: "unavailable",
+      query: "invoice",
+      results: [],
+    } satisfies MailSearchResponse);
+
+    render(
+      <App
+        initialData={fixtureMail}
+        searchDebounceMs={0}
+        searchMail={searchMail}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "invoice" },
+    });
+
+    expect(
+      await screen.findByRole("region", { name: "Search index unavailable" }),
+    ).toBeVisible();
+    expect(searchMail).toHaveBeenCalledWith(
+      {
+        accountId: null,
+        folderId: null,
+        limit: 100,
+        query: "invoice",
+      },
+      expect.any(AbortSignal),
+    );
   });
 
   it("supports keyboard navigation for search, folders, messages, and reading", () => {

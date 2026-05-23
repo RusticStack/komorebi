@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, keyboard/accessibility workflows, virtualized message rendering, and safe message detail rendering implemented; live account setup and sync adapters are not registered.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, and safe message detail rendering implemented; live account setup and sync adapters are not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -29,7 +29,7 @@ The default state is an accountless local shell with:
 - settings entry
 - empty states
 
-Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
+Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `search_mail` queries the same cache through FTS5 when the user searches. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
 
 ## State Model
 
@@ -46,7 +46,7 @@ Tests may inject fixture mail through `initialData` to verify workflows. In Taur
 - selected message
 - search query
 
-The navigation state is frontend-local only. Cache reads come from the Rust `load_mail_shell` command. The shell does not mutate SQLite, sync state, credentials, attachments, or provider state.
+The navigation state is frontend-local only. Cache reads come from the Rust `load_mail_shell` and `search_mail` commands. The shell does not mutate SQLite, sync state, credentials, attachments, or provider state.
 
 ## Local Cache Read Model
 
@@ -60,7 +60,9 @@ The navigation state is frontend-local only. Cache reads come from the Rust `loa
 - maps folder unread counts from sync state into account/folder/unified unread badges
 - never returns `credential_ref`, passwords, tokens, attachment storage paths, storage-relative filenames, checksums, or raw SQL results
 
-The command has no frontend-supplied arguments. It is exposed only through `load_mail_shell`, `src-tauri/build.rs`, and the `allow-load-mail-shell` capability permission.
+`load_mail_shell` has no frontend-supplied arguments. It is exposed through `load_mail_shell`, `src-tauri/build.rs`, and the `allow-load-mail-shell` capability permission.
+
+`search_mail` accepts only a typed query/scope request. It validates query length, raw SQL-shaped input, raw HTML, account id, and folder id before executing a parameterized FTS query. It returns full safe message rows with the same attachment metadata redaction policy as the shell snapshot, so results outside the bounded recent-message snapshot can still open in the reader. It is exposed through `search_mail`, `src-tauri/build.rs`, and the `allow-search-mail` capability permission.
 
 ## Navigation Behavior
 
@@ -78,7 +80,19 @@ In account mode:
 - selecting a different account or folder preserves the selected message when it still belongs to the new scope
 - selecting a scope that does not contain the selected message clears the selection
 
-Search filters the current account/folder scope by sender, sender email, subject, preview, and plain body text.
+## Search Behavior
+
+When no Tauri search function is available, test fixtures use local in-memory filtering by sender, sender email, subject, preview, and plain body text.
+
+In Tauri runtime, non-empty search input uses `search_mail` after a debounce. Search is cancellable from React's perspective: changing the query or scope aborts/ignores stale responses. Backend search spans subject, sender name/email, plain body, and HTML body across active accounts. In unified mode it searches all active-account folders; in account mode it searches the selected account; when a folder is selected it narrows to that folder. Result rows show account/folder origin.
+
+Search UI states:
+
+- debouncing/loading: `Searching local index`
+- ready with results: result count plus virtualized rows
+- ready with no results: no-match state
+- unavailable index: no-index state
+- backend error: retryable search error state
 
 ## Message List Virtualization
 
@@ -157,7 +171,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - folder navigation
 - selected-message preservation for compatible scope changes
 - safe message detail rendering with sanitized HTML, remote image blocking, inert attachment metadata, and disabled reply/forward/remote-content controls
-- message search
+- local fixture search and FTS-backed search with debounce, cancellation, result origin labels, no-match state, no-index state, and retryable error state
 - message selection and reader rendering
 - keyboard search focus, list navigation, folder navigation, reader focus, dialog focus trapping, Escape close, and focus return
 - 10,000-message virtualized rendering with bounded DOM row count and stable row state during scroll
@@ -165,7 +179,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - settings drawer entry
 - loading/error shell states
 
-Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, removed-account exclusion, credential-reference redaction, and attachment storage-path redaction from disposable SQLite databases.
+Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
 
 No test uses real mailbox data, real credentials, or live provider connections.
 

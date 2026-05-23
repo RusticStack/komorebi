@@ -1,7 +1,7 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index, SMTP send receipts, draft persistence, Sent-copy planning, and per-account signatures implemented.
-Last reviewed: 2026-05-22.
+Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, Sent-copy planning, and per-account signatures implemented.
+Last reviewed: 2026-05-23.
 
 ## Implementation
 
@@ -74,6 +74,8 @@ The migration adds insert, update, and delete triggers for indexed columns. It a
 - `rebuild_messages_fts`: explicit FTS rebuild command for repair or future indexed-column migrations.
 - `check_messages_fts_integrity`: FTS5 `integrity-check` command with external-content table validation.
 
+`src-tauri/src/mail_shell.rs` exposes the frontend-facing `search_mail` command. It converts user text into bounded FTS terms, validates optional account/folder scope, excludes removed accounts, returns full safe shell message rows with display-only attachment metadata, and reports a missing FTS table as `indexStatus: "unavailable"`.
+
 ## Identity Rules
 
 `messages.id` is the local stable row id. It is not an IMAP UID and not an RFC `Message-ID`.
@@ -127,6 +129,7 @@ Encrypted local mail storage is future work. This schema stores message bodies a
 - FTS5 insert/update/delete triggers keep indexed content consistent.
 - FTS5 rebuild restores missing index entries and backfills rows when upgrading a version-1 database.
 - FTS5 integrity checks pass after trigger and rebuild paths.
+- Frontend-facing shell search covers active-account FTS results, account/folder scoping, attachment metadata projection, missing-index reporting, and denial paths in `src-tauri/src/mail_shell.rs`.
 - Folder semantics migration adds `attributes_json` to version-2 databases and defaults existing rows to `[]`.
 - SMTP send receipt migration adds `smtp_send_receipts` to version-3 databases and accepts valid confirmed send records.
 - Draft/Sent migration adds `composer_drafts`, `sent_mail_copies`, and `smtp_send_receipts.source_draft_id` to version-4 databases.

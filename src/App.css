@@ -350,6 +350,16 @@ textarea:disabled {
   background: #fffdf9;
 }
 
+.search-status {
+  color: #716d66;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.search-status--warning {
+  color: #774331;
+}
+
 .messages {
   position: relative;
   flex: 1 1 auto;
@@ -426,6 +436,20 @@ textarea:disabled {
   background: #fff7f3;
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.message-location {
+  max-width: 150px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid #d8d0c4;
+  border-radius: 6px;
+  color: #5d7567;
+  background: #f7f5f2;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-row time,

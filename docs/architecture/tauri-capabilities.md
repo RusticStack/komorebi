@@ -1,6 +1,6 @@
 # Tauri Capability Model
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Current Policy
 
@@ -8,7 +8,7 @@ Komorebi's main webview grants only reviewed feature-specific Tauri permissions.
 
 - `app.security.capabilities` must be `["default"]` until another window or capability is intentionally introduced.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
-- `default.permissions` contains only `allow-load-mail-shell`, the read-only local-cache snapshot command for the first screen.
+- `default.permissions` contains only read-only mail-shell cache commands: `allow-load-mail-shell` and `allow-search-mail`.
 - No remote origins are allowed to use Tauri APIs.
 
 Tauri capability files are kept as standalone files and referenced by identifier in `tauri.conf.json`. This avoids the Tauri default where every file in `src-tauri/capabilities` is enabled automatically when `security.capabilities` is omitted.
@@ -32,6 +32,7 @@ Absence of a permission is the denial mechanism. Do not add broad explicit deny 
 `src-tauri/build.rs` keeps the application command ACL list as `APP_COMMANDS`. The reviewed command list is currently:
 
 - `load_mail_shell`: read-only app-data SQLite snapshot for accounts, folders, unread counts, and a bounded recent-message list.
+- `search_mail`: read-only app-data SQLite FTS query for validated subject/sender/body search results.
 
 `src-tauri/src/lib.rs` must not register any command outside `APP_COMMANDS`, and every registered command must have a matching capability permission.
 
@@ -60,7 +61,7 @@ Rules for likely future plugins:
 
 - `tauri.conf.json` explicitly enables only `default`.
 - All capability files are parseable and reviewed by the test.
-- The default capability targets only the main window and grants only `allow-load-mail-shell`.
+- The default capability targets only the main window and grants only `allow-load-mail-shell` and `allow-search-mail`.
 - Forbidden plugin permissions, remote origins, wildcard windows, and unreviewed custom-command registrations are absent.
 - Rust does not register forbidden Tauri plugins.
 

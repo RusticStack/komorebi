@@ -17,7 +17,10 @@ pub mod token_lifecycle;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![mail_shell::load_mail_shell])
+        .invoke_handler(tauri::generate_handler![
+            mail_shell::load_mail_shell,
+            mail_shell::search_mail
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

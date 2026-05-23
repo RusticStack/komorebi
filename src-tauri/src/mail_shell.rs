@@ -1,13 +1,20 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use rusqlite::{params, Connection};
-use serde::Serialize;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+use crate::ipc_validation::{
+    reject_raw_sql, reject_unsanitized_html, validate_bounded_text, validate_entity_id,
+    IpcValidationError,
+};
 use crate::schema::{apply_migrations, SchemaMigrationError};
 
 const MAIL_CACHE_FILE_NAME: &str = "mail-cache.sqlite3";
 const MESSAGE_SNAPSHOT_LIMIT: i64 = 500;
+const MAIL_SEARCH_RESULT_LIMIT: u32 = 100;
+const MAX_SEARCH_QUERY_BYTES: usize = 512;
+const MAX_SEARCH_TERMS: usize = 12;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +74,30 @@ pub struct MailShellAttachment {
     pub disposition: String,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSearchRequest {
+    pub query: String,
+    pub account_id: Option<String>,
+    pub folder_id: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSearchResponse {
+    pub query: String,
+    pub index_status: MailSearchIndexStatus,
+    pub results: Vec<MailShellMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MailSearchIndexStatus {
+    Ready,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MailShellError {
@@ -89,6 +120,12 @@ impl From<rusqlite::Error> for MailShellError {
 
 impl From<SchemaMigrationError> for MailShellError {
     fn from(error: SchemaMigrationError) -> Self {
+        Self::new(error.to_string())
+    }
+}
+
+impl From<IpcValidationError> for MailShellError {
+    fn from(error: IpcValidationError) -> Self {
         Self::new(error.to_string())
     }
 }
@@ -118,6 +155,51 @@ pub fn load_mail_shell_from_path(cache_path: &Path) -> Result<MailShellSnapshot,
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
     load_mail_shell_from_connection(&connection).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn search_mail(
+    app: tauri::AppHandle,
+    request: MailSearchRequest,
+) -> Result<MailSearchResponse, MailShellError> {
+    let app_data_dir = app.path().app_data_dir()?;
+    fs::create_dir_all(&app_data_dir)?;
+    let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+
+    search_mail_from_path(&cache_path, request)
+}
+
+pub fn search_mail_from_path(
+    cache_path: &Path,
+    request: MailSearchRequest,
+) -> Result<MailSearchResponse, MailShellError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    search_mail_from_connection(&connection, request)
+}
+
+pub fn search_mail_from_connection(
+    connection: &Connection,
+    request: MailSearchRequest,
+) -> Result<MailSearchResponse, MailShellError> {
+    let validated_request = validate_search_request(connection, request)?;
+
+    if !messages_fts_available(connection)? {
+        return Ok(MailSearchResponse {
+            query: validated_request.query,
+            index_status: MailSearchIndexStatus::Unavailable,
+            results: Vec::new(),
+        });
+    }
+
+    let mut messages = search_messages(connection, &validated_request)?;
+    attach_message_attachments(connection, &mut messages)?;
+
+    Ok(MailSearchResponse {
+        query: validated_request.query,
+        index_status: MailSearchIndexStatus::Ready,
+        results: messages,
+    })
 }
 
 pub fn load_mail_shell_from_connection(
@@ -222,7 +304,6 @@ fn load_folders(connection: &Connection) -> rusqlite::Result<Vec<MailShellFolder
 }
 
 fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessage>> {
-    let mut attachments_by_message = load_message_attachments(connection)?;
     let mut statement = connection.prepare(
         "SELECT
            messages.id,
@@ -251,11 +332,9 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
 
     let rows = statement.query_map(params![MESSAGE_SNAPSHOT_LIMIT], |row| {
         let preview = trim_preview(row.get::<_, String>(6)?);
-        let id: String = row.get(0)?;
-        let attachments = attachments_by_message.remove(&id).unwrap_or_default();
 
         Ok(MailShellMessage {
-            id,
+            id: row.get(0)?,
             account_id: row.get(1)?,
             folder_id: row.get(2)?,
             sender: row.get(3)?,
@@ -267,34 +346,162 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
             flagged: row.get::<_, i64>(9)? == 1,
             body_text: row.get(10)?,
             body_html: row.get(11)?,
-            attachments,
+            attachments: Vec::new(),
         })
     })?;
+
+    let mut messages = collect_rows(rows)?;
+    attach_message_attachments(connection, &mut messages)?;
+
+    Ok(messages)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidatedSearchRequest {
+    query: String,
+    fts_query: String,
+    account_id: Option<String>,
+    folder_id: Option<String>,
+    limit: u32,
+}
+
+fn validate_search_request(
+    connection: &Connection,
+    request: MailSearchRequest,
+) -> Result<ValidatedSearchRequest, MailShellError> {
+    validate_bounded_text("query", &request.query, MAX_SEARCH_QUERY_BYTES)?;
+    reject_raw_sql("query", &request.query)?;
+    reject_unsanitized_html("query", &request.query)?;
+
+    let query = request.query.trim().to_string();
+    let fts_query = fts_query_from_user_input(&query)?;
+
+    if let Some(account_id) = request.account_id.as_deref() {
+        validate_entity_id("account_id", account_id)?;
+        if !active_account_exists(connection, account_id)? {
+            return Err(IpcValidationError::UnknownAccount.into());
+        }
+    }
+
+    if let Some(folder_id) = request.folder_id.as_deref() {
+        validate_entity_id("folder_id", folder_id)?;
+        if !folder_exists_in_scope(connection, request.account_id.as_deref(), folder_id)? {
+            return Err(IpcValidationError::UnknownFolder.into());
+        }
+    }
+
+    Ok(ValidatedSearchRequest {
+        query,
+        fts_query,
+        account_id: request.account_id,
+        folder_id: request.folder_id,
+        limit: request
+            .limit
+            .unwrap_or(MAIL_SEARCH_RESULT_LIMIT)
+            .clamp(1, MAIL_SEARCH_RESULT_LIMIT),
+    })
+}
+
+fn search_messages(
+    connection: &Connection,
+    request: &ValidatedSearchRequest,
+) -> rusqlite::Result<Vec<MailShellMessage>> {
+    let mut statement = connection.prepare(
+        "SELECT
+           messages.id,
+           messages.account_id,
+           messages.folder_id,
+           COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '(unknown sender)') AS sender,
+           COALESCE(messages.sender_email, '') AS sender_email,
+           messages.subject,
+           COALESCE(NULLIF(messages.snippet, ''), NULLIF(messages.body_text, ''), '') AS preview,
+           COALESCE(messages.date_received, messages.internal_date, '') AS received_at,
+           messages.is_read,
+           messages.is_flagged,
+           messages.body_text,
+           messages.body_html,
+           bm25(messages_fts) AS rank
+         FROM messages_fts
+         JOIN messages ON messages.rowid = messages_fts.rowid
+         JOIN accounts ON accounts.id = messages.account_id
+         JOIN folders ON folders.account_id = messages.account_id
+          AND folders.id = messages.folder_id
+         WHERE messages_fts MATCH ?1
+           AND accounts.removed_at IS NULL
+           AND accounts.auth_status != 'removed'
+           AND (?2 IS NULL OR messages.account_id = ?2)
+           AND (?3 IS NULL OR messages.folder_id = ?3)
+         ORDER BY
+           rank,
+           COALESCE(messages.date_received, messages.internal_date, messages.created_at) DESC,
+           messages.id
+         LIMIT ?4",
+    )?;
+
+    let rows = statement.query_map(
+        params![
+            request.fts_query.as_str(),
+            request.account_id.as_deref(),
+            request.folder_id.as_deref(),
+            request.limit
+        ],
+        |row| {
+            let preview = trim_preview(row.get::<_, String>(6)?);
+
+            Ok(MailShellMessage {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                folder_id: row.get(2)?,
+                sender: row.get(3)?,
+                sender_email: row.get(4)?,
+                subject: row.get(5)?,
+                preview,
+                received_at: row.get(7)?,
+                unread: row.get::<_, i64>(8)? == 0,
+                flagged: row.get::<_, i64>(9)? == 1,
+                body_text: row.get(10)?,
+                body_html: row.get(11)?,
+                attachments: Vec::new(),
+            })
+        },
+    )?;
 
     collect_rows(rows)
 }
 
-fn load_message_attachments(
+fn attach_message_attachments(
     connection: &Connection,
+    messages: &mut [MailShellMessage],
+) -> rusqlite::Result<()> {
+    let message_ids = messages
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<Vec<_>>();
+    let mut attachments_by_message = load_message_attachments_by_ids(connection, &message_ids)?;
+
+    for message in messages {
+        message.attachments = attachments_by_message
+            .remove(&message.id)
+            .unwrap_or_default();
+    }
+
+    Ok(())
+}
+
+fn load_message_attachments_by_ids(
+    connection: &Connection,
+    message_ids: &[String],
 ) -> rusqlite::Result<HashMap<String, Vec<MailShellAttachment>>> {
-    let mut statement = connection.prepare(
-        "WITH visible_messages AS (
-           SELECT
-             messages.id,
-             messages.account_id,
-             messages.folder_id
-           FROM messages
-           JOIN accounts ON accounts.id = messages.account_id
-           JOIN folders ON folders.account_id = messages.account_id
-            AND folders.id = messages.folder_id
-           WHERE accounts.removed_at IS NULL
-             AND accounts.auth_status != 'removed'
-           ORDER BY
-             COALESCE(messages.date_received, messages.internal_date, messages.created_at) DESC,
-             messages.id
-           LIMIT ?1
-         )
-         SELECT
+    if message_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders = (1..=message_ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT
            attachments.message_id,
            attachments.id,
            COALESCE(NULLIF(attachments.display_filename, ''), 'Attachment') AS display_filename,
@@ -306,17 +513,15 @@ fn load_message_attachments(
            attachments.size_bytes,
            attachments.disposition
          FROM attachments
-         JOIN visible_messages ON visible_messages.account_id = attachments.account_id
-          AND visible_messages.folder_id = attachments.folder_id
-          AND visible_messages.id = attachments.message_id
+         WHERE attachments.message_id IN ({placeholders})
          ORDER BY
            attachments.message_id,
            CASE attachments.disposition WHEN 'inline' THEN 0 ELSE 1 END,
            display_filename COLLATE NOCASE,
-           attachments.id",
-    )?;
-
-    let rows = statement.query_map(params![MESSAGE_SNAPSHOT_LIMIT], |row| {
+           attachments.id"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(message_ids.iter()), |row| {
         Ok((
             row.get::<_, String>(0)?,
             MailShellAttachment {
@@ -329,6 +534,15 @@ fn load_message_attachments(
         ))
     })?;
 
+    collect_attachment_rows(rows)
+}
+
+fn collect_attachment_rows(
+    rows: rusqlite::MappedRows<
+        '_,
+        impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<(String, MailShellAttachment)>,
+    >,
+) -> rusqlite::Result<HashMap<String, Vec<MailShellAttachment>>> {
     let mut attachments_by_message = HashMap::<String, Vec<MailShellAttachment>>::new();
     for row in rows {
         let (message_id, attachment) = row?;
@@ -339,6 +553,74 @@ fn load_message_attachments(
     }
 
     Ok(attachments_by_message)
+}
+
+fn messages_fts_available(connection: &Connection) -> rusqlite::Result<bool> {
+    let exists = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'messages_fts'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+
+    Ok(exists)
+}
+
+fn active_account_exists(connection: &Connection, account_id: &str) -> rusqlite::Result<bool> {
+    let exists = connection
+        .query_row(
+            "SELECT 1
+             FROM accounts
+             WHERE id = ?1
+               AND removed_at IS NULL
+               AND auth_status != 'removed'",
+            [account_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+
+    Ok(exists)
+}
+
+fn folder_exists_in_scope(
+    connection: &Connection,
+    account_id: Option<&str>,
+    folder_id: &str,
+) -> rusqlite::Result<bool> {
+    let exists = connection
+        .query_row(
+            "SELECT 1
+             FROM folders
+             JOIN accounts ON accounts.id = folders.account_id
+             WHERE folders.id = ?1
+               AND (?2 IS NULL OR folders.account_id = ?2)
+               AND accounts.removed_at IS NULL
+               AND accounts.auth_status != 'removed'",
+            params![folder_id, account_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+
+    Ok(exists)
+}
+
+fn fts_query_from_user_input(query: &str) -> Result<String, IpcValidationError> {
+    let tokens = query
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .take(MAX_SEARCH_TERMS)
+        .map(|token| format!("{}*", token.to_lowercase()))
+        .collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        return Err(IpcValidationError::EmptyField { field: "query" });
+    }
+
+    Ok(tokens.join(" "))
 }
 
 fn collect_rows<T>(
@@ -520,6 +802,141 @@ mod tests {
         assert!(!json.contains("attachments/acct_work"));
         assert!(json.contains("person@example.com"));
         assert!(json.contains("invoice_.pdf"));
+    }
+
+    #[test]
+    fn search_mail_uses_fts_across_active_accounts_and_returns_safe_messages() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+
+        let invoice_search = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice number".to_string(),
+                account_id: None,
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(invoice_search.index_status, MailSearchIndexStatus::Ready);
+        assert_eq!(invoice_search.query, "invoice number");
+        assert_eq!(invoice_search.results.len(), 1);
+        assert_eq!(invoice_search.results[0].id, "msg_work");
+        assert_eq!(invoice_search.results[0].account_id, "acct_work");
+        assert_eq!(invoice_search.results[0].folder_id, "folder_work_inbox");
+        assert_eq!(invoice_search.results[0].sender, "Finance");
+        assert_eq!(
+            invoice_search.results[0].attachments,
+            vec![MailShellAttachment {
+                id: "att_work_invoice".to_string(),
+                display_filename: "invoice_.pdf".to_string(),
+                content_type: "application/pdf".to_string(),
+                size_bytes: 24576,
+                disposition: "attachment".to_string(),
+            }]
+        );
+
+        let account_scoped = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice".to_string(),
+                account_id: Some("acct_personal".to_string()),
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+        assert!(account_scoped.results.is_empty());
+
+        let archive_search = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "receipt".to_string(),
+                account_id: None,
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+        assert_eq!(archive_search.results.len(), 1);
+        assert_eq!(archive_search.results[0].id, "msg_archive");
+        assert_eq!(
+            archive_search.results[0].folder_id,
+            "folder_personal_archive"
+        );
+    }
+
+    #[test]
+    fn search_mail_reports_unavailable_when_fts_index_is_missing() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+        connection.execute("DROP TABLE messages_fts", []).unwrap();
+
+        let response = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice".to_string(),
+                account_id: None,
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(response.index_status, MailSearchIndexStatus::Unavailable);
+        assert!(response.results.is_empty());
+    }
+
+    #[test]
+    fn search_mail_validates_query_and_scope_before_fts_execution() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+
+        for query in [
+            "SELECT * FROM messages",
+            "<img src=x onerror=alert(1)>",
+            "subject; DELETE FROM messages",
+        ] {
+            let error = search_mail_from_connection(
+                &connection,
+                MailSearchRequest {
+                    query: query.to_string(),
+                    account_id: None,
+                    folder_id: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap_err()
+            .reason;
+
+            assert!(!error.contains(query));
+        }
+
+        let invalid_account = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice".to_string(),
+                account_id: Some("acct_work/../../secrets".to_string()),
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap_err();
+        assert!(invalid_account.reason.contains("account_id is invalid"));
+
+        let unknown_folder = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "invoice".to_string(),
+                account_id: Some("acct_work".to_string()),
+                folder_id: Some("folder_personal_archive".to_string()),
+                limit: Some(10),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(unknown_folder.reason, "folder was not found for account");
     }
 
     fn seed_shell_cache(connection: &Connection) {

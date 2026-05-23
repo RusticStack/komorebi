@@ -85,14 +85,17 @@ describe("Tauri capabilities", () => {
     expect(capabilityFileNames).toEqual(["default.json"]);
   });
 
-  it("keeps the main window limited to the reviewed mail-shell read command", () => {
+  it("keeps the main window limited to reviewed mail-shell read commands", () => {
     const defaultCapability = readCapability("default.json");
 
     expect(defaultCapability.identifier).toBe("default");
     expect(defaultCapability.windows).toEqual(["main"]);
     expect(defaultCapability.webviews).toBeUndefined();
     expect(defaultCapability.remote).toBeUndefined();
-    expect(defaultCapability.permissions).toEqual(["allow-load-mail-shell"]);
+    expect(defaultCapability.permissions).toEqual([
+      "allow-load-mail-shell",
+      "allow-search-mail",
+    ]);
   });
 
   it("denies broad local-system and network plugin permissions by absence", () => {
@@ -128,12 +131,11 @@ describe("Tauri capabilities", () => {
     }
 
     expect(buildScript).toContain(
-      'const APP_COMMANDS: &[&str] = &["load_mail_shell"];',
+      'const APP_COMMANDS: &[&str] = &["load_mail_shell", "search_mail"];',
     );
     expect(buildScript).toContain(".commands(APP_COMMANDS)");
-    expect(libRs).toContain(
-      ".invoke_handler(tauri::generate_handler![mail_shell::load_mail_shell])",
-    );
+    expect(libRs).toContain("mail_shell::load_mail_shell");
+    expect(libRs).toContain("mail_shell::search_mail");
     expect(libRs.match(/generate_handler!\[/g)).toHaveLength(1);
   });
 

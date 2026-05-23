@@ -1,10 +1,15 @@
 # IPC Input Validation
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has one frontend-callable IPC command: `load_mail_shell`. It is inputless and read-only from React's perspective, so it has no frontend-supplied IDs, paths, URLs, SQL, HTML, or payloads to validate. The validation layer exists so future commands have a shared denial policy before they can touch credentials, files, SQL, network URLs, or mailbox state.
+Komorebi has two frontend-callable IPC commands:
+
+- `load_mail_shell`: inputless, read-only local-cache shell snapshot.
+- `search_mail`: read-only local-cache FTS query with a typed request.
+
+`search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
 
 The code source of truth is `src-tauri/src/ipc_validation.rs`.
 
@@ -53,6 +58,8 @@ Before registering a command in `invoke_handler`, add:
 
 Do not add a command if validation depends on real mailboxes, real credentials, or real app-data paths. Use fake stores, fixtures, and temp directories.
 
+`search_mail` is the current example of an accepted read-only input-bearing command: request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
+
 ## Current Denial Tests
 
 Rust tests cover:
@@ -65,6 +72,7 @@ Rust tests cover:
 - Unknown account, folder, and message ids.
 - Invalid id shapes before lookup.
 - Validation errors not echoing sensitive input values.
+- `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
 
 `pnpm check` runs the validation tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

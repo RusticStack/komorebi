@@ -65,6 +65,21 @@ export type MailShellData = {
   messages: MailMessage[];
 };
 
+export type MailSearchRequest = {
+  query: string;
+  accountId: string | null;
+  folderId: string | null;
+  limit?: number;
+};
+
+export type MailSearchIndexStatus = "ready" | "unavailable";
+
+export type MailSearchResponse = {
+  query: string;
+  indexStatus: MailSearchIndexStatus;
+  results: MailMessage[];
+};
+
 export type MailShellLoadState = {
   accounts: LoadStatus;
   folders: LoadStatus;
@@ -233,7 +248,7 @@ export function messagesForScope(state: MailShellState) {
       if (message.folderId !== state.selectedFolderId) {
         return false;
       }
-    } else if (state.unifiedInbox && folder.kind !== "inbox") {
+    } else if (state.unifiedInbox && !query && folder.kind !== "inbox") {
       return false;
     }
 

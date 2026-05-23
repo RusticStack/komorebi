@@ -1,10 +1,10 @@
 # IPC And Mutation Boundaries
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Current State
 
-Komorebi has one frontend-callable Rust command and no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, local draft/Sent persistence, and account signature persistence now exist; mutating command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
+Komorebi has two frontend-callable Rust commands and no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. The database schema, migration path, input validation layer, initial Rust sync state machine, folder IDLE/polling worker, MIME normalization boundary, backend SMTP send boundary, local draft/Sent persistence, and account signature persistence now exist; mutating command exposure remains blocked until account setup, composer UI, live adapters, worker orchestration, command ACL, and command-specific validation are implemented.
 
 The accepted boundary is:
 
@@ -12,7 +12,7 @@ The accepted boundary is:
 - Rust owns every operation that can mutate credentials, local cache, account metadata, attachment files, migrations, or remote mailbox state.
 - Direct frontend SQL is disabled today. If it is introduced later, it is read-only only and must be justified by a documented table/query scope.
 
-## Current Frontend-Callable Command
+## Current Frontend-Callable Commands
 
 `load_mail_shell` lives in `src-tauri/src/mail_shell.rs`. It:
 
@@ -23,7 +23,19 @@ The accepted boundary is:
 - excludes removed accounts
 - does not expose raw SQL, filesystem paths, credential refs, passwords, tokens, or attachment storage paths
 
-This command is listed in `src-tauri/build.rs`, granted only by `allow-load-mail-shell` in `src-tauri/capabilities/default.json`, and covered by Rust and capability tests.
+`search_mail` also lives in `src-tauri/src/mail_shell.rs`. It:
+
+- accepts a typed query/scope request
+- validates query size, raw SQL-shaped input, raw HTML, optional account id, and optional folder id
+- opens the same app-data SQLite cache through Rust
+- applies Rust-owned migrations before reading
+- uses parameterized FTS5 search over subject, sender name/email, plain body, and HTML body
+- excludes removed accounts
+- returns full safe message rows plus display-safe attachment metadata so search results outside the recent snapshot can still open in the reader
+- reports a missing FTS index as `unavailable` instead of exposing raw SQLite errors to React
+- does not expose raw SQL, filesystem paths, credential refs, passwords, tokens, or attachment storage paths
+
+These commands are listed in `src-tauri/build.rs`, granted only by `allow-load-mail-shell` and `allow-search-mail` in `src-tauri/capabilities/default.json`, and covered by Rust and capability tests.
 
 ## Rust-Only Privileged Operations
 

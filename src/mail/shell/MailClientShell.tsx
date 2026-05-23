@@ -31,29 +31,59 @@ import {
   type MailShellData,
   type MailShellLoadState,
   type MailAttachment,
+  type MailSearchRequest,
+  type MailSearchResponse,
   type MailMessage,
   type MailShellState,
 } from "./mailShellState";
+
+export type MailSearchFunction = (
+  request: MailSearchRequest,
+  signal: AbortSignal,
+) => Promise<MailSearchResponse>;
 
 export type MailClientShellProps = {
   initialData?: MailShellData;
   initialLoadState?: MailShellLoadState;
   loadMailShellData?: () => Promise<MailShellData>;
+  searchMail?: MailSearchFunction;
+  searchDebounceMs?: number;
 };
 
 type Drawer = "composer" | "settings" | null;
+type MailSearchUiStatus =
+  | "idle"
+  | "debouncing"
+  | "loading"
+  | "ready"
+  | "error"
+  | "unavailable";
+type MailSearchUiState = {
+  query: string;
+  results: MailMessage[];
+  status: MailSearchUiStatus;
+};
 
 const MESSAGE_ROW_HEIGHT_PX = 136;
 const MESSAGE_LIST_OVERSCAN = 8;
+const MAIL_SEARCH_DEBOUNCE_MS = 250;
+const MAIL_SEARCH_RESULT_LIMIT = 100;
 const MESSAGE_LIST_FALLBACK_RECT: Rect = {
   width: 420,
   height: 640,
+};
+const emptySearchState: MailSearchUiState = {
+  query: "",
+  results: [],
+  status: "idle",
 };
 
 export function MailClientShell({
   initialData = emptyMailShellData,
   initialLoadState = readyMailShellLoadState,
   loadMailShellData,
+  searchMail,
+  searchDebounceMs = MAIL_SEARCH_DEBOUNCE_MS,
 }: MailClientShellProps) {
   const [state, setState] = useState<MailShellState>(() =>
     createMailShellState(
@@ -61,6 +91,9 @@ export function MailClientShell({
       loadMailShellData ? loadingMailShellLoadState() : initialLoadState,
     ),
   );
+  const [searchState, setSearchState] =
+    useState<MailSearchUiState>(emptySearchState);
+  const [searchRetryNonce, setSearchRetryNonce] = useState(0);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -71,10 +104,36 @@ export function MailClientShell({
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const visibleFolders = useMemo(() => foldersForScope(state), [state]);
-  const visibleMessages = useMemo(() => messagesForScope(state), [state]);
-  const activeMessage = selectedMessage(state);
+  const scopedMessages = useMemo(() => messagesForScope(state), [state]);
+  const searchQuery = state.searchQuery.trim();
+  const isBackendSearchActive = Boolean(searchMail && searchQuery);
+  const searchAccountId = state.unifiedInbox ? null : state.selectedAccountId;
+  const searchFolderId = state.selectedFolderId;
+  const hasFreshSearchResults = searchState.query === searchQuery;
+  const effectiveSearchStatus: MailSearchUiStatus = isBackendSearchActive
+    ? hasFreshSearchResults
+      ? searchState.status
+      : "debouncing"
+    : "idle";
+  const effectiveSearchResults =
+    isBackendSearchActive && hasFreshSearchResults ? searchState.results : [];
+  const visibleMessages = isBackendSearchActive
+    ? effectiveSearchResults
+    : scopedMessages;
+  const activeMessage = state.selectedMessageId
+    ? visibleMessages.find((message) => message.id === state.selectedMessageId) ??
+      selectedMessage(state)
+    : null;
   const activeAccount = selectedAccount(state);
   const activeFolder = selectedFolder(state);
+  const accountById = useMemo(
+    () => new Map(state.data.accounts.map((account) => [account.id, account])),
+    [state.data.accounts],
+  );
+  const folderById = useMemo(
+    () => new Map(state.data.folders.map((folder) => [folder.id, folder])),
+    [state.data.folders],
+  );
   const hasAccounts = state.data.accounts.length > 0;
   const canCompose = hasAccounts && state.loadState.accounts === "ready";
   const listTitle = state.unifiedInbox
@@ -269,6 +328,70 @@ export function MailClientShell({
   }, [loadMailShellData]);
 
   useEffect(() => {
+    if (
+      !searchMail ||
+      !searchQuery ||
+      !hasAccounts ||
+      state.loadState.messages !== "ready"
+    ) {
+      return;
+    }
+
+    const request = searchRequestForScope(
+      searchQuery,
+      searchAccountId,
+      searchFolderId,
+    );
+    const controller = new AbortController();
+    const debounceHandle = window.setTimeout(() => {
+      setSearchState((current) => ({
+        query: searchQuery,
+        results: current.query === searchQuery ? current.results : [],
+        status: "loading",
+      }));
+
+      searchMail(request, controller.signal)
+        .then((response) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          setSearchState({
+            query: response.query,
+            results: response.results,
+            status:
+              response.indexStatus === "unavailable" ? "unavailable" : "ready",
+          });
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted || isAbortError(error)) {
+            return;
+          }
+
+          setSearchState({
+            query: searchQuery,
+            results: [],
+            status: "error",
+          });
+        });
+    }, searchDebounceMs);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounceHandle);
+    };
+  }, [
+    hasAccounts,
+    searchDebounceMs,
+    searchMail,
+    searchAccountId,
+    searchFolderId,
+    searchQuery,
+    searchRetryNonce,
+    state.loadState.messages,
+  ]);
+
+  useEffect(() => {
     if (!drawer) {
       return;
     }
@@ -460,12 +583,22 @@ export function MailClientShell({
               })
             }
           />
+          <SearchStatusLine
+            isBackendSearchActive={isBackendSearchActive}
+            resultCount={visibleMessages.length}
+            status={effectiveSearchStatus}
+          />
         </label>
 
         <MessageListState
+          accountById={accountById}
+          folderById={folderById}
+          isBackendSearchActive={isBackendSearchActive}
           state={state}
+          searchStatus={effectiveSearchStatus}
           visibleMessages={visibleMessages}
           onRetry={loadMailShellData ? reloadMailShell : undefined}
+          onRetrySearch={() => setSearchRetryNonce((current) => current + 1)}
           onSelectMessage={(messageId) =>
             patchState({
               selectedMessageId: messageId,
@@ -552,6 +685,71 @@ export function MailClientShell({
   );
 }
 
+function searchRequestForScope(
+  query: string,
+  accountId: string | null,
+  folderId: string | null,
+): MailSearchRequest {
+  return {
+    accountId,
+    folderId,
+    limit: MAIL_SEARCH_RESULT_LIMIT,
+    query,
+  };
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function SearchStatusLine({
+  isBackendSearchActive,
+  resultCount,
+  status,
+}: {
+  isBackendSearchActive: boolean;
+  resultCount: number;
+  status: MailSearchUiStatus;
+}) {
+  if (!isBackendSearchActive) {
+    return null;
+  }
+
+  if (status === "debouncing" || status === "loading") {
+    return (
+      <span className="search-status" role="status">
+        Searching local index
+      </span>
+    );
+  }
+
+  if (status === "unavailable") {
+    return (
+      <span className="search-status search-status--warning" role="status">
+        Search index unavailable
+      </span>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <span className="search-status search-status--warning" role="status">
+        Search unavailable
+      </span>
+    );
+  }
+
+  if (status === "ready") {
+    return (
+      <span className="search-status" role="status">
+        {resultCount} {resultCount === 1 ? "result" : "results"}
+      </span>
+    );
+  }
+
+  return null;
+}
+
 function StatusList({
   status,
   loadingLabel,
@@ -592,15 +790,25 @@ function StatusList({
 }
 
 function MessageListState({
+  accountById,
+  folderById,
+  isBackendSearchActive,
   state,
+  searchStatus,
   visibleMessages,
   onRetry,
+  onRetrySearch,
   onSelectMessage,
   onReadMessage,
 }: {
+  accountById: Map<string, { label: string }>;
+  folderById: Map<string, { name: string }>;
+  isBackendSearchActive: boolean;
   state: MailShellState;
+  searchStatus: MailSearchUiStatus;
   visibleMessages: ReturnType<typeof messagesForScope>;
   onRetry?: () => void;
+  onRetrySearch: () => void;
   onSelectMessage: (messageId: string) => void;
   onReadMessage: (messageId: string) => void;
 }) {
@@ -713,6 +921,45 @@ function MessageListState({
     );
   }
 
+  if (
+    isBackendSearchActive &&
+    (searchStatus === "debouncing" || searchStatus === "loading")
+  ) {
+    return (
+      <div className="messages">
+        <section className="empty-panel" aria-label="Searching messages">
+          <h3>Searching local index</h3>
+          <p>Matching subject, sender, and body across active accounts.</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (isBackendSearchActive && searchStatus === "unavailable") {
+    return (
+      <div className="messages">
+        <section className="empty-panel error-panel" aria-label="Search index unavailable">
+          <h3>Search index unavailable</h3>
+          <p>The local FTS index is missing or not ready.</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (isBackendSearchActive && searchStatus === "error") {
+    return (
+      <div className="messages">
+        <section className="empty-panel error-panel" aria-label="Search error">
+          <h3>Search unavailable</h3>
+          <p>The local FTS query could not be completed.</p>
+          <button type="button" onClick={onRetrySearch}>
+            Retry
+          </button>
+        </section>
+      </div>
+    );
+  }
+
   if (visibleMessages.length === 0 && state.searchQuery.trim()) {
     return (
       <div className="messages">
@@ -751,6 +998,9 @@ function MessageListState({
           if (!message) {
             return null;
           }
+          const locationLabel = state.searchQuery.trim()
+            ? messageLocationLabel(message, accountById, folderById)
+            : null;
 
           return (
             <div
@@ -761,6 +1011,7 @@ function MessageListState({
               <MessageRow
                 index={virtualRow.index}
                 isSelected={message.id === state.selectedMessageId}
+                locationLabel={locationLabel}
                 message={message}
                 refCallback={(element) => {
                   messageButtonRefs.current[virtualRow.index] = element;
@@ -786,6 +1037,7 @@ function MessageListState({
 function MessageRow({
   index,
   isSelected,
+  locationLabel,
   message,
   onClick,
   onKeyDown,
@@ -794,6 +1046,7 @@ function MessageRow({
 }: {
   index: number;
   isSelected: boolean;
+  locationLabel: string | null;
   message: MailMessage;
   onClick: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
@@ -809,7 +1062,7 @@ function MessageRow({
         message.flagged ? ", flagged" : ""
       } message from ${message.sender}, ${message.subject || "no subject"}, ${
         message.receivedAt
-      }`}
+      }${locationLabel ? `, ${locationLabel}` : ""}`}
       aria-posinset={index + 1}
       aria-setsize={rowCount}
       data-message-index={index}
@@ -823,6 +1076,9 @@ function MessageRow({
           {message.flagged ? (
             <span className="message-flag">Flagged</span>
           ) : null}
+          {locationLabel ? (
+            <span className="message-location">{locationLabel}</span>
+          ) : null}
           <time>{message.receivedAt}</time>
         </span>
       </div>
@@ -830,6 +1086,17 @@ function MessageRow({
       <p>{message.preview}</p>
     </button>
   );
+}
+
+function messageLocationLabel(
+  message: MailMessage,
+  accountById: Map<string, { label: string }>,
+  folderById: Map<string, { name: string }>,
+) {
+  const account = accountById.get(message.accountId);
+  const folder = folderById.get(message.folderId);
+
+  return `${account?.label ?? "Account"} / ${folder?.name ?? "Folder"}`;
 }
 
 function ReaderPane({

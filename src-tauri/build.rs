@@ -1,4 +1,4 @@
-const APP_COMMANDS: &[&str] = &["load_mail_shell"];
+const APP_COMMANDS: &[&str] = &["load_mail_shell", "search_mail"];
 
 fn main() {
     tauri_build::try_build(
