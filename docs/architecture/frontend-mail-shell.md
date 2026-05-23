@@ -218,8 +218,7 @@ Current composer limits:
 - Draft reload after app restart is backend-supported but not surfaced in the drawer yet.
 - Provider Drafts-folder upload is not implemented.
 - Reply/forward routing into the composer is not implemented.
-- Sent-folder APPEND for providers that need it remains future work.
-- Live SMTP sends require configured account credentials and stored OAuth client config for Gmail/Microsoft; live smoke coverage is ignored and user-opt-in only.
+- Live SMTP sends require configured account credentials and stored OAuth client config for Gmail/Microsoft; pending Microsoft/generic Sent APPEND upload is handled by the backend scheduler after confirmed send, while live smoke coverage is ignored and user-opt-in only.
 
 ## Settings Entry
 

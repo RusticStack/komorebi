@@ -55,7 +55,7 @@ Absence of a permission is the denial mechanism. Do not add broad explicit deny 
 - `autosave_composer_draft`: typed local draft autosave through Rust-owned SQLite persistence.
 - `discard_composer_draft`: typed local draft discard plus staged composer attachment cleanup.
 - `stage_composer_attachment`: typed user-selected byte staging into backend-generated app-data paths; no frontend filesystem path permission.
-- `send_composer_email`: typed SMTP send orchestration through the Rust send boundary, credential resolver, staged attachment streamer, and confirmed-send persistence.
+- `send_composer_email`: typed SMTP send orchestration through the Rust send boundary, credential resolver, staged attachment streamer, confirmed-send persistence, and scheduler refresh when provider Sent APPEND is pending.
 - `list_recent_recipients`: read-only account-scoped local SQLite autocomplete suggestions from confirmed sends.
 - `create_account`: typed generic-provider account setup that runs live IMAP/SMTP login validation before secret storage, stores secrets in Windows Credential Manager before metadata insert, and rejects direct Gmail/Microsoft secret handoff.
 - `reauth_account`: typed generic replacement secret storage for an existing account's approved credential slot and rejection path for Gmail/Microsoft OAuth accounts.

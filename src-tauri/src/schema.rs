@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 8;
+pub const LATEST_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -52,6 +52,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 8,
         name: "mime_parse_warnings",
         sql: include_str!("../migrations/008_mime_parse_warnings.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "sent_mail_append_payloads",
+        sql: include_str!("../migrations/009_sent_mail_append_payloads.sql"),
     },
 ];
 
@@ -314,6 +319,40 @@ mod tests {
             .unwrap();
     }
 
+    fn seed_send_receipt(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO smtp_send_receipts (
+                   id,
+                   account_id,
+                   rfc_message_id,
+                   subject,
+                   from_address,
+                   to_addresses_json,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security,
+                   auth_mechanism,
+                   message_size_bytes
+                 )
+                 VALUES (
+                   'send_1',
+                   'acct_1',
+                   '<sent@example.com>',
+                   'sent',
+                   'sender@example.com',
+                   '[\"recipient@example.com\"]',
+                   'smtp.example.com',
+                   587,
+                   'starttls',
+                   'plain',
+                   512
+                 )",
+                [],
+            )
+            .unwrap();
+    }
+
     #[test]
     fn applies_initial_schema_records_version_and_is_idempotent() {
         let mut connection = Connection::open_in_memory().unwrap();
@@ -404,6 +443,7 @@ mod tests {
             "idx_recent_recipients_account_last_used",
             "idx_recent_recipients_account_email",
             "idx_sent_mail_copies_account_state",
+            "idx_sent_mail_copies_pending_append",
             "idx_templates_account",
         ] {
             assert!(indexes.contains(index), "missing index {index}");
@@ -590,6 +630,11 @@ mod tests {
                     "sent_folder_id",
                     "sent_folder_remote_id",
                     "last_error",
+                    "append_payload",
+                    "append_payload_sha256",
+                    "append_attempt_count",
+                    "last_append_attempt_at",
+                    "uploaded_at",
                     "created_at",
                     "updated_at",
                 ]
@@ -981,7 +1026,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2, 3, 4, 5, 6, 7, 8]
+            vec![2, 3, 4, 5, 6, 7, 8, 9]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -1028,7 +1073,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![3, 4, 5, 6, 7, 8]
+            vec![3, 4, 5, 6, 7, 8, 9]
         );
         let attributes_json = connection
             .query_row(
@@ -1067,7 +1112,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![4, 5, 6, 7, 8]
+            vec![4, 5, 6, 7, 8, 9]
         );
         connection
             .execute(
@@ -1160,7 +1205,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![5, 6, 7, 8]
+            vec![5, 6, 7, 8, 9]
         );
         connection
             .execute(
@@ -1252,7 +1297,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![6, 7, 8]
+            vec![6, 7, 8, 9]
         );
         connection
             .execute(
@@ -1310,7 +1355,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![7, 8]
+            vec![7, 8, 9]
         );
         connection
             .execute(
@@ -1377,7 +1422,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![8]
+            vec![8, 9]
         );
         let warnings_json: String = connection
             .query_row(
@@ -1392,6 +1437,81 @@ mod tests {
                 "UPDATE messages
                  SET mime_parse_warnings_json = 'not-json'
                  WHERE id = 'msg_1'",
+                [],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn sent_mail_append_payload_migration_adds_retry_state_to_v8_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..8] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 8;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+        seed_send_receipt(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 8);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![9]
+        );
+        connection
+            .execute(
+                "INSERT INTO sent_mail_copies (
+                   id,
+                   send_receipt_id,
+                   account_id,
+                   rfc_message_id,
+                   provider_kind,
+                   sent_folder_policy,
+                   sync_state,
+                   append_payload,
+                   append_payload_sha256
+                 )
+                 VALUES (
+                   'sentcopy_1',
+                   'send_1',
+                   'acct_1',
+                   '<sent@example.com>',
+                   'generic_imap_smtp',
+                   'imap_append',
+                   'pending_upload',
+                   x'526177206d657373616765',
+                   '0000000000000000000000000000000000000000000000000000000000000000'
+                 )",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "UPDATE sent_mail_copies
+                 SET append_attempt_count = -1
+                 WHERE id = 'sentcopy_1'",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "UPDATE sent_mail_copies
+                 SET append_payload_sha256 = 'not-a-hash'
+                 WHERE id = 'sentcopy_1'",
                 [],
             )
             .is_err());

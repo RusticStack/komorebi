@@ -1,6 +1,6 @@
 # Draft And Sent Persistence
 
-Status: backend local draft persistence, frontend autosave/discard command wiring, local recent-recipient persistence, and provider-aware Sent-copy planning implemented; provider Drafts upload and IMAP APPEND upload are not registered.
+Status: backend local draft persistence, frontend autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is not registered.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -16,6 +16,7 @@ Komorebi persists composer drafts locally in SQLite and links successful sends t
 - Confirmed send marks the draft `sent`, links `sent_receipt_id`, sets `sent_at`, and clears private draft content.
 - Every confirmed send gets a `sent_mail_copies` record that says whether provider Sent upload is unnecessary, pending, or unsupported.
 - Confirmed composer sends update local-only `recent_recipients` rows for account-scoped autocomplete.
+- Confirmed sends that require IMAP Sent upload keep a temporary RFC822 payload in SQLite until the scheduler appends or safely recognizes the message already exists in the provider Sent folder.
 
 This persistence boundary is now exposed through reviewed Tauri commands for the TipTap composer MVP:
 
@@ -48,6 +49,8 @@ Migration `006_composer_attachments.sql` adds `composer_attachments` for user-se
 
 Migration `007_recent_recipients.sql` adds `recent_recipients` for local autocomplete. Rows are scoped by account, deduplicated by normalized email, store optional display name, use count, and last-used timestamp, and are populated only after confirmed composer sends.
 
+Migration `009_sent_mail_append_payloads.sql` adds pending Sent-upload retry state to `sent_mail_copies`: `append_payload`, `append_payload_sha256`, `append_attempt_count`, `last_append_attempt_at`, `uploaded_at`, and the partial pending-append index. The payload is plaintext RFC822 content and is retained only for rows that need IMAP APPEND; it is cleared after a successful upload or remote duplicate detection.
+
 Discarded or sent drafts intentionally clear private content. The row remains only as state evidence and, for sent drafts, a link to the confirmed send receipt.
 
 `sent_mail_copies` stores the Sent-folder plan for a confirmed send:
@@ -57,6 +60,8 @@ Discarded or sent drafts intentionally clear private content. The row remains on
 - sync state: `not_required`, `pending_upload`, `uploaded`, `unsupported`, or `failed`
 - optional Sent folder id/remote id
 - safe local error text for unavailable append behavior
+- temporary RFC822 append payload and SHA-256 while upload is pending or failed
+- append attempt count, last attempt time, and upload completion time
 
 ## Autosave
 
@@ -99,6 +104,7 @@ When a draft id is present:
 1. The active draft is validated before auth resolution, credential lookup, attachment streaming, MIME composition, or SMTP network activity.
 2. SMTP transport must accept the message.
 3. In one SQLite transaction, Rust inserts `smtp_send_receipts`, marks the draft `sent`, clears draft content, and inserts `sent_mail_copies`.
+4. If the provider policy is `imap_append`, the same transaction stores the exact RFC822 payload needed for later APPEND retry.
 
 If SMTP delivery fails, no receipt is inserted and the draft remains active.
 
@@ -111,10 +117,25 @@ Provider policy is intentionally conservative to avoid duplicate Sent messages:
 | Provider | Current policy | Reason |
 | --- | --- | --- |
 | Gmail | `provider_auto_copies` / `not_required` | Gmail Help says SMTP-sent messages are automatically copied to Gmail/Sent and clients should not save another sent copy on the server. |
-| Microsoft | `imap_append` / `pending_upload` when a Sent folder is discovered; otherwise `local_receipt_only` / `unsupported` | Microsoft documents SMTP AUTH as SMTP client submission for sending. It does not define SMTP as Sent-folder persistence, so Komorebi records a pending IMAP APPEND plan when a Sent folder is known. |
-| Generic IMAP/SMTP | `imap_append` / `pending_upload` when a Sent folder is discovered; otherwise `local_receipt_only` / `unsupported` | Generic SMTP has no portable Sent-folder persistence guarantee. Komorebi must use provider-discovered IMAP Sent folders or keep only the local receipt until configured. |
+| Microsoft | `imap_append` / `pending_upload` when a Sent folder is discovered; otherwise `local_receipt_only` / `unsupported` | Microsoft documents SMTP AUTH as SMTP client submission for sending. It does not define SMTP as Sent-folder persistence, so Komorebi queues a provider-discovered IMAP Sent APPEND when a Sent folder is known. |
+| Generic IMAP/SMTP | `imap_append` / `pending_upload` when a Sent folder is discovered; otherwise `local_receipt_only` / `unsupported` | Generic SMTP has no portable Sent-folder persistence guarantee. Komorebi uses provider-discovered IMAP Sent folders or keeps only the local receipt until configured. |
 
 Microsoft Support also documents that duplicate Sent items happen when a server creates a Sent entry and a client uploads another one. Komorebi therefore records a provider policy before upload instead of blindly appending every SMTP send.
+
+## Sent APPEND Upload
+
+`src-tauri/src/sync_scheduler.rs` uploads pending Sent copies after the account sync pass and `send_composer_email` asks the scheduler to refresh the account when a confirmed send creates a `pending_upload` row.
+
+The upload worker:
+
+- Loads only `sent_mail_copies` rows for the same account where `sent_folder_policy = 'imap_append'`, `sync_state IN ('pending_upload', 'failed')`, a Sent folder remote id exists, and a payload exists.
+- Ignores Gmail and other `provider_auto_copies` rows, so Gmail SMTP sends are not duplicated in Gmail/Sent.
+- Uses `LiveImapAdapter::sent_message_exists` to `UID SEARCH HEADER Message-ID` in the target Sent folder before APPEND. If the server already has the message, the row becomes `uploaded` without sending another copy.
+- Uses `LiveImapAdapter::append_sent_message` to issue a literal `APPEND "<Sent folder>" (\Seen) {bytes}` with the stored RFC822 payload.
+- Marks successful or already-present rows `uploaded`, sets `uploaded_at`, clears `last_error`, and clears `append_payload` plus `append_payload_sha256`.
+- Marks failed rows `failed`, increments `append_attempt_count`, stores redacted local error text, and keeps the payload and local send receipt for a later retry.
+
+The worker never deletes `smtp_send_receipts` on APPEND failure. A failed upload means the local send was still confirmed by SMTP, while provider Sent synchronization remains pending retry.
 
 ## Tests
 
@@ -125,6 +146,7 @@ Microsoft Support also documents that duplicate Sent items happen when a server 
 - Intentional discard clears private content.
 - Sent conversion clears private content after confirmed receipt.
 - Gmail/Microsoft/generic Sent policy resolution.
+- Pending IMAP APPEND payload retention, upload-state transitions, retry-state preservation, Gmail duplicate-upload avoidance, and payload cleanup after upload.
 - Sanitized HTML and JSON-array denial paths.
 
 `src-tauri/src/smtp_send.rs` tests cover:
@@ -132,9 +154,13 @@ Microsoft Support also documents that duplicate Sent items happen when a server 
 - Draft validation before send.
 - Failed SMTP delivery leaving the draft active.
 - Confirmed SMTP delivery linking the receipt and marking the draft sent.
-- Sent-copy state written with confirmed sends.
+- Sent-copy state and pending APPEND RFC822 payload written with confirmed sends.
 
-`src-tauri/src/schema.rs` tests cover migration from schema version 4 to version 5, migration from version 5 to version 6, migration from version 6 to version 7, valid draft/Sent-copy rows, valid staged composer attachment rows, and recent-recipient uniqueness.
+`src-tauri/src/schema.rs` tests cover migration from schema version 4 to version 5, migration from version 5 to version 6, migration from version 6 to version 7, migration from version 7 to version 8, migration from version 8 to version 9, valid draft/Sent-copy rows, valid staged composer attachment rows, recent-recipient uniqueness, MIME-warning JSON, and Sent APPEND retry-state constraints.
+
+`src-tauri/src/sync_scheduler.rs` tests cover pending Sent upload success, remote Message-ID duplicate detection without APPEND, and APPEND failure preserving the receipt and payload for retry.
+
+`src-tauri/src/imap_live.rs` and `src-tauri/tests/protocol_fixtures.rs` tests cover literal IMAP APPEND against local socket fixtures without live accounts.
 
 `src-tauri/src/composer.rs` tests cover:
 
@@ -154,8 +180,6 @@ Normal tests use no live mailbox, live SMTP server, real account, or real creden
 ## Not Implemented
 
 - Frontend draft reload/reopen UI after restart.
-- IMAP APPEND worker for pending Sent uploads.
-- Provider-specific Sent upload conflict handling.
 - Draft upload to provider Drafts folders.
 - Live IMAP/provider verification beyond the ignored SMTP smoke test.
 
@@ -173,10 +197,13 @@ Keep this document synchronized with:
 - `src-tauri/src/draft_persistence.rs`
 - `src-tauri/src/composer.rs`
 - `src-tauri/src/smtp_send.rs`
+- `src-tauri/src/sync_scheduler.rs`
+- `src-tauri/src/imap_live.rs`
 - `src-tauri/src/schema.rs`
 - `src-tauri/migrations/005_drafts_and_sent_mail.sql`
 - `src-tauri/migrations/006_composer_attachments.sql`
 - `src-tauri/migrations/007_recent_recipients.sql`
+- `src-tauri/migrations/009_sent_mail_append_payloads.sql`
 - `src/mail/composer/TipTapComposer.tsx`
 - `src/mail/composer/composerRichText.ts`
 - `docs/architecture/smtp-send.md`

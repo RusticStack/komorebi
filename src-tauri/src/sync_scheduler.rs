@@ -16,6 +16,10 @@ use crate::{
     account_connection::{AccountConnectionTestError, MailTransportSecurity},
     auth::{AuthKind, ProviderKind},
     credentials::{CredentialError, CredentialSlot, WindowsCredentialManager},
+    draft_persistence::{
+        list_pending_sent_mail_appends, mark_sent_mail_append_failed,
+        mark_sent_mail_append_uploaded, PendingSentMailAppend,
+    },
     imap_live::{LiveImapAdapter, LiveImapAuth, LiveImapConfig},
     imap_sync::{
         BackoffPolicy, FolderWorkerConfig, ImapSyncEngine, SqliteSyncCache, SyncCancellationToken,
@@ -549,6 +553,12 @@ fn run_live_account_worker_inner(job: &AccountWorkerJob) -> Result<(), SyncSched
             &job.cancellation,
             &mut waiter,
         )?;
+        let _append_report = upload_pending_sent_mail_appends(
+            &connection,
+            &job.account_id,
+            &mut server,
+            &job.cancellation,
+        )?;
     }
 
     if job.cancellation.is_cancelled() {
@@ -660,6 +670,119 @@ fn run_live_folder_worker(
     )?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SentMailAppendReport {
+    uploaded: usize,
+    skipped_existing: usize,
+    failed: usize,
+}
+
+trait SentMailAppendServer {
+    fn sent_message_exists(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        rfc_message_id: &str,
+    ) -> Result<bool, SyncError>;
+
+    fn append_sent_message(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        message_rfc822: &[u8],
+    ) -> Result<(), SyncError>;
+}
+
+impl SentMailAppendServer for LiveImapAdapter {
+    fn sent_message_exists(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        rfc_message_id: &str,
+    ) -> Result<bool, SyncError> {
+        LiveImapAdapter::sent_message_exists(self, account_id, remote_id, rfc_message_id)
+    }
+
+    fn append_sent_message(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        message_rfc822: &[u8],
+    ) -> Result<(), SyncError> {
+        LiveImapAdapter::append_sent_message(self, account_id, remote_id, message_rfc822)
+            .map(|_| ())
+    }
+}
+
+fn upload_pending_sent_mail_appends(
+    connection: &Connection,
+    account_id: &str,
+    server: &mut impl SentMailAppendServer,
+    cancellation: &SyncCancellationToken,
+) -> Result<SentMailAppendReport, SyncSchedulerError> {
+    cancellation
+        .ensure_not_cancelled()
+        .map_err(SyncSchedulerError::from)?;
+    let pending = list_pending_sent_mail_appends(connection, account_id, 20)
+        .map_err(|error| SyncSchedulerError::new(error.to_string()))?;
+    let mut report = SentMailAppendReport::default();
+
+    for copy in pending {
+        cancellation
+            .ensure_not_cancelled()
+            .map_err(SyncSchedulerError::from)?;
+        match upload_pending_sent_mail_append(connection, server, &copy) {
+            Ok(UploadSentAppendOutcome::Uploaded) => report.uploaded += 1,
+            Ok(UploadSentAppendOutcome::AlreadyPresent) => report.skipped_existing += 1,
+            Err(error) => {
+                let _ = mark_sent_mail_append_failed(
+                    connection,
+                    &copy.account_id,
+                    &copy.id,
+                    &error.reason,
+                );
+                report.failed += 1;
+                if error.reason.to_ascii_lowercase().contains("cancel") {
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UploadSentAppendOutcome {
+    Uploaded,
+    AlreadyPresent,
+}
+
+fn upload_pending_sent_mail_append(
+    connection: &Connection,
+    server: &mut impl SentMailAppendServer,
+    copy: &PendingSentMailAppend,
+) -> Result<UploadSentAppendOutcome, SyncSchedulerError> {
+    if server.sent_message_exists(
+        &copy.account_id,
+        &copy.sent_folder_remote_id,
+        &copy.rfc_message_id,
+    )? {
+        mark_sent_mail_append_uploaded(connection, &copy.account_id, &copy.id)
+            .map_err(|error| SyncSchedulerError::new(error.to_string()))?;
+        return Ok(UploadSentAppendOutcome::AlreadyPresent);
+    }
+
+    server.append_sent_message(
+        &copy.account_id,
+        &copy.sent_folder_remote_id,
+        &copy.message_rfc822,
+    )?;
+    mark_sent_mail_append_uploaded(connection, &copy.account_id, &copy.id)
+        .map_err(|error| SyncSchedulerError::new(error.to_string()))?;
+    Ok(UploadSentAppendOutcome::Uploaded)
 }
 
 fn cache_app_data_dir(cache_path: &Path) -> Result<PathBuf, SyncSchedulerError> {
@@ -1381,6 +1504,38 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FakeSentAppendServer {
+        existing_message_ids: HashSet<String>,
+        appended: Vec<(String, Vec<u8>)>,
+        fail_append: bool,
+    }
+
+    impl SentMailAppendServer for FakeSentAppendServer {
+        fn sent_message_exists(
+            &mut self,
+            _account_id: &str,
+            _remote_id: &str,
+            rfc_message_id: &str,
+        ) -> Result<bool, SyncError> {
+            Ok(self.existing_message_ids.contains(rfc_message_id))
+        }
+
+        fn append_sent_message(
+            &mut self,
+            _account_id: &str,
+            remote_id: &str,
+            message_rfc822: &[u8],
+        ) -> Result<(), SyncError> {
+            if self.fail_append {
+                return Err(SyncError::transient("IMAP APPEND fixture failure"));
+            }
+            self.appended
+                .push((remote_id.to_string(), message_rfc822.to_vec()));
+            Ok(())
+        }
+    }
+
     #[test]
     fn startup_loads_only_active_accounts() {
         let cache_path = migrated_file_database();
@@ -1594,6 +1749,173 @@ mod tests {
         let _ = fs::remove_file(cache_path);
     }
 
+    #[test]
+    fn pending_sent_uploads_append_once_and_clear_payload_after_success() {
+        let connection = migrated_connection();
+        insert_account(&connection, "acct_active", "connected", None);
+        insert_sent_folder(&connection, "acct_active");
+        insert_sent_copy(
+            &connection,
+            SentCopyFixture {
+                sent_copy_id: "sentcopy_upload",
+                send_receipt_id: "send_upload",
+                account_id: "acct_active",
+                rfc_message_id: "<sent-upload@example.com>",
+                policy: "imap_append",
+                state: "pending_upload",
+                payload: Some(b"Message-ID: <sent-upload@example.com>\r\n\r\nBody"),
+            },
+        );
+        insert_sent_copy(
+            &connection,
+            SentCopyFixture {
+                sent_copy_id: "sentcopy_gmail",
+                send_receipt_id: "send_gmail",
+                account_id: "acct_active",
+                rfc_message_id: "<gmail-auto@example.com>",
+                policy: "provider_auto_copies",
+                state: "not_required",
+                payload: None,
+            },
+        );
+        let mut server = FakeSentAppendServer::default();
+
+        let report = upload_pending_sent_mail_appends(
+            &connection,
+            "acct_active",
+            &mut server,
+            &SyncCancellationToken::new(),
+        )
+        .unwrap();
+
+        assert_eq!(report.uploaded, 1);
+        assert_eq!(report.skipped_existing, 0);
+        assert_eq!(report.failed, 0);
+        assert_eq!(server.appended.len(), 1);
+        assert_eq!(server.appended[0].0, "Sent Items");
+        assert_eq!(
+            server.appended[0].1,
+            b"Message-ID: <sent-upload@example.com>\r\n\r\nBody"
+        );
+        let uploaded: (String, Option<Vec<u8>>, Option<String>) = connection
+            .query_row(
+                "SELECT sync_state, append_payload, append_payload_sha256
+                 FROM sent_mail_copies
+                 WHERE id = 'sentcopy_upload'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(uploaded.0, "uploaded");
+        assert_eq!(uploaded.1, None);
+        assert_eq!(uploaded.2, None);
+
+        let report = upload_pending_sent_mail_appends(
+            &connection,
+            "acct_active",
+            &mut server,
+            &SyncCancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(report, SentMailAppendReport::default());
+        assert_eq!(server.appended.len(), 1);
+    }
+
+    #[test]
+    fn pending_sent_upload_marks_existing_remote_copy_uploaded_without_duplicate_append() {
+        let connection = migrated_connection();
+        insert_account(&connection, "acct_active", "connected", None);
+        insert_sent_folder(&connection, "acct_active");
+        insert_sent_copy(
+            &connection,
+            SentCopyFixture {
+                sent_copy_id: "sentcopy_existing",
+                send_receipt_id: "send_existing",
+                account_id: "acct_active",
+                rfc_message_id: "<already-there@example.com>",
+                policy: "imap_append",
+                state: "failed",
+                payload: Some(b"Message-ID: <already-there@example.com>\r\n\r\nBody"),
+            },
+        );
+        let mut server = FakeSentAppendServer::default();
+        server
+            .existing_message_ids
+            .insert("<already-there@example.com>".into());
+
+        let report = upload_pending_sent_mail_appends(
+            &connection,
+            "acct_active",
+            &mut server,
+            &SyncCancellationToken::new(),
+        )
+        .unwrap();
+
+        assert_eq!(report.uploaded, 0);
+        assert_eq!(report.skipped_existing, 1);
+        assert!(server.appended.is_empty());
+        let state: String = connection
+            .query_row(
+                "SELECT sync_state FROM sent_mail_copies WHERE id = 'sentcopy_existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "uploaded");
+    }
+
+    #[test]
+    fn pending_sent_upload_failure_keeps_receipt_and_payload_for_retry() {
+        let connection = migrated_connection();
+        insert_account(&connection, "acct_active", "connected", None);
+        insert_sent_folder(&connection, "acct_active");
+        insert_sent_copy(
+            &connection,
+            SentCopyFixture {
+                sent_copy_id: "sentcopy_retry",
+                send_receipt_id: "send_retry",
+                account_id: "acct_active",
+                rfc_message_id: "<retry@example.com>",
+                policy: "imap_append",
+                state: "pending_upload",
+                payload: Some(b"Message-ID: <retry@example.com>\r\n\r\nBody"),
+            },
+        );
+        let mut server = FakeSentAppendServer {
+            fail_append: true,
+            ..Default::default()
+        };
+
+        let report = upload_pending_sent_mail_appends(
+            &connection,
+            "acct_active",
+            &mut server,
+            &SyncCancellationToken::new(),
+        )
+        .unwrap();
+
+        assert_eq!(report.failed, 1);
+        let failed: (String, i64, Vec<u8>, i64) = connection
+            .query_row(
+                "SELECT
+                   sent_mail_copies.sync_state,
+                   sent_mail_copies.append_attempt_count,
+                   sent_mail_copies.append_payload,
+                   COUNT(smtp_send_receipts.id)
+                 FROM sent_mail_copies
+                 JOIN smtp_send_receipts
+                   ON smtp_send_receipts.id = sent_mail_copies.send_receipt_id
+                 WHERE sent_mail_copies.id = 'sentcopy_retry'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(failed.0, "failed");
+        assert_eq!(failed.1, 1);
+        assert_eq!(failed.2, b"Message-ID: <retry@example.com>\r\n\r\nBody");
+        assert_eq!(failed.3, 1);
+    }
+
     fn test_options(max_account_workers: usize) -> SyncSchedulerOptions {
         SyncSchedulerOptions {
             max_account_workers,
@@ -1663,6 +1985,88 @@ mod tests {
                     format!("Komorebi/mail-account/{account_id}/generic-password"),
                     status,
                     removed_at
+                ],
+            )
+            .unwrap();
+    }
+
+    fn insert_sent_folder(connection: &Connection, account_id: &str) {
+        connection
+            .execute(
+                "INSERT INTO folders (
+                   id,
+                   account_id,
+                   remote_id,
+                   name,
+                   display_name,
+                   kind,
+                   special_use
+                 )
+                 VALUES (?1, ?2, 'Sent Items', 'Sent Items', 'Sent Items', 'sent', 'sent')",
+                params![format!("folder_sent_{account_id}"), account_id],
+            )
+            .unwrap();
+    }
+
+    struct SentCopyFixture<'fixture> {
+        sent_copy_id: &'fixture str,
+        send_receipt_id: &'fixture str,
+        account_id: &'fixture str,
+        rfc_message_id: &'fixture str,
+        policy: &'fixture str,
+        state: &'fixture str,
+        payload: Option<&'fixture [u8]>,
+    }
+
+    fn insert_sent_copy(connection: &Connection, fixture: SentCopyFixture<'_>) {
+        connection
+            .execute(
+                "INSERT INTO smtp_send_receipts (
+                   id,
+                   account_id,
+                   rfc_message_id,
+                   subject,
+                   from_address,
+                   to_addresses_json,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security,
+                   auth_mechanism,
+                   message_size_bytes
+                 )
+                 VALUES (?1, ?2, ?3, 'sent', ?4, '[]', 'smtp.example.com', 587, 'starttls', 'plain', 128)",
+                params![
+                    fixture.send_receipt_id,
+                    fixture.account_id,
+                    fixture.rfc_message_id,
+                    format!("{}@example.com", fixture.account_id)
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sent_mail_copies (
+                   id,
+                   send_receipt_id,
+                   account_id,
+                   rfc_message_id,
+                   provider_kind,
+                   sent_folder_policy,
+                   sync_state,
+                   sent_folder_id,
+                   sent_folder_remote_id,
+                   append_payload
+                )
+                 VALUES (?1, ?2, ?3, ?4, 'generic_imap_smtp', ?5, ?6, ?7, 'Sent Items', ?8)",
+                params![
+                    fixture.sent_copy_id,
+                    fixture.send_receipt_id,
+                    fixture.account_id,
+                    fixture.rfc_message_id,
+                    fixture.policy,
+                    fixture.state,
+                    format!("folder_sent_{}", fixture.account_id),
+                    fixture.payload
                 ],
             )
             .unwrap();

@@ -1,6 +1,6 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning, per-account signatures, per-account local preferences, and MIME parse-warning storage implemented.
+Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning/upload state, per-account signatures, per-account local preferences, and MIME parse-warning storage implemented.
 Last reviewed: 2026-05-23.
 
 ## Implementation
@@ -21,7 +21,7 @@ Inbound MIME normalization is implemented in `src-tauri/src/mime_normalization.r
 
 Backend SMTP send receipt persistence is implemented in `src-tauri/src/smtp_send.rs`. Confirmed sends are recorded only after the SMTP transport accepts the message.
 
-Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs` and exposed to the composer through `src-tauri/src/composer.rs`. Active drafts autosave sanitized composer HTML, including the reviewed rich-formatting subset; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records.
+Draft and Sent-copy persistence is implemented in `src-tauri/src/draft_persistence.rs` and exposed to the composer through `src-tauri/src/composer.rs`. Active drafts autosave sanitized composer HTML, including the reviewed rich-formatting subset; discarded/sent drafts clear private draft content; confirmed sends get provider-aware Sent-copy records. Migration `009_sent_mail_append_payloads.sql` adds the temporary RFC822 payload, payload hash, attempt counter, last attempt time, upload time, and pending-append index needed to retry provider Sent uploads safely.
 
 Staged composer attachment persistence is implemented by migration `006_composer_attachments.sql` and `src-tauri/src/composer.rs`. User-selected outbound bytes are written to backend-generated app-data paths and linked to active draft ids until discard or confirmed send cleanup.
 
@@ -45,7 +45,7 @@ The current schema defines:
 - `composer_drafts`: local composer draft autosave state.
 - `composer_attachments`: staged outbound composer attachment metadata and backend-generated storage references.
 - `recent_recipients`: account-scoped local-only autocomplete rows populated after confirmed composer sends.
-- `sent_mail_copies`: provider-aware Sent-folder copy/upload state for confirmed sends.
+- `sent_mail_copies`: provider-aware Sent-folder copy/upload state for confirmed sends, including temporary pending APPEND payloads for providers that require IMAP Sent upload.
 - `templates`: future composer template records.
 - `template_versions`: version history for future template editing.
 - `messages_fts`: FTS5 external-content search index over message subject, sender, and body columns.
@@ -119,7 +119,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - Composer drafts reference accounts, require JSON address/reference/attachment arrays, and clear private content when discarded or marked sent.
 - Composer attachments reference accounts and active draft rows, store only backend-generated storage-relative paths, require SHA-256 and MIME metadata, and are cleaned after discard or confirmed send.
 - Recent recipients reference accounts, deduplicate by `(account_id, normalized_email)`, store optional display name plus use count and last-used timestamp, and are local cache data only.
-- Sent mail copy records reference confirmed send receipts and account/provider metadata, and distinguish provider auto-copy, pending IMAP append, and local-receipt-only states.
+- Sent mail copy records reference confirmed send receipts and account/provider metadata, and distinguish provider auto-copy, pending IMAP append, uploaded, failed, and local-receipt-only states. Pending/failed IMAP append rows may temporarily store plaintext RFC822 payload bytes plus SHA-256 for retry; uploaded rows clear those payload columns.
 
 ## Deferred Schema Work
 
@@ -148,6 +148,7 @@ Encrypted local mail storage is future work. This schema/storage model stores me
 - Composer attachment migration adds `composer_attachments`, staged attachment indexes, and timestamp trigger to version-5 databases.
 - Recent-recipient migration adds `recent_recipients`, autocomplete indexes, uniqueness, and timestamp trigger to version-6 databases.
 - MIME parse-warning migration adds `messages.mime_parse_warnings_json` with a checked `[]` default to version-7 databases.
+- Sent APPEND payload migration adds retry payload/hash/attempt/upload columns and a pending-append index to version-8 databases.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 

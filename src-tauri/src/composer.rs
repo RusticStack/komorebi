@@ -38,7 +38,7 @@ use crate::{
         SmtpAccountStore, SmtpAuthResolver, SmtpSender, SqliteSmtpAccountStore,
         ATTACHMENT_STREAM_CHUNK_BYTES,
     },
-    sync_scheduler::load_account_oauth_client_config,
+    sync_scheduler::{load_account_oauth_client_config, BackgroundSyncScheduler},
     token_lifecycle::{
         AccessTokenCache, AccountDataError, AccountDataStore, CachedAccessToken, ReconnectReason,
         TokenLifecycle,
@@ -282,9 +282,16 @@ pub async fn send_composer_email(
 ) -> Result<ComposerSendResponse, ComposerCommandError> {
     let app_data_dir = app_data_dir(&app)?;
     let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+    let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        send_composer_email_from_path(&cache_path, &app_data_dir, request)
+        let response = send_composer_email_from_path(&cache_path, &app_data_dir, request)?;
+        if response.sent_folder_policy == "imap_append"
+            && response.sent_folder_sync_state == "pending_upload"
+        {
+            let _ = scheduler.refresh_account(cache_path.clone(), &response.account_id);
+        }
+        Ok(response)
     })
     .await
     .map_err(|error| ComposerCommandError::new(error.to_string()))?

@@ -187,6 +187,48 @@ impl LiveImapAdapter {
             .count())
     }
 
+    pub fn sent_message_exists(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        rfc_message_id: &str,
+    ) -> Result<bool, SyncError> {
+        self.ensure_account(account_id)?;
+        self.ensure_selected(remote_id)?;
+        let message_id = quote_imap_string(rfc_message_id)?;
+        Ok(!self
+            .uid_search(&format!("HEADER Message-ID {message_id}"))?
+            .is_empty())
+    }
+
+    pub fn append_sent_message(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        message_rfc822: &[u8],
+    ) -> Result<LiveImapAppendResult, SyncError> {
+        self.ensure_account(account_id)?;
+        if message_rfc822.is_empty() || message_rfc822.len() > self.config.max_message_bytes {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "IMAP APPEND payload size was invalid",
+            });
+        }
+
+        let quoted_folder = quote_imap_string(remote_id)?;
+        let flags = imap_flag_list(&BTreeSet::from([RemoteFlag::Seen]));
+        let command = format!("APPEND {quoted_folder} {flags}");
+        let timeout = self.config.timeout;
+        let max_message_bytes = self.config.max_message_bytes;
+        let responses = self.connection_mut()?.run_literal_command(
+            &command,
+            message_rfc822,
+            timeout,
+            max_message_bytes,
+        )?;
+
+        Ok(parse_append_result(&responses))
+    }
+
     fn open_authenticated_connection(&mut self) -> Result<(), SyncError> {
         let stream = open_stream(&self.config)?;
         let mut connection = ImapConnection::new(stream);
@@ -553,6 +595,50 @@ impl ImapConnection {
         )
     }
 
+    fn run_literal_command(
+        &mut self,
+        command_prefix: &str,
+        literal: &[u8],
+        timeout: Duration,
+        max_literal_bytes: usize,
+    ) -> Result<Vec<ImapResponse>, SyncError> {
+        if literal.len() > max_literal_bytes {
+            return Err(SyncError::InvalidRemoteState {
+                reason: "IMAP literal payload was too large",
+            });
+        }
+
+        let tag = format!("A{:04}", self.next_tag);
+        self.next_tag = self.next_tag.saturating_add(1);
+        write_protocol_line(
+            self.stream.as_mut(),
+            &format!("{tag} {command_prefix} {{{}}}", literal.len()),
+        )?;
+        self.set_read_timeout(Some(timeout))?;
+        let continuation = self.read_response(max_literal_bytes)?;
+        if !continuation.line.starts_with('+') {
+            if continuation.is_tagged(&tag) {
+                require_tagged_ok(
+                    &[continuation],
+                    SyncError::permanent("IMAP APPEND was rejected"),
+                )?;
+                return Ok(Vec::new());
+            }
+            return Err(SyncError::InvalidRemoteState {
+                reason: "IMAP APPEND did not return a continuation",
+            });
+        }
+
+        self.stream
+            .write_all(literal)
+            .and_then(|_| self.stream.write_all(b"\r\n"))
+            .and_then(|_| self.stream.flush())
+            .map_err(|_| SyncError::transient("IMAP network operation failed"))?;
+        let responses = self.read_until_tag(&tag, timeout, max_literal_bytes)?;
+        require_tagged_ok(&responses, SyncError::permanent("IMAP APPEND was rejected"))?;
+        Ok(responses)
+    }
+
     fn authenticate_xoauth2(
         &mut self,
         initial_response: &str,
@@ -782,6 +868,12 @@ impl ImapResponse {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveImapAppendResult {
+    pub uid_validity: Option<u64>,
+    pub uid: Option<u64>,
+}
+
 #[derive(Debug)]
 enum ImapReadError {
     TimedOut,
@@ -921,6 +1013,38 @@ fn require_tagged_ok(responses: &[ImapResponse], rejected: SyncError) -> Result<
             reason: "IMAP tagged response was invalid",
         }),
     }
+}
+
+fn parse_append_result(responses: &[ImapResponse]) -> LiveImapAppendResult {
+    responses
+        .iter()
+        .rev()
+        .find_map(|response| parse_append_uid(&response.text()))
+        .unwrap_or(LiveImapAppendResult {
+            uid_validity: None,
+            uid: None,
+        })
+}
+
+fn parse_append_uid(line: &str) -> Option<LiveImapAppendResult> {
+    let upper = line.to_ascii_uppercase();
+    let position = upper.find("[APPENDUID ")?;
+    let after = line.get(position + "[APPENDUID ".len()..)?;
+    let mut parts =
+        after.split(|character: char| character.is_ascii_whitespace() || character == ']');
+    let uid_validity = parts.next()?.parse().ok()?;
+    let uid_token = parts.next()?;
+    let uid = uid_token
+        .split(',')
+        .next()
+        .filter(|value| !value.is_empty())?
+        .parse()
+        .ok()?;
+
+    Some(LiveImapAppendResult {
+        uid_validity: Some(uid_validity),
+        uid: Some(uid),
+    })
 }
 
 fn quote_imap_string(value: &str) -> Result<String, SyncError> {
@@ -1413,7 +1537,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::{
         fs,
-        io::{BufRead, BufReader},
+        io::{BufRead, BufReader, Read},
         net::{SocketAddr, TcpListener},
         path::PathBuf,
         sync::{Arc, Mutex},
@@ -1613,6 +1737,52 @@ mod tests {
         drop(adapter);
         server.join();
         fs::remove_dir_all(app_data_dir).unwrap();
+    }
+
+    #[test]
+    fn live_adapter_checks_message_id_and_appends_sent_literal() {
+        let message = b"Message-ID: <sent-1@example.com>\r\nSubject: Sent\r\n\r\nBody".to_vec();
+        let expected_message = message.clone();
+        let server = ScriptedImapServer::start(move |stream, commands| {
+            let mut script = ImapScript::new(stream, commands);
+            script.greet();
+            script.expect_login_ok();
+            script.expect_select("Sent Items", 0);
+            script.expect_search("");
+            script.expect_search("");
+            script.expect_search("");
+            script.expect_append("Sent Items", &expected_message, 901);
+            script.expect_search("901");
+            script.expect_logout();
+        });
+        let mut adapter = LiveImapAdapter::connect(password_config(&server)).unwrap();
+
+        assert!(!adapter
+            .sent_message_exists("acct_live", "Sent Items", "<sent-1@example.com>")
+            .unwrap());
+        let appended = adapter
+            .append_sent_message("acct_live", "Sent Items", &message)
+            .unwrap();
+        assert_eq!(
+            appended,
+            LiveImapAppendResult {
+                uid_validity: Some(777),
+                uid: Some(901)
+            }
+        );
+        assert!(adapter
+            .sent_message_exists("acct_live", "Sent Items", "<sent-1@example.com>")
+            .unwrap());
+        adapter.logout().unwrap();
+
+        let commands = server.join();
+        assert!(commands
+            .iter()
+            .any(|command| command.contains("UID SEARCH HEADER Message-ID")));
+        assert!(commands.iter().any(|command| {
+            command.contains("APPEND \"Sent Items\" (\\Seen)")
+                && command.ends_with(&format!("{{{}}}", message.len()))
+        }));
     }
 
     #[test]
@@ -1970,6 +2140,32 @@ mod tests {
             ));
             self.stream.write_all(raw).expect("write literal");
             self.write(")\r\n");
+        }
+
+        fn expect_append(&mut self, folder: &str, expected: &[u8], uid: u64) {
+            let line = self.read_command();
+            assert!(line.contains(" APPEND "));
+            assert!(line.contains(folder));
+            assert!(line.contains("(\\Seen)"));
+            assert!(line.ends_with(&format!("{{{}}}", expected.len())));
+            let tag = line.split_whitespace().next().unwrap().to_string();
+            self.write("+ ready for literal\r\n");
+
+            let mut literal = vec![0_u8; expected.len()];
+            self.reader
+                .read_exact(&mut literal)
+                .expect("read append literal");
+            assert_eq!(literal, expected);
+            let mut crlf = [0_u8; 2];
+            self.reader.read_exact(&mut crlf).expect("read append crlf");
+            assert_eq!(&crlf, b"\r\n");
+            self.commands
+                .lock()
+                .expect("commands")
+                .push(format!("<literal:{}>", literal.len()));
+            self.write(&format!(
+                "{tag} OK [APPENDUID 777 {uid}] APPEND completed\r\n"
+            ));
         }
 
         fn expect_fetch_flags(&mut self) {

@@ -1,6 +1,6 @@
 # IMAP Sync State Machine
 
-Status: Rust state machine, live IMAP protocol adapter, app-managed background scheduler, folder worker, folder/flag semantics, and SQLite cache integration implemented.
+Status: Rust state machine, live IMAP protocol adapter, app-managed background scheduler, pending Sent APPEND upload, folder worker, folder/flag semantics, and SQLite cache integration implemented.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -199,6 +199,7 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - Standard and custom IMAP flag normalization/preservation.
 - Special-use folder detection, unknown provider attribute preservation, and sync of messages in custom folders.
 - Storage-safe inbound attachment bytes are written under generated paths, malicious sender filenames do not affect storage, hashes/sizes are preserved, and expunge cleanup removes stored files.
+- Pending provider Sent uploads are processed after account sync: Message-ID duplicate checks run before literal APPEND, successful rows clear their temporary payload, and failures preserve receipts/payloads for retry.
 
 `src-tauri/tests/protocol_fixtures.rs` tests cover a socket-level IMAP fixture for future adapter work:
 
@@ -207,6 +208,7 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - Large mailbox SEARCH over 10,000 UIDs and high-UID FETCH.
 - SELECT metadata with UIDVALIDITY, UIDNEXT, EXISTS, and EXPUNGE.
 - IDLE continuation, EXISTS wakeup, EXPUNGE notification, and clean DONE completion.
+- Literal APPEND handling for local Sent upload fixtures.
 
 `src-tauri/src/imap_live.rs` tests cover:
 
@@ -216,6 +218,7 @@ Unsupported or provider-specific roles remain usable as `kind = custom`, `specia
 - Reconnect after a dropped socket and reauthentication before further protocol work.
 - LIST and FETCH parser edge cases, including quoted folder names and missing UID denial.
 - Raw `BODY.PEEK[]` sync persistence for parsed body text, safe attachment bytes, attachment metadata, MIME warning JSON, and FTS search results.
+- Sent-folder Message-ID search and literal APPEND to the selected Sent folder without exposing live credentials.
 
 No test uses a real mailbox or real credentials.
 

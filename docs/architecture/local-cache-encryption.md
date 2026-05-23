@@ -11,6 +11,7 @@ This means:
 
 - Message metadata, `body_text`, and `body_html` stored in SQLite are plaintext database content.
 - Active draft subject, recipient JSON, body text, body HTML, and attachment-id references in `composer_drafts` are plaintext database content until the draft is discarded or converted to sent state.
+- Pending Sent-folder IMAP APPEND payloads in `sent_mail_copies.append_payload` are plaintext RFC822 database content until upload succeeds or remote duplicate detection marks the row uploaded and clears the payload.
 - Staged outbound composer attachment files and `composer_attachments` metadata are plaintext until discard or confirmed-send cleanup.
 - Recent-recipient autocomplete rows are plaintext local SQLite content.
 - Per-account `signature_html` values are plaintext account metadata.

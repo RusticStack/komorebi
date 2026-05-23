@@ -1,6 +1,6 @@
 # SMTP Send Boundary
 
-Status: backend send boundary and live `lettre` SMTP transport implemented in Rust and exposed through the typed composer send command.
+Status: backend send boundary, live `lettre` SMTP transport, and pending Sent APPEND handoff implemented in Rust and exposed through the typed composer send command.
 Last reviewed: 2026-05-23.
 
 ## Current Scope
@@ -20,6 +20,7 @@ Komorebi sends outbound mail through a backend-only boundary that:
 - Records local sent state only after the SMTP transport returns an accepted response.
 - Converts a supplied active draft id to sent state only after confirmed SMTP acceptance.
 - Updates local-only recent-recipient autocomplete rows after confirmed composer sends.
+- Stores the exact RFC822 payload for provider policies that need a later IMAP Sent-folder APPEND.
 
 The module remains the SMTP source of truth. The frontend does not call it directly; `src-tauri/src/composer.rs` exposes `send_composer_email` as the reviewed Tauri command wrapper. That wrapper validates the active draft request, staged attachment ownership, and sanitized body payloads before resolving credentials or calling SMTP.
 The wrapper also deduplicates To/CC/BCC recipients before send and best-effort updates `recent_recipients` after SMTP acceptance.
@@ -112,9 +113,9 @@ The receipt records:
 
 `send_email` inserts a receipt only after `SmtpSender::send` succeeds. Transport failure returns an error and leaves `smtp_send_receipts` unchanged.
 
-When a source draft id is supplied, `send_email` validates that the draft is active before auth/network work. After SMTP acceptance, it inserts the receipt, marks the draft sent, clears private draft content, and writes the provider-aware `sent_mail_copies` record in one transaction.
+When a source draft id is supplied, `send_email` validates that the draft is active before auth/network work. After SMTP acceptance, it inserts the receipt, marks the draft sent, clears private draft content, and writes the provider-aware `sent_mail_copies` record in one transaction. When that record is `imap_append/pending_upload`, the same transaction stores the formatted RFC822 payload and SHA-256 for retry by the sync scheduler.
 
-This is not full Sent-folder synchronization. Provider-aware Sent-copy planning is implemented in `docs/architecture/draft-and-sent-persistence.md`, but the IMAP APPEND worker for pending Sent uploads remains future work.
+Provider-aware Sent-copy planning and pending IMAP APPEND upload are implemented in `docs/architecture/draft-and-sent-persistence.md`. Gmail rows remain `provider_auto_copies/not_required` and do not retain or upload APPEND payloads.
 
 ## Tests
 
@@ -126,6 +127,7 @@ This is not full Sent-folder synchronization. Provider-aware Sent-copy planning 
 - Failed SMTP delivery leaving no sent receipt.
 - Failed SMTP delivery leaving the source draft active.
 - Confirmed SMTP delivery converting the source draft to sent state.
+- Confirmed SMTP delivery retaining a temporary RFC822 APPEND payload for Microsoft/generic rows that require Sent upload.
 - Sanitized account signature insertion during MIME composition.
 - Rich composer HTML serialization for strikethrough, tables, code blocks, font controls, colors, highlights, and alignment.
 - BCC header removal from formatted MIME.
@@ -153,7 +155,6 @@ Normal checks do not use a live mailbox, live SMTP server, real account, or real
 ## Not Implemented
 
 - Draft reload/reopen UI after restart.
-- IMAP APPEND worker for pending Sent uploads.
 - Provider-specific setup documentation for obtaining OAuth client IDs and test refresh tokens.
 
 ## Documentation Sync

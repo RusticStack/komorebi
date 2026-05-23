@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
@@ -125,6 +125,48 @@ fn fake_imap_protocol_server_can_reject_authentication() {
 }
 
 #[test]
+fn fake_imap_protocol_server_accepts_sent_append_literal() {
+    let server = FakeImapProtocolServer::start(FakeImapProtocolConfig::default());
+    let (mut reader, mut writer) = connect_client(server.addr());
+    assert!(read_protocol_line(&mut reader)
+        .expect("read IMAP greeting")
+        .contains("Komorebi fake IMAP"));
+
+    let login = imap_command(&mut reader, &mut writer, "A001", "LOGIN fixture secret")
+        .expect("login to fake IMAP");
+    assert_eq!(
+        login.last().expect("tagged login response"),
+        "A001 OK LOGIN completed"
+    );
+    let message = b"Message-ID: <append@example.com>\r\nSubject: Append\r\n\r\nBody";
+    let append = imap_append_command(
+        &mut reader,
+        &mut writer,
+        "A002",
+        "APPEND \"Sent Items\" (\\Seen)",
+        message,
+    )
+    .expect("append sent message");
+    assert_eq!(
+        append.last().expect("tagged append response"),
+        "A002 OK [APPENDUID 777 1001] APPEND completed"
+    );
+
+    let appended = server.appended_messages();
+    assert_eq!(appended.len(), 1);
+    assert!(appended[0].contains("Message-ID: <append@example.com>"));
+    assert!(appended[0].contains("Subject: Append"));
+
+    let logout =
+        imap_command(&mut reader, &mut writer, "A003", "LOGOUT").expect("logout from fake IMAP");
+    assert_eq!(
+        logout.last().expect("tagged logout response"),
+        "A003 OK LOGOUT completed"
+    );
+    server.join();
+}
+
+#[test]
 fn fake_smtp_protocol_server_accepts_message_and_records_data() {
     let server = FakeSmtpProtocolServer::start(FakeSmtpProtocolConfig::default());
     let (mut reader, mut writer) = connect_client(server.addr());
@@ -233,6 +275,7 @@ impl Default for FakeImapProtocolConfig {
 struct FakeImapProtocolServer {
     addr: SocketAddr,
     handle: Option<JoinHandle<()>>,
+    appended_messages: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeImapProtocolServer {
@@ -242,23 +285,38 @@ impl FakeImapProtocolServer {
             .local_addr()
             .expect("read fake IMAP listener address");
         let connection_count = if config.drop_first_connection { 2 } else { 1 };
+        let appended_messages = Arc::new(Mutex::new(Vec::new()));
+        let server_appended_messages = Arc::clone(&appended_messages);
 
         let handle = thread::spawn(move || {
             for connection_index in 0..connection_count {
                 let (stream, _) = listener.accept().expect("accept fake IMAP connection");
-                handle_fake_imap_connection(stream, &config, connection_index)
-                    .expect("serve fake IMAP connection");
+                handle_fake_imap_connection(
+                    stream,
+                    &config,
+                    connection_index,
+                    &server_appended_messages,
+                )
+                .expect("serve fake IMAP connection");
             }
         });
 
         Self {
             addr,
             handle: Some(handle),
+            appended_messages,
         }
     }
 
     fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    fn appended_messages(&self) -> Vec<String> {
+        self.appended_messages
+            .lock()
+            .expect("fake IMAP appended messages lock")
+            .clone()
     }
 
     fn join(mut self) {
@@ -274,6 +332,7 @@ fn handle_fake_imap_connection(
     stream: TcpStream,
     config: &FakeImapProtocolConfig,
     connection_index: usize,
+    appended_messages: &Arc<Mutex<Vec<String>>>,
 ) -> io::Result<()> {
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_write_timeout(Some(READ_TIMEOUT))?;
@@ -301,7 +360,7 @@ fn handle_fake_imap_connection(
                 return Ok(());
             }
             write_protocol_line(&mut writer, &format!("{tag} OK LOGIN completed"))?;
-        } else if command_upper == "SELECT INBOX" {
+        } else if command_upper == "SELECT INBOX" || command_upper == "SELECT \"SENT ITEMS\"" {
             write_protocol_line(
                 &mut writer,
                 "* FLAGS (\\Seen \\Flagged \\Answered \\Deleted)",
@@ -340,6 +399,29 @@ fn handle_fake_imap_connection(
                 )?;
             }
             write_protocol_line(&mut writer, &format!("{tag} OK FETCH completed"))?;
+        } else if command_upper.starts_with("APPEND ") {
+            let literal_len = parse_literal_len(command).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "APPEND omitted literal length")
+            })?;
+            write_protocol_line(&mut writer, "+ ready for literal")?;
+            let mut bytes = vec![0_u8; literal_len];
+            reader.read_exact(&mut bytes)?;
+            let mut crlf = [0_u8; 2];
+            reader.read_exact(&mut crlf)?;
+            if &crlf != b"\r\n" {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "APPEND literal missing CRLF",
+                ));
+            }
+            appended_messages
+                .lock()
+                .expect("fake IMAP appended messages lock")
+                .push(String::from_utf8_lossy(&bytes).into_owned());
+            write_protocol_line(
+                &mut writer,
+                &format!("{tag} OK [APPENDUID 777 1001] APPEND completed"),
+            )?;
         } else if command_upper == "IDLE" {
             write_protocol_line(&mut writer, "+ idling")?;
             if config.send_idle_updates {
@@ -363,6 +445,16 @@ fn handle_fake_imap_connection(
             write_protocol_line(&mut writer, &format!("{tag} NO unsupported command"))?;
         }
     }
+}
+
+fn parse_literal_len(command: &str) -> Option<usize> {
+    let trimmed = command.trim_end();
+    let marker_start = trimmed.rfind('{')?;
+    let marker_end = trimmed.rfind('}')?;
+    if marker_end <= marker_start {
+        return None;
+    }
+    trimmed[marker_start + 1..marker_end].parse().ok()
 }
 
 fn requested_fetch_uids(command: &str, mailbox_size: usize) -> Vec<usize> {
@@ -509,6 +601,39 @@ fn imap_command(
     command: &str,
 ) -> io::Result<Vec<String>> {
     write_protocol_line(writer, &format!("{tag} {command}"))?;
+    let mut response = Vec::new();
+    loop {
+        let line = read_protocol_line(reader)?;
+        let tagged = line.starts_with(tag);
+        response.push(line);
+        if tagged {
+            return Ok(response);
+        }
+    }
+}
+
+fn imap_append_command(
+    reader: &mut BufReader<TcpStream>,
+    writer: &mut TcpStream,
+    tag: &str,
+    command_prefix: &str,
+    literal: &[u8],
+) -> io::Result<Vec<String>> {
+    write_protocol_line(
+        writer,
+        &format!("{tag} {command_prefix} {{{}}}", literal.len()),
+    )?;
+    let continuation = read_protocol_line(reader)?;
+    if !continuation.starts_with('+') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "APPEND continuation was not returned",
+        ));
+    }
+    writer.write_all(literal)?;
+    writer.write_all(b"\r\n")?;
+    writer.flush()?;
+
     let mut response = Vec::new();
     loop {
         let line = read_protocol_line(reader)?;

@@ -288,6 +288,7 @@ pub struct ConfirmedSendRecord {
     pub smtp_security: SmtpSecurity,
     pub auth_mechanism: &'static str,
     pub message_size_bytes: u64,
+    pub message_rfc822: Vec<u8>,
     pub provider_response: Option<String>,
 }
 
@@ -623,7 +624,7 @@ impl SmtpAccountStore for SqliteSmtpAccountStore<'_> {
                 },
             )?;
         }
-        insert_sent_mail_copy_record(&transaction, &sent_copy)?;
+        insert_sent_mail_copy_record(&transaction, &sent_copy, Some(&record.message_rfc822))?;
         transaction.commit()?;
 
         Ok(ConfirmedSendPersistence {
@@ -1007,6 +1008,7 @@ where
         smtp_security: account.smtp_security,
         auth_mechanism: auth.mechanism_schema_value(),
         message_size_bytes: composed.message_size_bytes,
+        message_rfc822: composed.message_rfc822.clone(),
         provider_response: delivery.provider_response.clone(),
     };
     let persistence = account_store.record_confirmed_send(&record)?;
@@ -1036,6 +1038,7 @@ where
 struct ComposedMessage {
     message: Message,
     message_size_bytes: u64,
+    message_rfc822: Vec<u8>,
     attachment_bytes_streamed: u64,
 }
 
@@ -1145,14 +1148,16 @@ fn compose_message(
     }
     .map_err(|error| SendEmailError::MimeBuild(error.to_string()))?;
 
+    let message_rfc822 = message.formatted();
     let message_size_bytes =
-        u64::try_from(message.formatted().len()).map_err(|_| SendEmailError::InvalidRequest {
+        u64::try_from(message_rfc822.len()).map_err(|_| SendEmailError::InvalidRequest {
             reason: "composed message size overflowed",
         })?;
 
     Ok(ComposedMessage {
         message,
         message_size_bytes,
+        message_rfc822,
         attachment_bytes_streamed,
     })
 }
@@ -1597,6 +1602,32 @@ mod tests {
             .unwrap();
     }
 
+    fn seed_sent_folder(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO folders (
+                   id,
+                   account_id,
+                   remote_id,
+                   name,
+                   display_name,
+                   kind,
+                   special_use
+                 )
+                 VALUES (
+                   'folder_sent',
+                   'acct_send',
+                   'Sent Items',
+                   'Sent Items',
+                   'Sent Items',
+                   'sent',
+                   'sent'
+                 )",
+                [],
+            )
+            .unwrap();
+    }
+
     fn seed_active_draft(connection: &Connection) {
         connection
             .execute(
@@ -1838,6 +1869,57 @@ mod tests {
                 SendProgressEvent::SentStateRecorded
             ]
         ));
+    }
+
+    #[test]
+    fn confirmed_send_keeps_rfc822_payload_for_pending_imap_append_only() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        seed_sent_folder(&connection);
+        let mut account_store = SqliteSmtpAccountStore::new(&connection);
+        let mut auth = FakeAuthResolver {
+            auth: SmtpAuth::Plain {
+                username: "sender@example.com".into(),
+                password: SecretString::new("app-password"),
+            },
+        };
+        let mut attachments = FakeAttachmentStore::with_text_attachment();
+        let mut smtp = FakeSmtpSender::default();
+
+        let report = send_email(
+            request(),
+            &mut account_store,
+            &mut auth,
+            &mut attachments,
+            &mut smtp,
+        )
+        .unwrap();
+
+        assert_eq!(report.sent_folder_policy, SentFolderPolicy::ImapAppend);
+        assert_eq!(
+            report.sent_folder_sync_state,
+            SentFolderSyncState::PendingUpload
+        );
+        let sent_copy: (String, String, Option<Vec<u8>>, Option<String>) = connection
+            .query_row(
+                "SELECT sync_state, sent_folder_remote_id, append_payload, append_payload_sha256
+                 FROM sent_mail_copies
+                 WHERE send_receipt_id = (
+                   SELECT id FROM smtp_send_receipts WHERE account_id = 'acct_send'
+                 )",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let payload = sent_copy.2.expect("pending append payload");
+        assert_eq!(sent_copy.0, "pending_upload");
+        assert_eq!(sent_copy.1, "Sent Items");
+        assert!(String::from_utf8_lossy(&payload).contains("Message-ID: <send-1@example.com>"));
+        assert_eq!(
+            sent_copy.3.expect("payload hash").len(),
+            64,
+            "payload hash should be retained until upload"
+        );
     }
 
     #[test]

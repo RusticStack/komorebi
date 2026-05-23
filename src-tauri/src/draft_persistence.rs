@@ -12,6 +12,8 @@ use crate::{
     },
 };
 
+pub const MAX_SENT_APPEND_PAYLOAD_BYTES: usize = 50 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DraftState {
     Active,
@@ -169,6 +171,18 @@ pub struct SentMailCopyRecord {
     pub sent_folder_id: Option<String>,
     pub sent_folder_remote_id: Option<String>,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSentMailAppend {
+    pub id: String,
+    pub send_receipt_id: String,
+    pub account_id: String,
+    pub rfc_message_id: String,
+    pub sent_folder_id: String,
+    pub sent_folder_remote_id: String,
+    pub message_rfc822: Vec<u8>,
+    pub append_attempt_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -519,7 +533,10 @@ pub fn sent_mail_copy_for_confirmed_send(
 pub fn insert_sent_mail_copy_record(
     transaction: &Transaction<'_>,
     record: &SentMailCopyRecord,
+    append_payload: Option<&[u8]>,
 ) -> Result<(), DraftPersistenceError> {
+    let payload = sent_append_payload(record, append_payload)?;
+    let payload_hash = payload.map(sha256_hex);
     transaction.execute(
         "INSERT INTO sent_mail_copies (
            id,
@@ -531,9 +548,11 @@ pub fn insert_sent_mail_copy_record(
            sync_state,
            sent_folder_id,
            sent_folder_remote_id,
-           last_error
+           last_error,
+           append_payload,
+           append_payload_sha256
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             &record.id,
             &record.send_receipt_id,
@@ -545,10 +564,111 @@ pub fn insert_sent_mail_copy_record(
             &record.sent_folder_id,
             &record.sent_folder_remote_id,
             &record.last_error,
+            payload,
+            payload_hash.as_deref(),
         ],
     )?;
 
     Ok(())
+}
+
+pub fn list_pending_sent_mail_appends(
+    connection: &Connection,
+    account_id: &str,
+    limit: usize,
+) -> Result<Vec<PendingSentMailAppend>, DraftPersistenceError> {
+    validate_entity_id("account_id", account_id)?;
+    let bounded_limit = limit.clamp(1, 50);
+    let mut statement = connection.prepare(
+        "SELECT
+           id,
+           send_receipt_id,
+           account_id,
+           rfc_message_id,
+           sent_folder_id,
+           sent_folder_remote_id,
+           append_payload,
+           append_attempt_count
+         FROM sent_mail_copies
+         WHERE account_id = ?1
+           AND sent_folder_policy = 'imap_append'
+           AND sync_state IN ('pending_upload', 'failed')
+           AND sent_folder_id IS NOT NULL
+           AND sent_folder_remote_id IS NOT NULL
+           AND append_payload IS NOT NULL
+         ORDER BY created_at, id
+         LIMIT ?2",
+    )?;
+    let rows = statement.query_map(params![account_id, bounded_limit as i64], |row| {
+        let attempt_count = row.get::<_, i64>(7)?.max(0) as u32;
+        Ok(PendingSentMailAppend {
+            id: row.get(0)?,
+            send_receipt_id: row.get(1)?,
+            account_id: row.get(2)?,
+            rfc_message_id: row.get(3)?,
+            sent_folder_id: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            sent_folder_remote_id: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+            message_rfc822: row.get(6)?,
+            append_attempt_count: attempt_count,
+        })
+    })?;
+
+    let mut pending = Vec::new();
+    for row in rows {
+        pending.push(row?);
+    }
+    Ok(pending)
+}
+
+pub fn mark_sent_mail_append_uploaded(
+    connection: &Connection,
+    account_id: &str,
+    sent_copy_id: &str,
+) -> Result<bool, DraftPersistenceError> {
+    validate_entity_id("account_id", account_id)?;
+    validate_entity_id("sent_copy_id", sent_copy_id)?;
+    let changed = connection.execute(
+        "UPDATE sent_mail_copies
+         SET sync_state = 'uploaded',
+             last_error = NULL,
+             append_payload = NULL,
+             append_payload_sha256 = NULL,
+             uploaded_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1
+           AND account_id = ?2
+           AND sent_folder_policy = 'imap_append'
+           AND sync_state IN ('pending_upload', 'failed')",
+        params![sent_copy_id, account_id],
+    )?;
+
+    Ok(changed == 1)
+}
+
+pub fn mark_sent_mail_append_failed(
+    connection: &Connection,
+    account_id: &str,
+    sent_copy_id: &str,
+    error: &str,
+) -> Result<bool, DraftPersistenceError> {
+    validate_entity_id("account_id", account_id)?;
+    validate_entity_id("sent_copy_id", sent_copy_id)?;
+    let error = sanitize_append_error(error);
+    let changed = connection.execute(
+        "UPDATE sent_mail_copies
+         SET sync_state = 'failed',
+             last_error = ?3,
+             append_attempt_count = append_attempt_count + 1,
+             last_append_attempt_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1
+           AND account_id = ?2
+           AND sent_folder_policy = 'imap_append'
+           AND sync_state IN ('pending_upload', 'failed')",
+        params![sent_copy_id, account_id, error],
+    )?;
+
+    Ok(changed == 1)
 }
 
 fn validate_autosave_request(request: &DraftAutosaveRequest) -> Result<(), DraftPersistenceError> {
@@ -673,7 +793,7 @@ fn resolve_sent_folder_policy(
                 (
                     SentFolderPolicy::ImapAppend,
                     SentFolderSyncState::PendingUpload,
-                    Some("IMAP APPEND worker is not implemented yet"),
+                    None,
                 )
             } else {
                 (
@@ -684,6 +804,54 @@ fn resolve_sent_folder_policy(
             }
         }
     }
+}
+
+fn sent_append_payload<'payload>(
+    record: &SentMailCopyRecord,
+    append_payload: Option<&'payload [u8]>,
+) -> Result<Option<&'payload [u8]>, DraftPersistenceError> {
+    if record.sent_folder_policy == SentFolderPolicy::ImapAppend
+        && record.sync_state == SentFolderSyncState::PendingUpload
+    {
+        let Some(payload) = append_payload else {
+            return Err(DraftPersistenceError::InvalidDraft {
+                reason: "pending Sent upload requires message payload",
+            });
+        };
+        if payload.is_empty() {
+            return Err(DraftPersistenceError::InvalidDraft {
+                reason: "pending Sent upload payload is empty",
+            });
+        }
+        if payload.len() > MAX_SENT_APPEND_PAYLOAD_BYTES {
+            return Err(DraftPersistenceError::InvalidDraft {
+                reason: "pending Sent upload payload is too large",
+            });
+        }
+        return Ok(Some(payload));
+    }
+
+    Ok(None)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(bytes);
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn sanitize_append_error(error: &str) -> String {
+    const MAX_APPEND_ERROR_BYTES: usize = 240;
+    let mut sanitized = error.replace(['\r', '\n', '\0'], " ");
+    sanitized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    if sanitized.len() > MAX_APPEND_ERROR_BYTES {
+        sanitized.truncate(MAX_APPEND_ERROR_BYTES);
+    }
+    sanitized
 }
 
 fn stable_sent_copy_id(send_receipt_id: &str) -> String {
@@ -955,11 +1123,177 @@ mod tests {
         assert_eq!(microsoft.sent_folder_policy, SentFolderPolicy::ImapAppend);
         assert_eq!(microsoft.sync_state, SentFolderSyncState::PendingUpload);
         assert_eq!(microsoft.sent_folder_id, Some("folder_sent".into()));
+        assert_eq!(microsoft.last_error, None);
         assert_eq!(
             generic.sent_folder_policy,
             SentFolderPolicy::LocalReceiptOnly
         );
         assert_eq!(generic.sync_state, SentFolderSyncState::Unsupported);
+    }
+
+    #[test]
+    fn imap_append_rows_store_payload_until_uploaded_and_retry_after_failure() {
+        let connection = migrated_connection();
+        seed_account(&connection, "acct_ms", "microsoft");
+        seed_sent_folder(&connection, "acct_ms");
+        connection
+            .execute(
+                "INSERT INTO smtp_send_receipts (
+                   id,
+                   account_id,
+                   rfc_message_id,
+                   subject,
+                   from_address,
+                   to_addresses_json,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security,
+                   auth_mechanism,
+                   message_size_bytes
+                 )
+                 VALUES (
+                   'send_ms',
+                   'acct_ms',
+                   '<ms@example.com>',
+                   'sent',
+                   'sender@example.com',
+                   '[]',
+                   'smtp.example.com',
+                   587,
+                   'starttls',
+                   'xoauth2',
+                   128
+                 )",
+                [],
+            )
+            .unwrap();
+        let record = sent_mail_copy_for_confirmed_send(
+            &connection,
+            "acct_ms",
+            ProviderKind::Microsoft,
+            "send_ms",
+            "<ms@example.com>",
+        )
+        .unwrap();
+        let transaction = connection.unchecked_transaction().unwrap();
+        insert_sent_mail_copy_record(&transaction, &record, Some(b"Subject: Sent\r\n\r\nBody"))
+            .unwrap();
+        transaction.commit().unwrap();
+
+        let pending = list_pending_sent_mail_appends(&connection, "acct_ms", 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].sent_folder_remote_id, "Sent Items");
+        assert_eq!(pending[0].message_rfc822, b"Subject: Sent\r\n\r\nBody");
+
+        mark_sent_mail_append_failed(
+            &connection,
+            "acct_ms",
+            &record.id,
+            "IMAP server said no\r\nwith private details removed",
+        )
+        .unwrap();
+        let failed: (String, i64, String, Vec<u8>) = connection
+            .query_row(
+                "SELECT sync_state, append_attempt_count, last_error, append_payload
+                 FROM sent_mail_copies
+                 WHERE id = ?1",
+                [&record.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(failed.0, "failed");
+        assert_eq!(failed.1, 1);
+        assert_eq!(failed.2, "IMAP server said no with private details removed");
+        assert_eq!(failed.3, b"Subject: Sent\r\n\r\nBody");
+        assert_eq!(
+            list_pending_sent_mail_appends(&connection, "acct_ms", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        assert!(mark_sent_mail_append_uploaded(&connection, "acct_ms", &record.id).unwrap());
+        let uploaded: (String, Option<Vec<u8>>, Option<String>) = connection
+            .query_row(
+                "SELECT sync_state, append_payload, append_payload_sha256
+                 FROM sent_mail_copies
+                 WHERE id = ?1",
+                [&record.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(uploaded.0, "uploaded");
+        assert_eq!(uploaded.1, None);
+        assert_eq!(uploaded.2, None);
+        assert!(list_pending_sent_mail_appends(&connection, "acct_ms", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn gmail_sent_copy_rows_do_not_store_append_payloads() {
+        let connection = migrated_connection();
+        seed_account(&connection, "acct_gmail", "gmail");
+        connection
+            .execute(
+                "INSERT INTO smtp_send_receipts (
+                   id,
+                   account_id,
+                   rfc_message_id,
+                   subject,
+                   from_address,
+                   to_addresses_json,
+                   smtp_host,
+                   smtp_port,
+                   smtp_security,
+                   auth_mechanism,
+                   message_size_bytes
+                 )
+                 VALUES (
+                   'send_gmail',
+                   'acct_gmail',
+                   '<gmail@example.com>',
+                   'sent',
+                   'sender@example.com',
+                   '[]',
+                   'smtp.gmail.com',
+                   587,
+                   'starttls',
+                   'xoauth2',
+                   128
+                 )",
+                [],
+            )
+            .unwrap();
+        let record = sent_mail_copy_for_confirmed_send(
+            &connection,
+            "acct_gmail",
+            ProviderKind::Gmail,
+            "send_gmail",
+            "<gmail@example.com>",
+        )
+        .unwrap();
+        let transaction = connection.unchecked_transaction().unwrap();
+        insert_sent_mail_copy_record(&transaction, &record, Some(b"Subject: Gmail\r\n\r\nBody"))
+            .unwrap();
+        transaction.commit().unwrap();
+
+        let row: (String, Option<Vec<u8>>) = connection
+            .query_row(
+                "SELECT sent_folder_policy, append_payload
+                 FROM sent_mail_copies
+                 WHERE id = ?1",
+                [&record.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "provider_auto_copies");
+        assert_eq!(row.1, None);
+        assert!(
+            list_pending_sent_mail_appends(&connection, "acct_gmail", 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
