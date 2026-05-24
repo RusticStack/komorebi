@@ -32,6 +32,7 @@ import type {
   ComposerAttachment,
   ComposerAttachmentDisposition,
   ComposerAttachmentStageRequest,
+  ComposerDraft,
   ComposerDraftDiscardRequest,
   ComposerDraftSaveRequest,
   ComposerDraftSaveResponse,
@@ -65,12 +66,16 @@ export type RecentRecipientSearchFunction = (
 
 export type TipTapComposerProps = {
   accounts: MailAccount[];
+  initialDraft?: ComposerDraft | null;
   initialAccountId: string | null;
   loadRecentRecipients?: RecentRecipientSearchFunction;
   saveDraft?: ComposerDraftSaveFunction;
   discardDraft?: ComposerDraftDiscardFunction;
   stageAttachment?: ComposerAttachmentStageFunction;
   sendMail?: ComposerSendFunction;
+  onDraftDiscarded?: (draftId: string) => void;
+  onDraftSaved?: (draftId: string) => void;
+  onDraftSent?: (draftId: string) => void;
   onClose: () => void;
 };
 
@@ -94,33 +99,47 @@ const RECIPIENT_AUTOCOMPLETE_DEBOUNCE_MS = 150;
 
 export function TipTapComposer({
   accounts,
+  initialDraft = null,
   initialAccountId,
   loadRecentRecipients,
   saveDraft,
   discardDraft,
   stageAttachment,
   sendMail,
+  onDraftDiscarded,
+  onDraftSaved,
+  onDraftSent,
   onClose,
 }: TipTapComposerProps) {
   const { t } = useTranslation();
   const [accountId, setAccountId] = useState(
-    initialAccountId ?? accounts[0]?.id ?? "",
+    initialDraft?.accountId ?? initialAccountId ?? accounts[0]?.id ?? "",
   );
-  const [draftId] = useState(() => createDraftId());
-  const [toInput, setToInput] = useState("");
-  const [ccInput, setCcInput] = useState("");
-  const [bccInput, setBccInput] = useState("");
-  const [subject, setSubject] = useState("");
-  const [bodyHtml, setBodyHtml] = useState("<p></p>");
-  const [bodyText, setBodyText] = useState("");
+  const [draftId] = useState(() => initialDraft?.id ?? createDraftId());
+  const [toInput, setToInput] = useState(() =>
+    formatComposerAddresses(initialDraft?.to ?? []),
+  );
+  const [ccInput, setCcInput] = useState(() =>
+    formatComposerAddresses(initialDraft?.cc ?? []),
+  );
+  const [bccInput, setBccInput] = useState(() =>
+    formatComposerAddresses(initialDraft?.bcc ?? []),
+  );
+  const [subject, setSubject] = useState(initialDraft?.subject ?? "");
+  const [bodyHtml, setBodyHtml] = useState(initialDraft?.bodyHtml ?? "<p></p>");
+  const [bodyText, setBodyText] = useState(initialDraft?.bodyText ?? "");
   const [linkInput, setLinkInput] = useState("");
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>(
+    initialDraft?.attachments ?? [],
+  );
   const [inlineImageSources, setInlineImageSources] = useState(
     () => new Map<string, string>(),
   );
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [recipientNotices, setRecipientNotices] = useState<string[]>([]);
-  const [draftStatus, setDraftStatus] = useState<DraftStatus>("idle");
+  const [draftStatus, setDraftStatus] = useState<DraftStatus>(
+    initialDraft ? "saved" : "idle",
+  );
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const [progress, setProgress] = useState<string[]>([]);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
@@ -206,6 +225,7 @@ export function TipTapComposer({
     try {
       const saved = await saveDraft(request.value);
       setDraftStatus("saved");
+      onDraftSaved?.(saved.id);
       if (showErrors) {
         setValidationErrors([]);
         setRecipientNotices(request.duplicateNotices);
@@ -228,6 +248,7 @@ export function TipTapComposer({
 
     try {
       await discardDraft({ accountId, draftId });
+      onDraftDiscarded?.(draftId);
     } catch {
       setValidationErrors([t("composer.errors.draftCouldNotDiscard")]);
       setDraftStatus("error");
@@ -421,6 +442,7 @@ export function TipTapComposer({
       setSendStatus("sent");
       setDraftStatus("sent");
       setProgress(response.progress.map((item) => sendProgressLabel(item, t)));
+      onDraftSent?.(response.draftId);
     } catch {
       setSendStatus("error");
       setProgress([]);
@@ -519,6 +541,7 @@ export function TipTapComposer({
           <span>{t("composer.fields.from")}</span>
           <select
             value={accountId}
+            disabled={Boolean(initialDraft) || sendStatus === "sending" || sendStatus === "sent"}
             onChange={(event) => {
               setAccountId(event.target.value);
               setRecipientNotices([]);
@@ -1235,6 +1258,18 @@ function formatRecipientSuggestion(suggestion: RecentRecipientSuggestion) {
     .replace(/\s+/g, " ")
     .trim();
   return name ? `${name} <${suggestion.address}>` : suggestion.address;
+}
+
+function formatComposerAddresses(addresses: ComposerAddress[]) {
+  return addresses
+    .map((address) => {
+      const name = address.name
+        ?.replace(/[",;<>]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return name ? `${name} <${address.address}>` : address.address;
+    })
+    .join(", ");
 }
 
 function normalizeEmailAddress(address: string) {

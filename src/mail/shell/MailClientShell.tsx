@@ -49,6 +49,7 @@ import {
   type MailSearchResponse,
   type MailMessage,
   type MailShellState,
+  type ComposerDraft,
   type AccountSetupRequest,
   type AccountSetupResponse,
   type AccountReauthRequest,
@@ -62,6 +63,7 @@ import {
   type AccountManagementView,
   type AccountSettingsUpdateRequest,
   type AccountSettingsUpdateResponse,
+  type LoadStatus,
 } from "./mailShellState";
 
 export type MailSearchFunction = (
@@ -92,6 +94,7 @@ export type AccountAuthStatusFunction = (
 export type AccountSettingsUpdateFunction = (
   request: AccountSettingsUpdateRequest,
 ) => Promise<AccountSettingsUpdateResponse>;
+export type ComposerDraftListFunction = () => Promise<ComposerDraft[]>;
 export type SyncStatusUnsubscribeFunction = () => void | Promise<void>;
 export type SyncStatusSubscribeFunction = (
   handler: (payload: unknown) => void,
@@ -99,8 +102,10 @@ export type SyncStatusSubscribeFunction = (
 
 export type MailClientShellProps = {
   initialData?: MailShellData;
+  initialComposerDrafts?: ComposerDraft[];
   initialLoadState?: MailShellLoadState;
   loadMailShellData?: () => Promise<MailShellData>;
+  loadComposerDrafts?: ComposerDraftListFunction;
   searchMail?: MailSearchFunction;
   searchDebounceMs?: number;
   loadRecentRecipients?: RecentRecipientSearchFunction;
@@ -119,7 +124,7 @@ export type MailClientShellProps = {
   subscribeToSyncStatus?: SyncStatusSubscribeFunction;
 };
 
-type Drawer = "composer" | "settings" | "account-status" | null;
+type Drawer = "composer" | "drafts" | "settings" | "account-status" | null;
 type MailSearchUiStatus =
   | "idle"
   | "debouncing"
@@ -149,8 +154,10 @@ const emptySearchState: MailSearchUiState = {
 
 export function MailClientShell({
   initialData = emptyMailShellData,
+  initialComposerDrafts = [],
   initialLoadState = readyMailShellLoadState,
   loadMailShellData,
+  loadComposerDrafts,
   searchMail,
   searchDebounceMs = MAIL_SEARCH_DEBOUNCE_MS,
   loadRecentRecipients,
@@ -179,13 +186,20 @@ export function MailClientShell({
   const [searchState, setSearchState] =
     useState<MailSearchUiState>(emptySearchState);
   const [searchRetryNonce, setSearchRetryNonce] = useState(0);
+  const [composerDrafts, setComposerDrafts] =
+    useState<ComposerDraft[]>(initialComposerDrafts);
+  const [composerDraftsLoadState, setComposerDraftsLoadState] =
+    useState<LoadStatus>(loadComposerDrafts ? "loading" : "ready");
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [statusAccountId, setStatusAccountId] = useState<string | null>(null);
+  const [selectedComposerDraftId, setSelectedComposerDraftId] =
+    useState<string | null>(null);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const readerRef = useRef<HTMLElement | null>(null);
   const composeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const draftsButtonRef = useRef<HTMLButtonElement | null>(null);
   const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -228,6 +242,9 @@ export function MailClientShell({
   const canCompose = hasAccounts && state.loadState.accounts === "ready";
   const statusAccount = statusAccountId
     ? accountById.get(statusAccountId) ?? null
+    : null;
+  const selectedComposerDraft = selectedComposerDraftId
+    ? composerDrafts.find((draft) => draft.id === selectedComposerDraftId) ?? null
     : null;
   const listTitle = state.unifiedInbox
     ? t("mail.folders.unifiedInbox")
@@ -389,6 +406,58 @@ export function MailClientShell({
     }
   }
 
+  async function reloadComposerDrafts(options: { showLoading?: boolean } = {}) {
+    if (!loadComposerDrafts) {
+      return;
+    }
+
+    if (options.showLoading ?? true) {
+      setComposerDraftsLoadState("loading");
+    }
+
+    try {
+      const drafts = await loadComposerDrafts();
+      setComposerDrafts(drafts);
+      setComposerDraftsLoadState("ready");
+      setSelectedComposerDraftId((current) =>
+        current && drafts.some((draft) => draft.id === current)
+          ? current
+          : null,
+      );
+    } catch {
+      setComposerDraftsLoadState("error");
+    }
+  }
+
+  function openNewComposer(restoreFocus: HTMLElement | null) {
+    setSelectedComposerDraftId(null);
+    openDrawer("composer", restoreFocus);
+  }
+
+  function openComposerDraft(
+    draftId: string,
+    restoreFocus: HTMLElement | null = draftsButtonRef.current,
+  ) {
+    setSelectedComposerDraftId(draftId);
+    openDrawer("composer", restoreFocus);
+  }
+
+  function handleComposerDraftChanged() {
+    if (loadComposerDrafts) {
+      void reloadComposerDrafts({ showLoading: false });
+    }
+  }
+
+  function handleComposerDraftClosed(draftId: string) {
+    setComposerDrafts((current) =>
+      current.filter((draft) => draft.id !== draftId),
+    );
+    setSelectedComposerDraftId((current) => (current === draftId ? null : current));
+    if (loadComposerDrafts) {
+      void reloadComposerDrafts({ showLoading: false });
+    }
+  }
+
   function openAccountStatusDrawer(
     accountId: string,
     restoreFocus: HTMLElement | null,
@@ -492,6 +561,33 @@ export function MailClientShell({
       cancelled = true;
     };
   }, [loadMailShellData]);
+
+  useEffect(() => {
+    if (!loadComposerDrafts) {
+      return;
+    }
+
+    let cancelled = false;
+
+    loadComposerDrafts()
+      .then((drafts) => {
+        if (cancelled) {
+          return;
+        }
+        setComposerDrafts(drafts);
+        setComposerDraftsLoadState("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setComposerDraftsLoadState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadComposerDrafts]);
 
   useEffect(() => {
     if (!subscribeToSyncStatus || !loadMailShellData) {
@@ -819,14 +915,32 @@ export function MailClientShell({
             </p>
             <h2>{listTitle}</h2>
           </div>
-          <button
-            ref={composeButtonRef}
-            type="button"
-            disabled={!canCompose}
-            onClick={() => openDrawer("composer", composeButtonRef.current)}
-          >
-            {t("composer.actions.compose")}
-          </button>
+          <div className="list-toolbar__actions">
+            <button
+              ref={draftsButtonRef}
+              type="button"
+              disabled={
+                !canCompose ||
+                (composerDraftsLoadState === "ready" && composerDrafts.length === 0)
+              }
+              aria-label={t("composer.drafts.buttonAria", {
+                count: composerDrafts.length,
+                formattedCount: localeFormat.count(composerDrafts.length),
+              })}
+              onClick={() => openDrawer("drafts", draftsButtonRef.current)}
+            >
+              {t("composer.drafts.button")}
+              <span>{localeFormat.count(composerDrafts.length)}</span>
+            </button>
+            <button
+              ref={composeButtonRef}
+              type="button"
+              disabled={!canCompose}
+              onClick={() => openNewComposer(composeButtonRef.current)}
+            >
+              {t("composer.actions.compose")}
+            </button>
+          </div>
         </header>
 
         <label className="search">
@@ -915,6 +1029,9 @@ export function MailClientShell({
               if (loadMailShellData) {
                 void reloadMailShell();
               }
+              if (loadComposerDrafts) {
+                void reloadComposerDrafts({ showLoading: false });
+              }
             }}
             onCreateAccount={createAccount}
             onReauthAccount={reauthAccount}
@@ -924,6 +1041,31 @@ export function MailClientShell({
             onTestAccountConnection={testAccountConnection}
             onGetAccountAuthStatus={getAccountAuthStatus}
             onClose={closeDrawer}
+          />
+        </div>
+      ) : null}
+
+      {drawer === "drafts" ? (
+        <div
+          className="composer-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("composer.drafts.aria")}
+          ref={drawerRef}
+          tabIndex={-1}
+          onKeyDown={handleDrawerKeyDown}
+        >
+          <DraftsDrawer
+            accounts={state.data.accounts}
+            drafts={composerDrafts}
+            loadState={composerDraftsLoadState}
+            onClose={closeDrawer}
+            onOpenDraft={(draftId) => openComposerDraft(draftId)}
+            onRetry={
+              loadComposerDrafts
+                ? () => void reloadComposerDrafts()
+                : undefined
+            }
           />
         </div>
       ) : null}
@@ -991,9 +1133,13 @@ export function MailClientShell({
           <ComposerDrawer
             accounts={state.data.accounts}
             discardDraft={discardComposerDraft}
+            initialDraft={selectedComposerDraft}
             initialAccountId={activeAccount?.id ?? state.data.accounts[0]?.id ?? null}
             loadRecentRecipients={loadRecentRecipients}
             onClose={closeDrawer}
+            onDraftDiscarded={handleComposerDraftClosed}
+            onDraftSaved={handleComposerDraftChanged}
+            onDraftSent={handleComposerDraftClosed}
             saveDraft={saveComposerDraft}
             sendMail={sendComposerMail}
             stageAttachment={stageComposerAttachment}
@@ -1072,6 +1218,84 @@ function SearchStatusLine({
   return null;
 }
 
+function DraftsDrawer({
+  accounts,
+  drafts,
+  loadState,
+  onClose,
+  onOpenDraft,
+  onRetry,
+}: {
+  accounts: MailAccount[];
+  drafts: ComposerDraft[];
+  loadState: LoadStatus;
+  onClose: () => void;
+  onOpenDraft: (draftId: string) => void;
+  onRetry?: () => void;
+}) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+  const accountById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account])),
+    [accounts],
+  );
+
+  return (
+    <section className="composer-panel" aria-label={t("composer.drafts.aria")}>
+      <header className="settings-panel__header">
+        <div>
+          <p className="eyebrow">{t("composer.drafts.eyebrow")}</p>
+          <h2>{t("composer.drafts.heading")}</h2>
+        </div>
+        <button type="button" onClick={onClose}>
+          {t("common.actions.close")}
+        </button>
+      </header>
+
+      <section className="draft-list-panel" aria-label={t("composer.drafts.aria")}>
+        <StatusList
+          status={loadState}
+          loadingLabel={t("composer.drafts.loading")}
+          errorLabel={t("composer.drafts.error")}
+          empty={drafts.length === 0}
+          emptyLabel={t("composer.drafts.empty")}
+          onRetry={onRetry}
+        >
+          <ul className="draft-list">
+            {drafts.map((draft) => {
+              const account = accountById.get(draft.accountId);
+              const subject = draftSubjectLabel(draft, t);
+
+              return (
+                <li key={draft.id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenDraft(draft.id)}
+                    aria-label={t("composer.drafts.openAria", { subject })}
+                  >
+                    <strong>{subject}</strong>
+                    <span>
+                      {account?.label ?? account?.email ?? draft.accountId}
+                      {" · "}
+                      {draftRecipientPreview(draft, t)}
+                    </span>
+                    <small>
+                      {t("composer.drafts.attachmentCount", {
+                        count: draft.attachments.length,
+                        formattedCount: localeFormat.count(draft.attachments.length),
+                      })}
+                    </small>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </StatusList>
+      </section>
+    </section>
+  );
+}
+
 function StatusList({
   status,
   loadingLabel,
@@ -1111,6 +1335,35 @@ function StatusList({
   }
 
   return children;
+}
+
+function draftSubjectLabel(draft: ComposerDraft, t: TFunction) {
+  return draft.subject.trim() || t("composer.drafts.noSubject");
+}
+
+function draftRecipientPreview(draft: ComposerDraft, t: TFunction) {
+  const recipients = [...draft.to, ...draft.cc, ...draft.bcc];
+  if (recipients.length === 0) {
+    return t("composer.drafts.noRecipients");
+  }
+
+  const [firstRecipient, ...remainingRecipients] = recipients;
+  const label = firstRecipient
+    ? formatDraftRecipient(firstRecipient)
+    : t("composer.drafts.noRecipients");
+  if (remainingRecipients.length === 0) {
+    return label;
+  }
+
+  return t("composer.drafts.recipientSummary", {
+    count: remainingRecipients.length,
+    first: label,
+    formattedCount: remainingRecipients.length,
+  });
+}
+
+function formatDraftRecipient(address: { name: string | null; address: string }) {
+  return address.name ? `${address.name} <${address.address}>` : address.address;
 }
 
 function MessageListState({

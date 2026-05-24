@@ -6,6 +6,7 @@ const APP_COMMANDS: &[&str] = &[
     "stage_composer_attachment",
     "send_composer_email",
     "list_recent_recipients",
+    "list_composer_drafts",
     "create_account",
     "reauth_account",
     "remove_account",

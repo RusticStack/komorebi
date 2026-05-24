@@ -9,6 +9,7 @@ import {
   discardComposerDraftFromTauri,
   getAccountAuthStatusFromTauri,
   isTauriRuntime,
+  listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
   reauthAccountFromTauri,
@@ -38,6 +39,7 @@ function App(props: MailClientShellProps) {
   const runtimeRecentRecipients = isRuntime
     ? listRecentRecipientsFromTauri
     : undefined;
+  const runtimeComposerDrafts = isRuntime ? listComposerDraftsFromTauri : undefined;
   const runtimeCreateAccount = isRuntime ? createAccountFromTauri : undefined;
   const runtimeReauthAccount = isRuntime ? reauthAccountFromTauri : undefined;
   const runtimeStartOAuthAccountSetup = isRuntime
@@ -74,6 +76,7 @@ function App(props: MailClientShellProps) {
       loadRecentRecipients={
         props.loadRecentRecipients ?? runtimeRecentRecipients
       }
+      loadComposerDrafts={props.loadComposerDrafts ?? runtimeComposerDrafts}
       createAccount={props.createAccount ?? runtimeCreateAccount}
       reauthAccount={props.reauthAccount ?? runtimeReauthAccount}
       startOAuthAccountSetup={

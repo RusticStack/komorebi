@@ -5,6 +5,7 @@ import "../i18n";
 import type {
   ComposerAttachment,
   ComposerAttachmentStageRequest,
+  ComposerDraft,
   ComposerDraftDiscardRequest,
   ComposerDraftSaveRequest,
   ComposerDraftSaveResponse,
@@ -26,6 +27,7 @@ import {
 
 type E2eEvent =
   | { name: "load-mail-shell" }
+  | { name: "list-drafts" }
   | { name: "search-mail"; request: MailSearchRequest }
   | { name: "save-draft"; request: ComposerDraftSaveRequest }
   | { name: "discard-draft"; request: ComposerDraftDiscardRequest }
@@ -162,6 +164,32 @@ const archiveSearchResult: MailMessage = {
   unread: false,
 };
 
+const savedDrafts: ComposerDraft[] = [
+  {
+    accountId: "acct_personal",
+    attachments: [
+      {
+        accountId: "acct_personal",
+        contentId: null,
+        contentType: "text/plain",
+        displayFilename: "briefing.txt",
+        disposition: "attachment",
+        draftId: "draft_e2e_saved",
+        id: "catt_e2e_briefing",
+        sizeBytes: 5,
+      },
+    ],
+    autosaveRevision: 3,
+    bcc: [],
+    bodyHtml: "<p>Draft body from local cache.</p><p>Personal signature</p>",
+    bodyText: "Draft body from local cache.\nPersonal signature",
+    cc: [],
+    id: "draft_e2e_saved",
+    subject: "Saved local draft",
+    to: [{ address: "qa@example.com", name: null }],
+  },
+];
+
 const urlParams = new URLSearchParams(window.location.search);
 const performanceFixture =
   urlParams.get("fixture") === "performance"
@@ -179,6 +207,13 @@ async function loadMailShellData(): Promise<MailShellData> {
   await delay(performanceFixture ? 0 : 50);
 
   return clone(activeMail);
+}
+
+async function loadComposerDrafts(): Promise<ComposerDraft[]> {
+  e2eEvents.push({ name: "list-drafts" });
+  await delay(performanceFixture ? 0 : 30);
+
+  return clone(savedDrafts);
 }
 
 async function searchMail(
@@ -338,6 +373,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App
       discardComposerDraft={discardComposerDraft}
+      loadComposerDrafts={loadComposerDrafts}
       loadMailShellData={loadMailShellData}
       loadRecentRecipients={listRecentRecipients}
       saveComposerDraft={saveComposerDraft}

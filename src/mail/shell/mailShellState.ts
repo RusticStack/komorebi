@@ -117,6 +117,19 @@ export type ComposerAttachment = {
   contentId: string | null;
 };
 
+export type ComposerDraft = {
+  id: string;
+  accountId: string;
+  subject: string;
+  to: ComposerAddress[];
+  cc: ComposerAddress[];
+  bcc: ComposerAddress[];
+  bodyText: string | null;
+  bodyHtml: string | null;
+  attachments: ComposerAttachment[];
+  autosaveRevision: number;
+};
+
 export type ComposerDraftSaveRequest = {
   accountId: string;
   draftId: string;

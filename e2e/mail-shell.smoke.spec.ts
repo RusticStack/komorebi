@@ -41,18 +41,20 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
       .getByRole("heading", { name: "Phoenix report" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Compose" }).click();
+  await page.getByRole("button", { name: "Drafts, 1 saved locally" }).click();
+  const drafts = page.getByRole("dialog", { name: "Local drafts" });
+  await expect(drafts.getByText("Saved local draft")).toBeVisible();
+  await expect(drafts.getByText("1 attachment")).toBeVisible();
+  await drafts.getByRole("button", { name: "Open draft: Saved local draft" }).click();
+
   const composer = page.getByRole("dialog", { name: "Composer" });
   await expect(composer).toBeVisible();
   await expect(
     composer.getByText("Drafts stay local to this device until sent or discarded."),
   ).toBeVisible();
-
-  await composer.getByLabel("To").fill("qa@example.com");
-  await composer.getByLabel("Subject").fill("E2E smoke send");
-  await composer
-    .getByRole("textbox", { name: "Message body" })
-    .fill("Smoke body from Playwright.");
+  await expect(composer.getByLabel("To")).toHaveValue("qa@example.com");
+  await expect(composer.getByLabel("Subject")).toHaveValue("Saved local draft");
+  await expect(composer.getByText("briefing.txt - text/plain - 5 B")).toBeVisible();
   await composer.getByRole("button", { name: "Send" }).click();
 
   await expect(composer.getByText("Message sent")).toBeVisible();
@@ -62,11 +64,15 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
     const events =
       (
         window as Window & {
-          __KOMOREBI_E2E_EVENTS__?: Array<{ name: string }>;
+          __KOMOREBI_E2E_EVENTS__?: Array<{
+            name: string;
+            request?: { draftId?: string };
+          }>;
         }
       ).__KOMOREBI_E2E_EVENTS__ ?? [];
 
     return events.filter((event) => event.name === "send-mail");
   });
   expect(sentEvents).toHaveLength(1);
+  expect(sentEvents[0]?.request?.draftId).toBe("draft_e2e_saved");
 });

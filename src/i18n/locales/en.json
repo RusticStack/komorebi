@@ -237,6 +237,23 @@
         "inline": "inline"
       }
     },
+    "drafts": {
+      "aria": "Local drafts",
+      "attachmentCount_one": "{{formattedCount}} attachment",
+      "attachmentCount_other": "{{formattedCount}} attachments",
+      "button": "Drafts",
+      "buttonAria": "Drafts, {{formattedCount}} saved locally",
+      "empty": "No saved local drafts.",
+      "error": "Drafts could not be loaded.",
+      "eyebrow": "Composer",
+      "heading": "Local drafts",
+      "loading": "Loading drafts",
+      "noRecipients": "No recipients",
+      "noSubject": "No subject",
+      "openAria": "Open draft: {{subject}}",
+      "recipientSummary_one": "{{first}} and {{count}} more",
+      "recipientSummary_other": "{{first}} and {{count}} more"
+    },
     "autocomplete": {
       "duplicateSkipped": "Duplicate recipient skipped: {{address}} in {{fieldLabel}} already appears in {{firstFieldLabel}}."
     },

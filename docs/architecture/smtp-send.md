@@ -155,7 +155,6 @@ Normal checks do not use a live mailbox, live SMTP server, real account, or real
 
 ## Not Implemented
 
-- Draft reload/reopen UI after restart.
 - Provider-specific setup documentation for obtaining OAuth client IDs and test refresh tokens.
 
 ## Documentation Sync

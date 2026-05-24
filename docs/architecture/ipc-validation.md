@@ -13,6 +13,7 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `stage_composer_attachment`: typed user-selected byte staging with backend-generated storage paths.
 - `send_composer_email`: typed send request routed through Rust SMTP/draft/credential boundaries.
 - `list_recent_recipients`: typed local recent-recipient autocomplete query.
+- `list_composer_drafts`: inputless local draft reload/reopen query.
 - `create_account`: typed generic account setup that enforces provider/auth policy, runs live generic IMAP/SMTP login checks before credential and metadata writes, and rejects direct Gmail/Microsoft secret handoff.
 - `reauth_account`: typed generic credential rotation for an existing account and rejection path for Gmail/Microsoft OAuth accounts.
 - `start_oauth_account_setup`: typed Gmail/Microsoft OAuth loopback setup that validates account metadata/client id, opens the browser from Rust, validates callback state, exchanges the authorization code in Rust, requires a refresh token, stores it without exposing secrets to React, persists non-secret OAuth runtime metadata, and starts the backend sync scheduler for the account.
@@ -24,7 +25,7 @@ Komorebi has reviewed frontend-callable IPC commands:
 
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
 
-Composer commands validate account/draft/attachment ids, payload sizes, address shapes on send, sanitized body wrappers, staged attachment ownership, MIME type/size, local recent-recipient account scope, and app-data storage scope before side effects. They never accept frontend-supplied filesystem paths, raw SQL, credential material, or arbitrary provider commands. `stage_composer_attachment` accepts bytes from a browser `File` selected by the user and writes only to a Rust-generated app-data path.
+Composer commands validate account/draft/attachment ids, payload sizes, address shapes on send, sanitized body wrappers, staged attachment ownership, MIME type/size, local recent-recipient account scope, and app-data storage scope before side effects. They never accept frontend-supplied filesystem paths, raw SQL, credential material, or arbitrary provider commands. `stage_composer_attachment` accepts bytes from a browser `File` selected by the user and writes only to a Rust-generated app-data path. `list_composer_drafts` accepts no request fields and returns active local drafts with typed address/body fields and display-safe attachment metadata only; it does not expose storage paths or hashes.
 
 The composer frontend sanitizer is `src/mail/composer/composerRichText.ts`. It is the reviewed source for rich HTML that may cross IPC: only the supported TipTap subset is preserved, and inline styles are reduced to whitelisted alignment, color, background-color, font-size, and font-family values before Rust accepts `DraftHtml` or `SanitizedHtml` wrappers.
 

@@ -237,6 +237,23 @@
         "inline": "inline"
       }
     },
+    "drafts": {
+      "aria": "Rascunhos locais",
+      "attachmentCount_one": "{{formattedCount}} anexo",
+      "attachmentCount_other": "{{formattedCount}} anexos",
+      "button": "Rascunhos",
+      "buttonAria": "Rascunhos, {{formattedCount}} guardados localmente",
+      "empty": "Sem rascunhos locais guardados.",
+      "error": "Nao foi possivel carregar os rascunhos.",
+      "eyebrow": "Compositor",
+      "heading": "Rascunhos locais",
+      "loading": "A carregar rascunhos",
+      "noRecipients": "Sem destinatarios",
+      "noSubject": "Sem assunto",
+      "openAria": "Abrir rascunho: {{subject}}",
+      "recipientSummary_one": "{{first}} e mais {{count}}",
+      "recipientSummary_other": "{{first}} e mais {{count}}"
+    },
     "autocomplete": {
       "duplicateSkipped": "Destinatario duplicado ignorado: {{address}} em {{fieldLabel}} ja aparece em {{firstFieldLabel}}."
     },

@@ -21,9 +21,9 @@ use crate::{
     auth::ProviderKind,
     credentials::WindowsCredentialManager,
     draft_persistence::{
-        autosave_draft, discard_draft, ensure_active_draft, ComposerDraftRecord,
-        DiscardDraftRequest, DraftAutosaveRequest, DraftHtml, DraftPersistenceError,
-        SentFolderPolicy, SentFolderSyncState,
+        autosave_draft, discard_draft, ensure_active_draft, list_active_drafts,
+        ComposerDraftRecord, DiscardDraftRequest, DraftAutosaveRequest, DraftHtml,
+        DraftPersistenceError, SentFolderPolicy, SentFolderSyncState,
     },
     ipc_validation::{
         validate_bounded_text, validate_entity_id, validate_payload_size, IpcValidationError,
@@ -115,6 +115,21 @@ pub struct ComposerDraftView {
     pub account_id: String,
     pub autosave_revision: u64,
     pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerDraftListItemView {
+    pub id: String,
+    pub account_id: String,
+    pub subject: String,
+    pub to: Vec<ComposerAddress>,
+    pub cc: Vec<ComposerAddress>,
+    pub bcc: Vec<ComposerAddress>,
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub attachments: Vec<ComposerAttachmentView>,
+    pub autosave_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -306,6 +321,14 @@ pub fn list_recent_recipients(
     list_recent_recipients_from_path(&cache_path, request)
 }
 
+#[tauri::command]
+pub fn list_composer_drafts(
+    app: tauri::AppHandle,
+) -> Result<Vec<ComposerDraftListItemView>, ComposerCommandError> {
+    let cache_path = mail_cache_path(&app)?;
+    list_composer_drafts_from_path(&cache_path)
+}
+
 pub fn autosave_composer_draft_from_path(
     cache_path: &Path,
     request: ComposerDraftSaveRequest,
@@ -327,6 +350,28 @@ pub fn autosave_composer_draft_from_connection(
     )?;
     let record = autosave_draft(connection, draft_autosave_request(request)?)?;
     Ok(draft_view(record))
+}
+
+pub fn list_composer_drafts_from_path(
+    cache_path: &Path,
+) -> Result<Vec<ComposerDraftListItemView>, ComposerCommandError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    list_composer_drafts_from_connection(&connection)
+}
+
+pub fn list_composer_drafts_from_connection(
+    connection: &Connection,
+) -> Result<Vec<ComposerDraftListItemView>, ComposerCommandError> {
+    let account_ids = active_account_ids(connection)?;
+    let mut drafts = Vec::new();
+    for account_id in account_ids {
+        for record in list_active_drafts(connection, &account_id)? {
+            drafts.push(draft_list_item_view(connection, record)?);
+        }
+    }
+
+    Ok(drafts)
 }
 
 pub fn discard_composer_draft_from_path(
@@ -842,6 +887,128 @@ fn ensure_composer_attachments_exist(
     Ok(())
 }
 
+fn active_account_ids(connection: &Connection) -> Result<Vec<String>, ComposerCommandError> {
+    let mut statement = connection.prepare(
+        "SELECT id
+         FROM accounts
+         WHERE auth_status != 'removed'
+         ORDER BY display_name COLLATE NOCASE, display_email COLLATE NOCASE, id",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut account_ids = Vec::new();
+    for row in rows {
+        account_ids.push(row?);
+    }
+    Ok(account_ids)
+}
+
+fn draft_list_item_view(
+    connection: &Connection,
+    record: ComposerDraftRecord,
+) -> Result<ComposerDraftListItemView, ComposerCommandError> {
+    let attachment_ids = attachment_ids_from_json(&record.attachment_ids_json)?;
+    let attachments = composer_attachments_for_draft(
+        connection,
+        &record.account_id,
+        &record.id,
+        &attachment_ids,
+    )?;
+
+    Ok(ComposerDraftListItemView {
+        id: record.id,
+        account_id: record.account_id,
+        subject: record.subject,
+        to: composer_addresses_from_json("to", &record.to_addresses_json)?,
+        cc: composer_addresses_from_json("cc", &record.cc_addresses_json)?,
+        bcc: composer_addresses_from_json("bcc", &record.bcc_addresses_json)?,
+        body_text: record.body_text,
+        body_html: record.body_html,
+        attachments,
+        autosave_revision: record.autosave_revision,
+    })
+}
+
+fn composer_addresses_from_json(
+    field: &'static str,
+    value: &str,
+) -> Result<Vec<ComposerAddress>, ComposerCommandError> {
+    let addresses: Vec<ComposerAddress> = serde_json::from_str(value)
+        .map_err(|_| ComposerCommandError::new("draft addresses are invalid"))?;
+    for address in &addresses {
+        validate_payload_size(field, address.address.as_bytes(), MAX_TEXT_FIELD_BYTES)?;
+        if let Some(name) = &address.name {
+            validate_payload_size(field, name.as_bytes(), MAX_TEXT_FIELD_BYTES)?;
+        }
+    }
+    Ok(addresses)
+}
+
+fn attachment_ids_from_json(value: &str) -> Result<Vec<String>, ComposerCommandError> {
+    let ids: Vec<String> = serde_json::from_str(value)
+        .map_err(|_| ComposerCommandError::new("draft attachment ids are invalid"))?;
+    for id in &ids {
+        validate_entity_id("attachment_id", id)?;
+    }
+    Ok(ids)
+}
+
+fn composer_attachments_for_draft(
+    connection: &Connection,
+    account_id: &str,
+    draft_id: &str,
+    attachment_ids: &[String],
+) -> Result<Vec<ComposerAttachmentView>, ComposerCommandError> {
+    validate_entity_id("account_id", account_id)?;
+    validate_entity_id("draft_id", draft_id)?;
+    if attachment_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut statement = connection.prepare(
+        "SELECT
+           id,
+           disposition,
+           content_id,
+           display_filename,
+           canonical_mime,
+           size_bytes
+         FROM composer_attachments
+         WHERE account_id = ?1 AND draft_id = ?2",
+    )?;
+    let rows = statement.query_map(params![account_id, draft_id], |row| {
+        let disposition: String = row.get(1)?;
+        let size_bytes: i64 = row.get(5)?;
+        Ok(ComposerAttachmentView {
+            id: row.get(0)?,
+            account_id: account_id.to_string(),
+            draft_id: draft_id.to_string(),
+            display_filename: row.get(3)?,
+            content_type: row.get(4)?,
+            size_bytes: size_bytes as u64,
+            disposition: composer_disposition_from_schema_value(&disposition),
+            content_id: row.get(2)?,
+        })
+    })?;
+
+    let mut by_id = HashMap::new();
+    for row in rows {
+        let attachment = row?;
+        by_id.insert(attachment.id.clone(), attachment);
+    }
+
+    let mut ordered = Vec::new();
+    for attachment_id in attachment_ids {
+        let Some(attachment) = by_id.remove(attachment_id) else {
+            return Err(ComposerCommandError::new(
+                "composer attachment was not found",
+            ));
+        };
+        ordered.push(attachment);
+    }
+
+    Ok(ordered)
+}
+
 fn composer_attachment_relative_path(
     account_id: &str,
     draft_id: &str,
@@ -979,6 +1146,13 @@ fn composer_disposition_schema_value(disposition: ComposerAttachmentDisposition)
     match disposition {
         ComposerAttachmentDisposition::Attachment => "attachment",
         ComposerAttachmentDisposition::Inline => "inline",
+    }
+}
+
+fn composer_disposition_from_schema_value(value: &str) -> ComposerAttachmentDisposition {
+    match value {
+        "inline" => ComposerAttachmentDisposition::Inline,
+        _ => ComposerAttachmentDisposition::Attachment,
     }
 }
 
@@ -1581,6 +1755,62 @@ mod tests {
         assert!(body_html.contains("<s>"));
         assert!(body_html.contains("<pre><code>const ok = true;</code></pre>"));
         assert!(body_html.contains("font-family: Georgia"));
+    }
+
+    #[test]
+    fn list_composer_drafts_returns_active_drafts_with_staged_attachment_metadata() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        autosave_composer_draft_from_connection(&connection, draft_save_request()).unwrap();
+        let app_data_dir = temp_app_data_dir("list-drafts");
+        let staged = stage_composer_attachment_from_connection(
+            &connection,
+            &app_data_dir,
+            ComposerAttachmentStageRequest {
+                account_id: "acct_composer".into(),
+                draft_id: "draft_composer".into(),
+                display_filename: "briefing.txt".into(),
+                content_type: Some("text/plain".into()),
+                disposition: ComposerAttachmentDisposition::Attachment,
+                bytes: b"draft attachment".to_vec(),
+            },
+        )
+        .unwrap();
+        let mut request = draft_save_request();
+        request.attachment_ids = vec![staged.id.clone()];
+        autosave_composer_draft_from_connection(&connection, request).unwrap();
+
+        let drafts = list_composer_drafts_from_connection(&connection).unwrap();
+
+        assert_eq!(drafts.len(), 1);
+        let draft = &drafts[0];
+        assert_eq!(draft.id, "draft_composer");
+        assert_eq!(draft.account_id, "acct_composer");
+        assert_eq!(draft.subject, "Composer subject");
+        assert_eq!(draft.to[0].address, "recipient@example.com");
+        assert_eq!(
+            draft.body_html.as_deref(),
+            Some("<p>Hello from <strong>composer</strong></p>")
+        );
+        assert_eq!(draft.attachments.len(), 1);
+        assert_eq!(draft.attachments[0].id, staged.id);
+        assert_eq!(draft.attachments[0].display_filename, "briefing.txt");
+        assert_eq!(draft.attachments[0].content_type, "text/plain");
+
+        discard_composer_draft_from_connection(
+            &connection,
+            &app_data_dir,
+            ComposerDraftDiscardRequest {
+                account_id: "acct_composer".into(),
+                draft_id: "draft_composer".into(),
+            },
+        )
+        .unwrap();
+        assert!(list_composer_drafts_from_connection(&connection)
+            .unwrap()
+            .is_empty());
+
+        fs::remove_dir_all(app_data_dir).unwrap();
     }
 
     #[test]

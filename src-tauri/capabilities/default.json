@@ -13,6 +13,7 @@
     "allow-stage-composer-attachment",
     "allow-send-composer-email",
     "allow-list-recent-recipients",
+    "allow-list-composer-drafts",
     "allow-create-account",
     "allow-reauth-account",
     "allow-remove-account",

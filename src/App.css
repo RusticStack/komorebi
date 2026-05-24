@@ -350,6 +350,35 @@ textarea:disabled {
   color: #fffaf5;
 }
 
+.list-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.list-toolbar__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-toolbar__actions button:first-child {
+  border-color: #c8d4c7;
+  background: #eef4ed;
+  color: #2f4d3d;
+}
+
+.list-toolbar__actions button span {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 68%);
+  color: inherit;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
 .settings-button {
   min-height: 38px;
   padding: 8px 10px;
@@ -788,6 +817,46 @@ textarea:disabled {
   display: grid;
   align-content: start;
   gap: 16px;
+}
+
+.draft-list-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.draft-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-list button {
+  display: grid;
+  width: 100%;
+  gap: 5px;
+  padding: 12px;
+  text-align: left;
+  background: #f7f5f2;
+  color: #2d2d2d;
+}
+
+.draft-list strong,
+.draft-list span,
+.draft-list small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.draft-list span {
+  color: #5c5750;
+  font-size: 0.88rem;
+}
+
+.draft-list small {
+  color: #827b72;
 }
 
 .account-settings h3,
@@ -1259,6 +1328,10 @@ textarea:focus-visible,
     grid-template-columns: 1fr;
   }
 
+  .list-toolbar__actions {
+    justify-content: flex-start;
+  }
+
   .list-toolbar button {
     justify-self: start;
   }
@@ -1294,5 +1367,9 @@ textarea:focus-visible,
   .settings-drawer,
   .composer-drawer {
     width: 100vw;
+  }
+
+  .composer-recipient-grid {
+    grid-template-columns: 1fr;
   }
 }

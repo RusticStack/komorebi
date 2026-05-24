@@ -4,6 +4,7 @@ import type {
   ComposerAttachment,
   ComposerAttachmentStageRequest,
   ComposerDraftDiscardRequest,
+  ComposerDraft,
   ComposerDraftSaveRequest,
   ComposerDraftSaveResponse,
   ComposerSendRequest,
@@ -52,6 +53,7 @@ const DISCARD_COMPOSER_DRAFT_COMMAND = "discard_composer_draft";
 const STAGE_COMPOSER_ATTACHMENT_COMMAND = "stage_composer_attachment";
 const SEND_COMPOSER_EMAIL_COMMAND = "send_composer_email";
 const LIST_RECENT_RECIPIENTS_COMMAND = "list_recent_recipients";
+const LIST_COMPOSER_DRAFTS_COMMAND = "list_composer_drafts";
 const CREATE_ACCOUNT_COMMAND = "create_account";
 const REAUTH_ACCOUNT_COMMAND = "reauth_account";
 const REMOVE_ACCOUNT_COMMAND = "remove_account";
@@ -134,6 +136,10 @@ export async function listRecentRecipientsFromTauri(
   throwIfAborted(signal);
 
   return response;
+}
+
+export async function listComposerDraftsFromTauri(): Promise<ComposerDraft[]> {
+  return invoke<ComposerDraft[]>(LIST_COMPOSER_DRAFTS_COMMAND);
 }
 
 export async function createAccountFromTauri(

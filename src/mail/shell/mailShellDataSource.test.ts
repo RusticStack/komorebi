@@ -23,6 +23,7 @@ import {
   createAccountFromTauri,
   getAccountAuthStatusFromTauri,
   isTauriRuntime,
+  listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
   reauthAccountFromTauri,
@@ -172,6 +173,27 @@ describe("mailShellDataSource", () => {
     expect(invokeMock).toHaveBeenCalledWith("autosave_composer_draft", {
       request,
     });
+  });
+
+  it("loads active composer drafts through the reviewed read command", async () => {
+    const drafts = [
+      {
+        accountId: "acct_personal",
+        attachments: [],
+        autosaveRevision: 3,
+        bcc: [],
+        bodyHtml: "<p>Draft body</p>",
+        bodyText: "Draft body",
+        cc: [],
+        id: "draft_123",
+        subject: "Saved local draft",
+        to: [{ address: "ada@example.com", name: "Ada" }],
+      },
+    ];
+    invokeMock.mockResolvedValueOnce(drafts);
+
+    await expect(listComposerDraftsFromTauri()).resolves.toBe(drafts);
+    expect(invokeMock).toHaveBeenCalledWith("list_composer_drafts");
   });
 
   it("maps account management workflows to typed Tauri commands", async () => {

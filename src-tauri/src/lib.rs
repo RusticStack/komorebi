@@ -57,6 +57,7 @@ pub fn run() {
             composer::stage_composer_attachment,
             composer::send_composer_email,
             composer::list_recent_recipients,
+            composer::list_composer_drafts,
             account_management::create_account,
             account_management::reauth_account,
             account_management::remove_account,

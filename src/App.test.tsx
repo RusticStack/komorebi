@@ -12,6 +12,7 @@ import { formatDateTime } from "./i18n";
 import type {
   ComposerAttachment,
   ComposerAttachmentStageRequest,
+  ComposerDraft,
   ComposerDraftDiscardRequest,
   ComposerDraftSaveRequest,
   ComposerDraftSaveResponse,
@@ -463,6 +464,91 @@ describe("App", () => {
       disposition: "attachment",
     });
     expect(stageRequest.bytes).toEqual([104, 101, 108, 108, 111]);
+  });
+
+  it("loads active local drafts and reopens them without creating a new send draft", async () => {
+    const handlers = composerTestHandlers();
+    const savedDraft: ComposerDraft = {
+      accountId: "acct_personal",
+      attachments: [
+        {
+          accountId: "acct_personal",
+          contentId: null,
+          contentType: "text/plain",
+          displayFilename: "briefing.txt",
+          disposition: "attachment",
+          draftId: "draft_existing",
+          id: "catt_briefing",
+          sizeBytes: 5,
+        },
+      ],
+      autosaveRevision: 4,
+      bcc: [],
+      bodyHtml: "<p>Draft body</p><p>Personal signature</p>",
+      bodyText: "Draft body\nPersonal signature",
+      cc: [{ address: "copy@example.com", name: null }],
+      id: "draft_existing",
+      subject: "Budget update",
+      to: [{ address: "ada@example.com", name: "Ada Lovelace" }],
+    };
+    const loadComposerDrafts = vi
+      .fn<() => Promise<ComposerDraft[]>>()
+      .mockResolvedValueOnce([savedDraft])
+      .mockResolvedValue([]);
+
+    render(
+      <App
+        initialData={fixtureMail}
+        loadComposerDrafts={loadComposerDrafts}
+        {...handlers}
+      />,
+    );
+
+    const draftsButton = await screen.findByRole("button", {
+      name: "Drafts, 1 saved locally",
+    });
+    fireEvent.click(draftsButton);
+
+    const draftsDialog = screen.getByRole("dialog", { name: "Local drafts" });
+    expect(within(draftsDialog).getByText("Budget update")).toBeVisible();
+    expect(within(draftsDialog).getByText(/Ada Lovelace/)).toBeVisible();
+    expect(within(draftsDialog).getByText("1 attachment")).toBeVisible();
+
+    fireEvent.click(
+      within(draftsDialog).getByRole("button", {
+        name: "Open draft: Budget update",
+      }),
+    );
+
+    const composer = screen.getByRole("dialog", { name: "Composer" });
+    expect(within(composer).getByLabelText("From")).toHaveValue("acct_personal");
+    expect(within(composer).getByLabelText("From")).toBeDisabled();
+    expect(within(composer).getByLabelText("To")).toHaveValue(
+      "Ada Lovelace <ada@example.com>",
+    );
+    expect(within(composer).getByLabelText("CC")).toHaveValue("copy@example.com");
+    expect(within(composer).getByLabelText("Subject")).toHaveValue(
+      "Budget update",
+    );
+    expect(
+      within(composer).getByRole("textbox", { name: "Message body" }),
+    ).toHaveTextContent("Draft body");
+    expect(
+      within(composer).getByRole("textbox", { name: "Message body" }),
+    ).toHaveTextContent("Personal signature");
+    expect(
+      within(composer).getByText(/briefing\.txt - text\/plain - 5 B/),
+    ).toBeVisible();
+
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(handlers.sendComposerMail).toHaveBeenCalledTimes(1));
+    expect(handlers.sendComposerMail.mock.calls[0][0]).toMatchObject({
+      attachmentIds: ["catt_briefing"],
+      draftId: "draft_existing",
+      subject: "Budget update",
+      to: [{ address: "ada@example.com", name: "Ada Lovelace" }],
+    });
+    expect(await within(composer).findByText("SMTP accepted")).toBeVisible();
   });
 
   it("shows composer validation errors before send", async () => {

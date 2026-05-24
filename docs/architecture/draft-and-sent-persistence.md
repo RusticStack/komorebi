@@ -1,7 +1,7 @@
 # Draft And Sent Persistence
 
-Status: backend local draft persistence, frontend autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is intentionally deferred and drafts are local-only until sent or discarded.
-Last reviewed: 2026-05-23.
+Status: backend local draft persistence, frontend draft reload/reopen UI, autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is intentionally deferred and drafts are local-only until sent or discarded.
+Last reviewed: 2026-05-24.
 
 ## Current Scope
 
@@ -12,7 +12,7 @@ Komorebi persists composer drafts locally in SQLite and links successful sends t
 - Active drafts are stored in `composer_drafts`.
 - Active drafts are local-only; they are not uploaded to provider Drafts folders.
 - Autosave updates the same active draft and increments `autosave_revision`.
-- Restart recovery loads active drafts by account from SQLite.
+- Restart recovery loads active drafts plus display-safe staged attachment metadata from SQLite through `list_composer_drafts`.
 - Intentional discard marks the draft `discarded` and clears subject, recipients, body, and attachment ids.
 - Confirmed send marks the draft `sent`, links `sent_receipt_id`, sets `sent_at`, and clears private draft content.
 - Every confirmed send gets a `sent_mail_copies` record that says whether provider Sent upload is unnecessary, pending, or unsupported.
@@ -23,8 +23,10 @@ This persistence boundary is now exposed through reviewed Tauri commands for the
 
 - `autosave_composer_draft`
 - `discard_composer_draft`
+- `stage_composer_attachment`
 - `send_composer_email`
 - `list_recent_recipients`
+- `list_composer_drafts`
 
 The commands keep draft mutation in Rust, validate ids/payloads/ownership, and are granted only through narrow capability permissions.
 
@@ -81,6 +83,14 @@ The frontend TipTap composer debounces autosave and also exposes a manual Save d
 The composer status copy tells users that drafts stay local to the device until sent or discarded. Do not remove or soften this copy unless provider Drafts upload exists with retry, delete, conflict, and cleanup semantics.
 
 The same draft id can be autosaved repeatedly while active. Autosaving a discarded or sent draft is rejected instead of reviving stale private content.
+
+## Reload And Reopen
+
+`list_composer_drafts` is an inputless read command exposed by `src-tauri/src/composer.rs`. It applies migrations, loads active drafts for non-removed accounts, parses persisted To/CC/BCC JSON into typed address records, and returns only composer fields plus display-safe attachment metadata. It does not return attachment storage paths, app-data locations, hashes, credential refs, raw SQL, or filesystem handles.
+
+The React shell loads this list on startup through `loadComposerDrafts`. The message toolbar shows a Drafts entry with the active local draft count. The Drafts drawer lists subject, account, recipient preview, and attachment count; selecting a draft opens `TipTapComposer` with the original draft id, account, recipients, subject, sanitized rich body, existing signature content, and staged attachment metadata restored.
+
+Reopened drafts keep the original draft id for autosave and send. The account selector is locked for reopened drafts because `composer_drafts.id` is the primary identity and the persisted row is account-owned. Confirmed send or intentional discard removes the draft from the list and does not create a second draft or duplicate send state.
 
 ## Discard
 
@@ -174,6 +184,7 @@ The worker never deletes `smtp_send_receipts` on APPEND failure. A failed upload
 `src-tauri/src/composer.rs` tests cover:
 
 - Autosave command mapping.
+- Active draft list/reopen projection with display-safe staged attachment metadata.
 - Rich composer HTML autosave persistence.
 - Staged attachment storage under backend-generated app-data paths.
 - Unsafe attachment content denial.
@@ -182,13 +193,12 @@ The worker never deletes `smtp_send_receipts` on APPEND failure. A failed upload
 - Invalid send address denial before SMTP work.
 - Duplicate recipient normalization and recent-recipient autocomplete persistence after confirmed fake SMTP send.
 
-`src/App.test.tsx` covers frontend autosave/save, address validation, duplicate recipient handling, keyboard recent-recipient autocomplete, attachment and inline-image staging request shapes, signature insertion, send request shape, progress rendering, and redacted SMTP failure mapping.
+`src/App.test.tsx` covers frontend autosave/save, draft list loading, reopened draft hydration, address validation, duplicate recipient handling, keyboard recent-recipient autocomplete, attachment and inline-image staging request shapes, signature insertion, send request shape, progress rendering, and redacted SMTP failure mapping.
 
 Normal tests use no live mailbox, live SMTP server, real account, or real credential. `src-tauri/tests/live_smtp_smoke.rs` is ignored and env-gated for explicit user-provided live SMTP test accounts only.
 
 ## Not Implemented
 
-- Frontend draft reload/reopen UI after restart.
 - Provider Drafts-folder upload remains intentionally deferred; current UI/docs disclose local-only drafts.
 - Live IMAP/provider verification beyond the ignored SMTP smoke test.
 
