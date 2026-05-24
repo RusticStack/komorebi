@@ -9,6 +9,7 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `load_mail_shell`: inputless, read-only local-cache shell snapshot.
 - `search_mail`: read-only local-cache FTS query with a typed request.
 - `allow_remote_content`: typed remote-content preference persistence for a stored message or sender.
+- `perform_mail_action`: typed server-affecting reader action for mark-read/unread, move, archive, delete-to-trash, and expunge.
 - `open_external_link`: typed external link opening for delegated, sanitized message links.
 - `preview_attachment`: typed reader preview for stored local-cache attachment content.
 - `save_attachment`: typed reader save for stored local-cache attachment content through a backend-owned native save dialog.
@@ -31,6 +32,8 @@ Komorebi has reviewed frontend-callable IPC commands:
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
 
 `allow_remote_content` validates account/folder/message id shape, active account/folder/message ownership, and `userRequested=true` before writing a SQLite preference row. The request may choose only `message` or `sender` scope; React never supplies sender email or remote URLs. Sender-scoped preferences derive the sender from the stored message row and reject messages without a usable sender address.
+
+`perform_mail_action` validates account/folder/message id shape, active ownership, `userRequested=true`, confirmation for delete-to-trash and expunge, target-folder ownership for moves, archive/trash special-folder availability, and retry attempts before live IMAP mutation or local cache update. Rust resolves remote folder names and stored UIDs from SQLite. React cannot submit raw IMAP commands, raw SQL, credential refs, local paths, remote provider folder names for archive/delete, or hard-delete requests. The command stops the account sync worker around accepted mutations, returns redacted retry metadata for transient failures, and returns undo metadata only for reversible actions.
 
 `open_external_link` validates `userRequested=true`, URL length, absolute URL parsing, scheme, host policy, credential absence, and command-specific `mailto` fields before opening. `http` and `https` links require public hosts and reject loopback, localhost, link-local, and private network hosts. `mailto` links require at least one valid recipient and allow only `to`, `cc`, `bcc`, and `subject`; body/attachment fields, encoded control characters, local paths, scripts, and custom schemes are denied. Errors must not echo rejected URLs.
 
@@ -94,6 +97,8 @@ Do not add a command if validation depends on real mailboxes, real credentials, 
 
 Reader attachment commands are the file-operation examples: request fields are typed, IDs are ownership-checked against active account/folder/message rows, persisted source paths are treated as untrusted cache state and canonicalized under app data, content is revalidated by hash/size/sniffing before any IPC byte response or file write, save destinations come from a backend-owned native dialog, overwrites are refused, and external open remains unavailable.
 
+Mail actions are the server-mutation examples: request fields are typed, IDs are ownership-checked against active cache rows, delete and expunge require confirmation, archive/delete special folders are backend-resolved, retries are bounded, and local cache updates occur only after the live adapter accepts the remote mutation. Delete-to-trash is the default delete path; direct hard delete is not a command variant.
+
 Composer commands are the mutating examples: request fields are typed, HTML is accepted only through sanitizer-backed frontend output plus backend `DraftHtml`/`SanitizedHtml` wrappers, rich formatting is constrained to the reviewed TipTap/sanitizer whitelist, attachments are staged by bytes rather than paths, staged ids are ownership-checked, duplicate recipients are normalized before persistence/send, recent-recipient lookup is account-scoped and read-only, and send calls the existing SMTP boundary plus pending Sent APPEND scheduler path instead of exposing credentials or transport details to React.
 
 Cross-command denial coverage lives in `src-tauri/tests/ipc_denial_paths.rs`. Keep it focused on public command-level entry points, disposable SQLite databases, temp app-data directories, and fake stores; it should fail before any new IPC surface accepts invalid IDs, raw SQL-shaped text, frontend paths, unowned scope, oversized payloads, or unauthorized server-affecting actions.
@@ -113,6 +118,7 @@ Rust tests cover:
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
 - Reader attachment denial paths for missing user intent, invalid IDs, unowned scope, missing stored content, persisted path traversal, hash mismatch, size/type mismatch, unpreviewable types, spoofed selected-save extensions, and overwrite refusal.
 - Remote-content preference denial paths for missing user intent, invalid IDs, unknown or unowned account/folder/message scope, and missing usable sender addresses before persistence.
+- Mail-action denial paths for missing user intent, invalid IDs, unknown or unowned account/folder/message scope, missing delete/expunge confirmation, missing special-use targets, transient retry metadata, and unauthorized action rejection before fake-store mutation.
 - External-link denial paths for missing user intent, scripts, local paths, custom schemes, embedded credentials, private/local hosts, unsupported `mailto` fields, encoded control characters, and redacted unsafe URL errors before opener calls.
 - Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, sanitized rich-HTML handling, and send validation before SMTP work.
 - Account-management denial paths for unsupported provider/auth combinations, invalid account ids, invalid hosts, plaintext transport, protocol-injection secrets, oversized account fields, direct Gmail/Microsoft secret-handoff rejection, live generic login failure before credential persistence, credential-store failure before metadata persistence, unknown account removal, account settings invalid/unknown/oversized field rejection, and redacted auth status.

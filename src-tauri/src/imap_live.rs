@@ -187,6 +187,34 @@ impl LiveImapAdapter {
             .count())
     }
 
+    pub fn move_messages(
+        &mut self,
+        account_id: &str,
+        source_remote_id: &str,
+        target_remote_id: &str,
+        uids: &[u64],
+    ) -> Result<LiveImapMoveResult, SyncError> {
+        self.ensure_account(account_id)?;
+        if uids.is_empty() {
+            return Ok(LiveImapMoveResult {
+                destination_uid_validity: None,
+                destination_uids: Vec::new(),
+            });
+        }
+
+        self.ensure_selected(source_remote_id)?;
+        let uid_set = uid_sequence_set(uids)?;
+        let target = quote_imap_string(target_remote_id)?;
+        let command = format!("UID MOVE {uid_set} {target}");
+        let timeout = self.config.timeout;
+        let max_message_bytes = self.config.max_message_bytes;
+        let responses = self
+            .connection_mut()?
+            .run_command(&command, timeout, max_message_bytes)?;
+
+        Ok(parse_move_result(&responses))
+    }
+
     pub fn sent_message_exists(
         &mut self,
         account_id: &str,
@@ -199,6 +227,18 @@ impl LiveImapAdapter {
         Ok(!self
             .uid_search(&format!("HEADER Message-ID {message_id}"))?
             .is_empty())
+    }
+
+    pub fn find_message_uids_by_message_id(
+        &mut self,
+        account_id: &str,
+        remote_id: &str,
+        rfc_message_id: &str,
+    ) -> Result<BTreeSet<u64>, SyncError> {
+        self.ensure_account(account_id)?;
+        self.ensure_selected(remote_id)?;
+        let message_id = quote_imap_string(rfc_message_id)?;
+        self.uid_search(&format!("HEADER Message-ID {message_id}"))
     }
 
     pub fn append_sent_message(
@@ -874,6 +914,12 @@ pub struct LiveImapAppendResult {
     pub uid: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveImapMoveResult {
+    pub destination_uid_validity: Option<u64>,
+    pub destination_uids: Vec<u64>,
+}
+
 #[derive(Debug)]
 enum ImapReadError {
     TimedOut,
@@ -1045,6 +1091,59 @@ fn parse_append_uid(line: &str) -> Option<LiveImapAppendResult> {
         uid_validity: Some(uid_validity),
         uid: Some(uid),
     })
+}
+
+fn parse_move_result(responses: &[ImapResponse]) -> LiveImapMoveResult {
+    responses
+        .iter()
+        .rev()
+        .find_map(|response| parse_copy_uid(&response.text()))
+        .unwrap_or(LiveImapMoveResult {
+            destination_uid_validity: None,
+            destination_uids: Vec::new(),
+        })
+}
+
+fn parse_copy_uid(line: &str) -> Option<LiveImapMoveResult> {
+    let upper = line.to_ascii_uppercase();
+    let position = upper.find("[COPYUID ")?;
+    let after = line.get(position + "[COPYUID ".len()..)?;
+    let mut parts =
+        after.split(|character: char| character.is_ascii_whitespace() || character == ']');
+    let uid_validity = parts.next()?.parse().ok()?;
+    let _source_uids = parts.next()?;
+    let destination_uids = parse_uid_sequence_values(parts.next()?)?;
+
+    Some(LiveImapMoveResult {
+        destination_uid_validity: Some(uid_validity),
+        destination_uids,
+    })
+}
+
+fn parse_uid_sequence_values(value: &str) -> Option<Vec<u64>> {
+    if value.trim().is_empty() {
+        return None;
+    }
+
+    let mut uids = Vec::new();
+    for part in value.split(',') {
+        if let Some((start, end)) = part.split_once(':') {
+            let start = start.parse::<u64>().ok()?;
+            let end = end.parse::<u64>().ok()?;
+            if start == 0 || end == 0 || start > end {
+                return None;
+            }
+            uids.extend(start..=end);
+        } else {
+            let uid = part.parse::<u64>().ok()?;
+            if uid == 0 {
+                return None;
+            }
+            uids.push(uid);
+        }
+    }
+
+    Some(uids)
 }
 
 fn quote_imap_string(value: &str) -> Result<String, SyncError> {
@@ -1564,6 +1663,7 @@ mod tests {
             script.expect_fetch_messages();
             script.expect_fetch_flags();
             script.expect_store_flags();
+            script.expect_move();
             script.expect_expunge();
             script.expect_capability(true);
             script.expect_idle_update();
@@ -1610,6 +1710,17 @@ mod tests {
         assert_eq!(updates[0].uid, 1);
         assert!(updates[0].flags.contains(&RemoteFlag::Flagged));
 
+        let moved = adapter
+            .move_messages("acct_live", "INBOX", "Archive", &[1])
+            .unwrap();
+        assert_eq!(
+            moved,
+            LiveImapMoveResult {
+                destination_uid_validity: Some(777),
+                destination_uids: vec![901]
+            }
+        );
+
         assert_eq!(adapter.expunge_folder("acct_live", "INBOX").unwrap(), 1);
         assert_eq!(
             adapter.idle_capability("acct_live", "INBOX").unwrap(),
@@ -1635,6 +1746,9 @@ mod tests {
         assert!(commands
             .iter()
             .any(|command| command.contains("UID STORE 1 +FLAGS")));
+        assert!(commands
+            .iter()
+            .any(|command| command.contains("UID MOVE 1 \"Archive\"")));
         assert!(commands.iter().any(|command| command.ends_with("EXPUNGE")));
         assert!(commands.iter().any(|command| command.ends_with("IDLE")));
     }
@@ -2183,6 +2297,14 @@ mod tests {
             let tag = line.split_whitespace().next().unwrap().to_string();
             self.write("* 1 FETCH (UID 1 FLAGS (\\Seen \\Flagged))\r\n");
             self.write(&format!("{tag} OK STORE completed\r\n"));
+        }
+
+        fn expect_move(&mut self) {
+            let line = self.read_command();
+            assert!(line.contains("UID MOVE 1 \"Archive\""));
+            let tag = line.split_whitespace().next().unwrap().to_string();
+            self.write("* 1 EXPUNGE\r\n");
+            self.write(&format!("{tag} OK [COPYUID 777 1 901] MOVE completed\r\n"));
         }
 
         fn expect_expunge(&mut self) {

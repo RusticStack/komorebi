@@ -15,6 +15,8 @@ import type {
   AttachmentSaveResponse,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
+  MailActionRequest,
+  MailActionResponse,
   RemoteContentPreferenceRequest,
   RemoteContentPreferenceResponse,
   MailSearchRequest,
@@ -57,6 +59,7 @@ export type SyncStatusEventHandler = (
 const LOAD_MAIL_SHELL_COMMAND = "load_mail_shell";
 const SEARCH_MAIL_COMMAND = "search_mail";
 const ALLOW_REMOTE_CONTENT_COMMAND = "allow_remote_content";
+const PERFORM_MAIL_ACTION_COMMAND = "perform_mail_action";
 const OPEN_EXTERNAL_LINK_COMMAND = "open_external_link";
 const PREVIEW_ATTACHMENT_COMMAND = "preview_attachment";
 const SAVE_ATTACHMENT_COMMAND = "save_attachment";
@@ -115,6 +118,14 @@ export async function openExternalLinkFromTauri(
   request: ExternalLinkOpenRequest,
 ): Promise<ExternalLinkOpenResponse> {
   return invoke<ExternalLinkOpenResponse>(OPEN_EXTERNAL_LINK_COMMAND, {
+    request,
+  });
+}
+
+export async function performMailActionFromTauri(
+  request: MailActionRequest,
+): Promise<MailActionResponse> {
+  return invoke<MailActionResponse>(PERFORM_MAIL_ACTION_COMMAND, {
     request,
   });
 }

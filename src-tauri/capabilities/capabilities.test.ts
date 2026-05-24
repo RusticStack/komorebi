@@ -141,6 +141,10 @@ function rustCommandPath(command: string) {
     return `mail_shell::${command}`;
   }
 
+  if (command === "perform_mail_action") {
+    return `mail_actions::${command}`;
+  }
+
   if (command === "open_external_link") {
     return `external_links::${command}`;
   }
@@ -222,6 +226,7 @@ describe("Tauri capabilities", () => {
       "allow-load-mail-shell",
       "allow-search-mail",
       "allow-allow-remote-content",
+      "allow-perform-mail-action",
       "allow-open-external-link",
       "allow-preview-attachment",
       "allow-save-attachment",
@@ -279,6 +284,7 @@ describe("Tauri capabilities", () => {
       "load_mail_shell",
       "search_mail",
       "allow_remote_content",
+      "perform_mail_action",
       "open_external_link",
       "preview_attachment",
       "save_attachment",

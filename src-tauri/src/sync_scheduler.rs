@@ -842,7 +842,7 @@ struct SyncAccountConfig {
     imap_security: MailTransportSecurity,
 }
 
-fn load_live_imap_config(
+pub(crate) fn load_live_imap_config(
     connection: &Connection,
     account_id: &str,
 ) -> Result<LiveImapConfig, SyncSchedulerError> {

@@ -127,6 +127,57 @@ export type ExternalLinkOpenResponse = {
   opened: boolean;
 };
 
+export type MailActionKind =
+  | { kind: "mark-read"; read: boolean }
+  | { kind: "move"; targetFolderId: string }
+  | { kind: "archive" }
+  | { kind: "delete-to-trash" }
+  | { kind: "expunge-deleted" };
+
+export type MailActionRequest = {
+  accountId: string;
+  folderId: string;
+  messageId: string | null;
+  action: MailActionKind;
+  confirmed: boolean;
+  userRequested: boolean;
+  attempt?: number | null;
+};
+
+export type MailActionMutation =
+  | { kind: "flags-updated"; read: boolean }
+  | { kind: "moved"; fromFolderId: string; toFolderId: string }
+  | { kind: "expunged"; folderId: string; removedCount: number };
+
+export type MailActionUndo = {
+  accountId: string;
+  folderId: string;
+  messageId: string;
+  action: MailActionKind;
+};
+
+export type MailActionRetryPolicy =
+  | { kind: "retryable"; maxAttempts: number }
+  | { kind: "not-retryable" };
+
+export type MailActionRetryDecision =
+  | { kind: "retry-now"; nextAttempt: number; maxAttempts: number }
+  | { kind: "exhausted" }
+  | { kind: "not-retryable" };
+
+export type MailActionResponse = {
+  accountId: string;
+  action: MailActionKind;
+  mutation: MailActionMutation;
+  undo: MailActionUndo | null;
+  retry: MailActionRetryPolicy;
+};
+
+export type MailActionErrorResponse = {
+  reason: string;
+  retry?: MailActionRetryDecision;
+};
+
 export type MailMessage = {
   id: string;
   accountId: string;

@@ -15,6 +15,7 @@ import {
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
   openExternalLinkFromTauri,
+  performMailActionFromTauri,
   previewAttachmentFromTauri,
   reauthAccountFromTauri,
   removeAccountFromTauri,
@@ -39,6 +40,7 @@ function App(props: MailClientShellProps) {
   const runtimeOpenExternalLink = isRuntime
     ? openExternalLinkFromTauri
     : undefined;
+  const runtimeMailAction = isRuntime ? performMailActionFromTauri : undefined;
   const runtimeAttachmentPreview = isRuntime
     ? previewAttachmentFromTauri
     : undefined;
@@ -89,6 +91,7 @@ function App(props: MailClientShellProps) {
         props.allowRemoteContent ?? runtimeAllowRemoteContent
       }
       openExternalLink={props.openExternalLink ?? runtimeOpenExternalLink}
+      performMailAction={props.performMailAction ?? runtimeMailAction}
       previewAttachment={props.previewAttachment ?? runtimeAttachmentPreview}
       saveAttachment={props.saveAttachment ?? runtimeAttachmentSave}
       downloadAttachment={props.downloadAttachment ?? runtimeAttachmentDownload}

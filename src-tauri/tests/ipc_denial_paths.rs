@@ -35,9 +35,10 @@ use komorebi_lib::{
     },
     ipc_validation::{reject_client_supplied_path, MAX_TEXT_FIELD_BYTES},
     mail_actions::{
-        execute_mail_action, FolderActionKind, MailAction, MailActionCommand, MailActionError,
-        MailActionFailure, MailActionStore, MailActionStoreError, MessageActionKind, RetryDecision,
-        UserConfirmation,
+        execute_mail_action, perform_mail_action_with_store, FolderActionKind, MailAction,
+        MailActionCommand, MailActionError, MailActionFailure, MailActionStore,
+        MailActionStoreError, MailActionTargetFolderKind, MessageActionKind, PerformMailActionKind,
+        PerformMailActionRequest, RetryDecision, UserConfirmation,
     },
     mail_shell::{
         allow_remote_content_from_connection, search_mail_from_connection, MailSearchRequest,
@@ -538,6 +539,92 @@ fn server_affecting_mail_actions_reject_unauthorized_operations_before_mutation(
 }
 
 #[test]
+fn mail_action_ipc_command_rejects_missing_intent_bad_ids_unowned_scope_and_confirmation_gaps() {
+    let mut store = RecordingMailActionStore::seeded();
+
+    let no_intent = perform_mail_action_with_store(
+        &mut store,
+        mail_action_request(
+            ACCOUNT_ID,
+            INBOX_ID,
+            Some(MESSAGE_ID),
+            PerformMailActionKind::MarkRead { read: true },
+            false,
+            false,
+        ),
+    )
+    .expect_err("mail actions require explicit user intent");
+    assert_eq!(
+        no_intent.reason,
+        "mail action requires explicit user intent"
+    );
+    assert_eq!(store.mutation_count, 0);
+
+    let invalid_id = perform_mail_action_with_store(
+        &mut store,
+        mail_action_request(
+            "../secret",
+            INBOX_ID,
+            Some(MESSAGE_ID),
+            PerformMailActionKind::MarkRead { read: true },
+            false,
+            true,
+        ),
+    )
+    .expect_err("invalid ids are rejected before mutation");
+    assert!(invalid_id.reason.contains("account_id is invalid"));
+    assert_eq!(store.mutation_count, 0);
+
+    let unowned_folder = perform_mail_action_with_store(
+        &mut store,
+        mail_action_request(
+            ACCOUNT_ID,
+            OTHER_FOLDER_ID,
+            Some(MESSAGE_ID),
+            PerformMailActionKind::MarkRead { read: true },
+            false,
+            true,
+        ),
+    )
+    .expect_err("unowned folder is rejected before mutation");
+    assert_eq!(unowned_folder.reason, "folder was not found");
+    assert_eq!(store.mutation_count, 0);
+
+    let missing_confirmation = perform_mail_action_with_store(
+        &mut store,
+        mail_action_request(
+            ACCOUNT_ID,
+            INBOX_ID,
+            Some(MESSAGE_ID),
+            PerformMailActionKind::DeleteToTrash,
+            false,
+            true,
+        ),
+    )
+    .expect_err("delete-to-trash requires confirmation");
+    assert_eq!(
+        missing_confirmation.reason,
+        "mail action requires confirmation"
+    );
+    assert_eq!(store.mutation_count, 0);
+
+    let confirmed_delete = perform_mail_action_with_store(
+        &mut store,
+        mail_action_request(
+            ACCOUNT_ID,
+            INBOX_ID,
+            Some(MESSAGE_ID),
+            PerformMailActionKind::DeleteToTrash,
+            true,
+            true,
+        ),
+    )
+    .expect("confirmed delete-to-trash is allowed");
+    assert!(confirmed_delete.undo.is_some());
+    assert_eq!(store.mutation_count, 1);
+}
+
+#[test]
 fn account_management_commands_reject_bad_auth_ids_payloads_and_credential_failures() {
     let connection = migrated_connection();
     let mut credentials = RecordingAccountCredentialStore::default();
@@ -922,6 +1009,25 @@ fn message_command<'a>(
     }
 }
 
+fn mail_action_request(
+    account_id: &str,
+    folder_id: &str,
+    message_id: Option<&str>,
+    action: PerformMailActionKind,
+    confirmed: bool,
+    user_requested: bool,
+) -> PerformMailActionRequest {
+    PerformMailActionRequest {
+        account_id: account_id.into(),
+        folder_id: folder_id.into(),
+        message_id: message_id.map(str::to_string),
+        action,
+        confirmed,
+        user_requested,
+        attempt: None,
+    }
+}
+
 fn assert_action_failure(
     result: Result<komorebi_lib::mail_actions::MailActionReceipt, MailActionFailure>,
     expected_error: MailActionError,
@@ -970,6 +1076,19 @@ impl MailActionStore for RecordingMailActionStore {
             folder_id.to_string(),
             message_id.to_string(),
         ))
+    }
+
+    fn folder_id_for_kind(
+        &self,
+        account_id: &str,
+        kind: MailActionTargetFolderKind,
+    ) -> Option<String> {
+        let folder_id = match kind {
+            MailActionTargetFolderKind::Archive => "archive",
+            MailActionTargetFolderKind::Trash => "trash",
+        };
+        self.folder_exists(account_id, folder_id)
+            .then(|| folder_id.to_string())
     }
 
     fn set_seen(

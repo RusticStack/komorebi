@@ -128,8 +128,17 @@
       "actions": {
         "label": "Acoes da mensagem",
         "archive": "Arquivar",
+        "archiveTitle": "Mover esta mensagem para a pasta de arquivo da conta.",
         "archiveUnavailable": "Arquivo indisponivel",
         "archiveUnavailableTitle": "O arquivo aguarda o comando tipado de acao de correio.",
+        "delete": "Eliminar",
+        "deleteTitle": "Mover esta mensagem para o Lixo apos confirmacao.",
+        "deleteUnavailable": "Eliminacao indisponivel",
+        "deleteUnavailableTitle": "Eliminar requer uma pasta de Lixo da conta e o comando tipado de acao de correio.",
+        "expunge": "Expurgar",
+        "expungeTitle": "Remover permanentemente mensagens ja marcadas como eliminadas nesta pasta.",
+        "expungeUnavailable": "Expurgar indisponivel",
+        "expungeUnavailableTitle": "Expurgar requer o comando tipado de acao de correio.",
         "forward": "Reencaminhar",
         "forwardUnavailable": "Reencaminhamento indisponivel",
         "forwardUnavailableTitle": "O encaminhamento para o compositor ainda nao esta implementado.",
@@ -147,6 +156,9 @@
         "markReadUnavailable": "Marcar como lida indisponivel",
         "markUnread": "Marcar como por ler",
         "markUnreadUnavailable": "Marcar como por ler indisponivel",
+        "moveLabel": "Mover mensagem para pasta",
+        "movePlaceholder": "Mover para...",
+        "readStateTitle": "Atualizar o estado de leitura desta mensagem no servidor de correio.",
         "readStateUnavailableTitle": "As alteracoes de estado de leitura aguardam o comando tipado de acao de correio.",
         "reply": "Responder",
         "replyUnavailable": "Resposta indisponivel",
@@ -190,6 +202,41 @@
         "opened": "Ligacao externa aberta.",
         "opening": "A abrir ligacao externa.",
         "unavailable": "A abertura de ligacoes externas esta indisponivel."
+      },
+      "mailActions": {
+        "confirm": {
+          "delete-to-trash": {
+            "aria": "Confirmar eliminacao",
+            "body": "Eliminar move esta mensagem para o Lixo e pode ser anulado enquanto a mensagem permanecer la.",
+            "confirm": "Mover para o Lixo",
+            "heading": "Mover mensagem para o Lixo?"
+          },
+          "expunge-deleted": {
+            "aria": "Confirmar expurgo",
+            "body": "Expurgar remove permanentemente mensagens ja marcadas como eliminadas nesta pasta. Isto nao pode ser anulado.",
+            "confirm": "Expurgar",
+            "heading": "Expurgar permanentemente mensagens eliminadas?"
+          }
+        },
+        "error": "A acao de correio falhou.",
+        "running": {
+          "archive": "A arquivar mensagem.",
+          "delete-to-trash": "A mover mensagem para o Lixo.",
+          "expunge-deleted": "A expurgar mensagens eliminadas.",
+          "mark-read": "A atualizar estado de leitura.",
+          "move": "A mover mensagem."
+        },
+        "statusAria": "Estado da acao de correio",
+        "success": {
+          "archive": "Mensagem arquivada.",
+          "deleteToTrash": "Mensagem movida para o Lixo.",
+          "expunge": "{{count}} mensagens eliminadas expurgadas.",
+          "markRead": "Mensagem marcada como lida.",
+          "markUnread": "Mensagem marcada como por ler.",
+          "move": "Mensagem movida."
+        },
+        "undo": "Anular",
+        "unavailable": "As acoes de correio estao indisponiveis."
       },
       "remoteBlocked": "Conteudo remoto bloqueado por defeito",
       "selectedEyebrow": "Mensagem selecionada"

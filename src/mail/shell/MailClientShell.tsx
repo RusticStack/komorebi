@@ -49,6 +49,12 @@ import {
   type MailShellLoadState,
   type MailAccount,
   type MailAttachment,
+  type MailActionErrorResponse,
+  type MailActionKind,
+  type MailActionRequest,
+  type MailActionResponse,
+  type MailActionRetryDecision,
+  type MailActionUndo,
   type MailSearchRequest,
   type MailSearchResponse,
   type MailMessage,
@@ -89,6 +95,9 @@ export type RemoteContentPreferenceFunction = (
 export type ExternalLinkOpenFunction = (
   request: ExternalLinkOpenRequest,
 ) => Promise<ExternalLinkOpenResponse>;
+export type MailActionFunction = (
+  request: MailActionRequest,
+) => Promise<MailActionResponse>;
 export type AccountCreateFunction = (
   request: AccountSetupRequest,
 ) => Promise<AccountSetupResponse>;
@@ -137,6 +146,7 @@ export type MailClientShellProps = {
   searchMail?: MailSearchFunction;
   allowRemoteContent?: RemoteContentPreferenceFunction;
   openExternalLink?: ExternalLinkOpenFunction;
+  performMailAction?: MailActionFunction;
   previewAttachment?: AttachmentPreviewFunction;
   saveAttachment?: AttachmentSaveFunction;
   downloadAttachment?: AttachmentDownloadFunction;
@@ -185,6 +195,16 @@ type ExternalLinkActionState = {
   status: "idle" | "opening" | "opened" | "error";
   message: string | null;
 };
+type MailActionUiState = {
+  status: "idle" | "running" | "succeeded" | "error";
+  message: string | null;
+  undo: MailActionUndo | null;
+  retryRequest: MailActionRequest | null;
+};
+type MailActionConfirmation = {
+  request: MailActionRequest;
+  action: "delete-to-trash" | "expunge-deleted";
+} | null;
 
 const MESSAGE_ROW_HEIGHT_PX = 136;
 const MESSAGE_LIST_OVERSCAN = 8;
@@ -222,6 +242,12 @@ const emptyExternalLinkActionState: ExternalLinkActionState = {
   status: "idle",
   message: null,
 };
+const emptyMailActionUiState: MailActionUiState = {
+  status: "idle",
+  message: null,
+  undo: null,
+  retryRequest: null,
+};
 
 export function MailClientShell({
   initialData = emptyMailShellData,
@@ -232,6 +258,7 @@ export function MailClientShell({
   searchMail,
   allowRemoteContent,
   openExternalLink,
+  performMailAction,
   previewAttachment,
   saveAttachment,
   downloadAttachment,
@@ -278,6 +305,10 @@ export function MailClientShell({
     useState<RemoteContentActionState>(emptyRemoteContentActionState);
   const [externalLinkAction, setExternalLinkAction] =
     useState<ExternalLinkActionState>(emptyExternalLinkActionState);
+  const [mailAction, setMailAction] =
+    useState<MailActionUiState>(emptyMailActionUiState);
+  const [mailActionConfirmation, setMailActionConfirmation] =
+    useState<MailActionConfirmation>(null);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -522,6 +553,8 @@ export function MailClientShell({
     clearAttachmentUi();
     setRemoteContentAction(emptyRemoteContentActionState);
     setExternalLinkAction(emptyExternalLinkActionState);
+    setMailAction(emptyMailActionUiState);
+    setMailActionConfirmation(null);
   }
 
   async function handlePreviewAttachment(
@@ -698,6 +731,116 @@ export function MailClientShell({
         status: "error",
       });
     }
+  }
+
+  function requestMailAction(request: MailActionRequest) {
+    if (
+      !request.confirmed &&
+      (request.action.kind === "delete-to-trash" ||
+        request.action.kind === "expunge-deleted")
+    ) {
+      setMailActionConfirmation({
+        action: request.action.kind,
+        request: {
+          ...request,
+          confirmed: true,
+        },
+      });
+      setMailAction(emptyMailActionUiState);
+      return;
+    }
+
+    void executeMailAction(request);
+  }
+
+  async function executeMailAction(request: MailActionRequest) {
+    if (!performMailAction) {
+      setMailAction({
+        message: t("mail.reader.mailActions.unavailable"),
+        retryRequest: null,
+        status: "error",
+        undo: null,
+      });
+      return;
+    }
+
+    setMailActionConfirmation(null);
+    setMailAction({
+      message: mailActionRunningMessage(request.action, t),
+      retryRequest: null,
+      status: "running",
+      undo: null,
+    });
+
+    try {
+      const response = await performMailAction(request);
+      applyMailActionResponse(response);
+      setMailAction({
+        message: mailActionSuccessMessage(response, t),
+        retryRequest: null,
+        status: "succeeded",
+        undo: response.undo,
+      });
+      if (loadMailShellData) {
+        await reloadMailShell({ showLoading: false });
+      }
+    } catch (error) {
+      const retry = retryDecisionFromError(error);
+      setMailAction({
+        message: mailActionFailureMessage(error, t),
+        retryRequest:
+          retry?.kind === "retry-now"
+            ? {
+                ...request,
+                attempt: retry.nextAttempt,
+              }
+            : null,
+        status: "error",
+        undo: null,
+      });
+    }
+  }
+
+  function applyMailActionResponse(response: MailActionResponse) {
+    setState((current) => {
+      const messages = current.data.messages.map((message) => {
+        if (response.mutation.kind === "flags-updated") {
+          return message.accountId === response.accountId &&
+            message.id === messageIdFromActionResponse(response)
+            ? { ...message, unread: !response.mutation.read }
+            : message;
+        }
+
+        if (
+          response.mutation.kind === "moved" &&
+          message.accountId === response.accountId &&
+          message.folderId === response.mutation.fromFolderId &&
+          response.undo?.messageId === message.id
+        ) {
+          return {
+            ...message,
+            folderId: response.mutation.toFolderId,
+          };
+        }
+
+        return message;
+      });
+      const folders = foldersAfterMailAction(
+        current.data.folders,
+        current.data.messages,
+        response,
+      );
+
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          accounts: accountsWithFolderUnreadCounts(current.data.accounts, folders),
+          folders,
+          messages,
+        },
+      };
+    });
   }
 
   function openNewComposer(restoreFocus: HTMLElement | null) {
@@ -1309,11 +1452,31 @@ export function MailClientShell({
           attachmentAction={attachmentAction}
           remoteContentAction={remoteContentAction}
           externalLinkAction={externalLinkAction}
+          mailAction={mailAction}
+          mailActionConfirmation={mailActionConfirmation}
+          performMailAction={performMailAction}
           onPreviewAttachment={handlePreviewAttachment}
           onSaveAttachment={handleSaveAttachment}
           onDownloadAttachment={handleDownloadAttachment}
           onAllowRemoteContent={handleAllowRemoteContent}
           onOpenExternalLink={handleOpenExternalLink}
+          onRequestMailAction={requestMailAction}
+          onConfirmMailAction={() => {
+            if (mailActionConfirmation) {
+              void executeMailAction(mailActionConfirmation.request);
+            }
+          }}
+          onCancelMailAction={() => setMailActionConfirmation(null)}
+          onRetryMailAction={() => {
+            if (mailAction.retryRequest) {
+              void executeMailAction(mailAction.retryRequest);
+            }
+          }}
+          onUndoMailAction={() => {
+            if (mailAction.undo) {
+              void executeMailAction(mailActionRequestFromUndo(mailAction.undo));
+            }
+          }}
           onCloseAttachmentPreview={() => setAttachmentPreview(null)}
         />
       </section>
@@ -1545,6 +1708,168 @@ function attachmentRequestFor(
     attachmentId: attachment.id,
     userRequested: true,
   };
+}
+
+function mailActionRequestFor(
+  message: MailMessage,
+  action: MailActionKind,
+  confirmed: boolean,
+): MailActionRequest {
+  return {
+    accountId: message.accountId,
+    action,
+    confirmed,
+    folderId: message.folderId,
+    messageId: action.kind === "expunge-deleted" ? null : message.id,
+    userRequested: true,
+  };
+}
+
+function mailActionRequestFromUndo(undo: MailActionUndo): MailActionRequest {
+  return {
+    accountId: undo.accountId,
+    action: undo.action,
+    confirmed: false,
+    folderId: undo.folderId,
+    messageId: undo.messageId,
+    userRequested: true,
+  };
+}
+
+function messageIdFromActionResponse(response: MailActionResponse) {
+  return response.undo?.messageId ?? null;
+}
+
+function foldersAfterMailAction(
+  folders: MailShellData["folders"],
+  messages: MailShellData["messages"],
+  response: MailActionResponse,
+) {
+  const changedMessageId = messageIdFromActionResponse(response);
+  const changedMessage = changedMessageId
+    ? messages.find(
+        (message) =>
+          message.accountId === response.accountId &&
+          message.id === changedMessageId,
+      ) ?? null
+    : null;
+
+  return folders.map((folder) => {
+    if (response.mutation.kind === "flags-updated" && changedMessage) {
+      if (
+        folder.accountId !== response.accountId ||
+        folder.id !== changedMessage.folderId ||
+        changedMessage.unread === !response.mutation.read
+      ) {
+        return folder;
+      }
+
+      return {
+        ...folder,
+        unreadCount: Math.max(
+          0,
+          folder.unreadCount + (response.mutation.read ? -1 : 1),
+        ),
+      };
+    }
+
+    if (response.mutation.kind === "moved" && changedMessage) {
+      if (
+        folder.accountId === response.accountId &&
+        folder.id === response.mutation.fromFolderId
+      ) {
+        return {
+          ...folder,
+          totalCount: Math.max(0, folder.totalCount - 1),
+          unreadCount: Math.max(
+            0,
+            folder.unreadCount - (changedMessage.unread ? 1 : 0),
+          ),
+        };
+      }
+
+      if (
+        folder.accountId === response.accountId &&
+        folder.id === response.mutation.toFolderId
+      ) {
+        return {
+          ...folder,
+          totalCount: folder.totalCount + 1,
+          unreadCount: folder.unreadCount + (changedMessage.unread ? 1 : 0),
+        };
+      }
+    }
+
+    return folder;
+  });
+}
+
+function accountsWithFolderUnreadCounts(
+  accounts: MailShellData["accounts"],
+  folders: MailShellData["folders"],
+) {
+  return accounts.map((account) => ({
+    ...account,
+    unreadCount: folders
+      .filter((folder) => folder.accountId === account.id)
+      .reduce((total, folder) => total + folder.unreadCount, 0),
+  }));
+}
+
+function mailActionRunningMessage(action: MailActionKind, t: TFunction) {
+  return t(`mail.reader.mailActions.running.${action.kind}`);
+}
+
+function mailActionSuccessMessage(response: MailActionResponse, t: TFunction) {
+  switch (response.mutation.kind) {
+    case "flags-updated":
+      return response.mutation.read
+        ? t("mail.reader.mailActions.success.markRead")
+        : t("mail.reader.mailActions.success.markUnread");
+    case "moved":
+      if (response.action.kind === "archive") {
+        return t("mail.reader.mailActions.success.archive");
+      }
+      if (response.action.kind === "delete-to-trash") {
+        return t("mail.reader.mailActions.success.deleteToTrash");
+      }
+      return t("mail.reader.mailActions.success.move");
+    case "expunged":
+      return t("mail.reader.mailActions.success.expunge", {
+        count: response.mutation.removedCount,
+      });
+  }
+
+  return t("mail.reader.mailActions.success.move");
+}
+
+function retryDecisionFromError(
+  error: unknown,
+): MailActionRetryDecision | null {
+  if (
+    error &&
+    typeof error === "object" &&
+    "retry" in error &&
+    typeof error.retry === "object" &&
+    error.retry &&
+    "kind" in error.retry
+  ) {
+    return error.retry as MailActionRetryDecision;
+  }
+
+  return null;
+}
+
+function mailActionFailureMessage(error: unknown, t: TFunction) {
+  const reason =
+    error &&
+    typeof error === "object" &&
+    "reason" in error &&
+    typeof (error as MailActionErrorResponse).reason === "string"
+      ? (error as MailActionErrorResponse).reason
+      : null;
+
+  return reason || t("mail.reader.mailActions.error");
 }
 
 function triggerBrowserDownload(download: AttachmentDownloadResponse) {
@@ -2077,8 +2402,16 @@ function ReaderPane({
   attachmentAction,
   remoteContentAction,
   externalLinkAction,
+  mailAction,
+  mailActionConfirmation,
+  performMailAction,
   onAllowRemoteContent,
   onOpenExternalLink,
+  onRequestMailAction,
+  onConfirmMailAction,
+  onCancelMailAction,
+  onRetryMailAction,
+  onUndoMailAction,
   onPreviewAttachment,
   onSaveAttachment,
   onDownloadAttachment,
@@ -2096,11 +2429,19 @@ function ReaderPane({
   attachmentAction: AttachmentActionState;
   remoteContentAction: RemoteContentActionState;
   externalLinkAction: ExternalLinkActionState;
+  mailAction: MailActionUiState;
+  mailActionConfirmation: MailActionConfirmation;
+  performMailAction?: MailActionFunction;
   onAllowRemoteContent: (
     message: MailMessage,
     scope: RemoteContentPreferenceScope,
   ) => Promise<void>;
   onOpenExternalLink: (link: SafeEmailLink) => Promise<void>;
+  onRequestMailAction: (request: MailActionRequest) => void;
+  onConfirmMailAction: () => void;
+  onCancelMailAction: () => void;
+  onRetryMailAction: () => void;
+  onUndoMailAction: () => void;
   onPreviewAttachment: (message: MailMessage, attachment: MailAttachment) => void;
   onSaveAttachment: (message: MailMessage, attachment: MailAttachment) => void;
   onDownloadAttachment: (message: MailMessage, attachment: MailAttachment) => void;
@@ -2122,6 +2463,22 @@ function ReaderPane({
       ? remoteContentAction.message
       : null;
   const externalLinkStatusMessage = externalLinkAction.message;
+  const currentFolder = message
+    ? state.data.folders.find(
+        (folder) =>
+          folder.accountId === message.accountId && folder.id === message.folderId,
+      ) ?? null
+    : null;
+  const accountFolders = message
+    ? state.data.folders.filter((folder) => folder.accountId === message.accountId)
+    : [];
+  const archiveFolder = accountFolders.find((folder) => folder.kind === "archive");
+  const trashFolder = accountFolders.find((folder) => folder.kind === "trash");
+  const moveTargetFolders = accountFolders.filter(
+    (folder) => folder.id !== message?.folderId && folder.kind !== "all",
+  );
+  const mailActionBusy = mailAction.status === "running";
+  const mailActionAvailable = Boolean(performMailAction);
 
   if (state.loadState.messages === "loading") {
     return (
@@ -2207,26 +2564,143 @@ function ReaderPane({
         </button>
         <button
           type="button"
-          disabled
-          title={t("mail.reader.actions.archiveUnavailableTitle")}
-          aria-label={t("mail.reader.actions.archiveUnavailable")}
+          disabled={
+            !mailActionAvailable ||
+            !archiveFolder ||
+            archiveFolder.id === message.folderId ||
+            mailActionBusy
+          }
+          title={
+            mailActionAvailable && archiveFolder
+              ? t("mail.reader.actions.archiveTitle")
+              : t("mail.reader.actions.archiveUnavailableTitle")
+          }
+          aria-label={
+            mailActionAvailable && archiveFolder
+              ? t("mail.reader.actions.archive")
+              : t("mail.reader.actions.archiveUnavailable")
+          }
+          onClick={() =>
+            onRequestMailAction(
+              mailActionRequestFor(message, { kind: "archive" }, false),
+            )
+          }
         >
           {t("mail.reader.actions.archive")}
         </button>
         <button
           type="button"
-          disabled
-          title={t("mail.reader.actions.readStateUnavailableTitle")}
+          disabled={!mailActionAvailable || mailActionBusy}
+          title={
+            mailActionAvailable
+              ? t("mail.reader.actions.readStateTitle")
+              : t("mail.reader.actions.readStateUnavailableTitle")
+          }
           aria-label={
-            message.unread
-              ? t("mail.reader.actions.markReadUnavailable")
-              : t("mail.reader.actions.markUnreadUnavailable")
+            mailActionAvailable
+              ? message.unread
+                ? t("mail.reader.actions.markRead")
+                : t("mail.reader.actions.markUnread")
+              : message.unread
+                ? t("mail.reader.actions.markReadUnavailable")
+                : t("mail.reader.actions.markUnreadUnavailable")
+          }
+          onClick={() =>
+            onRequestMailAction(
+              mailActionRequestFor(
+                message,
+                { kind: "mark-read", read: message.unread },
+                false,
+              ),
+            )
           }
         >
           {message.unread
             ? t("mail.reader.actions.markRead")
             : t("mail.reader.actions.markUnread")}
         </button>
+        <label className="reader-actions__move">
+          <span>{t("mail.reader.actions.moveLabel")}</span>
+          <select
+            aria-label={t("mail.reader.actions.moveLabel")}
+            disabled={
+              !mailActionAvailable ||
+              mailActionBusy ||
+              moveTargetFolders.length === 0
+            }
+            value=""
+            onChange={(event) => {
+              const targetFolderId = event.target.value;
+              if (!targetFolderId) {
+                return;
+              }
+              onRequestMailAction(
+                mailActionRequestFor(
+                  message,
+                  { kind: "move", targetFolderId },
+                  false,
+                ),
+              );
+              event.currentTarget.value = "";
+            }}
+          >
+            <option value="">{t("mail.reader.actions.movePlaceholder")}</option>
+            {moveTargetFolders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={
+            !mailActionAvailable ||
+            !trashFolder ||
+            trashFolder.id === message.folderId ||
+            mailActionBusy
+          }
+          title={
+            mailActionAvailable && trashFolder
+              ? t("mail.reader.actions.deleteTitle")
+              : t("mail.reader.actions.deleteUnavailableTitle")
+          }
+          aria-label={
+            mailActionAvailable && trashFolder
+              ? t("mail.reader.actions.delete")
+              : t("mail.reader.actions.deleteUnavailable")
+          }
+          onClick={() =>
+            onRequestMailAction(
+              mailActionRequestFor(message, { kind: "delete-to-trash" }, false),
+            )
+          }
+        >
+          {t("mail.reader.actions.delete")}
+        </button>
+        {currentFolder?.kind === "trash" ? (
+          <button
+            type="button"
+            disabled={!mailActionAvailable || mailActionBusy}
+            title={
+              mailActionAvailable
+                ? t("mail.reader.actions.expungeTitle")
+                : t("mail.reader.actions.expungeUnavailableTitle")
+            }
+            aria-label={
+              mailActionAvailable
+                ? t("mail.reader.actions.expunge")
+                : t("mail.reader.actions.expungeUnavailable")
+            }
+            onClick={() =>
+              onRequestMailAction(
+                mailActionRequestFor(message, { kind: "expunge-deleted" }, false),
+              )
+            }
+          >
+            {t("mail.reader.actions.expunge")}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={
@@ -2256,6 +2730,14 @@ function ReaderPane({
       </div>
 
       <article className="reader-body">
+        {mailActionConfirmation ? (
+          <MailActionConfirmationPanel
+            action={mailActionConfirmation.action}
+            busy={mailActionBusy}
+            onCancel={onCancelMailAction}
+            onConfirm={onConfirmMailAction}
+          />
+        ) : null}
         {remoteContentPanelOpen &&
         messageHasRemoteContent &&
         !remoteContentAllowed ? (
@@ -2307,6 +2789,11 @@ function ReaderPane({
             {remoteContentStatusMessage}
           </p>
         ) : null}
+        <MailActionStatus
+          action={mailAction}
+          onRetry={onRetryMailAction}
+          onUndo={onUndoMailAction}
+        />
         <AttachmentList
           action={attachmentAction}
           attachments={message.attachments}
@@ -2367,6 +2854,85 @@ function remoteContentActionLabel({
   }
 
   return t("mail.reader.actions.loadRemote");
+}
+
+function MailActionConfirmationPanel({
+  action,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  action: "delete-to-trash" | "expunge-deleted";
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  const destructive = action === "expunge-deleted";
+
+  return (
+    <section
+      className={
+        destructive
+          ? "mail-action-panel mail-action-panel--destructive"
+          : "mail-action-panel"
+      }
+      aria-label={t(`mail.reader.mailActions.confirm.${action}.aria`)}
+    >
+      <div>
+        <h3>{t(`mail.reader.mailActions.confirm.${action}.heading`)}</h3>
+        <p>{t(`mail.reader.mailActions.confirm.${action}.body`)}</p>
+      </div>
+      <div className="mail-action-panel__actions">
+        <button type="button" disabled={busy} onClick={onConfirm}>
+          {t(`mail.reader.mailActions.confirm.${action}.confirm`)}
+        </button>
+        <button type="button" disabled={busy} onClick={onCancel}>
+          {t("common.actions.cancel")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function MailActionStatus({
+  action,
+  onRetry,
+  onUndo,
+}: {
+  action: MailActionUiState;
+  onRetry: () => void;
+  onUndo: () => void;
+}) {
+  const { t } = useTranslation();
+
+  if (!action.message) {
+    return null;
+  }
+
+  return (
+    <section
+      className={
+        action.status === "error"
+          ? "mail-action-status mail-action-status--error"
+          : "mail-action-status"
+      }
+      role={action.status === "error" ? "alert" : "status"}
+      aria-label={t("mail.reader.mailActions.statusAria")}
+    >
+      <span>{action.message}</span>
+      {action.undo ? (
+        <button type="button" onClick={onUndo}>
+          {t("mail.reader.mailActions.undo")}
+        </button>
+      ) : null}
+      {action.retryRequest ? (
+        <button type="button" onClick={onRetry}>
+          {t("common.actions.retry")}
+        </button>
+      ) : null}
+    </section>
+  );
 }
 
 function remoteContentActionTitle({

@@ -56,6 +56,7 @@ pub fn run() {
             mail_shell::load_mail_shell,
             mail_shell::search_mail,
             mail_shell::allow_remote_content,
+            mail_actions::perform_mail_action,
             external_links::open_external_link,
             attachment_commands::preview_attachment,
             attachment_commands::save_attachment,

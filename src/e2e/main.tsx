@@ -17,6 +17,8 @@ import type {
   ComposerSendResponse,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
+  MailActionRequest,
+  MailActionResponse,
   MailMessage,
   MailSearchRequest,
   MailSearchResponse,
@@ -39,6 +41,7 @@ type E2eEvent =
   | { name: "search-mail"; request: MailSearchRequest }
   | { name: "allow-remote-content"; request: RemoteContentPreferenceRequest }
   | { name: "open-external-link"; request: ExternalLinkOpenRequest }
+  | { name: "perform-mail-action"; request: MailActionRequest }
   | { name: "preview-attachment"; request: AttachmentCommandRequest }
   | { name: "save-attachment"; request: AttachmentCommandRequest }
   | { name: "download-attachment"; request: AttachmentCommandRequest }
@@ -92,6 +95,22 @@ const fixtureMail: MailShellData = {
       kind: "archive",
       name: "Archive",
       totalCount: 1,
+      unreadCount: 0,
+    },
+    {
+      accountId: "acct_work",
+      id: "folder_work_archive",
+      kind: "archive",
+      name: "Archive",
+      totalCount: 0,
+      unreadCount: 0,
+    },
+    {
+      accountId: "acct_work",
+      id: "folder_work_trash",
+      kind: "trash",
+      name: "Trash",
+      totalCount: 0,
       unreadCount: 0,
     },
     {
@@ -308,6 +327,81 @@ async function openExternalLink(
   };
 }
 
+async function performMailAction(
+  request: MailActionRequest,
+): Promise<MailActionResponse> {
+  e2eEvents.push({ name: "perform-mail-action", request });
+  await delay(20);
+
+  const message = request.messageId
+    ? activeMail.messages.find(
+        (candidate) =>
+          candidate.accountId === request.accountId &&
+          candidate.folderId === request.folderId &&
+          candidate.id === request.messageId,
+      )
+    : null;
+
+  if (request.action.kind === "mark-read" && message) {
+    message.unread = !request.action.read;
+    return {
+      accountId: request.accountId,
+      action: request.action,
+      mutation: { kind: "flags-updated", read: request.action.read },
+      retry: { kind: "retryable", maxAttempts: 3 },
+      undo: {
+        accountId: request.accountId,
+        action: { kind: "mark-read", read: !request.action.read },
+        folderId: request.folderId,
+        messageId: request.messageId ?? message.id,
+      },
+    };
+  }
+
+  if (request.action.kind === "expunge-deleted") {
+    return {
+      accountId: request.accountId,
+      action: request.action,
+      mutation: {
+        kind: "expunged",
+        folderId: request.folderId,
+        removedCount: 0,
+      },
+      retry: { kind: "retryable", maxAttempts: 3 },
+      undo: null,
+    };
+  }
+
+  const targetFolderId =
+    request.action.kind === "move"
+      ? request.action.targetFolderId
+      : request.action.kind === "archive"
+        ? "folder_work_archive"
+        : "folder_work_trash";
+  if (message) {
+    message.folderId = targetFolderId;
+  }
+
+  return {
+    accountId: request.accountId,
+    action: request.action,
+    mutation: {
+      kind: "moved",
+      fromFolderId: request.folderId,
+      toFolderId: targetFolderId,
+    },
+    retry: { kind: "retryable", maxAttempts: 3 },
+    undo: request.messageId
+      ? {
+          accountId: request.accountId,
+          action: { kind: "move", targetFolderId: request.folderId },
+          folderId: targetFolderId,
+          messageId: request.messageId,
+        }
+      : null,
+  };
+}
+
 async function previewAttachment(
   request: AttachmentCommandRequest,
 ): Promise<AttachmentPreviewResponse> {
@@ -489,6 +583,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       loadMailShellData={loadMailShellData}
       loadRecentRecipients={listRecentRecipients}
       openExternalLink={openExternalLink}
+      performMailAction={performMailAction}
       previewAttachment={previewAttachment}
       saveAttachment={saveAttachment}
       saveComposerDraft={saveComposerDraft}

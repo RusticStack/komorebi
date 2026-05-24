@@ -30,6 +30,10 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
   ).toHaveCount(0);
   await invoiceReader.getByRole("link", { name: "invoice portal" }).click();
   await expect(invoiceReader.getByText("External link opened.")).toBeVisible();
+  await invoiceReader.getByRole("button", { name: "Mark read" }).click();
+  await expect(invoiceReader.getByText("Message marked read.")).toBeVisible();
+  await invoiceReader.getByRole("button", { name: "Undo" }).click();
+  await expect(invoiceReader.getByText("Message marked unread.")).toBeVisible();
   await invoiceReader.getByRole("button", { name: "Load remote content" }).click();
   await invoiceReader
     .getByRole("button", { name: "Allow this message" })
@@ -108,6 +112,7 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
               draftId?: string;
               folderId?: string;
               messageId?: string;
+              action?: { kind?: string; read?: boolean };
               scope?: string;
               url?: string;
               userRequested?: boolean;
@@ -123,6 +128,9 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
       externalLinks: events.filter(
         (event) => event.name === "open-external-link",
       ),
+      mailActions: events.filter(
+        (event) => event.name === "perform-mail-action",
+      ),
       sent: events.filter((event) => event.name === "send-mail"),
     };
   });
@@ -137,6 +145,18 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
     folderId: "folder_work_inbox",
     messageId: "msg_invoice",
     scope: "message",
+    userRequested: true,
+  });
+  expect(events.mailActions).toHaveLength(2);
+  expect(events.mailActions[0]?.request).toMatchObject({
+    accountId: "acct_work",
+    action: { kind: "mark-read", read: true },
+    folderId: "folder_work_inbox",
+    messageId: "msg_invoice",
+    userRequested: true,
+  });
+  expect(events.mailActions[1]?.request).toMatchObject({
+    action: { kind: "mark-read", read: false },
     userRequested: true,
   });
   expect(events.sent).toHaveLength(1);

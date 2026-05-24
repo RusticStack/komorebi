@@ -7,6 +7,8 @@ import type {
   ComposerDraftSaveRequest,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
+  MailActionRequest,
+  MailActionResponse,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
@@ -37,6 +39,7 @@ import {
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
   openExternalLinkFromTauri,
+  performMailActionFromTauri,
   previewAttachmentFromTauri,
   reauthAccountFromTauri,
   removeAccountFromTauri,
@@ -193,6 +196,35 @@ describe("mailShellDataSource", () => {
 
     await expect(openExternalLinkFromTauri(request)).resolves.toBe(response);
     expect(invokeMock).toHaveBeenCalledWith("open_external_link", {
+      request,
+    });
+  });
+
+  it("maps mail actions to the typed Tauri command", async () => {
+    const request: MailActionRequest = {
+      accountId: "acct_personal",
+      action: { kind: "mark-read", read: true },
+      confirmed: false,
+      folderId: "folder_inbox",
+      messageId: "msg_invoice",
+      userRequested: true,
+    };
+    const response: MailActionResponse = {
+      accountId: "acct_personal",
+      action: request.action,
+      mutation: { kind: "flags-updated", read: true },
+      retry: { kind: "retryable", maxAttempts: 3 },
+      undo: {
+        accountId: "acct_personal",
+        action: { kind: "mark-read", read: false },
+        folderId: "folder_inbox",
+        messageId: "msg_invoice",
+      },
+    };
+    invokeMock.mockResolvedValueOnce(response);
+
+    await expect(performMailActionFromTauri(request)).resolves.toBe(response);
+    expect(invokeMock).toHaveBeenCalledWith("perform_mail_action", {
       request,
     });
   });

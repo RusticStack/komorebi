@@ -24,6 +24,8 @@ import type {
   ComposerSendResponse,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
+  MailActionRequest,
+  MailActionResponse,
   MailMessage,
   MailSearchRequest,
   MailSearchResponse,
@@ -72,11 +74,35 @@ const fixtureMail: MailShellData = {
       totalCount: 1,
     },
     {
+      id: "folder_personal_trash",
+      accountId: "acct_personal",
+      name: "Trash",
+      kind: "trash",
+      unreadCount: 0,
+      totalCount: 0,
+    },
+    {
       id: "folder_work_inbox",
       accountId: "acct_work",
       name: "Inbox",
       kind: "inbox",
       unreadCount: 1,
+      totalCount: 1,
+    },
+    {
+      id: "folder_work_archive",
+      accountId: "acct_work",
+      name: "Archive",
+      kind: "archive",
+      unreadCount: 0,
+      totalCount: 0,
+    },
+    {
+      id: "folder_work_trash",
+      accountId: "acct_work",
+      name: "Trash",
+      kind: "trash",
+      unreadCount: 0,
       totalCount: 1,
     },
   ],
@@ -141,6 +167,21 @@ const fixtureMail: MailShellData = {
           disposition: "inline",
         },
       ],
+    },
+    {
+      id: "msg_deleted",
+      accountId: "acct_work",
+      folderId: "folder_work_trash",
+      sender: "Old Sender",
+      senderEmail: "old@example.com",
+      subject: "Old deleted message",
+      preview: "Already marked deleted on the server.",
+      receivedAt: "2026-05-20T08:15:00",
+      unread: false,
+      flagged: false,
+      bodyText: "Already marked deleted on the server.",
+      bodyHtml: null,
+      attachments: [],
     },
   ],
 };
@@ -763,6 +804,208 @@ describe("App", () => {
 
     fireEvent.click(within(reader).getByText("bad link"));
     expect(openExternalLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes move, archive, delete, mark-read, expunge, undo, and retry through typed mail actions", async () => {
+    const performMailAction = vi.fn(
+      async (request: MailActionRequest): Promise<MailActionResponse> => {
+        if (request.action.kind === "archive" && request.attempt !== 2) {
+          throw {
+            reason: "mail server operation can retry",
+            retry: { kind: "retry-now", nextAttempt: 2, maxAttempts: 3 },
+          };
+        }
+
+        if (request.action.kind === "mark-read") {
+          return {
+            accountId: request.accountId,
+            action: request.action,
+            mutation: { kind: "flags-updated", read: request.action.read },
+            retry: { kind: "retryable", maxAttempts: 3 },
+            undo: {
+              accountId: request.accountId,
+              action: { kind: "mark-read", read: !request.action.read },
+              folderId: request.folderId,
+              messageId: request.messageId ?? "msg_invoice",
+            },
+          };
+        }
+
+        if (request.action.kind === "expunge-deleted") {
+          return {
+            accountId: request.accountId,
+            action: request.action,
+            mutation: { kind: "expunged", folderId: request.folderId, removedCount: 1 },
+            retry: { kind: "retryable", maxAttempts: 3 },
+            undo: null,
+          };
+        }
+
+        const targetFolderId =
+          request.action.kind === "move"
+            ? request.action.targetFolderId
+            : request.action.kind === "archive"
+              ? "folder_work_archive"
+              : "folder_work_trash";
+
+        return {
+          accountId: request.accountId,
+          action: request.action,
+          mutation: {
+            kind: "moved",
+            fromFolderId: request.folderId,
+            toFolderId: targetFolderId,
+          },
+          retry: { kind: "retryable", maxAttempts: 3 },
+          undo: {
+            accountId: request.accountId,
+            action: { kind: "move", targetFolderId: request.folderId },
+            folderId: targetFolderId,
+            messageId: request.messageId ?? "msg_invoice",
+          },
+        };
+      },
+    );
+
+    render(
+      <App initialData={fixtureMail} performMailAction={performMailAction} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Invoice question/ }));
+    let reader = screen.getByRole("region", { name: "Selected message" });
+
+    fireEvent.click(within(reader).getByRole("button", { name: "Mark read" }));
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenCalledWith({
+        accountId: "acct_work",
+        action: { kind: "mark-read", read: true },
+        confirmed: false,
+        folderId: "folder_work_inbox",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+    expect(await within(reader).findByText("Message marked read.")).toBeVisible();
+
+    fireEvent.change(
+      within(reader).getByLabelText("Move message to folder"),
+      { target: { value: "folder_work_archive" } },
+    );
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "move", targetFolderId: "folder_work_archive" },
+        confirmed: false,
+        folderId: "folder_work_inbox",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+    expect(await within(reader).findByText("Message moved.")).toBeVisible();
+
+    fireEvent.click(within(reader).getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "move", targetFolderId: "folder_work_inbox" },
+        confirmed: false,
+        folderId: "folder_work_archive",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+
+    fireEvent.click(within(reader).getByRole("button", { name: "Archive" }));
+    expect(
+      await within(reader).findByText("mail server operation can retry"),
+    ).toBeVisible();
+    fireEvent.click(within(reader).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "archive" },
+        attempt: 2,
+        confirmed: false,
+        folderId: "folder_work_inbox",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+    expect(await within(reader).findByText("Message archived.")).toBeVisible();
+
+    fireEvent.click(within(reader).getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "move", targetFolderId: "folder_work_inbox" },
+        confirmed: false,
+        folderId: "folder_work_archive",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+
+    const callCountBeforeDelete = performMailAction.mock.calls.length;
+    fireEvent.click(within(reader).getByRole("button", { name: "Delete" }));
+    expect(
+      within(reader).getByText("Delete moves this message to Trash and can be undone while the message remains there."),
+    ).toBeVisible();
+    expect(performMailAction).toHaveBeenCalledTimes(callCountBeforeDelete);
+    fireEvent.click(within(reader).getByRole("button", { name: "Move to Trash" }));
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "delete-to-trash" },
+        confirmed: true,
+        folderId: "folder_work_inbox",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+    expect(await within(reader).findByText("Message moved to Trash.")).toBeVisible();
+
+    fireEvent.click(within(reader).getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "move", targetFolderId: "folder_work_inbox" },
+        confirmed: false,
+        folderId: "folder_work_trash",
+        messageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Trash folder, 0 unread, 1 messages",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Old deleted message/ }));
+    reader = screen.getByRole("region", { name: "Selected message" });
+    fireEvent.click(within(reader).getByRole("button", { name: "Expunge" }));
+    expect(
+      within(reader).getByText(
+        "Expunge permanently removes messages already marked deleted in this folder. This cannot be undone.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      within(within(reader).getByRole("region", { name: "Confirm expunge" }))
+        .getByRole("button", { name: "Expunge" }),
+    );
+    await waitFor(() =>
+      expect(performMailAction).toHaveBeenLastCalledWith({
+        accountId: "acct_work",
+        action: { kind: "expunge-deleted" },
+        confirmed: true,
+        folderId: "folder_work_trash",
+        messageId: null,
+        userRequested: true,
+      }),
+    );
+    expect(
+      await within(reader).findByText("Expunged 1 deleted messages."),
+    ).toBeVisible();
   });
 
   it("persists narrow remote-content preferences and renders consented remote images", async () => {

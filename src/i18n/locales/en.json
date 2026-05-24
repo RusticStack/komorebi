@@ -128,8 +128,17 @@
       "actions": {
         "label": "Message actions",
         "archive": "Archive",
+        "archiveTitle": "Move this message to the account archive folder.",
         "archiveUnavailable": "Archive unavailable",
         "archiveUnavailableTitle": "Archive is waiting for the typed mail-action command.",
+        "delete": "Delete",
+        "deleteTitle": "Move this message to Trash after confirmation.",
+        "deleteUnavailable": "Delete unavailable",
+        "deleteUnavailableTitle": "Delete requires an account Trash folder and the typed mail-action command.",
+        "expunge": "Expunge",
+        "expungeTitle": "Permanently remove messages already marked deleted in this folder.",
+        "expungeUnavailable": "Expunge unavailable",
+        "expungeUnavailableTitle": "Expunge requires the typed mail-action command.",
         "forward": "Forward",
         "forwardUnavailable": "Forward unavailable",
         "forwardUnavailableTitle": "Composer forward routing is not implemented yet.",
@@ -147,6 +156,9 @@
         "markReadUnavailable": "Mark read unavailable",
         "markUnread": "Mark unread",
         "markUnreadUnavailable": "Mark unread unavailable",
+        "moveLabel": "Move message to folder",
+        "movePlaceholder": "Move to...",
+        "readStateTitle": "Update this message's read state on the mail server.",
         "readStateUnavailableTitle": "Read-state changes are waiting for the typed mail-action command.",
         "reply": "Reply",
         "replyUnavailable": "Reply unavailable",
@@ -190,6 +202,41 @@
         "opened": "External link opened.",
         "opening": "Opening external link.",
         "unavailable": "External link opening is unavailable."
+      },
+      "mailActions": {
+        "confirm": {
+          "delete-to-trash": {
+            "aria": "Confirm delete",
+            "body": "Delete moves this message to Trash and can be undone while the message remains there.",
+            "confirm": "Move to Trash",
+            "heading": "Move message to Trash?"
+          },
+          "expunge-deleted": {
+            "aria": "Confirm expunge",
+            "body": "Expunge permanently removes messages already marked deleted in this folder. This cannot be undone.",
+            "confirm": "Expunge",
+            "heading": "Permanently expunge deleted messages?"
+          }
+        },
+        "error": "Mail action failed.",
+        "running": {
+          "archive": "Archiving message.",
+          "delete-to-trash": "Moving message to Trash.",
+          "expunge-deleted": "Expunging deleted messages.",
+          "mark-read": "Updating read state.",
+          "move": "Moving message."
+        },
+        "statusAria": "Mail action status",
+        "success": {
+          "archive": "Message archived.",
+          "deleteToTrash": "Message moved to Trash.",
+          "expunge": "Expunged {{count}} deleted messages.",
+          "markRead": "Message marked read.",
+          "markUnread": "Message marked unread.",
+          "move": "Message moved."
+        },
+        "undo": "Undo",
+        "unavailable": "Mail actions are unavailable."
       },
       "remoteBlocked": "Remote content blocked by default",
       "selectedEyebrow": "Selected message"
