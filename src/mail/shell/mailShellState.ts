@@ -1,5 +1,15 @@
 export type LoadStatus = "ready" | "loading" | "error";
 
+export type UiLanguagePreference = "en" | "pt-PT";
+
+export type UiPreferencesView = {
+  language: UiLanguagePreference | null;
+};
+
+export type UiPreferencesUpdateRequest = {
+  language: UiLanguagePreference | null;
+};
+
 export type AccountStatus =
   | "connected"
   | "idle"

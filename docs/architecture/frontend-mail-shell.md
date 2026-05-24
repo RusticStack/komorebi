@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
+Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
 Last reviewed: 2026-05-24.
 
 ## Current Scope
@@ -15,6 +15,7 @@ The code source of truth is:
 - `src/i18n/`
 - `src/App.tsx`
 - `src/App.css`
+- `src-tauri/src/app_preferences.rs`
 - `src-tauri/src/attachment_commands.rs`
 - `src-tauri/src/external_links.rs`
 - `src-tauri/src/mail_actions.rs`
@@ -36,7 +37,7 @@ The default state is an accountless local shell with:
 - settings entry
 - empty states
 
-Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `load_message_page` reads scoped message pages from the same cache for large folder browsing; `search_mail` queries the same cache through FTS5 when the user searches; reader mail actions call `perform_mail_action`; delegated message links call the typed external-link command; reader attachment actions call typed preview/save/download commands; composer data-source functions call the typed Rust draft, attachment staging, forwarded-attachment staging, recent-recipient, and send commands. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
+Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `load_message_page` reads scoped message pages from the same cache for large folder browsing; `search_mail` queries the same cache through FTS5 when the user searches; language preference reads/writes call `get_ui_preferences` and `update_ui_preferences`; reader mail actions call `perform_mail_action`; delegated message links call the typed external-link command; reader attachment actions call typed preview/save/download commands; composer data-source functions call the typed Rust draft, attachment staging, forwarded-attachment staging, recent-recipient, and send commands. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
 
 ## State Model
 
@@ -148,7 +149,10 @@ OAuth reconnect for Gmail/Microsoft calls `start_oauth_account_reauth` with the 
 The frontend uses `i18next` and `react-i18next` through `src/i18n/index.ts`.
 
 - Supported languages are English (`en`) and Portuguese (`pt-PT`).
-- First-launch language detection reads `navigator.languages` and `navigator.language`, maps any Portuguese locale to `pt-PT`, maps English locales to `en`, and falls back to English.
+- First-launch language detection reads `navigator.languages` and `navigator.language`, maps any Portuguese locale to `pt-PT`, maps English locales to `en`, and falls back to English when no persisted override exists.
+- `src-tauri/src/app_preferences.rs` stores the optional language override in the SQLite `settings` key `ui:language`; valid values are `en`, `pt-PT`, or no row for system default.
+- `get_ui_preferences` is inputless and returns only the optional language override. `update_ui_preferences` accepts only the typed optional language enum and deletes the row when the user chooses system default.
+- The settings drawer language picker applies the persisted language immediately after save and uses detection again only when the backend returns `null`.
 - Translation resources live in `src/i18n/locales/en.json` and `src/i18n/locales/pt-PT.json`.
 - Runtime shell, reader, settings, safe-message, and composer strings route through `t(...)`; the app name remains literal branding.
 - Missing sender and attachment display-name fallbacks are applied in React through i18n keys, not synthesized as English labels in the Rust cache read model.
@@ -157,7 +161,7 @@ The frontend uses `i18next` and `react-i18next` through `src/i18n/index.ts`.
 - Account/folder unread badges, search result status counts, and attachment-size labels use the active locale's number formatting.
 - `pt-PT` resource completeness is tested against English resources.
 
-There is no language picker, persisted locale setting, relative date wording, or broad long-string screenshot corpus yet.
+There is no relative date wording or broad long-string screenshot corpus yet.
 
 ## Message List Virtualization
 
@@ -315,7 +319,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - settings account preference/signature save command and cache reload
 - account sync status drawer, last-successful-sync display, generic reconnect, OAuth reconnect, and backend sync-status event refresh
 - loading/error shell states
-- first-launch language detection, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
+- first-launch language detection, persisted language preference application, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
 
 `src/mail/shell/mailShellState.test.ts` covers pure shell state rules: unified/account/folder scope filtering, local search fallback behavior, cache-reload selection preservation, and stale backend row clearing.
 
@@ -335,7 +339,7 @@ Normal automated tests use no real mailbox data, real credentials, or live provi
 
 - TanStack Query integration.
 - External attachment open, archive extraction, and attachment preview types beyond plain text/raster images.
-- Language picker, persisted locale preference, relative date wording, and broad translated-layout screenshot coverage.
+- Relative date wording and broad translated-layout screenshot coverage.
 - E2E accessibility, axe, or real screen-reader harness.
 - Release-build Tauri-shell performance measurements against live adapters and persisted SQLite fixture databases.
 

@@ -14,7 +14,11 @@ import {
   type Rect,
   type Virtualizer,
 } from "@tanstack/react-virtual";
-import { useLocaleFormatters } from "../../i18n";
+import {
+  detectInitialLanguage,
+  i18n as komorebiI18n,
+  useLocaleFormatters,
+} from "../../i18n";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import {
   hasRemoteContentReferences,
@@ -91,6 +95,8 @@ import {
   type RemoteContentPreferenceRequest,
   type RemoteContentPreferenceResponse,
   type RemoteContentPreferenceScope,
+  type UiPreferencesUpdateRequest,
+  type UiPreferencesView,
   type LoadStatus,
 } from "./mailShellState";
 
@@ -135,6 +141,10 @@ export type AccountAuthStatusFunction = (
 export type AccountSettingsUpdateFunction = (
   request: AccountSettingsUpdateRequest,
 ) => Promise<AccountSettingsUpdateResponse>;
+export type UiPreferencesLoadFunction = () => Promise<UiPreferencesView>;
+export type UiPreferencesUpdateFunction = (
+  request: UiPreferencesUpdateRequest,
+) => Promise<UiPreferencesView>;
 export type ComposerDraftListFunction = () => Promise<ComposerDraft[]>;
 export type ComposerForwardedAttachmentStageFunction = (
   request: ComposerForwardedAttachmentStageRequest,
@@ -162,6 +172,8 @@ export type MailClientShellProps = {
   loadComposerDrafts?: ComposerDraftListFunction;
   searchMail?: MailSearchFunction;
   allowRemoteContent?: RemoteContentPreferenceFunction;
+  loadUiPreferences?: UiPreferencesLoadFunction;
+  updateUiPreferences?: UiPreferencesUpdateFunction;
   openExternalLink?: ExternalLinkOpenFunction;
   performMailAction?: MailActionFunction;
   previewAttachment?: AttachmentPreviewFunction;
@@ -322,6 +334,8 @@ export function MailClientShell({
   loadComposerDrafts,
   searchMail,
   allowRemoteContent,
+  loadUiPreferences,
+  updateUiPreferences,
   openExternalLink,
   performMailAction,
   previewAttachment,
@@ -365,6 +379,11 @@ export function MailClientShell({
     useState<ComposerDraft[]>(initialComposerDrafts);
   const [composerDraftsLoadState, setComposerDraftsLoadState] =
     useState<LoadStatus>(loadComposerDrafts ? "loading" : "ready");
+  const [languagePreference, setLanguagePreference] = useState<
+    UiPreferencesView["language"]
+  >(null);
+  const [languagePreferenceLoadState, setLanguagePreferenceLoadState] =
+    useState<LoadStatus>(loadUiPreferences ? "loading" : "ready");
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [statusAccountId, setStatusAccountId] = useState<string | null>(null);
   const [selectedComposerDraftId, setSelectedComposerDraftId] =
@@ -394,6 +413,7 @@ export function MailClientShell({
   const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const languagePreferenceRevisionRef = useRef(0);
   const visibleFolders = useMemo(() => foldersForScope(state), [state]);
   const scopedMessages = useMemo(() => messagesForScope(state), [state]);
   const searchQuery = state.searchQuery.trim();
@@ -469,6 +489,23 @@ export function MailClientShell({
   const listTitle = state.unifiedInbox
     ? t("mail.folders.unifiedInbox")
     : activeFolder?.name ?? activeAccount?.label ?? t("mail.folders.allMail");
+
+  const saveLanguagePreference = useCallback(
+    async (language: UiPreferencesView["language"]) => {
+      if (!updateUiPreferences) {
+        throw new Error(t("settings.language.unavailable"));
+      }
+
+      languagePreferenceRevisionRef.current += 1;
+      const preferences = await updateUiPreferences({ language });
+      setLanguagePreference(preferences.language);
+      setLanguagePreferenceLoadState("ready");
+      await komorebiI18n.changeLanguage(
+        preferences.language ?? detectInitialLanguage(),
+      );
+    },
+    [t, updateUiPreferences],
+  );
 
   function patchState(update: Partial<MailShellState>) {
     setState((current) => ({
@@ -1192,6 +1229,41 @@ export function MailClientShell({
       results: current.results.map(patchMessage),
     }));
   }
+
+  useEffect(() => {
+    if (!loadUiPreferences) {
+      return;
+    }
+
+    let cancelled = false;
+    const revision = languagePreferenceRevisionRef.current;
+
+    loadUiPreferences()
+      .then((preferences) => {
+        if (
+          cancelled ||
+          revision !== languagePreferenceRevisionRef.current
+        ) {
+          return;
+        }
+
+        setLanguagePreference(preferences.language);
+        setLanguagePreferenceLoadState("ready");
+        void komorebiI18n.changeLanguage(
+          preferences.language ?? detectInitialLanguage(),
+        );
+      })
+      .catch(() => {
+        if (cancelled || revision !== languagePreferenceRevisionRef.current) {
+          return;
+        }
+        setLanguagePreferenceLoadState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadUiPreferences]);
 
   useEffect(() => {
     if (!loadMailShellData) {
@@ -1944,6 +2016,11 @@ export function MailClientShell({
               localPreferences: accountLocalPreferences(account),
             }))}
             initialAccountId={state.selectedAccountId}
+            languagePreference={languagePreference}
+            languagePreferenceStatus={languagePreferenceLoadState}
+            onChangeLanguagePreference={
+              updateUiPreferences ? saveLanguagePreference : undefined
+            }
             onSaveAccountSettings={saveAccountSettings}
             onAccountChanged={() => {
               if (loadMailShellData) {

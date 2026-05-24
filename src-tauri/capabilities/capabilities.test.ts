@@ -134,6 +134,13 @@ const oauthLoopbackCommandNames = new Set([
 
 function rustCommandPath(command: string) {
   if (
+    command === "get_ui_preferences" ||
+    command === "update_ui_preferences"
+  ) {
+    return `app_preferences::${command}`;
+  }
+
+  if (
     command === "load_mail_shell" ||
     command === "load_message_page" ||
     command === "search_mail" ||
@@ -228,6 +235,8 @@ describe("Tauri capabilities", () => {
       "allow-load-message-page",
       "allow-search-mail",
       "allow-allow-remote-content",
+      "allow-get-ui-preferences",
+      "allow-update-ui-preferences",
       "allow-perform-mail-action",
       "allow-open-external-link",
       "allow-preview-attachment",
@@ -288,6 +297,8 @@ describe("Tauri capabilities", () => {
       "load_message_page",
       "search_mail",
       "allow_remote_content",
+      "get_ui_preferences",
+      "update_ui_preferences",
       "perform_mail_action",
       "open_external_link",
       "preview_attachment",

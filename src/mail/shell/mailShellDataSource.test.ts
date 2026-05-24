@@ -37,6 +37,7 @@ import {
   createAccountFromTauri,
   downloadAttachmentFromTauri,
   getAccountAuthStatusFromTauri,
+  getUiPreferencesFromTauri,
   isTauriRuntime,
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
@@ -56,6 +57,7 @@ import {
   SYNC_STATUS_EVENT_NAME,
   testAccountConnectionFromTauri,
   updateAccountSettingsFromTauri,
+  updateUiPreferencesFromTauri,
 } from "./mailShellDataSource";
 
 const shellResponse: MailShellData = {
@@ -209,6 +211,26 @@ describe("mailShellDataSource", () => {
     await expect(allowRemoteContentFromTauri(request)).resolves.toBe(response);
     expect(invokeMock).toHaveBeenCalledWith("allow_remote_content", {
       request,
+    });
+  });
+
+  it("maps UI preference reads and writes to typed Tauri commands", async () => {
+    invokeMock
+      .mockResolvedValueOnce({ language: null })
+      .mockResolvedValueOnce({ language: "pt-PT" });
+
+    await expect(getUiPreferencesFromTauri()).resolves.toEqual({
+      language: null,
+    });
+    await expect(
+      updateUiPreferencesFromTauri({ language: "pt-PT" }),
+    ).resolves.toEqual({
+      language: "pt-PT",
+    });
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_ui_preferences");
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "update_ui_preferences", {
+      request: { language: "pt-PT" },
     });
   });
 

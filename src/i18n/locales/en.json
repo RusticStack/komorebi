@@ -585,6 +585,18 @@
       },
       "statusSummary": "Auth status: {{status}}; {{credential}}."
     },
+    "language": {
+      "en": "English",
+      "heading": "Language",
+      "label": "Language preference",
+      "loadError": "Language preference could not be loaded.",
+      "loading": "Loading language preference.",
+      "ptPT": "Portuguese (Portugal)",
+      "saved": "Language preference saved.",
+      "saving": "Saving language preference.",
+      "system": "System default",
+      "unavailable": "Language settings are unavailable in this runtime."
+    },
     "aria": {
       "panel": "Settings",
       "preview": "Signature preview"

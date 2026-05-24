@@ -21,6 +21,8 @@ import type {
   AccountSecurityMode,
   AccountSetupRequest,
   AccountSetupResponse,
+  LoadStatus,
+  UiLanguagePreference,
 } from "../mail/shell/mailShellState";
 
 export type SignatureAccountOption = {
@@ -37,6 +39,11 @@ export type SignatureAccountOption = {
 export type AccountSignatureSettingsProps = {
   accounts: SignatureAccountOption[];
   initialAccountId?: string | null;
+  languagePreference?: UiLanguagePreference | null;
+  languagePreferenceStatus?: LoadStatus;
+  onChangeLanguagePreference?: (
+    language: UiLanguagePreference | null,
+  ) => Promise<void>;
   onSaveSignature?: (
     accountId: string,
     signatureHtml: string | null,
@@ -108,6 +115,9 @@ const defaultLocalPreferences: AccountLocalPreferences = {
 export function AccountSignatureSettings({
   accounts,
   initialAccountId,
+  languagePreference = null,
+  languagePreferenceStatus = "ready",
+  onChangeLanguagePreference,
   onSaveSignature,
   onSaveAccountSettings,
   onAccountChanged,
@@ -140,6 +150,11 @@ export function AccountSignatureSettings({
   const [deleteLocalCache, setDeleteLocalCache] = useState(true);
   const [accountNotice, setAccountNotice] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [languageNoticeKey, setLanguageNoticeKey] = useState<string | null>(
+    null,
+  );
+  const [languageError, setLanguageError] = useState<string | null>(null);
+  const [languageSaving, setLanguageSaving] = useState(false);
   const [authStatus, setAuthStatus] = useState<AccountAuthStatusView | null>(
     null,
   );
@@ -186,6 +201,64 @@ export function AccountSignatureSettings({
           </button>
         ) : null}
       </header>
+
+      <section
+        className="app-preferences"
+        aria-label={t("settings.language.heading")}
+      >
+        <h3>{t("settings.language.heading")}</h3>
+        <label>
+          <span>{t("settings.language.label")}</span>
+          <select
+            value={languagePreference ?? "system"}
+            disabled={
+              !onChangeLanguagePreference ||
+              languagePreferenceStatus === "loading" ||
+              languageSaving
+            }
+            onChange={(event) => {
+              const value = event.target.value;
+              void handleLanguagePreferenceChange(
+                value === "system" ? null : (value as UiLanguagePreference),
+              );
+            }}
+          >
+            <option value="system">{t("settings.language.system")}</option>
+            <option value="en">{t("settings.language.en")}</option>
+            <option value="pt-PT">{t("settings.language.ptPT")}</option>
+          </select>
+        </label>
+        {languagePreferenceStatus === "loading" ? (
+          <p className="settings-notice" role="status">
+            {t("settings.language.loading")}
+          </p>
+        ) : null}
+        {languageSaving ? (
+          <p className="settings-notice" role="status">
+            {t("settings.language.saving")}
+          </p>
+        ) : null}
+        {languageNoticeKey ? (
+          <p className="settings-notice" role="status">
+            {t(languageNoticeKey)}
+          </p>
+        ) : null}
+        {languagePreferenceStatus === "error" ? (
+          <p className="settings-error" role="alert">
+            {t("settings.language.loadError")}
+          </p>
+        ) : null}
+        {languageError ? (
+          <p className="settings-error" role="alert">
+            {languageError}
+          </p>
+        ) : null}
+        {!onChangeLanguagePreference ? (
+          <p className="account-form__hint">
+            {t("settings.language.unavailable")}
+          </p>
+        ) : null}
+      </section>
 
       <section
         className="account-settings"
@@ -599,6 +672,27 @@ export function AccountSignatureSettings({
       )}
     </section>
   );
+
+  async function handleLanguagePreferenceChange(
+    language: UiLanguagePreference | null,
+  ) {
+    if (!onChangeLanguagePreference) {
+      setLanguageError(t("settings.language.unavailable"));
+      return;
+    }
+
+    setLanguageError(null);
+    setLanguageNoticeKey(null);
+    setLanguageSaving(true);
+    try {
+      await onChangeLanguagePreference(language);
+      setLanguageNoticeKey("settings.language.saved");
+    } catch (error) {
+      setLanguageError(formatAccountError(error));
+    } finally {
+      setLanguageSaving(false);
+    }
+  }
 
   function updateAccountForm(update: Partial<AccountFormState>) {
     setAccountForm((current) => ({ ...current, ...update }));

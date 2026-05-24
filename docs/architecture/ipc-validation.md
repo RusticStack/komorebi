@@ -10,6 +10,8 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `load_message_page`: read-only local-cache message page query with a typed scope/cursor request.
 - `search_mail`: read-only local-cache FTS query with a typed request.
 - `allow_remote_content`: typed remote-content preference persistence for a stored message or sender.
+- `get_ui_preferences`: inputless local UI preference lookup for the optional language override.
+- `update_ui_preferences`: typed local UI preference persistence for the optional language override.
 - `perform_mail_action`: typed server-affecting reader action for mark-read/unread, move, archive, delete-to-trash, and expunge.
 - `open_external_link`: typed external link opening for delegated, sanitized message links.
 - `preview_attachment`: typed reader preview for stored local-cache attachment content.
@@ -36,6 +38,8 @@ Komorebi has reviewed frontend-callable IPC commands:
 `search_mail` validates the query and optional account/folder scope before executing backend-owned SQLite reads. It rejects raw SQL-shaped input, raw HTML/markup, URL/path-shaped input, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. Supported advanced syntax is parsed in Rust into sanitized FTS terms plus parameterized metadata filters for `from:`, `subject:`, `body:`, `has:attachment`, and `is:read|unread|flagged|starred`; unsupported `has:`/`is:` values and duplicate/conflicting filters are denial paths. It does not accept raw SQL, raw FTS `MATCH` syntax, paths, URLs, message bodies, HTML to persist, account/folder names as query syntax, or cache filenames from React.
 
 `allow_remote_content` validates account/folder/message id shape, active account/folder/message ownership, and `userRequested=true` before writing a SQLite preference row. The request may choose only `message` or `sender` scope; React never supplies sender email or remote URLs. Sender-scoped preferences derive the sender from the stored message row and reject messages without a usable sender address.
+
+`get_ui_preferences` accepts no request fields and reads only the optional `settings` row `ui:language`. `update_ui_preferences` accepts only the optional enum values `en`, `pt-PT`, or `null`; `null` deletes the override so first-launch language detection applies again. The command rejects unknown language values through serde before persistence and never accepts raw setting keys, JSON strings, SQL, paths, account ids, or arbitrary preference maps from React.
 
 `perform_mail_action` validates account/folder/message id shape, active ownership, `userRequested=true`, confirmation for delete-to-trash and expunge, target-folder ownership for moves, archive/trash special-folder availability, and retry attempts before live IMAP mutation or local cache update. Rust resolves remote folder names and stored UIDs from SQLite. React cannot submit raw IMAP commands, raw SQL, credential refs, local paths, remote provider folder names for archive/delete, or hard-delete requests. The command stops the account sync worker around accepted mutations, returns redacted retry metadata for transient failures, and returns undo metadata only for reversible actions.
 

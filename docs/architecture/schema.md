@@ -29,7 +29,7 @@ Local recent-recipient persistence is implemented by migration `007_recent_recip
 
 Per-account signature persistence is implemented in `src-tauri/src/account_signatures.rs` and `src-tauri/src/account_management.rs` through the existing `accounts.signature_html` column. Signatures are sanitized account metadata and are not credentials.
 
-Per-account local preferences are implemented in `src-tauri/src/account_management.rs` through the existing JSON `settings` table using keys shaped as `account:{account_id}:local_preferences`. The current preference is `includeInUnifiedInbox`, which `load_mail_shell` and `search_mail` use to exclude opted-out accounts from unified views while leaving explicit account scope usable. No schema migration was required because `settings` already stores validated JSON objects.
+Per-account local preferences are implemented in `src-tauri/src/account_management.rs` through the existing JSON `settings` table using keys shaped as `account:{account_id}:local_preferences`. The current preference is `includeInUnifiedInbox`, which `load_mail_shell` and `search_mail` use to exclude opted-out accounts from unified views while leaving explicit account scope usable. The app-wide optional language override is implemented in `src-tauri/src/app_preferences.rs` through the same table under key `ui:language`, storing only JSON string values `"en"` or `"pt-PT"`; the row is deleted when the user chooses system default. No schema migration was required because `settings` already stores validated JSON values.
 
 Remote-content preferences are implemented by migration `010_remote_content_preferences.sql` and `src-tauri/src/mail_shell.rs`. The table stores explicit user consent for either one stored message or one normalized sender within an account. React chooses only the scope; Rust validates the account/folder/message and derives sender addresses from the cached message row.
 
@@ -38,7 +38,7 @@ Remote-content preferences are implemented by migration `010_remote_content_pref
 The current schema defines:
 
 - `schema_migrations`: applied migration history.
-- `settings`: global and scoped preferences stored as validated JSON values, including per-account local preferences under `account:{account_id}:local_preferences`.
+- `settings`: global and scoped preferences stored as validated JSON values, including UI language under `ui:language` and per-account local preferences under `account:{account_id}:local_preferences`.
 - `accounts`: non-secret account metadata and credential references only.
 - `folders`: provider folders, special-use classification, preserved provider attributes, sync counters, UIDVALIDITY, and sync status.
 - `messages`: local message rows with separate local id, IMAP UID, UIDVALIDITY, RFC `Message-ID`, provider metadata, and MIME parser-warning JSON.
@@ -110,6 +110,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - `accounts.credential_ref` is the only persisted secret reference and is unique.
 - `accounts.signature_html` stores optional sanitized HTML account metadata. Empty signatures store `NULL`.
 - Per-account local preference rows in `settings` store validated JSON objects and are deleted during account removal.
+- The optional UI language setting stores only a JSON string `"en"` or `"pt-PT"` under `ui:language`; no row means system detection is used.
 - Remote-content preference rows reference an account and either one message or one normalized sender. Message-scoped rows cascade when the message/account is deleted; sender-scoped rows cascade when the account is deleted. Uniqueness allows one row per `(account_id, message_id)` message scope and one row per `(account_id, normalized_sender_email)` sender scope.
 - Generic IMAP/SMTP accounts must include IMAP and SMTP host, port, and security metadata.
 - Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
@@ -155,6 +156,7 @@ Encrypted local mail storage is future work. This schema/storage model stores me
 - Sent APPEND payload migration adds retry payload/hash/attempt/upload columns and a pending-append index to version-8 databases.
 - Remote-content preference migration adds message/sender consent rows, uniqueness, account/message foreign keys, timestamp trigger, and account cascade behavior to version-9 databases.
 - JSON validation for settings and templates.
+- UI language preference default/read/write/reset behavior and invalid stored-language rejection in `src-tauri/src/app_preferences.rs`.
 - `PRAGMA foreign_key_check` on valid seed data.
 
 `pnpm check` runs these tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.

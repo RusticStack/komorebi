@@ -585,6 +585,18 @@
       },
       "statusSummary": "Estado de autenticacao: {{status}}; {{credential}}."
     },
+    "language": {
+      "en": "Ingles",
+      "heading": "Idioma",
+      "label": "Preferencia de idioma",
+      "loadError": "Nao foi possivel carregar a preferencia de idioma.",
+      "loading": "A carregar preferencia de idioma.",
+      "ptPT": "Portugues (Portugal)",
+      "saved": "Preferencia de idioma guardada.",
+      "saving": "A guardar preferencia de idioma.",
+      "system": "Predefinicao do sistema",
+      "unavailable": "As definicoes de idioma estao indisponiveis neste runtime."
+    },
     "aria": {
       "panel": "Definicoes",
       "preview": "Pre-visualizacao da assinatura"

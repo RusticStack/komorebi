@@ -12,6 +12,35 @@ describe("AccountSignatureSettings", () => {
     expect(screen.getByText("No accounts configured.")).toBeVisible();
   });
 
+  it("persists language preference changes through the typed callback", async () => {
+    const onChangeLanguagePreference = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AccountSignatureSettings
+        accounts={[]}
+        languagePreference={null}
+        onChangeLanguagePreference={onChangeLanguagePreference}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Language preference"), {
+      target: { value: "pt-PT" },
+    });
+
+    await waitFor(() =>
+      expect(onChangeLanguagePreference).toHaveBeenCalledWith("pt-PT"),
+    );
+    expect(await screen.findByText("Language preference saved.")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Language preference"), {
+      target: { value: "system" },
+    });
+
+    await waitFor(() =>
+      expect(onChangeLanguagePreference).toHaveBeenCalledWith(null),
+    );
+  });
+
   it("sanitizes the edited signature before saving per account", () => {
     const onSaveSignature = vi.fn();
     render(

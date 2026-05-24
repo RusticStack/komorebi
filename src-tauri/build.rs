@@ -3,6 +3,8 @@ const APP_COMMANDS: &[&str] = &[
     "load_message_page",
     "search_mail",
     "allow_remote_content",
+    "get_ui_preferences",
+    "update_ui_preferences",
     "perform_mail_action",
     "open_external_link",
     "preview_attachment",

@@ -1,6 +1,7 @@
 pub mod account_connection;
 pub mod account_management;
 pub mod account_signatures;
+pub mod app_preferences;
 pub mod attachment_commands;
 pub mod attachment_safety;
 pub mod auth;
@@ -57,6 +58,8 @@ pub fn run() {
             mail_shell::load_message_page,
             mail_shell::search_mail,
             mail_shell::allow_remote_content,
+            app_preferences::get_ui_preferences,
+            app_preferences::update_ui_preferences,
             mail_actions::perform_mail_action,
             external_links::open_external_link,
             attachment_commands::preview_attachment,

@@ -10,6 +10,7 @@ import {
   discardComposerDraftFromTauri,
   downloadAttachmentFromTauri,
   getAccountAuthStatusFromTauri,
+  getUiPreferencesFromTauri,
   isTauriRuntime,
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
@@ -30,6 +31,7 @@ import {
   subscribeToSyncStatusFromTauri,
   testAccountConnectionFromTauri,
   updateAccountSettingsFromTauri,
+  updateUiPreferencesFromTauri,
 } from "./mail/shell/mailShellDataSource";
 
 function App(props: MailClientShellProps) {
@@ -39,6 +41,10 @@ function App(props: MailClientShellProps) {
   const runtimeSearch = isRuntime ? searchMailFromTauri : undefined;
   const runtimeAllowRemoteContent = isRuntime
     ? allowRemoteContentFromTauri
+    : undefined;
+  const runtimeUiPreferences = isRuntime ? getUiPreferencesFromTauri : undefined;
+  const runtimeUpdateUiPreferences = isRuntime
+    ? updateUiPreferencesFromTauri
     : undefined;
   const runtimeOpenExternalLink = isRuntime
     ? openExternalLinkFromTauri
@@ -96,6 +102,10 @@ function App(props: MailClientShellProps) {
       searchMail={props.searchMail ?? runtimeSearch}
       allowRemoteContent={
         props.allowRemoteContent ?? runtimeAllowRemoteContent
+      }
+      loadUiPreferences={props.loadUiPreferences ?? runtimeUiPreferences}
+      updateUiPreferences={
+        props.updateUiPreferences ?? runtimeUpdateUiPreferences
       }
       openExternalLink={props.openExternalLink ?? runtimeOpenExternalLink}
       performMailAction={props.performMailAction ?? runtimeMailAction}

@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
+import { afterEach } from "vitest";
 import App from "../App";
 import type { MailShellData } from "../mail/shell/mailShellState";
 import {
@@ -8,6 +9,7 @@ import {
   formatByteSize,
   formatCount,
   formatDateTime,
+  i18n as appI18n,
   matchSupportedLanguage,
 } from ".";
 import { en, ptPT } from "./resources";
@@ -23,6 +25,12 @@ function flattenedKeys(value: unknown, prefix = ""): string[] {
 }
 
 describe("i18n", () => {
+  afterEach(async () => {
+    await act(async () => {
+      await appI18n.changeLanguage("en");
+    });
+  });
+
   it("detects supported first-launch languages and falls back to English", () => {
     expect(
       detectInitialLanguage({
@@ -64,6 +72,19 @@ describe("i18n", () => {
     expect(
       screen.getByRole("checkbox", { name: "Caixa unificada" }),
     ).toBeDisabled();
+  });
+
+  it("applies a persisted language preference when one exists", async () => {
+    await act(async () => {
+      await appI18n.changeLanguage("en");
+    });
+
+    render(<App loadUiPreferences={() => Promise.resolve({ language: "pt-PT" })} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Definicoes" }),
+    ).toBeEnabled();
+    expect(screen.getByText("Nenhuma conta configurada.")).toBeVisible();
   });
 
   it("formats counts, dates, times, sizes, and statuses for pt-PT UI", () => {

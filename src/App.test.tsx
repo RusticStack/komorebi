@@ -6,9 +6,9 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 import App from "./App";
-import { formatDateTime } from "./i18n";
+import { formatDateTime, i18n as appI18n } from "./i18n";
 import type {
   AttachmentCommandRequest,
   AttachmentDownloadResponse,
@@ -209,6 +209,12 @@ const archiveSearchResult: MailMessage = {
   bodyHtml: null,
   attachments: [],
 };
+
+afterEach(async () => {
+  await act(async () => {
+    await appI18n.changeLanguage("en");
+  });
+});
 
 function createLargeMailFixture(messageCount: number): MailShellData {
   return {
@@ -2011,6 +2017,43 @@ describe("App", () => {
     await waitFor(() => expect(loadMailShellData).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Account settings were saved.")).toBeVisible();
     expect(screen.getByRole("button", { name: /Sender/ })).toBeVisible();
+  });
+
+  it("persists language changes from settings and applies the selected locale", async () => {
+    await appI18n.changeLanguage("en");
+    const loadUiPreferences = vi.fn().mockResolvedValue({ language: "en" });
+    const updateUiPreferences = vi
+      .fn()
+      .mockResolvedValue({ language: "pt-PT" });
+
+    render(
+      <App
+        initialData={fixtureMail}
+        loadUiPreferences={loadUiPreferences}
+        updateUiPreferences={updateUiPreferences}
+      />,
+    );
+
+    await waitFor(() => expect(loadUiPreferences).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+    await act(async () => {
+      fireEvent.change(within(settings).getByLabelText("Language preference"), {
+        target: { value: "pt-PT" },
+      });
+    });
+
+    await waitFor(() =>
+      expect(updateUiPreferences).toHaveBeenCalledWith({
+        language: "pt-PT",
+      }),
+    );
+    await waitFor(() => expect(appI18n.language).toBe("pt-PT"));
+    expect(
+      await screen.findByText("Preferencia de idioma guardada."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Definicoes" })).toBeVisible();
   });
 
   it("renders loading and error states for the shell surfaces", () => {
