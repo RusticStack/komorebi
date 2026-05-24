@@ -64,6 +64,7 @@ pub fn run() {
             composer::autosave_composer_draft,
             composer::discard_composer_draft,
             composer::stage_composer_attachment,
+            composer::stage_forwarded_attachments,
             composer::send_composer_email,
             composer::list_recent_recipients,
             composer::list_composer_drafts,

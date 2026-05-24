@@ -8,6 +8,7 @@ import type {
   AttachmentPreviewResponse,
   AttachmentSaveResponse,
   ComposerAttachment,
+  ComposerForwardedAttachmentStageRequest,
   ComposerAttachmentStageRequest,
   ComposerDraft,
   ComposerDraftDiscardRequest,
@@ -48,6 +49,7 @@ type E2eEvent =
   | { name: "save-draft"; request: ComposerDraftSaveRequest }
   | { name: "discard-draft"; request: ComposerDraftDiscardRequest }
   | { name: "stage-attachment"; request: ComposerAttachmentStageRequest }
+  | { name: "stage-forwarded-attachments"; request: ComposerForwardedAttachmentStageRequest }
   | { name: "send-mail"; request: ComposerSendRequest }
   | { name: "recent-recipients"; request: RecentRecipientSearchRequest };
 
@@ -174,14 +176,19 @@ const fixtureMail: MailShellData = {
       bodyHtml:
         '<p>Can you <strong>confirm</strong> the invoice number in the <a href="https://example.com/invoice">invoice portal</a>?</p><a href="javascript:alert(1)">bad link</a><img src="https://tracker.example/pixel.png" alt="tracking pixel">',
       bodyText: "Can you confirm the invoice number?",
+      ccAddresses: [{ address: "ada@example.com", name: "Ada" }],
       flagged: true,
       folderId: "folder_work_inbox",
       id: "msg_invoice",
+      inReplyTo: null,
       preview: "Can you confirm the invoice number?",
       receivedAt: "2026-05-22T08:15:00",
+      references: ["<thread-root@example.com>"],
+      rfcMessageId: "<invoice-question@example.com>",
       sender: "Finance",
       senderEmail: "finance@example.com",
       subject: "Invoice question",
+      toAddresses: [{ address: "work@example.com", name: "Work" }],
       unread: true,
     },
   ],
@@ -501,6 +508,24 @@ async function stageComposerAttachment(
   };
 }
 
+async function stageForwardedAttachments(
+  request: ComposerForwardedAttachmentStageRequest,
+): Promise<ComposerAttachment[]> {
+  e2eEvents.push({ name: "stage-forwarded-attachments", request });
+  await delay(20);
+
+  return request.sourceAttachmentIds.map((attachmentId) => ({
+    accountId: request.accountId,
+    contentId: null,
+    contentType: attachmentId.endsWith("notes") ? "text/plain" : "application/pdf",
+    displayFilename: attachmentId.endsWith("notes") ? "notes.txt" : "invoice.pdf",
+    disposition: "attachment",
+    draftId: request.draftId,
+    id: `catt_forwarded_${attachmentId}`,
+    sizeBytes: attachmentId.endsWith("notes") ? 20 : 24_576,
+  }));
+}
+
 async function sendComposerMail(
   request: ComposerSendRequest,
 ): Promise<ComposerSendResponse> {
@@ -591,6 +616,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       searchDebounceMs={performanceFixture ? 25 : undefined}
       sendComposerMail={sendComposerMail}
       stageComposerAttachment={stageComposerAttachment}
+      stageForwardedAttachments={stageForwardedAttachments}
     />
   </React.StrictMode>,
 );

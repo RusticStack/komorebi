@@ -14,6 +14,9 @@ use sha2::{Digest, Sha256};
 use tauri::Manager;
 
 use crate::{
+    attachment_commands::{
+        download_attachment_from_connection, AttachmentCommandError, AttachmentCommandRequest,
+    },
     attachment_safety::{
         sanitize_display_filename, validate_attachment_for_storage, AttachmentContentType,
         AttachmentSafetyError, AttachmentTypeEvidence, PreviewKind,
@@ -36,7 +39,7 @@ use crate::{
         OutboundAttachmentDisposition, OutboundAttachmentMetadata, OutboundAttachmentRef,
         OutboundEmailAddress, SendEmailError, SendEmailReport, SendEmailRequest, SendProgressEvent,
         SmtpAccountStore, SmtpAuthResolver, SmtpSender, SqliteSmtpAccountStore,
-        ATTACHMENT_STREAM_CHUNK_BYTES,
+        ATTACHMENT_STREAM_CHUNK_BYTES, MAX_OUTBOUND_ATTACHMENTS,
     },
     sync_scheduler::{load_account_oauth_client_config, BackgroundSyncScheduler},
     token_lifecycle::{
@@ -67,6 +70,8 @@ pub struct ComposerDraftSaveRequest {
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     pub attachment_ids: Vec<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -85,6 +90,17 @@ pub struct ComposerAttachmentStageRequest {
     pub content_type: Option<String>,
     pub disposition: ComposerAttachmentDisposition,
     pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerForwardedAttachmentStageRequest {
+    pub account_id: String,
+    pub draft_id: String,
+    pub source_folder_id: String,
+    pub source_message_id: String,
+    pub source_attachment_ids: Vec<String>,
+    pub user_requested: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,6 +122,8 @@ pub struct ComposerSendRequest {
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     pub attachment_ids: Vec<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -129,6 +147,8 @@ pub struct ComposerDraftListItemView {
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     pub attachments: Vec<ComposerAttachmentView>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
     pub autosave_revision: u64,
 }
 
@@ -255,6 +275,12 @@ impl From<AttachmentSafetyError> for ComposerCommandError {
     }
 }
 
+impl From<AttachmentCommandError> for ComposerCommandError {
+    fn from(value: AttachmentCommandError) -> Self {
+        Self::new(value.to_string())
+    }
+}
+
 impl From<SendEmailError> for ComposerCommandError {
     fn from(value: SendEmailError) -> Self {
         Self::new(value.to_string())
@@ -288,6 +314,16 @@ pub fn stage_composer_attachment(
     let app_data_dir = app_data_dir(&app)?;
     let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
     stage_composer_attachment_from_path(&cache_path, &app_data_dir, request)
+}
+
+#[tauri::command]
+pub fn stage_forwarded_attachments(
+    app: tauri::AppHandle,
+    request: ComposerForwardedAttachmentStageRequest,
+) -> Result<Vec<ComposerAttachmentView>, ComposerCommandError> {
+    let app_data_dir = app_data_dir(&app)?;
+    let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+    stage_forwarded_attachments_from_path(&cache_path, &app_data_dir, request)
 }
 
 #[tauri::command]
@@ -416,6 +452,66 @@ pub fn stage_composer_attachment_from_path(
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
     stage_composer_attachment_from_connection(&connection, app_data_dir, request)
+}
+
+pub fn stage_forwarded_attachments_from_path(
+    cache_path: &Path,
+    app_data_dir: &Path,
+    request: ComposerForwardedAttachmentStageRequest,
+) -> Result<Vec<ComposerAttachmentView>, ComposerCommandError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    stage_forwarded_attachments_from_connection(&connection, app_data_dir, request)
+}
+
+pub fn stage_forwarded_attachments_from_connection(
+    connection: &Connection,
+    app_data_dir: &Path,
+    request: ComposerForwardedAttachmentStageRequest,
+) -> Result<Vec<ComposerAttachmentView>, ComposerCommandError> {
+    validate_entity_id("account_id", &request.account_id)?;
+    validate_entity_id("draft_id", &request.draft_id)?;
+    validate_entity_id("folder_id", &request.source_folder_id)?;
+    validate_entity_id("message_id", &request.source_message_id)?;
+    if !request.user_requested {
+        return Err(ComposerCommandError::new(
+            "forwarded attachment staging requires user intent",
+        ));
+    }
+    if request.source_attachment_ids.len() > MAX_OUTBOUND_ATTACHMENTS {
+        return Err(ComposerCommandError::new("too many forwarded attachments"));
+    }
+    ensure_active_draft(connection, &request.account_id, &request.draft_id)?;
+
+    let mut staged = Vec::new();
+    for attachment_id in request.source_attachment_ids {
+        validate_entity_id("attachment_id", &attachment_id)?;
+        let source = download_attachment_from_connection(
+            connection,
+            app_data_dir,
+            AttachmentCommandRequest {
+                account_id: request.account_id.clone(),
+                folder_id: request.source_folder_id.clone(),
+                message_id: request.source_message_id.clone(),
+                attachment_id,
+                user_requested: true,
+            },
+        )?;
+        staged.push(stage_composer_attachment_from_connection(
+            connection,
+            app_data_dir,
+            ComposerAttachmentStageRequest {
+                account_id: request.account_id.clone(),
+                draft_id: request.draft_id.clone(),
+                display_filename: source.display_filename,
+                content_type: Some(source.content_type),
+                disposition: ComposerAttachmentDisposition::Attachment,
+                bytes: source.bytes,
+            },
+        )?);
+    }
+
+    Ok(staged)
 }
 
 pub fn stage_composer_attachment_from_connection(
@@ -591,6 +687,8 @@ where
             body_text: request.body_text.clone(),
             body_html: request.body_html.clone(),
             attachment_ids: request.attachment_ids.clone(),
+            in_reply_to: request.in_reply_to.clone(),
+            references: request.references.clone(),
         },
     )?;
 
@@ -713,8 +811,8 @@ fn draft_autosave_request(
         body_text,
         body_html,
         attachment_ids_json: serialize_attachment_ids(&request.attachment_ids)?,
-        in_reply_to: None,
-        references_json: "[]".to_string(),
+        in_reply_to: clean_optional_message_id(request.in_reply_to)?,
+        references_json: serialize_message_references(&request.references)?,
     })
 }
 
@@ -734,6 +832,8 @@ fn send_email_request(
         body_text: clean_optional_text(request.body_text)?,
         body_html: clean_optional_html_for_send(request.body_html)?,
         attachments: outbound_attachment_refs(request.attachment_ids)?,
+        in_reply_to: clean_optional_message_id(request.in_reply_to)?,
+        references: message_references(request.references)?,
         message_id: None,
     })
 }
@@ -852,6 +952,49 @@ fn outbound_attachment_refs(
         .collect()
 }
 
+fn clean_optional_message_id(
+    value: Option<String>,
+) -> Result<Option<String>, ComposerCommandError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    validate_payload_size("message_id", trimmed.as_bytes(), MAX_TEXT_FIELD_BYTES)?;
+    if trimmed.chars().any(char::is_control)
+        || !(trimmed.starts_with('<') && trimmed.ends_with('>') && trimmed.contains('@'))
+    {
+        return Err(ComposerCommandError::new(
+            "message_id must be an RFC Message-ID",
+        ));
+    }
+
+    Ok(Some(trimmed.to_string()))
+}
+
+fn message_references(values: Vec<String>) -> Result<Vec<String>, ComposerCommandError> {
+    if values.len() > 32 {
+        return Err(ComposerCommandError::new("too many message references"));
+    }
+    let mut seen = HashSet::new();
+    let mut references = Vec::new();
+    for value in values {
+        if let Some(reference) = clean_optional_message_id(Some(value))? {
+            if seen.insert(reference.to_ascii_lowercase()) {
+                references.push(reference);
+            }
+        }
+    }
+    Ok(references)
+}
+
+fn serialize_message_references(values: &[String]) -> Result<String, ComposerCommandError> {
+    serde_json::to_string(&message_references(values.to_vec())?)
+        .map_err(|error| ComposerCommandError::new(error.to_string()))
+}
+
 fn serialize_attachment_ids(ids: &[String]) -> Result<String, ComposerCommandError> {
     for id in ids {
         validate_entity_id("attachment_id", id)?;
@@ -924,6 +1067,8 @@ fn draft_list_item_view(
         body_text: record.body_text,
         body_html: record.body_html,
         attachments,
+        in_reply_to: record.in_reply_to,
+        references: message_references_from_json(&record.references_json)?,
         autosave_revision: record.autosave_revision,
     })
 }
@@ -950,6 +1095,12 @@ fn attachment_ids_from_json(value: &str) -> Result<Vec<String>, ComposerCommandE
         validate_entity_id("attachment_id", id)?;
     }
     Ok(ids)
+}
+
+fn message_references_from_json(value: &str) -> Result<Vec<String>, ComposerCommandError> {
+    let references: Vec<String> = serde_json::from_str(value)
+        .map_err(|_| ComposerCommandError::new("draft references are invalid"))?;
+    message_references(references)
 }
 
 fn composer_attachments_for_draft(
@@ -1685,6 +1836,8 @@ mod tests {
             body_text: Some("Hello from composer".into()),
             body_html: Some("<p>Hello from <strong>composer</strong></p>".into()),
             attachment_ids: Vec::new(),
+            in_reply_to: None,
+            references: Vec::new(),
         }
     }
 
@@ -1706,6 +1859,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(subject, "Composer subject");
+    }
+
+    #[test]
+    fn autosave_and_reload_preserve_reply_thread_metadata() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        let mut request = draft_save_request();
+        request.in_reply_to = Some("<source@example.com>".into());
+        request.references = vec![
+            "<root@example.com>".into(),
+            "<source@example.com>".into(),
+            "<source@example.com>".into(),
+        ];
+
+        autosave_composer_draft_from_connection(&connection, request)
+            .expect("save reply draft metadata");
+
+        let stored = connection
+            .query_row(
+                "SELECT in_reply_to, references_json
+                 FROM composer_drafts
+                 WHERE id = 'draft_composer'",
+                [],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored.0.as_deref(), Some("<source@example.com>"));
+        assert_eq!(stored.1, r#"["<root@example.com>","<source@example.com>"]"#);
+
+        let drafts = list_composer_drafts_from_connection(&connection).unwrap();
+        assert_eq!(
+            drafts[0].in_reply_to.as_deref(),
+            Some("<source@example.com>")
+        );
+        assert_eq!(
+            drafts[0].references,
+            vec!["<root@example.com>", "<source@example.com>"]
+        );
     }
 
     #[test]
@@ -1850,6 +2041,133 @@ mod tests {
         assert!(checked_app_data_path_for_read(&app_data_dir, &stored_path)
             .unwrap()
             .exists());
+
+        fs::remove_dir_all(app_data_dir).unwrap();
+    }
+
+    #[test]
+    fn stages_forwarded_attachment_from_validated_cached_message_bytes() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        autosave_composer_draft_from_connection(&connection, draft_save_request()).unwrap();
+        let app_data_dir = temp_app_data_dir("forward-attachment");
+        connection
+            .execute(
+                "INSERT INTO folders (
+                   id,
+                   account_id,
+                   remote_id,
+                   name,
+                   display_name,
+                   kind,
+                   uid_validity
+                 )
+                 VALUES (
+                   'folder_inbox',
+                   'acct_composer',
+                   'INBOX',
+                   'INBOX',
+                   'Inbox',
+                   'inbox',
+                   1
+                 )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages (
+                   id,
+                   account_id,
+                   folder_id,
+                   imap_uid,
+                   uid_validity,
+                   subject,
+                   sender_email
+                 )
+                 VALUES (
+                   'msg_forward_source',
+                   'acct_composer',
+                   'folder_inbox',
+                   7,
+                   1,
+                   'Forward source',
+                   'source@example.com'
+                 )",
+                [],
+            )
+            .unwrap();
+        let bytes = b"forwarded notes";
+        let relative_path =
+            "attachments/acct_composer/folder_inbox/msg_forward_source/att_forward.txt";
+        let full_path = app_data_dir.join(relative_path);
+        fs::create_dir_all(full_path.parent().unwrap()).unwrap();
+        fs::write(&full_path, bytes).unwrap();
+        connection
+            .execute(
+                "INSERT INTO attachments (
+                   id,
+                   account_id,
+                   folder_id,
+                   message_id,
+                   display_filename,
+                   canonical_mime,
+                   content_type,
+                   size_bytes,
+                   storage_relative_path,
+                   sha256,
+                   disposition
+                 )
+                 VALUES (
+                   'att_forward',
+                   'acct_composer',
+                   'folder_inbox',
+                   'msg_forward_source',
+                   '../notes.exe',
+                   'text/plain',
+                   'text/plain',
+                   ?1,
+                   ?2,
+                   ?3,
+                   'attachment'
+                 )",
+                params![bytes.len() as i64, relative_path, sha256_hex(bytes)],
+            )
+            .unwrap();
+
+        let staged = stage_forwarded_attachments_from_connection(
+            &connection,
+            &app_data_dir,
+            ComposerForwardedAttachmentStageRequest {
+                account_id: "acct_composer".into(),
+                draft_id: "draft_composer".into(),
+                source_folder_id: "folder_inbox".into(),
+                source_message_id: "msg_forward_source".into(),
+                source_attachment_ids: vec!["att_forward".into()],
+                user_requested: true,
+            },
+        )
+        .expect("stage forwarded attachment");
+
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].display_filename, "notes.txt");
+        assert_eq!(staged[0].content_type, "text/plain");
+        assert_eq!(
+            staged[0].disposition,
+            ComposerAttachmentDisposition::Attachment
+        );
+        let stored_path: String = connection
+            .query_row(
+                "SELECT storage_relative_path FROM composer_attachments WHERE id = ?1",
+                [&staged[0].id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored_path.starts_with("composer-attachments/acct_composer/draft_composer/"));
+        assert_eq!(
+            fs::read(checked_app_data_path_for_read(&app_data_dir, &stored_path).unwrap()).unwrap(),
+            bytes
+        );
 
         fs::remove_dir_all(app_data_dir).unwrap();
     }
@@ -2016,14 +2334,17 @@ mod tests {
         let mut auth = FakeAuthResolver;
         let mut attachments = ComposerAttachmentStore::new(&connection, &app_data_dir);
         let mut smtp = FakeSmtpSender::default();
+        let mut send_request = ComposerSendRequest {
+            attachment_ids: vec![staged.id.clone()],
+            ..ComposerSendRequest::from(draft_save_request())
+        };
+        send_request.in_reply_to = Some("<source@example.com>".into());
+        send_request.references = vec!["<root@example.com>".into(), "<source@example.com>".into()];
 
         let response = send_composer_email_with_runtime(
             &connection,
             &app_data_dir,
-            ComposerSendRequest {
-                attachment_ids: vec![staged.id.clone()],
-                ..ComposerSendRequest::from(draft_save_request())
-            },
+            send_request,
             &mut account_store,
             &mut auth,
             &mut attachments,
@@ -2053,6 +2374,12 @@ mod tests {
             .unwrap();
         assert_eq!(draft_state, "sent");
         assert!(smtp.sent_message.contains("komorebi-account-signature"));
+        assert!(smtp
+            .sent_message
+            .contains("In-Reply-To: <source@example.com>"));
+        assert!(smtp
+            .sent_message
+            .contains("References: <root@example.com> <source@example.com>"));
 
         fs::remove_dir_all(app_data_dir).unwrap();
     }
@@ -2069,6 +2396,8 @@ mod tests {
                 body_text: value.body_text,
                 body_html: value.body_html,
                 attachment_ids: value.attachment_ids,
+                in_reply_to: value.in_reply_to,
+                references: value.references,
             }
         }
     }

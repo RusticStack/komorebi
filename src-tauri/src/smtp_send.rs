@@ -193,6 +193,8 @@ pub struct SendEmailRequest {
     pub body_text: Option<String>,
     pub body_html: Option<SanitizedHtml>,
     pub attachments: Vec<OutboundAttachmentRef>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
     pub message_id: Option<String>,
 }
 
@@ -1072,6 +1074,12 @@ fn compose_message(
     for recipient in &request.reply_to {
         builder = builder.reply_to(recipient.mailbox()?);
     }
+    if let Some(in_reply_to) = &request.in_reply_to {
+        builder = builder.in_reply_to(in_reply_to.clone());
+    }
+    if !request.references.is_empty() {
+        builder = builder.references(request.references.join(" "));
+    }
 
     let body = compose_body_part(account, request)?;
     let mut attachment_bytes_streamed = 0_u64;
@@ -1248,6 +1256,17 @@ fn validate_send_request(request: &SendEmailRequest) -> Result<(), SendEmailErro
     if let Some(message_id) = &request.message_id {
         validate_message_id(message_id.clone())?;
     }
+    if let Some(in_reply_to) = &request.in_reply_to {
+        validate_message_id(in_reply_to.clone())?;
+    }
+    if request.references.len() > 32 {
+        return Err(SendEmailError::InvalidRequest {
+            reason: "too many message references",
+        });
+    }
+    for reference in &request.references {
+        validate_message_id(reference.clone())?;
+    }
 
     Ok(())
 }
@@ -1286,7 +1305,9 @@ fn validate_smtp_host(host: &str) -> Result<(), SendEmailError> {
 fn validate_message_id(value: String) -> Result<String, SendEmailError> {
     validate_bounded_text("message_id", &value, MAX_TEXT_FIELD_BYTES)?;
     let trimmed = value.trim();
-    if !(trimmed.starts_with('<') && trimmed.ends_with('>') && trimmed.contains('@')) {
+    if trimmed.chars().any(char::is_control)
+        || !(trimmed.starts_with('<') && trimmed.ends_with('>') && trimmed.contains('@'))
+    {
         return Err(SendEmailError::InvalidRequest {
             reason: "message_id must be an RFC Message-ID",
         });
@@ -1530,6 +1551,8 @@ mod tests {
             body_text: Some("Plain update".into()),
             body_html: Some(SanitizedHtml::new_sanitized("<p>Plain update</p>").unwrap()),
             attachments: vec![OutboundAttachmentRef::new("att_report").unwrap()],
+            in_reply_to: None,
+            references: Vec::new(),
             message_id: Some("<send-1@example.com>".into()),
         }
     }
@@ -1869,6 +1892,37 @@ mod tests {
                 SendProgressEvent::SentStateRecorded
             ]
         ));
+    }
+
+    #[test]
+    fn outgoing_reply_preserves_threading_headers() {
+        let connection = migrated_connection();
+        seed_generic_account(&connection);
+        let mut account_store = SqliteSmtpAccountStore::new(&connection);
+        let mut auth = FakeAuthResolver {
+            auth: SmtpAuth::Plain {
+                username: "sender@example.com".into(),
+                password: SecretString::new("app-password"),
+            },
+        };
+        let mut attachments = FakeAttachmentStore::with_text_attachment();
+        let mut smtp = FakeSmtpSender::default();
+        let mut request = request();
+        request.in_reply_to = Some("<source@example.com>".into());
+        request.references = vec!["<root@example.com>".into(), "<source@example.com>".into()];
+
+        send_email(
+            request,
+            &mut account_store,
+            &mut auth,
+            &mut attachments,
+            &mut smtp,
+        )
+        .unwrap();
+
+        let message = &smtp.sent_messages[0];
+        assert!(message.contains("In-Reply-To: <source@example.com>"));
+        assert!(message.contains("References: <root@example.com> <source@example.com>"));
     }
 
     #[test]

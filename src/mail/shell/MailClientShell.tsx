@@ -17,6 +17,7 @@ import { useLocaleFormatters } from "../../i18n";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import {
   hasRemoteContentReferences,
+  sanitizeEmailHtml,
   type SafeEmailLink,
 } from "../rendering/emailHtml";
 import {
@@ -60,6 +61,8 @@ import {
   type MailMessage,
   type MailShellState,
   type ComposerDraft,
+  type ComposerAttachment,
+  type ComposerForwardedAttachmentStageRequest,
   type AccountSetupRequest,
   type AccountSetupResponse,
   type AccountReauthRequest,
@@ -123,6 +126,9 @@ export type AccountSettingsUpdateFunction = (
   request: AccountSettingsUpdateRequest,
 ) => Promise<AccountSettingsUpdateResponse>;
 export type ComposerDraftListFunction = () => Promise<ComposerDraft[]>;
+export type ComposerForwardedAttachmentStageFunction = (
+  request: ComposerForwardedAttachmentStageRequest,
+) => Promise<ComposerAttachment[]>;
 export type AttachmentPreviewFunction = (
   request: AttachmentCommandRequest,
 ) => Promise<AttachmentPreviewResponse>;
@@ -155,6 +161,7 @@ export type MailClientShellProps = {
   saveComposerDraft?: ComposerDraftSaveFunction;
   discardComposerDraft?: ComposerDraftDiscardFunction;
   stageComposerAttachment?: ComposerAttachmentStageFunction;
+  stageForwardedAttachments?: ComposerForwardedAttachmentStageFunction;
   sendComposerMail?: ComposerSendFunction;
   createAccount?: AccountCreateFunction;
   reauthAccount?: AccountReauthFunction;
@@ -168,6 +175,7 @@ export type MailClientShellProps = {
 };
 
 type Drawer = "composer" | "drafts" | "settings" | "account-status" | null;
+type ComposerRouteKind = "reply" | "reply-all" | "forward";
 type MailSearchUiStatus =
   | "idle"
   | "debouncing"
@@ -193,6 +201,10 @@ type RemoteContentActionState = {
 type ExternalLinkActionState = {
   linkId: string | null;
   status: "idle" | "opening" | "opened" | "error";
+  message: string | null;
+};
+type ComposerRouteActionState = {
+  status: "idle" | "loading" | "error";
   message: string | null;
 };
 type MailActionUiState = {
@@ -242,6 +254,10 @@ const emptyExternalLinkActionState: ExternalLinkActionState = {
   status: "idle",
   message: null,
 };
+const emptyComposerRouteActionState: ComposerRouteActionState = {
+  status: "idle",
+  message: null,
+};
 const emptyMailActionUiState: MailActionUiState = {
   status: "idle",
   message: null,
@@ -267,6 +283,7 @@ export function MailClientShell({
   saveComposerDraft,
   discardComposerDraft,
   stageComposerAttachment,
+  stageForwardedAttachments,
   sendComposerMail,
   createAccount,
   reauthAccount,
@@ -297,6 +314,8 @@ export function MailClientShell({
   const [statusAccountId, setStatusAccountId] = useState<string | null>(null);
   const [selectedComposerDraftId, setSelectedComposerDraftId] =
     useState<string | null>(null);
+  const [routedComposerDraft, setRoutedComposerDraft] =
+    useState<ComposerDraft | null>(null);
   const [attachmentPreview, setAttachmentPreview] =
     useState<AttachmentPreviewResponse | null>(null);
   const [attachmentAction, setAttachmentAction] =
@@ -305,6 +324,8 @@ export function MailClientShell({
     useState<RemoteContentActionState>(emptyRemoteContentActionState);
   const [externalLinkAction, setExternalLinkAction] =
     useState<ExternalLinkActionState>(emptyExternalLinkActionState);
+  const [composerRouteAction, setComposerRouteAction] =
+    useState<ComposerRouteActionState>(emptyComposerRouteActionState);
   const [mailAction, setMailAction] =
     useState<MailActionUiState>(emptyMailActionUiState);
   const [mailActionConfirmation, setMailActionConfirmation] =
@@ -361,6 +382,7 @@ export function MailClientShell({
   const selectedComposerDraft = selectedComposerDraftId
     ? composerDrafts.find((draft) => draft.id === selectedComposerDraftId) ?? null
     : null;
+  const activeComposerDraft = selectedComposerDraft ?? routedComposerDraft;
   const listTitle = state.unifiedInbox
     ? t("mail.folders.unifiedInbox")
     : activeFolder?.name ?? activeAccount?.label ?? t("mail.folders.allMail");
@@ -379,6 +401,9 @@ export function MailClientShell({
 
   function closeDrawer() {
     const restoreFocus = restoreFocusRef.current;
+    if (drawer === "composer") {
+      setRoutedComposerDraft(null);
+    }
     setDrawer(null);
     restoreFocusRef.current = null;
     restoreFocus?.focus();
@@ -553,6 +578,7 @@ export function MailClientShell({
     clearAttachmentUi();
     setRemoteContentAction(emptyRemoteContentActionState);
     setExternalLinkAction(emptyExternalLinkActionState);
+    setComposerRouteAction(emptyComposerRouteActionState);
     setMailAction(emptyMailActionUiState);
     setMailActionConfirmation(null);
   }
@@ -845,6 +871,8 @@ export function MailClientShell({
 
   function openNewComposer(restoreFocus: HTMLElement | null) {
     setSelectedComposerDraftId(null);
+    setRoutedComposerDraft(null);
+    setComposerRouteAction(emptyComposerRouteActionState);
     openDrawer("composer", restoreFocus);
   }
 
@@ -853,6 +881,71 @@ export function MailClientShell({
     restoreFocus: HTMLElement | null = draftsButtonRef.current,
   ) {
     setSelectedComposerDraftId(draftId);
+    setRoutedComposerDraft(null);
+    setComposerRouteAction(emptyComposerRouteActionState);
+    openDrawer("composer", restoreFocus);
+  }
+
+  async function openRoutedComposer(
+    message: MailMessage,
+    route: ComposerRouteKind,
+    includeAttachments: boolean,
+    restoreFocus: HTMLElement | null,
+  ) {
+    if (!canCompose) {
+      return;
+    }
+
+    const draftId = createRoutedDraftId(route, message.id);
+    let attachments: ComposerAttachment[] = [];
+    if (includeAttachments && message.attachments.length > 0) {
+      if (!stageForwardedAttachments) {
+        setComposerRouteAction({
+          message: t("mail.reader.routing.forwardAttachmentUnavailable"),
+          status: "error",
+        });
+        return;
+      }
+
+      setComposerRouteAction({
+        message: t("mail.reader.routing.stagingAttachments"),
+        status: "loading",
+      });
+
+      try {
+        attachments = await stageForwardedAttachments({
+          accountId: message.accountId,
+          draftId,
+          sourceAttachmentIds: message.attachments.map(
+            (attachment) => attachment.id,
+          ),
+          sourceFolderId: message.folderId,
+          sourceMessageId: message.id,
+          userRequested: true,
+        });
+      } catch {
+        setComposerRouteAction({
+          message: t("mail.reader.routing.forwardAttachmentError"),
+          status: "error",
+        });
+        return;
+      }
+    }
+
+    const sourceAccount = accountById.get(message.accountId) ?? null;
+    setSelectedComposerDraftId(null);
+    setRoutedComposerDraft(
+      composerDraftFromMessage({
+        attachments,
+        draftId,
+        localeFormat,
+        message,
+        route,
+        sourceAccount,
+        t,
+      }),
+    );
+    setComposerRouteAction(emptyComposerRouteActionState);
     openDrawer("composer", restoreFocus);
   }
 
@@ -1443,6 +1536,8 @@ export function MailClientShell({
           state={state}
           message={activeMessage}
           hasVisibleMessages={visibleMessages.length > 0}
+          canCompose={canCompose}
+          canForwardAttachments={Boolean(stageForwardedAttachments)}
           onRetry={loadMailShellData ? reloadMailShell : undefined}
           previewAttachment={previewAttachment}
           saveAttachment={saveAttachment}
@@ -1452,6 +1547,7 @@ export function MailClientShell({
           attachmentAction={attachmentAction}
           remoteContentAction={remoteContentAction}
           externalLinkAction={externalLinkAction}
+          composerRouteAction={composerRouteAction}
           mailAction={mailAction}
           mailActionConfirmation={mailActionConfirmation}
           performMailAction={performMailAction}
@@ -1460,6 +1556,14 @@ export function MailClientShell({
           onDownloadAttachment={handleDownloadAttachment}
           onAllowRemoteContent={handleAllowRemoteContent}
           onOpenExternalLink={handleOpenExternalLink}
+          onRouteComposer={(message, route, includeAttachments, restoreFocus) => {
+            void openRoutedComposer(
+              message,
+              route,
+              includeAttachments,
+              restoreFocus,
+            );
+          }}
           onRequestMailAction={requestMailAction}
           onConfirmMailAction={() => {
             if (mailActionConfirmation) {
@@ -1612,7 +1716,7 @@ export function MailClientShell({
           <ComposerDrawer
             accounts={state.data.accounts}
             discardDraft={discardComposerDraft}
-            initialDraft={selectedComposerDraft}
+            initialDraft={activeComposerDraft}
             initialAccountId={activeAccount?.id ?? state.data.accounts[0]?.id ?? null}
             loadRecentRecipients={loadRecentRecipients}
             onClose={closeDrawer}
@@ -1734,6 +1838,301 @@ function mailActionRequestFromUndo(undo: MailActionUndo): MailActionRequest {
     messageId: undo.messageId,
     userRequested: true,
   };
+}
+
+function composerDraftFromMessage({
+  attachments,
+  draftId,
+  localeFormat,
+  message,
+  route,
+  sourceAccount,
+  t,
+}: {
+  attachments: ComposerAttachment[];
+  draftId: string;
+  localeFormat: ReturnType<typeof useLocaleFormatters>;
+  message: MailMessage;
+  route: ComposerRouteKind;
+  sourceAccount: MailAccount | null;
+  t: TFunction;
+}): ComposerDraft {
+  const quoted = quotedBodyFromMessage(message, route, localeFormat, t);
+  const recipients = composerRecipientsForRoute(message, route, sourceAccount);
+  const references =
+    route === "reply" || route === "reply-all"
+      ? replyReferencesForMessage(message)
+      : [];
+
+  return {
+    accountId: message.accountId,
+    attachments,
+    autosaveRevision: 0,
+    bcc: [],
+    bodyHtml: quoted.bodyHtml,
+    bodyText: quoted.bodyText,
+    cc: recipients.cc,
+    id: draftId,
+    inReplyTo:
+      route === "reply" || route === "reply-all"
+        ? (message.rfcMessageId ?? null)
+        : null,
+    references,
+    subject: subjectForRoute(message.subject, route, t),
+    to: recipients.to,
+  };
+}
+
+function composerRecipientsForRoute(
+  message: MailMessage,
+  route: ComposerRouteKind,
+  sourceAccount: MailAccount | null,
+): { to: ComposerDraft["to"]; cc: ComposerDraft["cc"] } {
+  if (route === "forward") {
+    return { cc: [], to: [] };
+  }
+
+  const ownEmail = sourceAccount?.email.trim().toLocaleLowerCase() ?? "";
+  const sender = composerAddressFromSender(message);
+  const senderEmail = sender?.address.trim().toLocaleLowerCase() ?? "";
+  const to = sender && senderEmail !== ownEmail ? [sender] : [];
+  if (route === "reply") {
+    return { cc: [], to };
+  }
+
+  const cc = dedupeComposerAddresses(
+    [...(message.toAddresses ?? []), ...(message.ccAddresses ?? [])]
+      .filter((address) => {
+        const normalized = address.address.trim().toLocaleLowerCase();
+        return normalized && normalized !== ownEmail && normalized !== senderEmail;
+      })
+      .map(mailAddressToComposerAddress),
+  );
+
+  return {
+    cc,
+    to: dedupeComposerAddresses(to),
+  };
+}
+
+function composerAddressFromSender(message: MailMessage) {
+  const address = message.senderEmail.trim();
+  if (!address) {
+    return null;
+  }
+
+  return {
+    address,
+    name:
+      message.sender.trim() && message.sender.trim() !== address
+        ? message.sender.trim()
+        : null,
+  };
+}
+
+function mailAddressToComposerAddress(address: {
+  name?: string | null;
+  address: string;
+}) {
+  return {
+    address: address.address.trim(),
+    name: address.name?.trim() || null,
+  };
+}
+
+function dedupeComposerAddresses<T extends { address: string }>(addresses: T[]) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const address of addresses) {
+    const normalized = address.address.trim().toLocaleLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    deduped.push(address);
+  }
+  return deduped;
+}
+
+function subjectForRoute(
+  subject: string,
+  route: ComposerRouteKind,
+  t: TFunction,
+) {
+  const trimmed = subject.trim();
+  const fallbackSubject = t("mail.messages.noSubject");
+  if (route === "forward") {
+    return /^\s*(fw|fwd)\s*:/i.test(trimmed)
+      ? trimmed
+      : `Fwd: ${trimmed || fallbackSubject}`;
+  }
+
+  return /^\s*re\s*:/i.test(trimmed)
+    ? trimmed
+    : `Re: ${trimmed || fallbackSubject}`;
+}
+
+function replyReferencesForMessage(message: MailMessage) {
+  const references = [...(message.references ?? [])];
+  if (message.rfcMessageId) {
+    references.push(message.rfcMessageId);
+  }
+
+  return dedupeMessageIds(references);
+}
+
+function dedupeMessageIds(values: string[]) {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    const normalized = trimmed.toLocaleLowerCase();
+    if (
+      !trimmed ||
+      !trimmed.startsWith("<") ||
+      !trimmed.endsWith(">") ||
+      !trimmed.includes("@") ||
+      seen.has(normalized)
+    ) {
+      continue;
+    }
+    seen.add(normalized);
+    deduped.push(trimmed);
+  }
+  return deduped;
+}
+
+function quotedBodyFromMessage(
+  message: MailMessage,
+  route: ComposerRouteKind,
+  localeFormat: ReturnType<typeof useLocaleFormatters>,
+  t: TFunction,
+) {
+  const sender = messageSenderLabel(message, t);
+  const receivedAt = localeFormat.dateTime(message.receivedAt);
+  const plain = messagePlainText(message);
+  const quotedHtml = quotedHtmlFromText(plain);
+  const quotedText = quotePlainText(plain);
+
+  if (route === "forward") {
+    const toLine = (message.toAddresses ?? [])
+      .map(formatComposerAddressForDisplay)
+      .join(", ");
+    const ccLine = (message.ccAddresses ?? [])
+      .map(formatComposerAddressForDisplay)
+      .join(", ");
+    const headerRows = [
+      `<p><strong>${escapeHtml(t("composer.routing.forwardHeader"))}</strong></p>`,
+      `<p><strong>${escapeHtml(t("composer.routing.from"))}:</strong> ${escapeHtml(
+        sender,
+      )}</p>`,
+      `<p><strong>${escapeHtml(t("composer.routing.date"))}:</strong> ${escapeHtml(
+        receivedAt,
+      )}</p>`,
+      `<p><strong>${escapeHtml(t("composer.routing.subject"))}:</strong> ${escapeHtml(
+        message.subject || t("mail.messages.noSubject"),
+      )}</p>`,
+      toLine
+        ? `<p><strong>${escapeHtml(t("composer.routing.to"))}:</strong> ${escapeHtml(
+            toLine,
+          )}</p>`
+        : "",
+      ccLine
+        ? `<p><strong>${escapeHtml(t("composer.routing.cc"))}:</strong> ${escapeHtml(
+            ccLine,
+          )}</p>`
+        : "",
+    ].join("");
+    const textHeader = [
+      t("composer.routing.forwardHeader"),
+      `${t("composer.routing.from")}: ${sender}`,
+      `${t("composer.routing.date")}: ${receivedAt}`,
+      `${t("composer.routing.subject")}: ${
+        message.subject || t("mail.messages.noSubject")
+      }`,
+      toLine ? `${t("composer.routing.to")}: ${toLine}` : "",
+      ccLine ? `${t("composer.routing.cc")}: ${ccLine}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      bodyHtml: `<p></p><blockquote>${headerRows}${quotedHtml}</blockquote>`,
+      bodyText: `\n\n${textHeader}\n\n${quotedText}`,
+    };
+  }
+
+  const intro = t("composer.routing.replyIntro", {
+    date: receivedAt,
+    sender,
+  });
+
+  return {
+    bodyHtml: `<p></p><blockquote><p>${escapeHtml(intro)}</p>${quotedHtml}</blockquote>`,
+    bodyText: `\n\n${intro}\n${quotedText}`,
+  };
+}
+
+function messagePlainText(message: MailMessage) {
+  const bodyText = message.bodyText?.trim();
+  if (bodyText) {
+    return bodyText;
+  }
+  if (message.bodyHtml) {
+    return htmlToText(message.bodyHtml).trim() || message.preview;
+  }
+  return message.preview;
+}
+
+function htmlToText(html: string) {
+  return sanitizeEmailHtml(html).plainText;
+}
+
+function quotedHtmlFromText(text: string) {
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map(
+      (paragraph) =>
+        `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`,
+    )
+    .join("");
+}
+
+function quotePlainText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatComposerAddressForDisplay(address: {
+  name?: string | null;
+  address: string;
+}) {
+  const trimmedAddress = address.address.trim();
+  const trimmedName = address.name?.trim();
+  return trimmedName ? `${trimmedName} <${trimmedAddress}>` : trimmedAddress;
+}
+
+function createRoutedDraftId(route: ComposerRouteKind, messageId: string) {
+  const suffix =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `draft_${route.replace(/[^a-z]/g, "_")}_${messageId}_${suffix}`.replace(
+    /[^A-Za-z0-9_-]/g,
+    "_",
+  );
 }
 
 function messageIdFromActionResponse(response: MailActionResponse) {
@@ -2393,6 +2792,8 @@ function ReaderPane({
   state,
   message,
   hasVisibleMessages,
+  canCompose,
+  canForwardAttachments,
   onRetry,
   allowRemoteContent,
   previewAttachment,
@@ -2402,11 +2803,13 @@ function ReaderPane({
   attachmentAction,
   remoteContentAction,
   externalLinkAction,
+  composerRouteAction,
   mailAction,
   mailActionConfirmation,
   performMailAction,
   onAllowRemoteContent,
   onOpenExternalLink,
+  onRouteComposer,
   onRequestMailAction,
   onConfirmMailAction,
   onCancelMailAction,
@@ -2420,6 +2823,8 @@ function ReaderPane({
   state: MailShellState;
   message: ReturnType<typeof selectedMessage>;
   hasVisibleMessages: boolean;
+  canCompose: boolean;
+  canForwardAttachments: boolean;
   onRetry?: () => void;
   allowRemoteContent?: RemoteContentPreferenceFunction;
   previewAttachment?: AttachmentPreviewFunction;
@@ -2429,6 +2834,7 @@ function ReaderPane({
   attachmentAction: AttachmentActionState;
   remoteContentAction: RemoteContentActionState;
   externalLinkAction: ExternalLinkActionState;
+  composerRouteAction: ComposerRouteActionState;
   mailAction: MailActionUiState;
   mailActionConfirmation: MailActionConfirmation;
   performMailAction?: MailActionFunction;
@@ -2437,6 +2843,12 @@ function ReaderPane({
     scope: RemoteContentPreferenceScope,
   ) => Promise<void>;
   onOpenExternalLink: (link: SafeEmailLink) => Promise<void>;
+  onRouteComposer: (
+    message: MailMessage,
+    route: ComposerRouteKind,
+    includeAttachments: boolean,
+    restoreFocus: HTMLElement | null,
+  ) => void;
   onRequestMailAction: (request: MailActionRequest) => void;
   onConfirmMailAction: () => void;
   onCancelMailAction: () => void;
@@ -2479,6 +2891,7 @@ function ReaderPane({
   );
   const mailActionBusy = mailAction.status === "running";
   const mailActionAvailable = Boolean(performMailAction);
+  const composerRouteBusy = composerRouteAction.status === "loading";
 
   if (state.loadState.messages === "loading") {
     return (
@@ -2548,20 +2961,82 @@ function ReaderPane({
       <div className="reader-actions" aria-label={t("mail.reader.actions.label")}>
         <button
           type="button"
-          disabled
-          title={t("mail.reader.actions.replyUnavailableTitle")}
-          aria-label={t("mail.reader.actions.replyUnavailable")}
+          disabled={!canCompose || composerRouteBusy}
+          title={
+            canCompose
+              ? t("mail.reader.actions.replyTitle")
+              : t("mail.reader.actions.replyUnavailableTitle")
+          }
+          aria-label={
+            canCompose
+              ? t("mail.reader.actions.reply")
+              : t("mail.reader.actions.replyUnavailable")
+          }
+          onClick={(event) =>
+            onRouteComposer(message, "reply", false, event.currentTarget)
+          }
         >
           {t("mail.reader.actions.reply")}
         </button>
         <button
           type="button"
-          disabled
-          title={t("mail.reader.actions.forwardUnavailableTitle")}
-          aria-label={t("mail.reader.actions.forwardUnavailable")}
+          disabled={!canCompose || composerRouteBusy}
+          title={
+            canCompose
+              ? t("mail.reader.actions.replyAllTitle")
+              : t("mail.reader.actions.replyAllUnavailableTitle")
+          }
+          aria-label={
+            canCompose
+              ? t("mail.reader.actions.replyAll")
+              : t("mail.reader.actions.replyAllUnavailable")
+          }
+          onClick={(event) =>
+            onRouteComposer(message, "reply-all", false, event.currentTarget)
+          }
+        >
+          {t("mail.reader.actions.replyAll")}
+        </button>
+        <button
+          type="button"
+          disabled={!canCompose || composerRouteBusy}
+          title={
+            canCompose
+              ? t("mail.reader.actions.forwardTitle")
+              : t("mail.reader.actions.forwardUnavailableTitle")
+          }
+          aria-label={
+            canCompose
+              ? t("mail.reader.actions.forward")
+              : t("mail.reader.actions.forwardUnavailable")
+          }
+          onClick={(event) =>
+            onRouteComposer(message, "forward", false, event.currentTarget)
+          }
         >
           {t("mail.reader.actions.forward")}
         </button>
+        {message.attachments.length > 0 ? (
+          <button
+            type="button"
+            disabled={!canCompose || !canForwardAttachments || composerRouteBusy}
+            title={
+              canCompose && canForwardAttachments
+                ? t("mail.reader.actions.forwardWithAttachmentsTitle")
+                : t("mail.reader.actions.forwardWithAttachmentsUnavailableTitle")
+            }
+            aria-label={
+              canCompose && canForwardAttachments
+                ? t("mail.reader.actions.forwardWithAttachments")
+                : t("mail.reader.actions.forwardWithAttachmentsUnavailable")
+            }
+            onClick={(event) =>
+              onRouteComposer(message, "forward", true, event.currentTarget)
+            }
+          >
+            {t("mail.reader.actions.forwardWithAttachments")}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={
@@ -2794,6 +3269,7 @@ function ReaderPane({
           onRetry={onRetryMailAction}
           onUndo={onUndoMailAction}
         />
+        <ComposerRouteStatus action={composerRouteAction} />
         <AttachmentList
           action={attachmentAction}
           attachments={message.attachments}
@@ -2932,6 +3408,25 @@ function MailActionStatus({
         </button>
       ) : null}
     </section>
+  );
+}
+
+function ComposerRouteStatus({ action }: { action: ComposerRouteActionState }) {
+  if (!action.message) {
+    return null;
+  }
+
+  return (
+    <p
+      className={
+        action.status === "error"
+          ? "mail-action-status mail-action-status--error"
+          : "mail-action-status"
+      }
+      role={action.status === "error" ? "alert" : "status"}
+    >
+      {action.message}
+    </p>
   );
 }
 

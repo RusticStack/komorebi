@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ComposerAttachment,
+  ComposerForwardedAttachmentStageRequest,
   ComposerAttachmentStageRequest,
   ComposerDraftDiscardRequest,
   ComposerDraft,
@@ -67,6 +68,7 @@ const DOWNLOAD_ATTACHMENT_COMMAND = "download_attachment";
 const AUTOSAVE_COMPOSER_DRAFT_COMMAND = "autosave_composer_draft";
 const DISCARD_COMPOSER_DRAFT_COMMAND = "discard_composer_draft";
 const STAGE_COMPOSER_ATTACHMENT_COMMAND = "stage_composer_attachment";
+const STAGE_FORWARDED_ATTACHMENTS_COMMAND = "stage_forwarded_attachments";
 const SEND_COMPOSER_EMAIL_COMMAND = "send_composer_email";
 const LIST_RECENT_RECIPIENTS_COMMAND = "list_recent_recipients";
 const LIST_COMPOSER_DRAFTS_COMMAND = "list_composer_drafts";
@@ -174,6 +176,14 @@ export async function stageComposerAttachmentFromTauri(
   request: ComposerAttachmentStageRequest,
 ): Promise<ComposerAttachment> {
   return invoke<ComposerAttachment>(STAGE_COMPOSER_ATTACHMENT_COMMAND, {
+    request,
+  });
+}
+
+export async function stageForwardedAttachmentsFromTauri(
+  request: ComposerForwardedAttachmentStageRequest,
+): Promise<ComposerAttachment[]> {
+  return invoke<ComposerAttachment[]>(STAGE_FORWARDED_ATTACHMENTS_COMMAND, {
     request,
   });
 }

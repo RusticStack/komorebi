@@ -4,6 +4,7 @@ import type {
   AttachmentDownloadResponse,
   AttachmentPreviewResponse,
   AttachmentSaveResponse,
+  ComposerForwardedAttachmentStageRequest,
   ComposerDraftSaveRequest,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
@@ -45,6 +46,7 @@ import {
   removeAccountFromTauri,
   saveAttachmentFromTauri,
   searchMailFromTauri,
+  stageForwardedAttachmentsFromTauri,
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
   subscribeToSyncStatusFromTauri,
@@ -299,6 +301,8 @@ describe("mailShellDataSource", () => {
       bodyText: "Safe composer body",
       cc: [],
       draftId: "draft_123",
+      inReplyTo: "<source@example.com>",
+      references: ["<root@example.com>", "<source@example.com>"],
       subject: "Quarterly review",
       to: [{ address: "ada@example.com", name: "Ada" }],
     };
@@ -329,6 +333,8 @@ describe("mailShellDataSource", () => {
         bodyText: "Draft body",
         cc: [],
         id: "draft_123",
+        inReplyTo: "<source@example.com>",
+        references: ["<source@example.com>"],
         subject: "Saved local draft",
         to: [{ address: "ada@example.com", name: "Ada" }],
       },
@@ -337,6 +343,37 @@ describe("mailShellDataSource", () => {
 
     await expect(listComposerDraftsFromTauri()).resolves.toBe(drafts);
     expect(invokeMock).toHaveBeenCalledWith("list_composer_drafts");
+  });
+
+  it("stages forwarded attachments through the reviewed backend command", async () => {
+    const request: ComposerForwardedAttachmentStageRequest = {
+      accountId: "acct_personal",
+      draftId: "draft_reply",
+      sourceAttachmentIds: ["att_invoice"],
+      sourceFolderId: "folder_inbox",
+      sourceMessageId: "msg_invoice",
+      userRequested: true,
+    };
+    const response = [
+      {
+        accountId: "acct_personal",
+        contentId: null,
+        contentType: "application/pdf",
+        displayFilename: "invoice.pdf",
+        disposition: "attachment" as const,
+        draftId: "draft_reply",
+        id: "catt_invoice",
+        sizeBytes: 2048,
+      },
+    ];
+    invokeMock.mockResolvedValueOnce(response);
+
+    await expect(stageForwardedAttachmentsFromTauri(request)).resolves.toBe(
+      response,
+    );
+    expect(invokeMock).toHaveBeenCalledWith("stage_forwarded_attachments", {
+      request,
+    });
   });
 
   it("maps account management workflows to typed Tauri commands", async () => {

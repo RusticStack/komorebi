@@ -140,8 +140,13 @@
         "expungeUnavailable": "Expurgar indisponivel",
         "expungeUnavailableTitle": "Expurgar requer o comando tipado de acao de correio.",
         "forward": "Reencaminhar",
+        "forwardTitle": "Abrir esta mensagem como rascunho de reencaminhamento seguro.",
+        "forwardWithAttachments": "Reencaminhar anexos",
+        "forwardWithAttachmentsTitle": "Abrir um rascunho reencaminhado e preparar os anexos em cache desta mensagem atraves do backend.",
+        "forwardWithAttachmentsUnavailable": "Reencaminhar anexos indisponivel",
+        "forwardWithAttachmentsUnavailableTitle": "Reencaminhar anexos requer bytes de anexo em cache e o comando backend tipado de preparacao.",
         "forwardUnavailable": "Reencaminhamento indisponivel",
-        "forwardUnavailableTitle": "O encaminhamento para o compositor ainda nao esta implementado.",
+        "forwardUnavailableTitle": "Adicione ou ligue uma conta antes de reencaminhar correio.",
         "loadRemote": "Carregar conteudo remoto",
         "loadRemoteAllowedMessage": "Conteudo remoto permitido para esta mensagem",
         "loadRemoteAllowedMessageTitle": "O carregamento de imagens remotas esta permitido para esta mensagem.",
@@ -161,8 +166,13 @@
         "readStateTitle": "Atualizar o estado de leitura desta mensagem no servidor de correio.",
         "readStateUnavailableTitle": "As alteracoes de estado de leitura aguardam o comando tipado de acao de correio.",
         "reply": "Responder",
+        "replyAll": "Responder a todos",
+        "replyAllTitle": "Abrir um rascunho de resposta a todos com destinatarios desta mensagem.",
+        "replyAllUnavailable": "Responder a todos indisponivel",
+        "replyAllUnavailableTitle": "Adicione ou ligue uma conta antes de responder a todos os destinatarios.",
+        "replyTitle": "Abrir um rascunho de resposta para esta mensagem.",
         "replyUnavailable": "Resposta indisponivel",
-        "replyUnavailableTitle": "O encaminhamento de resposta para o compositor ainda nao esta implementado."
+        "replyUnavailableTitle": "Adicione ou ligue uma conta antes de responder."
       },
       "empty": {
         "accountSetupRequired": "Configuracao de conta necessaria",
@@ -239,6 +249,11 @@
         "unavailable": "As acoes de correio estao indisponiveis."
       },
       "remoteBlocked": "Conteudo remoto bloqueado por defeito",
+      "routing": {
+        "forwardAttachmentError": "Nao foi possivel preparar os anexos reencaminhados.",
+        "forwardAttachmentUnavailable": "Reencaminhar anexos esta indisponivel neste runtime.",
+        "stagingAttachments": "A preparar anexos reencaminhados."
+      },
       "selectedEyebrow": "Mensagem selecionada"
     },
     "search": {
@@ -425,6 +440,15 @@
       }
     },
     "heading": "Nova mensagem",
+    "routing": {
+      "cc": "Cc",
+      "date": "Data",
+      "forwardHeader": "Mensagem reencaminhada",
+      "from": "De",
+      "replyIntro": "Em {{date}}, {{sender}} escreveu:",
+      "subject": "Assunto",
+      "to": "Para"
+    },
     "status": {
       "draftFailed": "Falha ao guardar rascunho",
       "draftNotSaved": "Rascunho nao guardado",

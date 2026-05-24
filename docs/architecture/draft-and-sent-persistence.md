@@ -1,6 +1,6 @@
 # Draft And Sent Persistence
 
-Status: backend local draft persistence, frontend draft reload/reopen UI, autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is intentionally deferred and drafts are local-only until sent or discarded.
+Status: backend local draft persistence, frontend draft reload/reopen UI, reply/forward draft metadata, autosave/discard command wiring, local recent-recipient persistence, provider-aware Sent-copy planning, and IMAP APPEND upload for pending Sent copies implemented; provider Drafts upload is intentionally deferred and drafts are local-only until sent or discarded.
 Last reviewed: 2026-05-24.
 
 ## Current Scope
@@ -24,6 +24,7 @@ This persistence boundary is now exposed through reviewed Tauri commands for the
 - `autosave_composer_draft`
 - `discard_composer_draft`
 - `stage_composer_attachment`
+- `stage_forwarded_attachments`
 - `send_composer_email`
 - `list_recent_recipients`
 - `list_composer_drafts`
@@ -48,7 +49,7 @@ Migration `005_drafts_and_sent_mail.sql` adds:
 - reply/reference metadata
 - autosave revision and timestamps
 
-Migration `006_composer_attachments.sql` adds `composer_attachments` for user-selected outbound files staged by the composer. These rows store account id, draft id, display filename, canonical MIME, byte size, backend-generated storage path, SHA-256, disposition, and optional inline CID. Staged files are plaintext app-data files and are deleted best-effort after discard or confirmed send.
+Migration `006_composer_attachments.sql` adds `composer_attachments` for user-selected outbound files staged by the composer and source attachments copied from cached reader messages for forwarding. These rows store account id, draft id, display filename, canonical MIME, byte size, backend-generated storage path, SHA-256, disposition, and optional inline CID. Staged files are plaintext app-data files and are deleted best-effort after discard or confirmed send.
 
 Migration `007_recent_recipients.sql` adds `recent_recipients` for local autocomplete. Rows are scoped by account, deduplicated by normalized email, store optional display name, use count, and last-used timestamp, and are populated only after confirmed composer sends.
 
@@ -84,9 +85,11 @@ The composer status copy tells users that drafts stay local to the device until 
 
 The same draft id can be autosaved repeatedly while active. Autosaving a discarded or sent draft is rejected instead of reviving stale private content.
 
+Reply/reply-all drafts preserve `composer_drafts.in_reply_to` and `references_json` so reopened drafts and send requests keep source message threading metadata. Forward drafts intentionally do not set reply headers, but they do persist the quoted source headers/body text in the sanitized draft body. Invalid, oversized, duplicate, or control-character-bearing Message-ID values are rejected before persistence or send.
+
 ## Reload And Reopen
 
-`list_composer_drafts` is an inputless read command exposed by `src-tauri/src/composer.rs`. It applies migrations, loads active drafts for non-removed accounts, parses persisted To/CC/BCC JSON into typed address records, and returns only composer fields plus display-safe attachment metadata. It does not return attachment storage paths, app-data locations, hashes, credential refs, raw SQL, or filesystem handles.
+`list_composer_drafts` is an inputless read command exposed by `src-tauri/src/composer.rs`. It applies migrations, loads active drafts for non-removed accounts, parses persisted To/CC/BCC JSON and reply references into typed records, and returns only composer fields plus display-safe attachment metadata. It does not return attachment storage paths, app-data locations, hashes, credential refs, raw SQL, or filesystem handles.
 
 The React shell loads this list on startup through `loadComposerDrafts`. The message toolbar shows a Drafts entry with the active local draft count. The Drafts drawer lists subject, account, recipient preview, and attachment count; selecting a draft opens `TipTapComposer` with the original draft id, account, recipients, subject, sanitized rich body, existing signature content, and staged attachment metadata restored.
 
@@ -105,6 +108,8 @@ Reopened drafts keep the original draft id for autosave and send. The account se
 Discarded drafts no longer appear in `list_active_drafts`.
 
 `discard_composer_draft` additionally deletes staged composer attachment rows and removes their app-data files best-effort. It does not delete inbound message attachments.
+
+`stage_forwarded_attachments` does not mutate or expose inbound attachment storage. It validates the source account/folder/message/attachment scope through the reader attachment path, verifies app-data containment, size, SHA-256, and MIME/type sniffing, then writes a new composer attachment copy under `composer-attachments/<account_id>/<draft_id>/...`. Sender filenames remain display-only and are sanitized again for the composer copy.
 
 ## Send Conversion
 
@@ -185,6 +190,8 @@ The worker never deletes `smtp_send_receipts` on APPEND failure. A failed upload
 
 - Autosave command mapping.
 - Active draft list/reopen projection with display-safe staged attachment metadata.
+- Reply/reference metadata persistence and reload.
+- Forwarded attachment staging from validated cached reader bytes.
 - Rich composer HTML autosave persistence.
 - Staged attachment storage under backend-generated app-data paths.
 - Unsafe attachment content denial.

@@ -15,6 +15,7 @@ import type {
   AttachmentPreviewResponse,
   AttachmentSaveResponse,
   ComposerAttachment,
+  ComposerForwardedAttachmentStageRequest,
   ComposerAttachmentStageRequest,
   ComposerDraft,
   ComposerDraftDiscardRequest,
@@ -151,6 +152,11 @@ const fixtureMail: MailShellData = {
       bodyText: "Can you confirm the invoice number?",
       bodyHtml:
         '<p>Can you <strong>confirm</strong> the invoice number in the <a href="https://example.com/invoice">invoice portal</a>?</p><a href="javascript:alert(1)">bad link</a><img src="https://tracker.example/pixel.png" alt="tracking pixel"><script>alert("xss")</script>',
+      rfcMessageId: "<invoice-question@example.com>",
+      inReplyTo: null,
+      references: ["<thread-root@example.com>"],
+      toAddresses: [{ address: "work@example.com", name: "Work" }],
+      ccAddresses: [{ address: "ada@example.com", name: "Ada" }],
       attachments: [
         {
           id: "att_invoice",
@@ -308,6 +314,22 @@ function composerTestHandlers() {
       sentFolderSyncState: "unsupported",
     }),
   );
+  const stageForwardedAttachments = vi.fn(
+    async (
+      request: ComposerForwardedAttachmentStageRequest,
+    ): Promise<ComposerAttachment[]> =>
+      request.sourceAttachmentIds.map((attachmentId) => ({
+        accountId: request.accountId,
+        contentId: null,
+        contentType: "application/pdf",
+        displayFilename:
+          attachmentId === "att_invoice" ? "invoice.pdf" : "logo.png",
+        disposition: "attachment",
+        draftId: request.draftId,
+        id: `catt_forwarded_${attachmentId}`,
+        sizeBytes: attachmentId === "att_invoice" ? 24_576 : 2_048,
+      })),
+  );
   const loadRecentRecipients = vi.fn(
     async (
       request: RecentRecipientSearchRequest,
@@ -341,6 +363,7 @@ function composerTestHandlers() {
     loadRecentRecipients,
     saveComposerDraft,
     sendComposerMail,
+    stageForwardedAttachments,
     stageComposerAttachment,
   };
 }
@@ -733,12 +756,22 @@ describe("App", () => {
 
     expect(
       within(reader).getByRole("button", {
-        name: "Reply unavailable",
+        name: "Reply",
       }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       within(reader).getByRole("button", {
-        name: "Forward unavailable",
+        name: "Reply all",
+      }),
+    ).toBeEnabled();
+    expect(
+      within(reader).getByRole("button", {
+        name: "Forward",
+      }),
+    ).toBeEnabled();
+    expect(
+      within(reader).getByRole("button", {
+        name: "Forward attachments unavailable",
       }),
     ).toBeDisabled();
     expect(
@@ -771,6 +804,79 @@ describe("App", () => {
     ).toBeDisabled();
     expect(reader).not.toHaveTextContent("AppData");
     expect(reader).not.toHaveTextContent("att_invoice.pdf");
+  });
+
+  it("routes reply, reply-all, and forwarded attachments into composer drafts", async () => {
+    const handlers = composerTestHandlers();
+    render(<App initialData={fixtureMail} {...handlers} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Invoice question/ }));
+    const reader = screen.getByRole("region", { name: "Selected message" });
+    fireEvent.click(within(reader).getByRole("button", { name: "Reply all" }));
+
+    let composer = screen.getByRole("dialog", { name: "Composer" });
+    expect(within(composer).getByLabelText("From")).toHaveValue("acct_work");
+    expect(within(composer).getByLabelText("From")).toBeDisabled();
+    expect(within(composer).getByLabelText("To")).toHaveValue(
+      "Finance <finance@example.com>",
+    );
+    expect(within(composer).getByLabelText("CC")).toHaveValue(
+      "Ada <ada@example.com>",
+    );
+    expect(within(composer).getByLabelText("Subject")).toHaveValue(
+      "Re: Invoice question",
+    );
+    expect(within(composer).getByText(/Finance wrote:/)).toBeVisible();
+
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(handlers.sendComposerMail).toHaveBeenCalledTimes(1));
+    const replySend = handlers.sendComposerMail.mock.calls[0][0];
+    expect(replySend).toMatchObject({
+      accountId: "acct_work",
+      cc: [{ address: "ada@example.com", name: "Ada" }],
+      inReplyTo: "<invoice-question@example.com>",
+      references: ["<thread-root@example.com>", "<invoice-question@example.com>"],
+      subject: "Re: Invoice question",
+      to: [{ address: "finance@example.com", name: "Finance" }],
+    });
+    expect(replySend.bodyHtml).toContain("<blockquote>");
+    fireEvent.click(within(composer).getByRole("button", { name: "Close" }));
+
+    fireEvent.click(
+      within(reader).getByRole("button", { name: "Forward attachments" }),
+    );
+    composer = await screen.findByRole("dialog", { name: "Composer" });
+    expect(handlers.stageForwardedAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "acct_work",
+        sourceAttachmentIds: ["att_invoice", "att_inline_logo"],
+        sourceFolderId: "folder_work_inbox",
+        sourceMessageId: "msg_invoice",
+        userRequested: true,
+      }),
+    );
+    expect(within(composer).getByLabelText("To")).toHaveValue("");
+    expect(within(composer).getByLabelText("Subject")).toHaveValue(
+      "Fwd: Invoice question",
+    );
+    expect(within(composer).getByText("Forwarded message")).toBeVisible();
+    expect(await within(composer).findByText(/invoice\.pdf/)).toBeVisible();
+    expect(await within(composer).findByText(/logo\.png/)).toBeVisible();
+
+    fireEvent.change(within(composer).getByLabelText("To"), {
+      target: { value: "Recipient <recipient@example.com>" },
+    });
+    fireEvent.click(within(composer).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(handlers.sendComposerMail).toHaveBeenCalledTimes(2));
+    const forwardSend = handlers.sendComposerMail.mock.calls[1][0];
+    expect(forwardSend).toMatchObject({
+      attachmentIds: ["catt_forwarded_att_invoice", "catt_forwarded_att_inline_logo"],
+      inReplyTo: null,
+      references: [],
+      subject: "Fwd: Invoice question",
+      to: [{ address: "recipient@example.com", name: "Recipient" }],
+    });
+    expect(forwardSend.bodyText).toContain("Forwarded message");
   });
 
   it("opens safe message links through the typed command and leaves unsafe links inert", async () => {

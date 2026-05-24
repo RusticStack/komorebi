@@ -25,8 +25,10 @@ use komorebi_lib::{
     attachment_safety::MAX_ATTACHMENT_BYTES,
     composer::{
         autosave_composer_draft_from_connection, list_recent_recipients_from_connection,
-        stage_composer_attachment_from_connection, ComposerAddress, ComposerAttachmentDisposition,
-        ComposerAttachmentStageRequest, ComposerDraftSaveRequest, RecentRecipientSearchRequest,
+        stage_composer_attachment_from_connection, stage_forwarded_attachments_from_connection,
+        ComposerAddress, ComposerAttachmentDisposition, ComposerAttachmentStageRequest,
+        ComposerDraftSaveRequest, ComposerForwardedAttachmentStageRequest,
+        RecentRecipientSearchRequest,
     },
     credentials::{CredentialError, CredentialSlot},
     external_links::{
@@ -308,6 +310,40 @@ fn composer_commands_reject_invalid_ids_unowned_attachments_unsafe_html_and_over
     )
     .expect_err("oversized attachment bytes are rejected");
     assert!(oversized_attachment.reason.contains("attachment exceeds"));
+
+    seed_message_and_attachment(&connection, &app_data_dir, b"safe attachment notes");
+    let no_forward_intent = stage_forwarded_attachments_from_connection(
+        &connection,
+        &app_data_dir,
+        ComposerForwardedAttachmentStageRequest {
+            account_id: ACCOUNT_ID.into(),
+            draft_id: DRAFT_ID.into(),
+            source_folder_id: INBOX_ID.into(),
+            source_message_id: MESSAGE_ID.into(),
+            source_attachment_ids: vec![ATTACHMENT_ID.into()],
+            user_requested: false,
+        },
+    )
+    .expect_err("forwarded attachment staging requires intent");
+    assert_eq!(
+        no_forward_intent.reason,
+        "forwarded attachment staging requires user intent"
+    );
+
+    let wrong_forward_scope = stage_forwarded_attachments_from_connection(
+        &connection,
+        &app_data_dir,
+        ComposerForwardedAttachmentStageRequest {
+            account_id: ACCOUNT_ID.into(),
+            draft_id: DRAFT_ID.into(),
+            source_folder_id: OTHER_FOLDER_ID.into(),
+            source_message_id: MESSAGE_ID.into(),
+            source_attachment_ids: vec![ATTACHMENT_ID.into()],
+            user_requested: true,
+        },
+    )
+    .expect_err("unowned forwarded attachment scope is rejected");
+    assert_eq!(wrong_forward_scope.reason, "attachment was not found");
 
     let mut invalid_recent = RecentRecipientSearchRequest {
         account_id: "../secret".into(),
@@ -871,6 +907,8 @@ fn draft_request() -> ComposerDraftSaveRequest {
         body_text: Some("Plain body".into()),
         body_html: Some("<p>Plain body</p>".into()),
         attachment_ids: Vec::new(),
+        in_reply_to: None,
+        references: Vec::new(),
     }
 }
 

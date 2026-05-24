@@ -10,6 +10,7 @@ const APP_COMMANDS: &[&str] = &[
     "autosave_composer_draft",
     "discard_composer_draft",
     "stage_composer_attachment",
+    "stage_forwarded_attachments",
     "send_composer_email",
     "list_recent_recipients",
     "list_composer_drafts",

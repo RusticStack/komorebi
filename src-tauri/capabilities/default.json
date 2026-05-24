@@ -17,6 +17,7 @@
     "allow-autosave-composer-draft",
     "allow-discard-composer-draft",
     "allow-stage-composer-attachment",
+    "allow-stage-forwarded-attachments",
     "allow-send-composer-email",
     "allow-list-recent-recipients",
     "allow-list-composer-drafts",

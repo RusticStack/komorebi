@@ -78,6 +78,8 @@ fn opt_in_live_smtp_send_through_configured_composer_command() {
             body_text: draft.body_text,
             body_html: draft.body_html,
             attachment_ids: draft.attachment_ids,
+            in_reply_to: draft.in_reply_to,
+            references: draft.references,
         },
     )
     .expect("send live SMTP smoke through typed composer command");
@@ -255,6 +257,8 @@ impl LiveSmtpSmokeConfig {
                     .to_string(),
             ),
             attachment_ids: Vec::new(),
+            in_reply_to: None,
+            references: Vec::new(),
         }
     }
 }

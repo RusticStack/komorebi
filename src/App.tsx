@@ -23,6 +23,7 @@ import {
   searchMailFromTauri,
   sendComposerMailFromTauri,
   stageComposerAttachmentFromTauri,
+  stageForwardedAttachmentsFromTauri,
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
   subscribeToSyncStatusFromTauri,
@@ -54,6 +55,9 @@ function App(props: MailClientShellProps) {
     : undefined;
   const runtimeAttachmentStage = isRuntime
     ? stageComposerAttachmentFromTauri
+    : undefined;
+  const runtimeForwardedAttachmentStage = isRuntime
+    ? stageForwardedAttachmentsFromTauri
     : undefined;
   const runtimeSend = isRuntime ? sendComposerMailFromTauri : undefined;
   const runtimeRecentRecipients = isRuntime
@@ -99,6 +103,9 @@ function App(props: MailClientShellProps) {
       discardComposerDraft={props.discardComposerDraft ?? runtimeDraftDiscard}
       stageComposerAttachment={
         props.stageComposerAttachment ?? runtimeAttachmentStage
+      }
+      stageForwardedAttachments={
+        props.stageForwardedAttachments ?? runtimeForwardedAttachmentStage
       }
       sendComposerMail={props.sendComposerMail ?? runtimeSend}
       loadRecentRecipients={

@@ -58,6 +58,45 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
     invoiceReader.getByText("Saved notes.txt to notes.txt."),
   ).toBeVisible();
 
+  await invoiceReader.getByRole("button", { name: "Reply all" }).click();
+  let composer = page.getByRole("dialog", { name: "Composer" });
+  await expect(composer).toBeVisible();
+  await expect(composer.getByLabel("To")).toHaveValue(
+    "Finance <finance@example.com>",
+  );
+  await expect(
+    composer.getByRole("combobox", { exact: true, name: "CC" }),
+  ).toHaveValue("Ada <ada@example.com>");
+  await expect(composer.getByLabel("Subject")).toHaveValue(
+    "Re: Invoice question",
+  );
+  await expect(composer.locator(".composer-editor")).toContainText(
+    "Can you confirm the invoice number?",
+  );
+  await composer.getByRole("button", { name: "Send" }).click();
+  await expect(composer.getByText("Message sent")).toBeVisible();
+  await composer.getByRole("button", { name: "Close" }).click();
+  await expect(composer).toBeHidden();
+
+  await invoiceReader
+    .getByRole("button", { name: "Forward attachments" })
+    .click();
+  composer = page.getByRole("dialog", { name: "Composer" });
+  await expect(composer).toBeVisible();
+  await expect(composer.getByLabel("To")).toHaveValue("");
+  await expect(composer.getByLabel("Subject")).toHaveValue(
+    "Fwd: Invoice question",
+  );
+  await expect(composer.locator(".composer-editor")).toContainText(
+    "Forwarded message",
+  );
+  await expect(composer.getByText(/invoice\.pdf/)).toBeVisible();
+  await expect(composer.getByText(/notes\.txt/)).toBeVisible();
+  await composer.getByRole("button", { name: "Save draft" }).click();
+  await expect(composer.getByText("Draft saved")).toBeVisible();
+  await composer.getByRole("button", { name: "Close" }).click();
+  await expect(composer).toBeHidden();
+
   await page.getByRole("button", { name: /Personal.+person@example\.com/ }).click();
   await page.getByRole("button", { name: /Archive folder/ }).click();
   await expect(
@@ -88,7 +127,7 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
   await expect(drafts.getByText("1 attachment")).toBeVisible();
   await drafts.getByRole("button", { name: "Open draft: Saved local draft" }).click();
 
-  const composer = page.getByRole("dialog", { name: "Composer" });
+  composer = page.getByRole("dialog", { name: "Composer" });
   await expect(composer).toBeVisible();
   await expect(
     composer.getByText("Drafts stay local to this device until sent or discarded."),
@@ -116,6 +155,13 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
               scope?: string;
               url?: string;
               userRequested?: boolean;
+              inReplyTo?: string | null;
+              references?: string[];
+              attachmentIds?: string[];
+              sourceAttachmentIds?: string[];
+              to?: Array<{ address?: string; name?: string | null }>;
+              cc?: Array<{ address?: string; name?: string | null }>;
+              subject?: string;
             };
           }>;
         }
@@ -131,7 +177,11 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
       mailActions: events.filter(
         (event) => event.name === "perform-mail-action",
       ),
+      savedDrafts: events.filter((event) => event.name === "save-draft"),
       sent: events.filter((event) => event.name === "send-mail"),
+      stagedForwardedAttachments: events.filter(
+        (event) => event.name === "stage-forwarded-attachments",
+      ),
     };
   });
   expect(events.externalLinks).toHaveLength(1);
@@ -159,6 +209,42 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
     action: { kind: "mark-read", read: false },
     userRequested: true,
   });
-  expect(events.sent).toHaveLength(1);
-  expect(events.sent[0]?.request?.draftId).toBe("draft_e2e_saved");
+  expect(events.stagedForwardedAttachments).toHaveLength(1);
+  const forwardedDraftId =
+    events.stagedForwardedAttachments[0]?.request?.draftId ?? "";
+  expect(forwardedDraftId).toMatch(/^draft_forward_msg_invoice_/);
+  expect(events.stagedForwardedAttachments[0]?.request).toMatchObject({
+    accountId: "acct_work",
+    draftId: forwardedDraftId,
+    sourceAttachmentIds: ["att_invoice", "att_invoice_notes"],
+    sourceFolderId: "folder_work_inbox",
+    sourceMessageId: "msg_invoice",
+    userRequested: true,
+  });
+  expect(events.savedDrafts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        request: expect.objectContaining({
+          attachmentIds: [
+            "catt_forwarded_att_invoice",
+            "catt_forwarded_att_invoice_notes",
+          ],
+          draftId: forwardedDraftId,
+          inReplyTo: null,
+          references: [],
+          subject: "Fwd: Invoice question",
+        }),
+      }),
+    ]),
+  );
+  expect(events.sent).toHaveLength(2);
+  expect(events.sent[0]?.request).toMatchObject({
+    cc: [{ address: "ada@example.com", name: "Ada" }],
+    draftId: expect.stringMatching(/^draft_reply_all_msg_invoice_/),
+    inReplyTo: "<invoice-question@example.com>",
+    references: ["<thread-root@example.com>", "<invoice-question@example.com>"],
+    subject: "Re: Invoice question",
+    to: [{ address: "finance@example.com", name: "Finance" }],
+  });
+  expect(events.sent[1]?.request?.draftId).toBe("draft_e2e_saved");
 });

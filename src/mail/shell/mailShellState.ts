@@ -62,6 +62,11 @@ export type MailAttachment = {
   disposition: "attachment" | "inline";
 };
 
+export type MailAddress = {
+  name: string | null;
+  address: string;
+};
+
 export type AttachmentCommandRequest = {
   accountId: string;
   folderId: string;
@@ -191,6 +196,11 @@ export type MailMessage = {
   flagged: boolean;
   bodyText: string | null;
   bodyHtml: string | null;
+  rfcMessageId?: string | null;
+  inReplyTo?: string | null;
+  references?: string[];
+  toAddresses?: MailAddress[];
+  ccAddresses?: MailAddress[];
   remoteContentAllowed?: boolean;
   remoteContentAllowedScope?: RemoteContentPreferenceScope | null;
   attachments: MailAttachment[];
@@ -245,6 +255,8 @@ export type ComposerDraft = {
   bodyText: string | null;
   bodyHtml: string | null;
   attachments: ComposerAttachment[];
+  inReplyTo?: string | null;
+  references?: string[];
   autosaveRevision: number;
 };
 
@@ -258,6 +270,8 @@ export type ComposerDraftSaveRequest = {
   bodyText: string | null;
   bodyHtml: string | null;
   attachmentIds: string[];
+  inReplyTo: string | null;
+  references: string[];
 };
 
 export type ComposerDraftSaveResponse = {
@@ -279,6 +293,15 @@ export type ComposerAttachmentStageRequest = {
   contentType: string | null;
   disposition: ComposerAttachmentDisposition;
   bytes: number[];
+};
+
+export type ComposerForwardedAttachmentStageRequest = {
+  accountId: string;
+  draftId: string;
+  sourceFolderId: string;
+  sourceMessageId: string;
+  sourceAttachmentIds: string[];
+  userRequested: boolean;
 };
 
 export type ComposerSendRequest = ComposerDraftSaveRequest;

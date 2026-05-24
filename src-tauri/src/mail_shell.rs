@@ -2,6 +2,7 @@ use std::{collections::HashMap, fs, path::Path};
 
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tauri::Manager;
 
@@ -77,9 +78,21 @@ pub struct MailShellMessage {
     pub flagged: bool,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
+    pub rfc_message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
+    pub to_addresses: Vec<MailShellAddress>,
+    pub cc_addresses: Vec<MailShellAddress>,
     pub remote_content_allowed: bool,
     pub remote_content_allowed_scope: Option<String>,
     pub attachments: Vec<MailShellAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailShellAddress {
+    pub name: Option<String>,
+    pub address: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -449,6 +462,11 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
            messages.is_flagged,
            messages.body_text,
            messages.body_html,
+           messages.rfc_message_id,
+           messages.in_reply_to,
+           messages.references_json,
+           messages.to_addresses_json,
+           messages.cc_addresses_json,
            CASE
              WHEN message_remote_content.id IS NOT NULL THEN 1
              WHEN sender_remote_content.id IS NOT NULL THEN 1
@@ -553,6 +571,11 @@ fn search_messages(
            messages.is_flagged,
            messages.body_text,
            messages.body_html,
+           messages.rfc_message_id,
+           messages.in_reply_to,
+           messages.references_json,
+           messages.to_addresses_json,
+           messages.cc_addresses_json,
            CASE
              WHEN message_remote_content.id IS NOT NULL THEN 1
              WHEN sender_remote_content.id IS NOT NULL THEN 1
@@ -646,10 +669,62 @@ fn mail_shell_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mail
         flagged: row.get::<_, i64>(9)? == 1,
         body_text: row.get(10)?,
         body_html: row.get(11)?,
-        remote_content_allowed: row.get::<_, i64>(12)? == 1,
-        remote_content_allowed_scope: row.get(13)?,
+        rfc_message_id: row.get(12)?,
+        in_reply_to: row.get(13)?,
+        references: message_references_from_json(&row.get::<_, String>(14)?),
+        to_addresses: mail_addresses_from_json(&row.get::<_, String>(15)?),
+        cc_addresses: mail_addresses_from_json(&row.get::<_, String>(16)?),
+        remote_content_allowed: row.get::<_, i64>(17)? == 1,
+        remote_content_allowed_scope: row.get(18)?,
         attachments: Vec::new(),
     })
+}
+
+fn message_references_from_json(value: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(value)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|reference| {
+            let trimmed = reference.trim();
+            (trimmed.starts_with('<')
+                && trimmed.ends_with('>')
+                && trimmed.contains('@')
+                && !trimmed.chars().any(char::is_control))
+            .then(|| trimmed.to_string())
+        })
+        .collect()
+}
+
+fn mail_addresses_from_json(value: &str) -> Vec<MailShellAddress> {
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(value) else {
+        return Vec::new();
+    };
+
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let Value::Object(object) = item else {
+                return None;
+            };
+            let address = object
+                .get("address")
+                .or_else(|| object.get("email"))
+                .and_then(Value::as_str)?
+                .trim()
+                .to_string();
+            if address.is_empty() || address.chars().any(char::is_control) {
+                return None;
+            }
+            let name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(ToString::to_string);
+
+            Some(MailShellAddress { name, address })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]

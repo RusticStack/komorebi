@@ -140,8 +140,13 @@
         "expungeUnavailable": "Expunge unavailable",
         "expungeUnavailableTitle": "Expunge requires the typed mail-action command.",
         "forward": "Forward",
+        "forwardTitle": "Open this message as a safe forwarded draft.",
+        "forwardWithAttachments": "Forward attachments",
+        "forwardWithAttachmentsTitle": "Open a forwarded draft and stage this message's cached attachments through the backend.",
+        "forwardWithAttachmentsUnavailable": "Forward attachments unavailable",
+        "forwardWithAttachmentsUnavailableTitle": "Attachment forwarding requires cached attachment bytes and the typed backend staging command.",
         "forwardUnavailable": "Forward unavailable",
-        "forwardUnavailableTitle": "Composer forward routing is not implemented yet.",
+        "forwardUnavailableTitle": "Add or connect an account before forwarding mail.",
         "loadRemote": "Load remote content",
         "loadRemoteAllowedMessage": "Remote content allowed for this message",
         "loadRemoteAllowedMessageTitle": "Remote image loading is allowed for this message.",
@@ -161,8 +166,13 @@
         "readStateTitle": "Update this message's read state on the mail server.",
         "readStateUnavailableTitle": "Read-state changes are waiting for the typed mail-action command.",
         "reply": "Reply",
+        "replyAll": "Reply all",
+        "replyAllTitle": "Open a reply-all draft with recipients from this message.",
+        "replyAllUnavailable": "Reply all unavailable",
+        "replyAllUnavailableTitle": "Add or connect an account before replying to all recipients.",
+        "replyTitle": "Open a reply draft for this message.",
         "replyUnavailable": "Reply unavailable",
-        "replyUnavailableTitle": "Composer reply routing is not implemented yet."
+        "replyUnavailableTitle": "Add or connect an account before replying."
       },
       "empty": {
         "accountSetupRequired": "Account setup required",
@@ -239,6 +249,11 @@
         "unavailable": "Mail actions are unavailable."
       },
       "remoteBlocked": "Remote content blocked by default",
+      "routing": {
+        "forwardAttachmentError": "Forwarded attachments could not be staged.",
+        "forwardAttachmentUnavailable": "Forwarding attachments is unavailable in this runtime.",
+        "stagingAttachments": "Staging forwarded attachments."
+      },
       "selectedEyebrow": "Selected message"
     },
     "search": {
@@ -425,6 +440,15 @@
       }
     },
     "heading": "New message",
+    "routing": {
+      "cc": "Cc",
+      "date": "Date",
+      "forwardHeader": "Forwarded message",
+      "from": "From",
+      "replyIntro": "On {{date}}, {{sender}} wrote:",
+      "subject": "Subject",
+      "to": "To"
+    },
     "status": {
       "draftFailed": "Draft save failed",
       "draftNotSaved": "Draft not saved",

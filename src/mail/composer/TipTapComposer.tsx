@@ -498,6 +498,8 @@ export function TipTapComposer({
         bodyText: cleanedBodyText || null,
         cc: recipients.cc,
         draftId,
+        inReplyTo: initialDraft?.inReplyTo ?? null,
+        references: initialDraft?.references ?? [],
         subject,
         to: recipients.to,
       },
