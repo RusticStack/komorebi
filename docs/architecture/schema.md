@@ -85,7 +85,7 @@ The migration adds insert, update, and delete triggers for indexed columns. It a
 - `rebuild_messages_fts`: explicit FTS rebuild command for repair or future indexed-column migrations.
 - `check_messages_fts_integrity`: FTS5 `integrity-check` command with external-content table validation.
 
-`src-tauri/src/mail_shell.rs` exposes the frontend-facing `search_mail` command. It converts user text into bounded FTS terms, validates optional account/folder scope, excludes removed accounts, returns full safe shell message rows with display-only attachment metadata, and reports a missing FTS table as `indexStatus: "unavailable"`.
+`src-tauri/src/mail_shell.rs` exposes the frontend-facing `search_mail` command. It converts user text into bounded FTS terms, parses reviewed advanced filters into parameterized sender/subject/body/read/flag/attachment predicates, validates optional account/folder scope, excludes removed accounts, returns full safe shell message rows with display-only attachment metadata plus parsed-filter/highlight metadata, and reports a missing FTS table as `indexStatus: "unavailable"`.
 
 ## Identity Rules
 

@@ -21,6 +21,11 @@ const MAX_SEARCH_QUERY_BYTES: usize = 512;
 const MAX_SEARCH_TERMS: usize = 12;
 const MAX_SENDER_EMAIL_BYTES: usize = 512;
 const MAX_PAGE_CURSOR_SORT_KEY_BYTES: usize = 128;
+const SEARCH_FILTER_FROM: &str = "from";
+const SEARCH_FILTER_SUBJECT: &str = "subject";
+const SEARCH_FILTER_BODY: &str = "body";
+const SEARCH_FILTER_HAS: &str = "has";
+const SEARCH_FILTER_IS: &str = "is";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +34,6 @@ pub struct MailShellSnapshot {
     pub folders: Vec<MailShellFolder>,
     pub messages: Vec<MailShellMessage>,
 }
-
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MailShellAccount {
@@ -150,6 +154,22 @@ pub struct MailSearchResponse {
     pub query: String,
     pub index_status: MailSearchIndexStatus,
     pub results: Vec<MailShellMessage>,
+    pub parsed_query: MailSearchParsedQuery,
+    pub highlight_terms: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSearchParsedQuery {
+    pub text_terms: Vec<String>,
+    pub filters: Vec<MailSearchParsedFilter>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSearchParsedFilter {
+    pub kind: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -345,6 +365,8 @@ pub fn search_mail_from_connection(
             query: validated_request.query,
             index_status: MailSearchIndexStatus::Unavailable,
             results: Vec::new(),
+            parsed_query: validated_request.parsed_query,
+            highlight_terms: validated_request.highlight_terms,
         });
     }
 
@@ -355,6 +377,8 @@ pub fn search_mail_from_connection(
         query: validated_request.query,
         index_status: MailSearchIndexStatus::Ready,
         results: messages,
+        parsed_query: validated_request.parsed_query,
+        highlight_terms: validated_request.highlight_terms,
     })
 }
 
@@ -591,10 +615,37 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ValidatedSearchRequest {
     query: String,
-    fts_query: String,
+    fts_query: Option<String>,
+    parsed_query: MailSearchParsedQuery,
+    highlight_terms: Vec<String>,
+    sender_filter: Option<String>,
+    subject_filter: Option<String>,
+    body_filter: Option<String>,
+    has_attachment_filter: Option<bool>,
+    read_filter: Option<bool>,
+    flagged_filter: Option<bool>,
     account_id: Option<String>,
     folder_id: Option<String>,
     limit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchQueryPlan {
+    fts_query: Option<String>,
+    parsed_query: MailSearchParsedQuery,
+    highlight_terms: Vec<String>,
+    sender_filter: Option<String>,
+    subject_filter: Option<String>,
+    body_filter: Option<String>,
+    has_attachment_filter: Option<bool>,
+    read_filter: Option<bool>,
+    flagged_filter: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SearchQueryToken {
+    Text(String),
+    Filter { kind: String, value: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -844,9 +895,10 @@ fn validate_search_request(
     validate_bounded_text("query", &request.query, MAX_SEARCH_QUERY_BYTES)?;
     reject_raw_sql("query", &request.query)?;
     reject_unsanitized_html("query", &request.query)?;
+    reject_search_urls_and_paths(&request.query)?;
 
     let query = request.query.trim().to_string();
-    let fts_query = fts_query_from_user_input(&query)?;
+    let query_plan = parse_search_query(&query)?;
 
     if let Some(account_id) = request.account_id.as_deref() {
         validate_entity_id("account_id", account_id)?;
@@ -864,7 +916,15 @@ fn validate_search_request(
 
     Ok(ValidatedSearchRequest {
         query,
-        fts_query,
+        fts_query: query_plan.fts_query,
+        parsed_query: query_plan.parsed_query,
+        highlight_terms: query_plan.highlight_terms,
+        sender_filter: query_plan.sender_filter,
+        subject_filter: query_plan.subject_filter,
+        body_filter: query_plan.body_filter,
+        has_attachment_filter: query_plan.has_attachment_filter,
+        read_filter: query_plan.read_filter,
+        flagged_filter: query_plan.flagged_filter,
         account_id: request.account_id,
         folder_id: request.folder_id,
         limit: request
@@ -878,6 +938,10 @@ fn search_messages(
     connection: &Connection,
     request: &ValidatedSearchRequest,
 ) -> rusqlite::Result<Vec<MailShellMessage>> {
+    if request.fts_query.is_none() {
+        return search_messages_by_metadata(connection, request);
+    }
+
     let mut statement = connection.prepare(
         "SELECT
            messages.id,
@@ -926,9 +990,46 @@ fn search_messages(
           AND sender_remote_content.normalized_sender_email = LOWER(TRIM(COALESCE(messages.sender_email, '')))
          WHERE messages_fts MATCH ?1
            AND accounts.removed_at IS NULL
-           AND accounts.auth_status != 'removed'
+          AND accounts.auth_status != 'removed'
            AND (?2 IS NULL OR messages.account_id = ?2)
            AND (?3 IS NULL OR messages.folder_id = ?3)
+           AND (
+             ?4 IS NULL
+             OR LOWER(COALESCE(messages.sender_name, '')) LIKE ?4 ESCAPE '\\'
+             OR LOWER(COALESCE(messages.sender_email, '')) LIKE ?4 ESCAPE '\\'
+           )
+           AND (
+             ?5 IS NULL
+             OR LOWER(COALESCE(messages.subject, '')) LIKE ?5 ESCAPE '\\'
+           )
+           AND (
+             ?6 IS NULL
+             OR LOWER(COALESCE(messages.body_text, '')) LIKE ?6 ESCAPE '\\'
+             OR LOWER(COALESCE(messages.body_html, '')) LIKE ?6 ESCAPE '\\'
+           )
+           AND (
+             ?7 IS NULL
+             OR (
+               ?7 = 1
+               AND EXISTS (
+                 SELECT 1 FROM attachments
+                 WHERE attachments.account_id = messages.account_id
+                   AND attachments.folder_id = messages.folder_id
+                   AND attachments.message_id = messages.id
+               )
+             )
+             OR (
+               ?7 = 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM attachments
+                 WHERE attachments.account_id = messages.account_id
+                   AND attachments.folder_id = messages.folder_id
+                   AND attachments.message_id = messages.id
+               )
+             )
+           )
+           AND (?8 IS NULL OR messages.is_read = ?8)
+           AND (?9 IS NULL OR messages.is_flagged = ?9)
            AND (
              ?2 IS NOT NULL
              OR COALESCE(
@@ -940,14 +1041,140 @@ fn search_messages(
            rank,
            COALESCE(messages.date_received, messages.internal_date, messages.created_at) DESC,
            messages.id
-         LIMIT ?4",
+         LIMIT ?10",
     )?;
 
     let rows = statement.query_map(
         params![
-            request.fts_query.as_str(),
+            request.fts_query.as_deref(),
             request.account_id.as_deref(),
             request.folder_id.as_deref(),
+            request.sender_filter.as_deref(),
+            request.subject_filter.as_deref(),
+            request.body_filter.as_deref(),
+            optional_bool_i64(request.has_attachment_filter),
+            optional_bool_i64(request.read_filter),
+            optional_bool_i64(request.flagged_filter),
+            request.limit
+        ],
+        mail_shell_message_from_row,
+    )?;
+
+    collect_rows(rows)
+}
+
+fn search_messages_by_metadata(
+    connection: &Connection,
+    request: &ValidatedSearchRequest,
+) -> rusqlite::Result<Vec<MailShellMessage>> {
+    let mut statement = connection.prepare(
+        "SELECT
+           messages.id,
+           messages.account_id,
+           messages.folder_id,
+           COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '') AS sender,
+           COALESCE(messages.sender_email, '') AS sender_email,
+           messages.subject,
+           COALESCE(NULLIF(messages.snippet, ''), NULLIF(messages.body_text, ''), '') AS preview,
+           COALESCE(messages.date_received, messages.internal_date, '') AS received_at,
+           messages.is_read,
+           messages.is_flagged,
+           messages.body_text,
+           messages.body_html,
+           messages.rfc_message_id,
+           messages.in_reply_to,
+           messages.references_json,
+           messages.to_addresses_json,
+           messages.cc_addresses_json,
+           CASE
+             WHEN message_remote_content.id IS NOT NULL THEN 1
+             WHEN sender_remote_content.id IS NOT NULL THEN 1
+             ELSE 0
+           END AS remote_content_allowed,
+           CASE
+             WHEN message_remote_content.id IS NOT NULL THEN 'message'
+             WHEN sender_remote_content.id IS NOT NULL THEN 'sender'
+             ELSE NULL
+           END AS remote_content_allowed_scope,
+           COALESCE(messages.date_received, messages.internal_date, messages.created_at) AS page_sort_key
+         FROM messages
+         JOIN accounts ON accounts.id = messages.account_id
+         JOIN folders ON folders.account_id = messages.account_id
+          AND folders.id = messages.folder_id
+         LEFT JOIN settings AS account_preferences
+           ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
+         LEFT JOIN remote_content_preferences AS message_remote_content
+           ON message_remote_content.account_id = messages.account_id
+          AND message_remote_content.scope = 'message'
+          AND message_remote_content.message_id = messages.id
+         LEFT JOIN remote_content_preferences AS sender_remote_content
+           ON sender_remote_content.account_id = messages.account_id
+          AND sender_remote_content.scope = 'sender'
+          AND sender_remote_content.normalized_sender_email = LOWER(TRIM(COALESCE(messages.sender_email, '')))
+         WHERE accounts.removed_at IS NULL
+           AND accounts.auth_status != 'removed'
+           AND (?1 IS NULL OR messages.account_id = ?1)
+           AND (?2 IS NULL OR messages.folder_id = ?2)
+           AND (
+             ?3 IS NULL
+             OR LOWER(COALESCE(messages.sender_name, '')) LIKE ?3 ESCAPE '\\'
+             OR LOWER(COALESCE(messages.sender_email, '')) LIKE ?3 ESCAPE '\\'
+           )
+           AND (
+             ?4 IS NULL
+             OR LOWER(COALESCE(messages.subject, '')) LIKE ?4 ESCAPE '\\'
+           )
+           AND (
+             ?5 IS NULL
+             OR LOWER(COALESCE(messages.body_text, '')) LIKE ?5 ESCAPE '\\'
+             OR LOWER(COALESCE(messages.body_html, '')) LIKE ?5 ESCAPE '\\'
+           )
+           AND (
+             ?6 IS NULL
+             OR (
+               ?6 = 1
+               AND EXISTS (
+                 SELECT 1 FROM attachments
+                 WHERE attachments.account_id = messages.account_id
+                   AND attachments.folder_id = messages.folder_id
+                   AND attachments.message_id = messages.id
+               )
+             )
+             OR (
+               ?6 = 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM attachments
+                 WHERE attachments.account_id = messages.account_id
+                   AND attachments.folder_id = messages.folder_id
+                   AND attachments.message_id = messages.id
+               )
+             )
+           )
+           AND (?7 IS NULL OR messages.is_read = ?7)
+           AND (?8 IS NULL OR messages.is_flagged = ?8)
+           AND (
+             ?1 IS NOT NULL
+             OR COALESCE(
+               json_extract(account_preferences.value_json, '$.includeInUnifiedInbox'),
+               1
+             ) != 0
+           )
+         ORDER BY
+           COALESCE(messages.date_received, messages.internal_date, messages.created_at) DESC,
+           messages.id
+         LIMIT ?9",
+    )?;
+
+    let rows = statement.query_map(
+        params![
+            request.account_id.as_deref(),
+            request.folder_id.as_deref(),
+            request.sender_filter.as_deref(),
+            request.subject_filter.as_deref(),
+            request.body_filter.as_deref(),
+            optional_bool_i64(request.has_attachment_filter),
+            optional_bool_i64(request.read_filter),
+            optional_bool_i64(request.flagged_filter),
             request.limit
         ],
         mail_shell_message_from_row,
@@ -1368,19 +1595,361 @@ fn folder_exists_in_scope(
     Ok(exists)
 }
 
-fn fts_query_from_user_input(query: &str) -> Result<String, IpcValidationError> {
-    let tokens = query
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .take(MAX_SEARCH_TERMS)
-        .map(|token| format!("{}*", token.to_lowercase()))
-        .collect::<Vec<_>>();
+fn parse_search_query(query: &str) -> Result<SearchQueryPlan, MailShellError> {
+    let tokens = tokenize_search_query(query)?;
+    let mut text_terms = Vec::new();
+    let mut fts_terms = Vec::new();
+    let mut filters = Vec::new();
+    let mut sender_filter = None;
+    let mut subject_filter = None;
+    let mut body_filter = None;
+    let mut has_attachment_filter = None;
+    let mut read_filter = None;
+    let mut flagged_filter = None;
 
-    if tokens.is_empty() {
-        return Err(IpcValidationError::EmptyField { field: "query" });
+    for token in tokens {
+        match token {
+            SearchQueryToken::Text(value) => {
+                let terms = search_terms_from_text(&value);
+                push_terms(&mut text_terms, &terms);
+                push_terms(&mut fts_terms, &terms);
+            }
+            SearchQueryToken::Filter { kind, value } => {
+                let value = normalize_search_value(&value);
+                if value.is_empty() {
+                    return Err(MailShellError::new("search filter value is required"));
+                }
+
+                match kind.as_str() {
+                    SEARCH_FILTER_FROM => {
+                        ensure_unique_filter(&sender_filter)?;
+                        let terms = search_terms_from_text(&value);
+                        ensure_filter_has_terms(&terms)?;
+                        push_terms(&mut fts_terms, &terms);
+                        sender_filter = Some(sql_like_contains(&value));
+                        filters.push(MailSearchParsedFilter { kind, value });
+                    }
+                    SEARCH_FILTER_SUBJECT => {
+                        ensure_unique_filter(&subject_filter)?;
+                        let terms = search_terms_from_text(&value);
+                        ensure_filter_has_terms(&terms)?;
+                        push_terms(&mut fts_terms, &terms);
+                        subject_filter = Some(sql_like_contains(&value));
+                        filters.push(MailSearchParsedFilter { kind, value });
+                    }
+                    SEARCH_FILTER_BODY => {
+                        ensure_unique_filter(&body_filter)?;
+                        let terms = search_terms_from_text(&value);
+                        ensure_filter_has_terms(&terms)?;
+                        push_terms(&mut fts_terms, &terms);
+                        body_filter = Some(sql_like_contains(&value));
+                        filters.push(MailSearchParsedFilter { kind, value });
+                    }
+                    SEARCH_FILTER_HAS => {
+                        let canonical = canonical_has_filter(&value)?;
+                        if has_attachment_filter.is_some() {
+                            return Err(MailShellError::new("duplicate search filter"));
+                        }
+                        has_attachment_filter = Some(true);
+                        filters.push(MailSearchParsedFilter {
+                            kind,
+                            value: canonical.to_string(),
+                        });
+                    }
+                    SEARCH_FILTER_IS => {
+                        let canonical = canonical_is_filter(&value)?;
+                        match canonical {
+                            "read" => set_read_filter(&mut read_filter, true)?,
+                            "unread" => set_read_filter(&mut read_filter, false)?,
+                            "flagged" => set_flagged_filter(&mut flagged_filter, true)?,
+                            _ => unreachable!("canonical is filter is constrained"),
+                        }
+                        filters.push(MailSearchParsedFilter {
+                            kind,
+                            value: canonical.to_string(),
+                        });
+                    }
+                    _ => {
+                        let terms = search_terms_from_text(&format!("{kind} {value}"));
+                        push_terms(&mut text_terms, &terms);
+                        push_terms(&mut fts_terms, &terms);
+                    }
+                }
+            }
+        }
     }
 
-    Ok(tokens.join(" "))
+    if fts_terms.is_empty()
+        && sender_filter.is_none()
+        && subject_filter.is_none()
+        && body_filter.is_none()
+        && has_attachment_filter.is_none()
+        && read_filter.is_none()
+        && flagged_filter.is_none()
+    {
+        return Err(IpcValidationError::EmptyField { field: "query" }.into());
+    }
+
+    let highlight_terms = fts_terms.clone();
+    let fts_query = if fts_terms.is_empty() {
+        None
+    } else {
+        Some(
+            fts_terms
+                .iter()
+                .take(MAX_SEARCH_TERMS)
+                .map(|token| format!("{token}*"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    };
+
+    Ok(SearchQueryPlan {
+        fts_query,
+        parsed_query: MailSearchParsedQuery {
+            filters,
+            text_terms,
+        },
+        highlight_terms,
+        sender_filter,
+        subject_filter,
+        body_filter,
+        has_attachment_filter,
+        read_filter,
+        flagged_filter,
+    })
+}
+
+fn tokenize_search_query(query: &str) -> Result<Vec<SearchQueryToken>, MailShellError> {
+    let characters = query.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    let mut tokens = Vec::new();
+
+    while index < characters.len() {
+        while index < characters.len() && characters[index].is_whitespace() {
+            index += 1;
+        }
+        if index >= characters.len() {
+            break;
+        }
+
+        if characters[index] == '"' {
+            let (value, next_index) = read_quoted_search_value(&characters, index + 1)?;
+            tokens.push(SearchQueryToken::Text(value));
+            index = next_index;
+            continue;
+        }
+
+        let token_start = index;
+        while index < characters.len()
+            && !characters[index].is_whitespace()
+            && characters[index] != ':'
+        {
+            index += 1;
+        }
+
+        if index < characters.len() && characters[index] == ':' {
+            let key = characters[token_start..index]
+                .iter()
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if is_recognized_search_filter(&key) {
+                let key = if key == "sender" {
+                    SEARCH_FILTER_FROM.to_string()
+                } else {
+                    key
+                };
+                index += 1;
+                if index >= characters.len() || characters[index].is_whitespace() {
+                    return Err(MailShellError::new("search filter value is required"));
+                }
+
+                let (value, next_index) = if characters[index] == '"' {
+                    read_quoted_search_value(&characters, index + 1)?
+                } else {
+                    let value_start = index;
+                    while index < characters.len() && !characters[index].is_whitespace() {
+                        index += 1;
+                    }
+                    (
+                        characters[value_start..index].iter().collect::<String>(),
+                        index,
+                    )
+                };
+                tokens.push(SearchQueryToken::Filter { kind: key, value });
+                index = next_index;
+                continue;
+            }
+
+            while index < characters.len() && !characters[index].is_whitespace() {
+                index += 1;
+            }
+            tokens.push(SearchQueryToken::Text(
+                characters[token_start..index].iter().collect(),
+            ));
+            continue;
+        }
+
+        tokens.push(SearchQueryToken::Text(
+            characters[token_start..index].iter().collect(),
+        ));
+    }
+
+    Ok(tokens)
+}
+
+fn read_quoted_search_value(
+    characters: &[char],
+    mut index: usize,
+) -> Result<(String, usize), MailShellError> {
+    let value_start = index;
+    while index < characters.len() && characters[index] != '"' {
+        index += 1;
+    }
+
+    if index >= characters.len() {
+        return Err(MailShellError::new("search query syntax is invalid"));
+    }
+
+    Ok((characters[value_start..index].iter().collect(), index + 1))
+}
+
+fn is_recognized_search_filter(key: &str) -> bool {
+    matches!(
+        key,
+        SEARCH_FILTER_FROM
+            | "sender"
+            | SEARCH_FILTER_SUBJECT
+            | SEARCH_FILTER_BODY
+            | SEARCH_FILTER_HAS
+            | SEARCH_FILTER_IS
+    )
+}
+
+fn normalize_search_value(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn search_terms_from_text(value: &str) -> Vec<String> {
+    value
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_lowercase())
+        .collect()
+}
+
+fn push_terms(target: &mut Vec<String>, terms: &[String]) {
+    for term in terms {
+        if target.len() >= MAX_SEARCH_TERMS {
+            break;
+        }
+        if !target.iter().any(|existing| existing == term) {
+            target.push(term.clone());
+        }
+    }
+}
+
+fn ensure_unique_filter<T>(existing: &Option<T>) -> Result<(), MailShellError> {
+    if existing.is_some() {
+        return Err(MailShellError::new("duplicate search filter"));
+    }
+
+    Ok(())
+}
+
+fn ensure_filter_has_terms(terms: &[String]) -> Result<(), MailShellError> {
+    if terms.is_empty() {
+        return Err(MailShellError::new("search filter value is invalid"));
+    }
+
+    Ok(())
+}
+
+fn canonical_has_filter(value: &str) -> Result<&'static str, MailShellError> {
+    match value.to_ascii_lowercase().as_str() {
+        "attachment" | "attachments" => Ok("attachment"),
+        _ => Err(MailShellError::new("unsupported search filter")),
+    }
+}
+
+fn canonical_is_filter(value: &str) -> Result<&'static str, MailShellError> {
+    match value.to_ascii_lowercase().as_str() {
+        "read" => Ok("read"),
+        "unread" => Ok("unread"),
+        "flagged" | "starred" => Ok("flagged"),
+        _ => Err(MailShellError::new("unsupported search filter")),
+    }
+}
+
+fn set_read_filter(target: &mut Option<bool>, value: bool) -> Result<(), MailShellError> {
+    match target {
+        Some(existing) if *existing != value => {
+            Err(MailShellError::new("conflicting search filter"))
+        }
+        Some(_) => Err(MailShellError::new("duplicate search filter")),
+        None => {
+            *target = Some(value);
+            Ok(())
+        }
+    }
+}
+
+fn set_flagged_filter(target: &mut Option<bool>, value: bool) -> Result<(), MailShellError> {
+    match target {
+        Some(existing) if *existing != value => {
+            Err(MailShellError::new("conflicting search filter"))
+        }
+        Some(_) => Err(MailShellError::new("duplicate search filter")),
+        None => {
+            *target = Some(value);
+            Ok(())
+        }
+    }
+}
+
+fn sql_like_contains(value: &str) -> String {
+    let mut escaped = String::new();
+    for character in value.to_lowercase().chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+
+    format!("%{escaped}%")
+}
+
+fn optional_bool_i64(value: Option<bool>) -> Option<i64> {
+    value.map(|value| if value { 1 } else { 0 })
+}
+
+fn reject_search_urls_and_paths(query: &str) -> Result<(), IpcValidationError> {
+    let lowered = query.to_ascii_lowercase();
+    if lowered.contains("://")
+        || lowered.contains("javascript:")
+        || lowered.contains("data:")
+        || lowered.contains("file:")
+    {
+        return Err(IpcValidationError::UnsafeUrl {
+            field: "query",
+            reason: "URLs are not accepted in search queries",
+        });
+    }
+
+    let bytes = query.as_bytes();
+    let windows_drive_path = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    if windows_drive_path
+        || query.contains("\\\\")
+        || query.contains("..\\")
+        || query.contains("../")
+    {
+        return Err(IpcValidationError::ClientSuppliedPath { field: "query" });
+    }
+
+    Ok(())
 }
 
 fn collect_rows<T>(
@@ -1964,6 +2533,85 @@ mod tests {
     }
 
     #[test]
+    fn search_mail_parses_advanced_filters_and_metadata_queries_safely() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+
+        let advanced_search = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "from:finance subject:\"Invoice question\" is:unread has:attachment"
+                    .to_string(),
+                account_id: None,
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .expect("advanced search succeeds");
+
+        assert_eq!(advanced_search.index_status, MailSearchIndexStatus::Ready);
+        assert_eq!(
+            advanced_search.parsed_query.filters,
+            vec![
+                MailSearchParsedFilter {
+                    kind: "from".to_string(),
+                    value: "finance".to_string(),
+                },
+                MailSearchParsedFilter {
+                    kind: "subject".to_string(),
+                    value: "Invoice question".to_string(),
+                },
+                MailSearchParsedFilter {
+                    kind: "is".to_string(),
+                    value: "unread".to_string(),
+                },
+                MailSearchParsedFilter {
+                    kind: "has".to_string(),
+                    value: "attachment".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            advanced_search.highlight_terms,
+            vec![
+                "finance".to_string(),
+                "invoice".to_string(),
+                "question".to_string()
+            ]
+        );
+        assert_eq!(advanced_search.results.len(), 1);
+        assert_eq!(advanced_search.results[0].id, "msg_work");
+
+        let metadata_only = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "has:attachment is:flagged".to_string(),
+                account_id: Some("acct_work".to_string()),
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .expect("metadata-only advanced search succeeds");
+
+        assert_eq!(metadata_only.highlight_terms, Vec::<String>::new());
+        assert_eq!(metadata_only.results.len(), 1);
+        assert_eq!(metadata_only.results[0].id, "msg_work");
+
+        let scoped_metadata_only = search_mail_from_connection(
+            &connection,
+            MailSearchRequest {
+                query: "has:attachment".to_string(),
+                account_id: Some("acct_personal".to_string()),
+                folder_id: None,
+                limit: Some(10),
+            },
+        )
+        .expect("metadata-only search remains account scoped");
+
+        assert!(scoped_metadata_only.results.is_empty());
+    }
+
+    #[test]
     fn account_local_preferences_exclude_accounts_from_unified_search_only() {
         let connection = migrated_connection();
         seed_shell_cache(&connection);
@@ -2222,6 +2870,11 @@ mod tests {
             "SELECT * FROM messages",
             "<img src=x onerror=alert(1)>",
             "subject; DELETE FROM messages",
+            "https://example.com/phishing",
+            "C:\\Users\\Alice\\mail.db",
+            "from:",
+            "has:script",
+            "is:deleted",
         ] {
             let error = search_mail_from_connection(
                 &connection,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createPerformanceMailFixture,
   normalizePerformanceMessageCount,
+  performanceAdvancedSearchQuery,
   performanceSearchNeedle,
   searchPerformanceMailFixture,
   PERFORMANCE_FIXTURE_MESSAGE_COUNT,
@@ -18,6 +19,9 @@ describe("mail performance fixtures", () => {
     expect(fixture.data.accounts).toHaveLength(2);
     expect(fixture.data.folders).toHaveLength(2);
     expect(fixture.metadata.attachmentCount).toBeGreaterThanOrEqual(500);
+    expect(fixture.metadata.advancedSearchQuery).toBe(
+      performanceAdvancedSearchQuery(),
+    );
     expect(fixture.metadata.inlineAttachmentCount).toBeGreaterThan(0);
     expect(fixture.metadata.totalAttachmentBytes).toBeGreaterThan(0);
     expect(
@@ -56,6 +60,24 @@ describe("mail performance fixtures", () => {
         limit: 5,
       }).results,
     ).toHaveLength(5);
+
+    expect(
+      searchPerformanceMailFixture(fixture.data, {
+        accountId: null,
+        folderId: null,
+        query: performanceAdvancedSearchQuery(),
+        limit: 10,
+      }).parsedQuery?.filters,
+    ).toEqual([{ kind: "subject", value: performanceSearchNeedle() }]);
+
+    expect(
+      searchPerformanceMailFixture(fixture.data, {
+        accountId: null,
+        folderId: null,
+        query: performanceAdvancedSearchQuery(),
+        limit: 10,
+      }).results,
+    ).toHaveLength(1);
 
     expect(
       searchPerformanceMailFixture(fixture.data, {

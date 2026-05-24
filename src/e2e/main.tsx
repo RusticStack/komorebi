@@ -37,6 +37,10 @@ import {
   searchPerformanceMailFixture,
   type PerformanceFixtureMetadata,
 } from "../perf/mailPerformanceFixtures";
+import {
+  messageMatchesClientMailSearch,
+  parseClientMailSearchQuery,
+} from "../mail/search/searchQuery";
 
 type E2eEvent =
   | { name: "load-mail-shell" }
@@ -332,21 +336,21 @@ async function searchMail(
   }
 
   const query = request.query.toLocaleLowerCase();
-  const results =
-    query === "phoenix"
-      ? [archiveSearchResult]
-      : activeMail.messages.filter((message) =>
-          [
-            message.sender,
-            message.senderEmail,
-            message.subject,
-            message.preview,
-            message.bodyText ?? "",
-          ].some((value) => value.toLocaleLowerCase().includes(query)),
-        );
+  const parsed = parseClientMailSearchQuery(request.query);
+  const archiveMatches =
+    query === "phoenix" ||
+    messageMatchesClientMailSearch(archiveSearchResult, parsed);
+  const results = [
+    ...(archiveMatches ? [archiveSearchResult] : []),
+    ...activeMail.messages.filter((message) =>
+      messageMatchesClientMailSearch(message, parsed),
+    ),
+  ];
 
   return {
+    highlightTerms: parsed.highlightTerms,
     indexStatus: "ready",
+    parsedQuery: parsed.parsedQuery,
     query: request.query,
     results: clone(results),
   };

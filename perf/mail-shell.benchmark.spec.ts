@@ -14,10 +14,12 @@ type MailShellBenchmarkReport = {
     inlineAttachmentCount: number;
     totalAttachmentBytes: number;
     searchNeedle: string;
+    advancedSearchQuery: string;
   };
   measurements: {
     initialLoadMs: number;
     searchLatencyMs: number;
+    advancedSearchLatencyMs: number;
     scrollToLastRowMs: number;
     selectLastRowMs: number;
     renderedRowCountAfterScroll: number;
@@ -62,6 +64,15 @@ test("reports mail shell memory, search, and list interaction metrics", async ({
   ).toBeVisible({ timeout: 30_000 });
   const searchLatencyMs = await elapsedSince(page, searchStartedAt);
   const heapAfterSearch = await readHeapUsage(page);
+  const advancedSearchStartedAt = await page.evaluate(() => performance.now());
+  await page.getByRole("searchbox").fill(fixtureMetadata.advancedSearchQuery);
+  await expect(
+    page.getByRole("button", {
+      name: new RegExp(`Performance message 9999.*${fixtureMetadata.searchNeedle}`),
+    }),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`Subject: ${fixtureMetadata.searchNeedle}`)).toBeVisible();
+  const advancedSearchLatencyMs = await elapsedSince(page, advancedSearchStartedAt);
 
   await page.getByRole("searchbox").fill("");
   await expect(list).toHaveAttribute(
@@ -91,6 +102,7 @@ test("reports mail shell memory, search, and list interaction metrics", async ({
   const report: MailShellBenchmarkReport = {
     fixture: {
       attachmentCount: fixtureMetadata.attachmentCount,
+      advancedSearchQuery: fixtureMetadata.advancedSearchQuery,
       inlineAttachmentCount: fixtureMetadata.inlineAttachmentCount,
       messageCount: fixtureMetadata.messageCount,
       searchNeedle: fixtureMetadata.searchNeedle,
@@ -100,6 +112,7 @@ test("reports mail shell memory, search, and list interaction metrics", async ({
       heapAfterListInteraction,
       heapAfterLoad,
       heapAfterSearch,
+      advancedSearchLatencyMs: roundMetric(advancedSearchLatencyMs),
       initialLoadMs: roundMetric(initialLoadMs),
       renderedRowCountAfterScroll,
       scrollToLastRowMs: roundMetric(scrollToLastRowMs),
@@ -113,6 +126,7 @@ test("reports mail shell memory, search, and list interaction metrics", async ({
   expect(report.measurements.renderedRowCountAfterScroll).toBeGreaterThan(0);
   expect(report.measurements.renderedRowCountAfterScroll).toBeLessThan(80);
   expect(report.measurements.searchLatencyMs).toBeGreaterThanOrEqual(0);
+  expect(report.measurements.advancedSearchLatencyMs).toBeGreaterThanOrEqual(0);
   expect(report.measurements.scrollToLastRowMs).toBeGreaterThanOrEqual(0);
 
   const reportJson = JSON.stringify(report, null, 2);

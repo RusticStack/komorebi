@@ -242,10 +242,22 @@ export type MailSearchRequest = {
 
 export type MailSearchIndexStatus = "ready" | "unavailable";
 
+export type MailSearchParsedFilter = {
+  kind: "from" | "subject" | "body" | "has" | "is";
+  value: string;
+};
+
+export type MailSearchParsedQuery = {
+  textTerms: string[];
+  filters: MailSearchParsedFilter[];
+};
+
 export type MailSearchResponse = {
   query: string;
   indexStatus: MailSearchIndexStatus;
   results: MailMessage[];
+  parsedQuery?: MailSearchParsedQuery;
+  highlightTerms?: string[];
 };
 
 export type ComposerAddress = {

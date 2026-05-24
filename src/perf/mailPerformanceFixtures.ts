@@ -5,6 +5,10 @@ import type {
   MailSearchResponse,
   MailShellData,
 } from "../mail/shell/mailShellState";
+import {
+  messageMatchesClientMailSearch,
+  parseClientMailSearchQuery,
+} from "../mail/search/searchQuery";
 
 export const PERFORMANCE_FIXTURE_MESSAGE_COUNT = 10_000;
 export const PERFORMANCE_FIXTURE_MAX_MESSAGE_COUNT = 50_000;
@@ -23,6 +27,7 @@ export type PerformanceFixtureMetadata = {
   inlineAttachmentCount: number;
   totalAttachmentBytes: number;
   searchNeedle: string;
+  advancedSearchQuery: string;
 };
 
 export type PerformanceMailFixture = {
@@ -116,6 +121,7 @@ export function createPerformanceMailFixture({
     },
     metadata: {
       attachmentCount,
+      advancedSearchQuery: performanceAdvancedSearchQuery(),
       inlineAttachmentCount,
       messageCount: boundedMessageCount,
       searchNeedle: performanceSearchNeedle(),
@@ -129,16 +135,23 @@ export function performanceSearchNeedle() {
   return `needle-${NEEDLE_MESSAGE_NUMBER}`;
 }
 
+export function performanceAdvancedSearchQuery() {
+  return `subject:${performanceSearchNeedle()}`;
+}
+
 export function searchPerformanceMailFixture(
   data: MailShellData,
   request: MailSearchRequest,
 ): MailSearchResponse {
-  const query = request.query.trim().toLocaleLowerCase();
+  const query = request.query.trim();
+  const parsed = parseClientMailSearchQuery(query);
   const limit = Math.max(1, Math.min(request.limit ?? 100, 500));
 
   if (!query) {
     return {
+      highlightTerms: [],
       indexStatus: "ready",
+      parsedQuery: parsed.parsedQuery,
       query: request.query,
       results: [],
     };
@@ -166,7 +179,7 @@ export function searchPerformanceMailFixture(
       continue;
     }
 
-    if (messageMatchesQuery(message, query)) {
+    if (messageMatchesClientMailSearch(message, parsed)) {
       results.push(message);
       if (results.length >= limit) {
         break;
@@ -175,7 +188,9 @@ export function searchPerformanceMailFixture(
   }
 
   return {
+    highlightTerms: parsed.highlightTerms,
     indexStatus: "ready",
+    parsedQuery: parsed.parsedQuery,
     query: request.query,
     results,
   };
@@ -284,17 +299,6 @@ function attachmentsForMessage(
         },
       ];
   }
-}
-
-function messageMatchesQuery(message: MailMessage, query: string) {
-  return [
-    message.sender,
-    message.senderEmail,
-    message.subject,
-    message.preview,
-    message.bodyText ?? "",
-    message.bodyHtml ?? "",
-  ].some((value) => value.toLocaleLowerCase().includes(query));
 }
 
 function countForAccount(messages: MailMessage[], accountId: string) {

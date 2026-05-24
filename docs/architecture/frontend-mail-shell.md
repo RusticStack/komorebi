@@ -73,7 +73,7 @@ The navigation state is frontend-local. Cache reads come from the Rust `load_mai
 
 `load_message_page` accepts only a typed account/folder/unified-inbox scope, optional backend-issued cursor, and bounded limit. It validates active account/folder ownership, rejects mixed unified/account scope, rejects missing non-unified scope, verifies the cursor belongs to the requested scope and sort key, bounds the cursor text and page size, rejects SQL/HTML-shaped cursor text, and uses backend-owned keyset pagination over cached message sort keys. It returns full safe message rows with the same attachment redaction policy as the shell snapshot plus `nextCursor`, `hasMore`, and `totalCount`. It is exposed through `load_message_page`, `src-tauri/build.rs`, and the `allow-load-message-page` capability permission.
 
-`search_mail` accepts only a typed query/scope request. It validates query length, raw SQL-shaped input, raw HTML, account id, and folder id before executing a parameterized FTS query. It returns full safe message rows with the same attachment metadata redaction policy as the shell snapshot, so results outside the bounded bootstrap snapshot can still open in the reader. It is exposed through `search_mail`, `src-tauri/build.rs`, and the `allow-search-mail` capability permission.
+`search_mail` accepts only a typed query/scope request. It validates query length, raw SQL-shaped input, raw HTML, URL/path-shaped input, account id, and folder id before parsing supported advanced syntax into backend-owned FTS terms and parameterized metadata filters. It returns full safe message rows with the same attachment metadata redaction policy as the shell snapshot plus parsed-filter metadata and plain highlight terms, so results outside the bounded bootstrap snapshot can still open in the reader without exposing raw FTS syntax or HTML snippets. It is exposed through `search_mail`, `src-tauri/build.rs`, and the `allow-search-mail` capability permission.
 
 ## Navigation Behavior
 
@@ -93,9 +93,25 @@ In account mode:
 
 ## Search Behavior
 
-When no Tauri search function is available, test fixtures use local in-memory filtering by sender, sender email, subject, preview, and plain body text.
+When no Tauri search function is available, test fixtures use local in-memory filtering by sender, sender email, subject, preview, and plain body text. Fixture parsing mirrors the supported search syntax for tests only; production authority remains the Rust command.
 
 In Tauri runtime, non-empty search input uses `search_mail` after a debounce. Search is cancellable from React's perspective: changing the query or scope aborts/ignores stale responses. Backend search spans subject, sender name/email, plain body, and HTML body across active accounts. In unified mode it searches all active-account folders; in account mode it searches the selected account; when a folder is selected it narrows to that folder. Result rows show account/folder origin.
+
+Supported advanced search syntax is intentionally small and parsed by Rust before SQLite execution:
+
+- plain text terms search subject, sender, and body through FTS5.
+- `from:value` or `sender:value` narrows sender name/email.
+- `subject:value` narrows subject.
+- `body:value` narrows plain/HTML body text.
+- quoted values such as `subject:"Invoice question"` preserve spaces inside one filter value.
+- `has:attachment` or `has:attachments` requires at least one cached attachment metadata row.
+- `is:read`, `is:unread`, `is:flagged`, and `is:starred` map to cached read/flag state.
+
+Unsupported `has:`/`is:` values, duplicate/conflicting filters, raw SQL-shaped input, raw HTML, absolute URLs, and local path-shaped input are denial paths. Advanced search remains scoped by the selected account/folder arguments; syntax does not let React provide account, folder, SQL, FTS, path, URL, or attachment source identifiers.
+
+Highlights are rendered by splitting plain text into React text nodes and `<mark>` elements from backend-returned terms. The frontend never renders highlighted snippets with `dangerouslySetInnerHTML`, and message bodies still render only through `SafeEmailBody`.
+
+Search history and saved searches are local-only WebView convenience state in `localStorage` under `komorebi.mail.searches.v1`. They are capped, deduplicated, user-clearable, and never sent anywhere except back to the typed `search_mail` command when the user re-runs a stored query. They may contain private search terms, so they are documented as local UI state rather than account data.
 
 Search UI states:
 
@@ -288,7 +304,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - external-link UI for delegated safe links, typed command payloads, missing-command status, and unsafe-link inert behavior
 - reader mail-action UI for mark-read/unread, move, archive, delete-to-trash, expunge, confirmation, undo, and retry request payloads
 - incremental folder/unified message paging, page command payloads, page-boundary append behavior, selected-message preservation, and keyboard movement across loaded page boundaries
-- local fixture search and FTS-backed search with debounce, cancellation, result origin labels, no-match state, no-index state, and retryable error state
+- local fixture search and FTS-backed search with debounce, cancellation, safe advanced syntax, plain-text highlighting, saved/recent local search controls, result origin labels, no-match state, no-index state, and retryable error state
 - TipTap composer address validation, duplicate recipient handling, keyboard autocomplete from recent recipients, signature insertion, local-only draft disclosure, active draft list/reopen hydration, draft save, attachment staging, forwarded attachment staging, inline image CID conversion, send command request shape including reply metadata, send progress, and validation errors
 - TipTap rich formatting extension output and sanitizer behavior in `src/mail/composer/TipTapComposer.test.tsx`
 - message selection and reader rendering
@@ -305,11 +321,11 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 
 `src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/page/search, remote-content preference persistence, external-link opening, attachment preview/save/download, forwarded attachment staging, recent-recipient lookup, composer draft list loading, composer autosave, generic account commands, OAuth loopback commands, sync-status event subscription, and cancellation before invoke or after a stale response.
 
-`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, calls the typed fixture message-page loader for the active unified scope, opens inbox and archive messages, marks a message read/unread through the typed mail-action fixture handler, opens a sanitized external link through a typed fixture handler, allows remote content for one fixture message through a typed handler and verifies the remote image appears only after consent, previews/saves a fixture attachment through typed handlers, routes reply/forward drafts through typed fixture handlers, runs backend-shaped search, opens a search result in the reader, opens the Drafts drawer, reopens a saved local draft in the composer, verifies the local-only draft disclosure, sends through typed fixture handlers with the original draft id, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
+`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, calls the typed fixture message-page loader for the active unified scope, opens inbox and archive messages, marks a message read/unread through the typed mail-action fixture handler, opens a sanitized external link through a typed fixture handler, allows remote content for one fixture message through a typed handler and verifies the remote image appears only after consent, previews/saves a fixture attachment through typed handlers, routes reply/forward drafts through typed fixture handlers, runs backend-shaped advanced search, verifies safe highlights and saved-search replay, opens a search result in the reader, opens the Drafts drawer, reopens a saved local draft in the composer, verifies the local-only draft disclosure, sends through typed fixture handlers with the original draft id, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
 
-`perf/mail-shell.benchmark.spec.ts` covers a browser-level benchmark path against the same test-only `/e2e/` entry with `?fixture=performance`. It uses the deterministic generator in `src/perf/mailPerformanceFixtures.ts` to populate 10,000 synthetic messages and representative attachment metadata, then reports Chromium heap usage, search latency, virtualized scroll timing, selected-row timing, and mounted row count through `pnpm perf:mail-shell` and `playwright.perf.config.ts`. The benchmark also guards the browser virtualizer path by requiring fewer than 80 mounted message rows for the 10,000-message fixture.
+`perf/mail-shell.benchmark.spec.ts` covers a browser-level benchmark path against the same test-only `/e2e/` entry with `?fixture=performance`. It uses the deterministic generator in `src/perf/mailPerformanceFixtures.ts` to populate 10,000 synthetic messages and representative attachment metadata, then reports Chromium heap usage, plain search latency, advanced `subject:` search latency, virtualized scroll timing, selected-row timing, and mounted row count through `pnpm perf:mail-shell` and `playwright.perf.config.ts`. The benchmark also guards the browser virtualizer path by requiring fewer than 80 mounted message rows for the 10,000-message fixture.
 
-Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, missing-label fallback ownership, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
+Rust tests in `src-tauri/src/mail_shell.rs` cover reading accounts, folders, unread counts, recent messages, safe attachment metadata projection, missing-label fallback ownership, removed-account exclusion, credential-reference redaction, attachment storage-path redaction, FTS search success, advanced syntax parsing, metadata-only search filters, account/folder scoping, validation denial paths, and missing-index reporting from disposable SQLite databases.
 
 Rust composer and SMTP tests cover sanitized rich composer HTML persistence and outgoing MIME serialization for strikethrough, tables, code blocks, font styles, colors, highlights, and alignment.
 

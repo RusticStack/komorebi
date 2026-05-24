@@ -285,12 +285,36 @@
         "label": "Sem resultados de pesquisa"
       },
       "placeholder": "Remetente, assunto ou corpo",
+      "filters": {
+        "aria": "Filtros de pesquisa ativos",
+        "body": "Corpo: {{value}}",
+        "from": "De: {{value}}",
+        "hasAttachment": "Tem anexos",
+        "is": {
+          "flagged": "Sinalizada",
+          "read": "Lida",
+          "unread": "Por ler"
+        },
+        "subject": "Assunto: {{value}}"
+      },
+      "filtersAria": "Filtros de pesquisa ativos",
+      "recent": {
+        "clear": "Limpar recentes",
+        "label": "Recentes"
+      },
+      "saved": {
+        "label": "Guardadas",
+        "remove": "Remover pesquisa guardada",
+        "removeCurrent": "Remover pesquisa guardada",
+        "saveCurrent": "Guardar pesquisa"
+      },
       "status": {
         "loading": "A pesquisar o indice local",
         "result_one": "{{formattedCount}} resultado",
         "result_other": "{{formattedCount}} resultados",
         "unavailable": "Indice de pesquisa indisponivel"
-      }
+      },
+      "toolsAria": "Filtros de pesquisa e pesquisas guardadas"
     },
     "states": {
       "accountsError": "Lista de contas indisponivel",

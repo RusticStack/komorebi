@@ -70,6 +70,10 @@ fn mail_search_command_rejects_sql_html_invalid_ids_unowned_scope_and_oversized_
         "SELECT * FROM messages",
         "subject; DELETE FROM messages",
         "<img src=x onerror=alert(1)>",
+        "https://example.com/phishing",
+        "C:\\Users\\Alice\\mail.db",
+        "has:script",
+        "is:deleted",
     ] {
         let error = search_mail_from_connection(
             &connection,

@@ -407,6 +407,10 @@ textarea:disabled {
   background: #fffdf9;
 }
 
+.search label {
+  color: #716d66;
+}
+
 .search-status {
   color: #716d66;
   font-size: 0.78rem;
@@ -415,6 +419,76 @@ textarea:disabled {
 
 .search-status--warning {
   color: #774331;
+}
+
+.search-tools {
+  display: grid;
+  gap: 6px;
+}
+
+.search-filter-chips,
+.search-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.search-tool-row {
+  display: grid;
+  gap: 4px;
+}
+
+.search-tool-row > span {
+  color: #716d66;
+  font-size: 0.74rem;
+}
+
+.search-chip,
+.search-token {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid #d8d0c4;
+  border-radius: 6px;
+  background: #f7f5f2;
+  color: #3f3c38;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.search-chip {
+  padding: 3px 7px;
+}
+
+.search-token button,
+.search-tool-button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 7px;
+  color: inherit;
+  background: transparent;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.search-token button:first-child {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-token button + button {
+  border-left: 1px solid #d8d0c4;
+  color: #774331;
+}
+
+.search-tool-button {
+  border: 1px solid #d8d0c4;
+  background: #fffdf9;
+  justify-self: start;
 }
 
 .messages {
@@ -547,6 +621,13 @@ textarea:disabled {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   font-size: 0.9rem;
+}
+
+.search-highlight {
+  border-radius: 3px;
+  padding: 0 2px;
+  background: #fde68a;
+  color: inherit;
 }
 
 .empty-panel {

@@ -1372,13 +1372,21 @@ describe("App", () => {
 
       await act(async () => {
         pendingSearches[1].resolve({
+          highlightTerms: ["phoenix"],
           indexStatus: "ready",
+          parsedQuery: {
+            filters: [],
+            textTerms: ["phoenix"],
+          },
           query: "phoenix",
           results: [archiveSearchResult],
         });
       });
 
-      expect(screen.getByText("Phoenix report")).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: /Phoenix report/ }),
+      ).toBeVisible();
+      expect(screen.getAllByText("Phoenix")[0]).toHaveClass("search-highlight");
       expect(screen.getByText("Personal / Archive")).toBeVisible();
       expect(screen.queryByText("Roadmap review")).not.toBeInTheDocument();
 
@@ -1392,6 +1400,69 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("renders advanced search filters, safe highlights, saved searches, and local history", async () => {
+    window.localStorage.removeItem("komorebi.mail.searches.v1");
+
+    const searchMail = vi.fn(async (request: MailSearchRequest) => ({
+      highlightTerms: ["research", "phoenix"],
+      indexStatus: "ready",
+      parsedQuery: {
+        filters: [{ kind: "from", value: "Research" }],
+        textTerms: ["phoenix"],
+      },
+      query: request.query,
+      results: [archiveSearchResult],
+    }) satisfies MailSearchResponse);
+
+    render(
+      <App
+        initialData={fixtureMail}
+        searchDebounceMs={0}
+        searchMail={searchMail}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "from:Research phoenix" },
+    });
+
+    expect(await screen.findByText("From: Research")).toBeVisible();
+    expect(screen.getAllByText("Phoenix")[0]).toHaveClass("search-highlight");
+    expect(screen.getAllByText("Research")[0]).toHaveClass("search-highlight");
+    expect(searchMail).toHaveBeenCalledWith(
+      {
+        accountId: null,
+        folderId: null,
+        limit: 100,
+        query: "from:Research phoenix",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("komorebi.mail.searches.v1") ?? "{}",
+      ).recent,
+    ).toEqual(["from:Research phoenix"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save search" }));
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("komorebi.mail.searches.v1") ?? "{}",
+      ).saved,
+    ).toEqual(["from:Research phoenix"]);
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "" },
+    });
+    expect(screen.getByText("Saved")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "from:Research phoenix" }),
+    );
+    expect(screen.getByRole("searchbox")).toHaveValue("from:Research phoenix");
+
+    window.localStorage.removeItem("komorebi.mail.searches.v1");
   });
 
   it("shows the no-index state when backend FTS is unavailable", async () => {

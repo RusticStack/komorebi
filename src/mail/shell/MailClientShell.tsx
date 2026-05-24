@@ -58,6 +58,8 @@ import {
   type MailActionRetryDecision,
   type MailActionUndo,
   type MailSearchRequest,
+  type MailSearchParsedFilter,
+  type MailSearchParsedQuery,
   type MailSearchResponse,
   type MailMessagePageCursor,
   type MailMessagePageRequest,
@@ -196,6 +198,12 @@ type MailSearchUiState = {
   query: string;
   results: MailMessage[];
   status: MailSearchUiStatus;
+  parsedQuery: MailSearchParsedQuery | null;
+  highlightTerms: string[];
+};
+type StoredSearches = {
+  recent: string[];
+  saved: string[];
 };
 type MailMessagePageUiStatus = "idle" | "loading" | "error";
 type MailMessagePageScope = {
@@ -246,6 +254,9 @@ const MESSAGE_PAGE_LOAD_AHEAD_ROWS = 20;
 const MESSAGE_PAGE_SIZE = 100;
 const MAIL_SEARCH_DEBOUNCE_MS = 250;
 const MAIL_SEARCH_RESULT_LIMIT = 100;
+const MAIL_SEARCH_STORAGE_KEY = "komorebi.mail.searches.v1";
+const MAIL_SEARCH_STORED_QUERY_LIMIT = 8;
+const MAIL_SEARCH_STORED_QUERY_MAX_BYTES = 512;
 const ATTACHMENT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
 const PREVIEWABLE_ATTACHMENT_TYPES = new Set([
   "image/gif",
@@ -259,9 +270,15 @@ const MESSAGE_LIST_FALLBACK_RECT: Rect = {
   height: 640,
 };
 const emptySearchState: MailSearchUiState = {
+  highlightTerms: [],
+  parsedQuery: null,
   query: "",
   results: [],
   status: "idle",
+};
+const emptyStoredSearches: StoredSearches = {
+  recent: [],
+  saved: [],
 };
 const emptyMessagePageState: MailMessagePageUiState = {
   cursor: null,
@@ -338,6 +355,9 @@ export function MailClientShell({
   const [searchState, setSearchState] =
     useState<MailSearchUiState>(emptySearchState);
   const [searchRetryNonce, setSearchRetryNonce] = useState(0);
+  const [storedSearches, setStoredSearches] = useState<StoredSearches>(() =>
+    readStoredSearches(),
+  );
   const [messagePageState, setMessagePageState] =
     useState<MailMessagePageUiState>(emptyMessagePageState);
   const [messagePageRetryNonce, setMessagePageRetryNonce] = useState(0);
@@ -412,6 +432,14 @@ export function MailClientShell({
           searchResultIsVisibleInScope(state, message),
         )
       : [];
+  const effectiveSearchParsedQuery =
+    isBackendSearchActive && hasFreshSearchResults
+      ? searchState.parsedQuery
+      : null;
+  const effectiveSearchHighlightTerms =
+    isBackendSearchActive && hasFreshSearchResults
+      ? searchState.highlightTerms
+      : [];
   const visibleMessages = isBackendSearchActive
     ? effectiveSearchResults
     : scopedMessages;
@@ -469,6 +497,53 @@ export function MailClientShell({
       return;
     }
 
+    searchInputRef.current?.focus();
+  }
+
+  function updateStoredSearches(
+    updater: (current: StoredSearches) => StoredSearches,
+  ) {
+    setStoredSearches((current) => {
+      const next = normalizeStoredSearches(updater(current));
+      writeStoredSearches(next);
+      return next;
+    });
+  }
+
+  function saveCurrentSearchQuery() {
+    const normalizedQuery = normalizeStoredSearchQuery(state.searchQuery);
+    if (!normalizedQuery) {
+      return;
+    }
+
+    updateStoredSearches((current) => ({
+      ...current,
+      saved: addStoredQuery(current.saved, normalizedQuery),
+    }));
+  }
+
+  function removeSavedSearchQuery(query: string) {
+    const normalizedQuery = normalizeStoredSearchQuery(query);
+    updateStoredSearches((current) => ({
+      ...current,
+      saved: current.saved.filter((stored) => stored !== normalizedQuery),
+    }));
+  }
+
+  function clearSearchHistory() {
+    updateStoredSearches((current) => ({
+      ...current,
+      recent: [],
+    }));
+  }
+
+  function applyStoredSearchQuery(query: string) {
+    clearAttachmentUi();
+    setRemoteContentAction(emptyRemoteContentActionState);
+    patchState({
+      searchQuery: query,
+      selectedMessageId: null,
+    });
     searchInputRef.current?.focus();
   }
 
@@ -1420,6 +1495,8 @@ export function MailClientShell({
     const controller = new AbortController();
     const debounceHandle = window.setTimeout(() => {
       setSearchState((current) => ({
+        highlightTerms: current.query === searchQuery ? current.highlightTerms : [],
+        parsedQuery: current.query === searchQuery ? current.parsedQuery : null,
         query: searchQuery,
         results: current.query === searchQuery ? current.results : [],
         status: "loading",
@@ -1432,11 +1509,27 @@ export function MailClientShell({
           }
 
           setSearchState({
+            highlightTerms: response.highlightTerms ?? [],
+            parsedQuery: response.parsedQuery ?? null,
             query: response.query,
             results: response.results,
             status:
               response.indexStatus === "unavailable" ? "unavailable" : "ready",
           });
+          if (response.indexStatus === "ready") {
+            setStoredSearches((current) => {
+              const normalizedQuery = normalizeStoredSearchQuery(response.query);
+              if (!normalizedQuery) {
+                return current;
+              }
+              const next = normalizeStoredSearches({
+                ...current,
+                recent: addStoredQuery(current.recent, normalizedQuery),
+              });
+              writeStoredSearches(next);
+              return next;
+            });
+          }
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted || isAbortError(error)) {
@@ -1444,6 +1537,8 @@ export function MailClientShell({
           }
 
           setSearchState({
+            highlightTerms: [],
+            parsedQuery: null,
             query: searchQuery,
             results: [],
             status: "error",
@@ -1699,20 +1794,21 @@ export function MailClientShell({
           </div>
         </header>
 
-        <label className="search">
-          <span>{t("mail.search.label")}</span>
+        <div className="search">
+          <label htmlFor="mail-search-input">{t("mail.search.label")}</label>
           <input
+            id="mail-search-input"
             ref={searchInputRef}
             type="search"
             placeholder={t("mail.search.placeholder")}
             disabled={!hasAccounts || state.loadState.messages !== "ready"}
             value={state.searchQuery}
             onChange={(event) => {
-            clearAttachmentUi();
-            setRemoteContentAction(emptyRemoteContentActionState);
-            patchState({
-              searchQuery: event.target.value,
-              selectedMessageId: null,
+              clearAttachmentUi();
+              setRemoteContentAction(emptyRemoteContentActionState);
+              patchState({
+                searchQuery: event.target.value,
+                selectedMessageId: null,
               });
             }}
           />
@@ -1721,7 +1817,17 @@ export function MailClientShell({
             resultCount={visibleMessages.length}
             status={effectiveSearchStatus}
           />
-        </label>
+          <SearchQueryTools
+            currentQuery={searchQuery}
+            parsedQuery={effectiveSearchParsedQuery}
+            recentSearches={storedSearches.recent}
+            savedSearches={storedSearches.saved}
+            onApplySearch={applyStoredSearchQuery}
+            onClearHistory={clearSearchHistory}
+            onRemoveSavedSearch={removeSavedSearchQuery}
+            onSaveSearch={saveCurrentSearchQuery}
+          />
+        </div>
 
         <MessageListState
           accountById={accountById}
@@ -1739,6 +1845,7 @@ export function MailClientShell({
           onRetry={loadMailShellData ? reloadMailShell : undefined}
           onRetryPage={() => setMessagePageRetryNonce((current) => current + 1)}
           onRetrySearch={() => setSearchRetryNonce((current) => current + 1)}
+          searchHighlightTerms={effectiveSearchHighlightTerms}
           onSelectMessage={(messageId) => {
             clearReaderActionUi();
             patchState({
@@ -2152,6 +2259,289 @@ function SearchStatusLine({
   }
 
   return null;
+}
+
+function SearchQueryTools({
+  currentQuery,
+  parsedQuery,
+  recentSearches,
+  savedSearches,
+  onApplySearch,
+  onClearHistory,
+  onRemoveSavedSearch,
+  onSaveSearch,
+}: {
+  currentQuery: string;
+  parsedQuery: MailSearchParsedQuery | null;
+  recentSearches: string[];
+  savedSearches: string[];
+  onApplySearch: (query: string) => void;
+  onClearHistory: () => void;
+  onRemoveSavedSearch: (query: string) => void;
+  onSaveSearch: () => void;
+}) {
+  const { t } = useTranslation();
+  const filters = parsedQuery?.filters ?? [];
+  const currentQuerySaved = savedSearches.includes(currentQuery);
+  const visibleRecentSearches = recentSearches.filter(
+    (query) => query !== currentQuery && !savedSearches.includes(query),
+  );
+  const hasTools =
+    filters.length > 0 ||
+    Boolean(currentQuery) ||
+    savedSearches.length > 0 ||
+    visibleRecentSearches.length > 0;
+
+  if (!hasTools) {
+    return null;
+  }
+
+  return (
+    <section className="search-tools" aria-label={t("mail.search.toolsAria")}>
+      {filters.length > 0 ? (
+        <div className="search-filter-chips" aria-label={t("mail.search.filtersAria")}>
+          {filters.map((filter) => (
+            <span className="search-chip" key={`${filter.kind}:${filter.value}`}>
+              {searchFilterLabel(filter, t)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {currentQuery ? (
+        <div className="search-tool-row">
+          {currentQuerySaved ? (
+            <button
+              type="button"
+              className="search-tool-button"
+              onClick={() => onRemoveSavedSearch(currentQuery)}
+            >
+              {t("mail.search.saved.removeCurrent")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="search-tool-button"
+              onClick={onSaveSearch}
+            >
+              {t("mail.search.saved.saveCurrent")}
+            </button>
+          )}
+        </div>
+      ) : null}
+      {savedSearches.length > 0 ? (
+        <SearchStoredQueryRow
+          label={t("mail.search.saved.label")}
+          queries={savedSearches}
+          removeLabel={t("mail.search.saved.remove")}
+          onApplySearch={onApplySearch}
+          onRemoveSearch={onRemoveSavedSearch}
+        />
+      ) : null}
+      {visibleRecentSearches.length > 0 ? (
+        <SearchStoredQueryRow
+          label={t("mail.search.recent.label")}
+          queries={visibleRecentSearches}
+          trailingAction={
+            <button
+              type="button"
+              className="search-tool-button"
+              onClick={onClearHistory}
+            >
+              {t("mail.search.recent.clear")}
+            </button>
+          }
+          onApplySearch={onApplySearch}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function SearchStoredQueryRow({
+  label,
+  queries,
+  removeLabel,
+  trailingAction,
+  onApplySearch,
+  onRemoveSearch,
+}: {
+  label: string;
+  queries: string[];
+  removeLabel?: string;
+  trailingAction?: ReactNode;
+  onApplySearch: (query: string) => void;
+  onRemoveSearch?: (query: string) => void;
+}) {
+  return (
+    <div className="search-tool-row">
+      <span>{label}</span>
+      <div className="search-token-list">
+        {queries.map((query) => (
+          <span className="search-token" key={query}>
+            <button type="button" onClick={() => onApplySearch(query)}>
+              {query}
+            </button>
+            {onRemoveSearch && removeLabel ? (
+              <button
+                type="button"
+                aria-label={`${removeLabel}: ${query}`}
+                onClick={() => onRemoveSearch(query)}
+              >
+                x
+              </button>
+            ) : null}
+          </span>
+        ))}
+        {trailingAction}
+      </div>
+    </div>
+  );
+}
+
+function searchFilterLabel(filter: MailSearchParsedFilter, t: TFunction) {
+  switch (filter.kind) {
+    case "from":
+      return t("mail.search.filters.from", { value: filter.value });
+    case "subject":
+      return t("mail.search.filters.subject", { value: filter.value });
+    case "body":
+      return t("mail.search.filters.body", { value: filter.value });
+    case "has":
+      return t("mail.search.filters.hasAttachment");
+    case "is":
+      return t(`mail.search.filters.is.${filter.value}`);
+    default:
+      return filter.value;
+  }
+}
+
+function HighlightedText({
+  terms,
+  text,
+}: {
+  terms: string[];
+  text: string;
+}) {
+  const normalizedTerms = normalizeHighlightTerms(terms);
+  if (!text || normalizedTerms.length === 0) {
+    return <>{text}</>;
+  }
+
+  const matcher = new RegExp(
+    `(${normalizedTerms.map(escapeRegExp).join("|")})`,
+    "gi",
+  );
+  const parts = text.split(matcher);
+
+  return (
+    <>
+      {parts.map((part, index) =>
+        normalizedTerms.some(
+          (term) => part.toLocaleLowerCase() === term.toLocaleLowerCase(),
+        ) ? (
+          <mark className="search-highlight" key={`${part}-${index}`}>
+            {part}
+          </mark>
+        ) : (
+          <span key={`${part}-${index}`}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+function normalizeHighlightTerms(terms: string[]) {
+  const normalized = new Set<string>();
+  for (const term of terms) {
+    const value = term.trim().toLocaleLowerCase();
+    if (value) {
+      normalized.add(value);
+    }
+  }
+
+  return Array.from(normalized).sort((left, right) => right.length - left.length);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readStoredSearches(): StoredSearches {
+  if (typeof window === "undefined") {
+    return emptyStoredSearches;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(MAIL_SEARCH_STORAGE_KEY);
+    if (!rawValue) {
+      return emptyStoredSearches;
+    }
+    const parsedValue = JSON.parse(rawValue) as Partial<StoredSearches>;
+    return normalizeStoredSearches({
+      recent: Array.isArray(parsedValue.recent) ? parsedValue.recent : [],
+      saved: Array.isArray(parsedValue.saved) ? parsedValue.saved : [],
+    });
+  } catch {
+    return emptyStoredSearches;
+  }
+}
+
+function writeStoredSearches(searches: StoredSearches) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      MAIL_SEARCH_STORAGE_KEY,
+      JSON.stringify(normalizeStoredSearches(searches)),
+    );
+  } catch {
+    // Search history is a convenience cache; quota or storage policy failures
+    // must not block local mail search.
+  }
+}
+
+function normalizeStoredSearches(searches: StoredSearches): StoredSearches {
+  return {
+    recent: normalizeStoredSearchList(searches.recent),
+    saved: normalizeStoredSearchList(searches.saved),
+  };
+}
+
+function normalizeStoredSearchList(queries: string[]) {
+  const normalized: string[] = [];
+  for (const query of queries) {
+    const value = normalizeStoredSearchQuery(query);
+    if (value && !normalized.includes(value)) {
+      normalized.push(value);
+    }
+    if (normalized.length >= MAIL_SEARCH_STORED_QUERY_LIMIT) {
+      break;
+    }
+  }
+
+  return normalized;
+}
+
+function addStoredQuery(queries: string[], query: string) {
+  return normalizeStoredSearchList([
+    query,
+    ...queries.filter((storedQuery) => storedQuery !== query),
+  ]);
+}
+
+function normalizeStoredSearchQuery(query: string) {
+  const normalized = query.trim().replace(/\s+/g, " ");
+  if (
+    !normalized ||
+    new TextEncoder().encode(normalized).length >
+      MAIL_SEARCH_STORED_QUERY_MAX_BYTES
+  ) {
+    return "";
+  }
+
+  return normalized;
 }
 
 function attachmentRequestFor(
@@ -2816,6 +3206,7 @@ function MessageListState({
   onRetry,
   onRetryPage,
   onRetrySearch,
+  searchHighlightTerms,
   onSelectMessage,
   onReadMessage,
 }: {
@@ -2830,6 +3221,7 @@ function MessageListState({
   onRetry?: () => void;
   onRetryPage: () => void;
   onRetrySearch: () => void;
+  searchHighlightTerms: string[];
   onSelectMessage: (messageId: string) => void;
   onReadMessage: (messageId: string) => void;
 }) {
@@ -3062,6 +3454,7 @@ function MessageListState({
                 isSelected={message.id === state.selectedMessageId}
                 locationLabel={locationLabel}
                 message={message}
+                searchHighlightTerms={searchHighlightTerms}
                 refCallback={(element) => {
                   messageButtonRefs.current[virtualRow.index] = element;
                 }}
@@ -3147,6 +3540,7 @@ function MessageRow({
   onKeyDown,
   refCallback,
   rowCount,
+  searchHighlightTerms,
 }: {
   index: number;
   isSelected: boolean;
@@ -3156,6 +3550,7 @@ function MessageRow({
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   refCallback: (element: HTMLButtonElement | null) => void;
   rowCount: number;
+  searchHighlightTerms: string[];
 }) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
@@ -3186,7 +3581,9 @@ function MessageRow({
       onClick={onClick}
     >
       <div className="message-row">
-        <strong>{sender}</strong>
+        <strong>
+          <HighlightedText terms={searchHighlightTerms} text={sender} />
+        </strong>
         <span className="message-row-meta">
           {message.flagged ? (
             <span className="message-flag">{t("mail.messages.flagged")}</span>
@@ -3197,8 +3594,12 @@ function MessageRow({
           <time dateTime={message.receivedAt}>{receivedAt}</time>
         </span>
       </div>
-      <h3>{subject}</h3>
-      <p>{message.preview}</p>
+      <h3>
+        <HighlightedText terms={searchHighlightTerms} text={subject} />
+      </h3>
+      <p>
+        <HighlightedText terms={searchHighlightTerms} text={message.preview} />
+      </p>
     </button>
   );
 }

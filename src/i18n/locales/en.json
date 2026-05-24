@@ -285,12 +285,36 @@
         "label": "No search results"
       },
       "placeholder": "Sender, subject, or body",
+      "filters": {
+        "aria": "Active search filters",
+        "body": "Body: {{value}}",
+        "from": "From: {{value}}",
+        "hasAttachment": "Has attachments",
+        "is": {
+          "flagged": "Flagged",
+          "read": "Read",
+          "unread": "Unread"
+        },
+        "subject": "Subject: {{value}}"
+      },
+      "filtersAria": "Active search filters",
+      "recent": {
+        "clear": "Clear recent",
+        "label": "Recent"
+      },
+      "saved": {
+        "label": "Saved",
+        "remove": "Remove saved search",
+        "removeCurrent": "Remove saved search",
+        "saveCurrent": "Save search"
+      },
       "status": {
         "loading": "Searching local index",
         "result_one": "{{formattedCount}} result",
         "result_other": "{{formattedCount}} results",
         "unavailable": "Search index unavailable"
-      }
+      },
+      "toolsAria": "Search filters and saved searches"
     },
     "states": {
       "accountsError": "Account list unavailable",

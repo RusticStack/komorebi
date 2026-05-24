@@ -108,10 +108,24 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
     page.getByRole("button", { name: /Roadmap review/ }),
   ).toBeVisible();
 
-  await page.getByRole("searchbox").fill("phoenix");
+  await page.getByRole("searchbox").fill("from:Research phoenix");
   await expect(
     page.getByRole("button", { name: /Phoenix report/ }),
   ).toBeVisible();
+  await expect(page.getByText("From: Research")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Phoenix report/ }).locator("mark").first(),
+  ).toHaveText("Research");
+  await page.getByRole("button", { name: "Save search" }).click();
+  await page.getByRole("searchbox").fill("");
+  const savedAdvancedSearch = page.getByRole("button", {
+    exact: true,
+    name: "from:Research phoenix",
+  });
+  await expect(
+    savedAdvancedSearch,
+  ).toBeVisible();
+  await savedAdvancedSearch.click();
   await expect(page.getByText("Personal / Archive")).toBeVisible();
 
   await page.getByRole("button", { name: /Phoenix report/ }).click();
