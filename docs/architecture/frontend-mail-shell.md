@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
+Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference and relative date wording, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
 Last reviewed: 2026-05-24.
 
 ## Current Scope
@@ -156,12 +156,12 @@ The frontend uses `i18next` and `react-i18next` through `src/i18n/index.ts`.
 - Translation resources live in `src/i18n/locales/en.json` and `src/i18n/locales/pt-PT.json`.
 - Runtime shell, reader, settings, safe-message, and composer strings route through `t(...)`; the app name remains literal branding.
 - Missing sender and attachment display-name fallbacks are applied in React through i18n keys, not synthesized as English labels in the Rust cache read model.
-- `src/i18n/localeFormat.ts` centralizes `Intl` formatting for message dates/times, unread and search-result counts, attachment sizes, and pluralized count/status text.
-- Message rows and reader headers format raw cache timestamps for the active locale. Unparseable legacy display strings are shown unchanged.
+- `src/i18n/localeFormat.ts` centralizes `Intl` formatting for message dates/times, relative today/yesterday/tomorrow labels, unread and search-result counts, attachment sizes, and pluralized count/status text.
+- Message rows, reader headers, account last-sync labels, and status-update labels use localized relative wording for today/yesterday/tomorrow and absolute active-locale formatting outside that narrow window. Unparseable legacy display strings are shown unchanged.
 - Account/folder unread badges, search result status counts, and attachment-size labels use the active locale's number formatting.
 - `pt-PT` resource completeness is tested against English resources.
 
-There is no relative date wording or broad long-string screenshot corpus yet.
+Long translated UI strings are covered by the Playwright `fixture=long-strings` harness for English and `pt-PT` desktop/narrow screenshots. The screenshots are generated under ignored `test-results/screenshots/locale-*.png` when the E2E layout test runs, and the same test fails on horizontal overflow.
 
 ## Message List Virtualization
 
@@ -319,13 +319,15 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - settings account preference/signature save command and cache reload
 - account sync status drawer, last-successful-sync display, generic reconnect, OAuth reconnect, and backend sync-status event refresh
 - loading/error shell states
-- first-launch language detection, persisted language preference application, English fallback, `pt-PT` resource completeness, locale-aware date/time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
+- first-launch language detection, persisted language preference application, English fallback, `pt-PT` resource completeness, locale-aware relative/absolute date-time/count/size/status formatting, localized missing sender/attachment fallbacks, and first-run `pt-PT` shell rendering in `src/i18n/i18n.test.tsx`
 
 `src/mail/shell/mailShellState.test.ts` covers pure shell state rules: unified/account/folder scope filtering, local search fallback behavior, cache-reload selection preservation, and stale backend row clearing.
 
 `src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/page/search, remote-content preference persistence, external-link opening, attachment preview/save/download, forwarded attachment staging, recent-recipient lookup, composer draft list loading, composer autosave, generic account commands, OAuth loopback commands, sync-status event subscription, and cancellation before invoke or after a stale response.
 
 `e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, calls the typed fixture message-page loader for the active unified scope, opens inbox and archive messages, marks a message read/unread through the typed mail-action fixture handler, opens a sanitized external link through a typed fixture handler, allows remote content for one fixture message through a typed handler and verifies the remote image appears only after consent, previews/saves a fixture attachment through typed handlers, routes reply/forward drafts through typed fixture handlers, runs backend-shaped advanced search, verifies safe highlights and saved-search replay, opens a search result in the reader, opens the Drafts drawer, reopens a saved local draft in the composer, verifies the local-only draft disclosure, sends through typed fixture handlers with the original draft id, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
+
+`e2e/locale-layout.spec.ts` covers the same test-only entry with `?fixture=long-strings&language=en|pt-PT`. It freezes the browser date to a deterministic day, verifies localized relative date labels, renders reader and settings surfaces at desktop and narrow widths, fails on horizontal overflow, and writes screenshot artifacts to ignored `test-results/screenshots/locale-*.png`.
 
 `perf/mail-shell.benchmark.spec.ts` covers a browser-level benchmark path against the same test-only `/e2e/` entry with `?fixture=performance`. It uses the deterministic generator in `src/perf/mailPerformanceFixtures.ts` to populate 10,000 synthetic messages and representative attachment metadata, then reports Chromium heap usage, plain search latency, advanced `subject:` search latency, virtualized scroll timing, selected-row timing, and mounted row count through `pnpm perf:mail-shell` and `playwright.perf.config.ts`. The benchmark also guards the browser virtualizer path by requiring fewer than 80 mounted message rows for the 10,000-message fixture.
 
@@ -339,7 +341,7 @@ Normal automated tests use no real mailbox data, real credentials, or live provi
 
 - TanStack Query integration.
 - External attachment open, archive extraction, and attachment preview types beyond plain text/raster images.
-- Relative date wording and broad translated-layout screenshot coverage.
+- Broader mixed-script and RTL-like translated-layout screenshots beyond English/`pt-PT` long-string stress fixtures.
 - E2E accessibility, axe, or real screen-reader harness.
 - Release-build Tauri-shell performance measurements against live adapters and persisted SQLite fixture databases.
 

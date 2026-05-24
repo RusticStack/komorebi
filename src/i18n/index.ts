@@ -46,6 +46,7 @@ export {
   formatByteSize,
   formatCount,
   formatDateTime,
+  formatRelativeDateTime,
   localeForLanguage,
   useLocaleFormatters,
 } from "./localeFormat";

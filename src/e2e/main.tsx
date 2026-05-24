@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "../App";
-import "../i18n";
+import { matchSupportedLanguage } from "../i18n";
 import type {
   AttachmentCommandRequest,
   AttachmentDownloadResponse,
@@ -30,6 +30,7 @@ import type {
   RecentRecipientSuggestion,
   RemoteContentPreferenceRequest,
   RemoteContentPreferenceResponse,
+  UiPreferencesView,
 } from "../mail/shell/mailShellState";
 import {
   createPerformanceMailFixture,
@@ -201,6 +202,81 @@ const fixtureMail: MailShellData = {
   ],
 };
 
+const longStringToken =
+  "RegionalizationAccessibilityVerificationTokenWithNoNaturalBreaks1234567890";
+
+const longStringFixtureMail: MailShellData = {
+  accounts: [
+    {
+      email: "internationalization-operations-and-quality-review@example.com",
+      id: "acct_long",
+      label:
+        "Internationalization operations account with a deliberately lengthy display name",
+      lastSuccessfulSyncAt: "2026-05-25T08:15:00",
+      signatureHtml: null,
+      status: "reconnect-needed",
+      statusMessage:
+        "Reauthentication is required before the next sync cycle can continue for this long localized layout fixture.",
+      statusUpdatedAt: "2026-05-24T17:40:00",
+      unreadCount: 12345,
+    },
+  ],
+  folders: [
+    {
+      accountId: "acct_long",
+      id: "folder_long_inbox",
+      kind: "inbox",
+      name: `Inbox for localization screenshots ${longStringToken}`,
+      totalCount: 1,
+      unreadCount: 1,
+    },
+    {
+      accountId: "acct_long",
+      id: "folder_long_archive",
+      kind: "archive",
+      name: `Archive with extra long translated folder label ${longStringToken}`,
+      totalCount: 0,
+      unreadCount: 0,
+    },
+    {
+      accountId: "acct_long",
+      id: "folder_long_trash",
+      kind: "trash",
+      name: `Trash folder with narrow layout stress wording ${longStringToken}`,
+      totalCount: 0,
+      unreadCount: 0,
+    },
+  ],
+  messages: [
+    {
+      accountId: "acct_long",
+      attachments: [
+        {
+          contentType: "text/plain",
+          displayFilename: `quarterly-regionalization-accessibility-notes-${longStringToken}.txt`,
+          disposition: "attachment",
+          id: "att_long_text",
+          sizeBytes: 1536,
+        },
+      ],
+      bodyHtml: null,
+      bodyText:
+        "This message exists only to verify that translated labels, relative dates, long subjects, long senders, attachment rows, and reader copy fit without horizontal overflow.",
+      flagged: true,
+      folderId: "folder_long_inbox",
+      id: "msg_long_strings",
+      preview:
+        "Long preview text checks line clamping, wrapping, and translated status surfaces without using mock production data.",
+      receivedAt: "2026-05-24T09:30:00",
+      sender:
+        "Localization Quality Assurance Distribution Group With A Long Sender Name",
+      senderEmail: "localization-quality-assurance@example.com",
+      subject: `Regionalization layout verification ${longStringToken}`,
+      unread: true,
+    },
+  ],
+};
+
 const archiveSearchResult: MailMessage = {
   accountId: "acct_personal",
   attachments: [],
@@ -244,16 +320,25 @@ const savedDrafts: ComposerDraft[] = [
 ];
 
 const urlParams = new URLSearchParams(window.location.search);
+const fixtureKind = urlParams.get("fixture");
+const requestedLanguage =
+  matchSupportedLanguage(urlParams.get("language")) ?? "en";
 const performanceFixture =
-  urlParams.get("fixture") === "performance"
+  fixtureKind === "performance"
     ? createPerformanceMailFixture({
         messageCount: normalizePerformanceMessageCount(
           Number(urlParams.get("messages")),
         ),
       })
     : null;
-const activeMail = performanceFixture?.data ?? fixtureMail;
+const activeMail =
+  performanceFixture?.data ??
+  (fixtureKind === "long-strings" ? longStringFixtureMail : fixtureMail);
 window.__KOMOREBI_PERF_FIXTURE__ = performanceFixture?.metadata;
+
+async function loadUiPreferences(): Promise<UiPreferencesView> {
+  return { language: requestedLanguage };
+}
 
 async function loadMailShellData(): Promise<MailShellData> {
   e2eEvents.push({ name: "load-mail-shell" });
@@ -670,6 +755,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       loadMailShellData={loadMailShellData}
       loadMessagePage={performanceFixture ? undefined : loadMessagePage}
       loadRecentRecipients={listRecentRecipients}
+      loadUiPreferences={loadUiPreferences}
       openExternalLink={openExternalLink}
       performMailAction={performMailAction}
       previewAttachment={previewAttachment}

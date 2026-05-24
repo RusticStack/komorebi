@@ -25,6 +25,11 @@
       "errorState": "Estado de erro",
       "localCache": "Cache local"
     },
+    "relativeDate": {
+      "todayWithTime": "Hoje, {{time}}",
+      "tomorrowWithTime": "Amanha, {{time}}",
+      "yesterdayWithTime": "Ontem, {{time}}"
+    },
     "units": {
       "bytes": {
         "byte": "B",

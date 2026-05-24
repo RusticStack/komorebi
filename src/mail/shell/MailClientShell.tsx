@@ -3633,7 +3633,8 @@ function MessageRow({
   const localeFormat = useLocaleFormatters();
   const subject = message.subject || t("mail.messages.noSubject");
   const sender = messageSenderLabel(message, t);
-  const receivedAt = localeFormat.dateTime(message.receivedAt);
+  const receivedAt = localeFormat.relativeDateTime(message.receivedAt);
+  const absoluteReceivedAt = localeFormat.dateTime(message.receivedAt);
 
   return (
     <button
@@ -3668,7 +3669,12 @@ function MessageRow({
           {locationLabel ? (
             <span className="message-location">{locationLabel}</span>
           ) : null}
-          <time dateTime={message.receivedAt}>{receivedAt}</time>
+          <time
+            dateTime={message.receivedAt}
+            title={absoluteReceivedAt || undefined}
+          >
+            {receivedAt}
+          </time>
         </span>
       </div>
       <h3>
@@ -3871,8 +3877,11 @@ function ReaderPane({
         <h2>{message.subject || t("mail.messages.noSubject")}</h2>
         <div className="sender-line">
           <span>{sender}</span>
-          <time dateTime={message.receivedAt}>
-            {localeFormat.dateTime(message.receivedAt)}
+          <time
+            dateTime={message.receivedAt}
+            title={localeFormat.dateTime(message.receivedAt)}
+          >
+            {localeFormat.relativeDateTime(message.receivedAt)}
           </time>
         </div>
       </header>
@@ -4662,7 +4671,7 @@ function AccountStatusDrawer({
             <dt>{t("mail.account.statusDrawer.lastStatusUpdate")}</dt>
             <dd>
               {account.statusUpdatedAt
-                ? localeFormat.dateTime(account.statusUpdatedAt)
+                ? localeFormat.relativeDateTime(account.statusUpdatedAt)
                 : t("mail.account.statusDrawer.statusUpdateUnavailable")}
             </dd>
           </div>
@@ -4786,7 +4795,7 @@ function lastSyncValue(
   t: TFunction,
 ) {
   return account.lastSuccessfulSyncAt
-    ? localeFormat.dateTime(account.lastSuccessfulSyncAt)
+    ? localeFormat.relativeDateTime(account.lastSuccessfulSyncAt)
     : t("mail.account.lastSyncNever");
 }
 

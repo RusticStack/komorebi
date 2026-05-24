@@ -211,6 +211,7 @@ textarea:disabled {
 
 .account-meta {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
 }
@@ -268,9 +269,22 @@ textarea:disabled {
 
 .folder {
   display: flex;
+  gap: 10px;
   justify-content: space-between;
+  min-width: 0;
   min-height: 38px;
   padding: 8px 10px;
+}
+
+.folder span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder span:last-child {
+  flex: 0 0 auto;
 }
 
 .folder.is-active {
@@ -681,7 +695,9 @@ textarea:disabled {
 }
 
 .sender-line span {
+  min-width: 0;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .reader-actions {

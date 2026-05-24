@@ -9,6 +9,8 @@ import {
 
 type ByteUnitKey = "byte" | "kilobyte" | "megabyte" | "gigabyte";
 
+const millisecondsPerDay = 24 * 60 * 60 * 1000;
+
 const byteUnits: Array<{ divisor: number; key: ByteUnitKey }> = [
   { divisor: 1, key: "byte" },
   { divisor: 1024, key: "kilobyte" },
@@ -52,6 +54,44 @@ export function formatDateTime(
   }).format(date);
 }
 
+export function formatRelativeDateTime(
+  value: string | null | undefined,
+  language: string | null | undefined,
+  t: TFunction,
+  referenceDate = new Date(),
+) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    return trimmed;
+  }
+
+  const locale = localeForLanguage(language);
+  const dayDelta = Math.round(
+    (startOfLocalDay(date) - startOfLocalDay(referenceDate)) /
+      millisecondsPerDay,
+  );
+  const time = new Intl.DateTimeFormat(locale, {
+    timeStyle: "short",
+  }).format(date);
+
+  if (dayDelta === 0) {
+    return t("common.relativeDate.todayWithTime", { time });
+  }
+  if (dayDelta === -1) {
+    return t("common.relativeDate.yesterdayWithTime", { time });
+  }
+  if (dayDelta === 1) {
+    return t("common.relativeDate.tomorrowWithTime", { time });
+  }
+
+  return formatDateTime(trimmed, locale);
+}
+
 export function formatByteSize(
   sizeBytes: number,
   language: string | null | undefined,
@@ -89,6 +129,9 @@ export function useLocaleFormatters() {
       dateTime(value: string | null | undefined) {
         return formatDateTime(value, language);
       },
+      relativeDateTime(value: string | null | undefined) {
+        return formatRelativeDateTime(value, language, t);
+      },
       searchResults(count: number) {
         return t("mail.search.status.result", {
           count,
@@ -104,4 +147,12 @@ export function useLocaleFormatters() {
     }),
     [language, t],
   );
+}
+
+function startOfLocalDay(date: Date) {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  ).getTime();
 }
