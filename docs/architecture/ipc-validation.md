@@ -7,6 +7,7 @@ Last updated: 2026-05-24
 Komorebi has reviewed frontend-callable IPC commands:
 
 - `load_mail_shell`: inputless, read-only local-cache shell snapshot.
+- `load_message_page`: read-only local-cache message page query with a typed scope/cursor request.
 - `search_mail`: read-only local-cache FTS query with a typed request.
 - `allow_remote_content`: typed remote-content preference persistence for a stored message or sender.
 - `perform_mail_action`: typed server-affecting reader action for mark-read/unread, move, archive, delete-to-trash, and expunge.
@@ -29,6 +30,8 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `update_account_settings`: typed account display-name, signature HTML, and local-preference persistence.
 - `test_account_connection`: typed generic IMAP/SMTP setup login validation without persistence.
 - `get_account_auth_status`: typed redacted auth-status lookup.
+
+`load_message_page` validates account/folder/unified-inbox scope, optional backend-issued cursor shape/scope/sort key, and bounded page limit before querying SQLite. Unified pages cannot include account or folder ids; non-unified pages must include an account or folder scope. The command rejects invalid IDs, unknown accounts, folders outside the requested account scope, forged or out-of-scope cursors, raw SQL-shaped cursor text, raw HTML/markup-shaped cursor text, and oversized cursors. It does not accept raw SQL, offset SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
 
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
 
@@ -94,7 +97,7 @@ Before registering a command in `invoke_handler`, add:
 
 Do not add a command if validation depends on real mailboxes, real credentials, or real app-data paths. Use fake stores, fixtures, and temp directories.
 
-`search_mail` is the read-only example of an accepted input-bearing command: request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
+`load_message_page` and `search_mail` are the read-only examples of accepted input-bearing commands. `load_message_page` request fields are typed, limit and cursor text are bounded, account/folder/unified scope is validated against active cache rows, and the cursor is used only as a keyset value in backend-owned SQL. `search_mail` request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
 
 Reader attachment commands are the file-operation examples: request fields are typed, IDs are ownership-checked against active account/folder/message rows, persisted source paths are treated as untrusted cache state and canonicalized under app data, content is revalidated by hash/size/sniffing before any IPC byte response or file write, save destinations come from a backend-owned native dialog, overwrites are refused, and external open remains unavailable.
 
@@ -116,6 +119,7 @@ Rust tests cover:
 - Unknown account, folder, and message ids.
 - Invalid id shapes before lookup.
 - Validation errors not echoing sensitive input values.
+- `load_message_page` denial paths for missing scope, mixed unified/account scope, unowned folders, invalid IDs, and raw SQL/HTML-shaped cursor text.
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
 - Reader attachment denial paths for missing user intent, invalid IDs, unowned scope, missing stored content, persisted path traversal, hash mismatch, size/type mismatch, unpreviewable types, spoofed selected-save extensions, and overwrite refusal.
 - Remote-content preference denial paths for missing user intent, invalid IDs, unknown or unowned account/folder/message scope, and missing usable sender addresses before persistence.
@@ -124,7 +128,7 @@ Rust tests cover:
 - Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, sanitized rich-HTML handling, and send validation before SMTP work.
 - Account-management denial paths for unsupported provider/auth combinations, invalid account ids, invalid hosts, plaintext transport, protocol-injection secrets, oversized account fields, direct Gmail/Microsoft secret-handoff rejection, live generic login failure before credential persistence, credential-store failure before metadata persistence, unknown account removal, account settings invalid/unknown/oversized field rejection, and redacted auth status.
 - OAuth loopback denial paths for unsupported generic-provider setup, denied consent/cancellation, callback state mismatch, timeout, invalid grant, provider errors, missing refresh token, and non-OAuth reauthentication targets.
-- `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search input, unowned account/folder/message/attachment scope, remote-content missing-intent/scope denial, external-link missing-intent/unsafe-URL denial, oversized search/composer/recent-recipient/attachment/account payloads, account settings denial paths, account credential failure, reader attachment source denial, and unauthorized mail actions rejected before fake-store mutation.
+- `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search and page-cursor input, unowned account/folder/message/attachment scope, remote-content missing-intent/scope denial, external-link missing-intent/unsafe-URL denial, oversized search/composer/recent-recipient/attachment/account payloads, account settings denial paths, account credential failure, reader attachment source denial, and unauthorized mail actions rejected before fake-store mutation.
 
 `pnpm check` runs the validation tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

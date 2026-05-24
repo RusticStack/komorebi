@@ -204,12 +204,33 @@ export type MailMessage = {
   remoteContentAllowed?: boolean;
   remoteContentAllowedScope?: RemoteContentPreferenceScope | null;
   attachments: MailAttachment[];
+  pageCursor?: MailMessagePageCursor | null;
 };
 
 export type MailShellData = {
   accounts: MailAccount[];
   folders: MailFolder[];
   messages: MailMessage[];
+};
+
+export type MailMessagePageCursor = {
+  sortKey: string;
+  messageId: string;
+};
+
+export type MailMessagePageRequest = {
+  accountId: string | null;
+  folderId: string | null;
+  unifiedInbox: boolean;
+  cursor: MailMessagePageCursor | null;
+  limit?: number;
+};
+
+export type MailMessagePageResponse = {
+  messages: MailMessage[];
+  nextCursor: MailMessagePageCursor | null;
+  hasMore: boolean;
+  totalCount: number;
 };
 
 export type MailSearchRequest = {

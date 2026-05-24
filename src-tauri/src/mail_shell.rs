@@ -14,10 +14,13 @@ use crate::schema::{apply_migrations, SchemaMigrationError};
 
 const MAIL_CACHE_FILE_NAME: &str = "mail-cache.sqlite3";
 const MESSAGE_SNAPSHOT_LIMIT: i64 = 500;
+const MESSAGE_PAGE_DEFAULT_LIMIT: u32 = 100;
+const MESSAGE_PAGE_MAX_LIMIT: u32 = 250;
 const MAIL_SEARCH_RESULT_LIMIT: u32 = 100;
 const MAX_SEARCH_QUERY_BYTES: usize = 512;
 const MAX_SEARCH_TERMS: usize = 12;
 const MAX_SENDER_EMAIL_BYTES: usize = 512;
+const MAX_PAGE_CURSOR_SORT_KEY_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +89,14 @@ pub struct MailShellMessage {
     pub remote_content_allowed: bool,
     pub remote_content_allowed_scope: Option<String>,
     pub attachments: Vec<MailShellAttachment>,
+    pub page_cursor: Option<MailMessagePageCursor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailMessagePageCursor {
+    pub sort_key: String,
+    pub message_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -112,6 +123,25 @@ pub struct MailSearchRequest {
     pub account_id: Option<String>,
     pub folder_id: Option<String>,
     pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailMessagePageRequest {
+    pub account_id: Option<String>,
+    pub folder_id: Option<String>,
+    pub unified_inbox: bool,
+    pub cursor: Option<MailMessagePageCursor>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailMessagePageResponse {
+    pub messages: Vec<MailShellMessage>,
+    pub next_cursor: Option<MailMessagePageCursor>,
+    pub has_more: bool,
+    pub total_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -237,6 +267,27 @@ pub fn search_mail_from_path(
 }
 
 #[tauri::command]
+pub fn load_message_page(
+    app: tauri::AppHandle,
+    request: MailMessagePageRequest,
+) -> Result<MailMessagePageResponse, MailShellError> {
+    let app_data_dir = app.path().app_data_dir()?;
+    fs::create_dir_all(&app_data_dir)?;
+    let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+
+    load_message_page_from_path(&cache_path, request)
+}
+
+pub fn load_message_page_from_path(
+    cache_path: &Path,
+    request: MailMessagePageRequest,
+) -> Result<MailMessagePageResponse, MailShellError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    load_message_page_from_connection(&connection, request)
+}
+
+#[tauri::command]
 pub fn allow_remote_content(
     app: tauri::AppHandle,
     request: RemoteContentPreferenceRequest,
@@ -304,6 +355,35 @@ pub fn search_mail_from_connection(
         query: validated_request.query,
         index_status: MailSearchIndexStatus::Ready,
         results: messages,
+    })
+}
+
+pub fn load_message_page_from_connection(
+    connection: &Connection,
+    request: MailMessagePageRequest,
+) -> Result<MailMessagePageResponse, MailShellError> {
+    let validated_request = validate_message_page_request(connection, request)?;
+    let total_count = count_messages_for_page(connection, &validated_request)?;
+    let fetch_limit = validated_request.limit + 1;
+    let mut messages = load_messages_page(connection, &validated_request, fetch_limit)?;
+    let has_more = messages.len() > validated_request.limit as usize;
+    if has_more {
+        messages.truncate(validated_request.limit as usize);
+    }
+    attach_message_attachments(connection, &mut messages)?;
+    let next_cursor = if has_more {
+        messages
+            .last()
+            .and_then(|message| message.page_cursor.clone())
+    } else {
+        None
+    };
+
+    Ok(MailMessagePageResponse {
+        messages,
+        next_cursor,
+        has_more,
+        total_count,
     })
 }
 
@@ -476,7 +556,8 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
              WHEN message_remote_content.id IS NOT NULL THEN 'message'
              WHEN sender_remote_content.id IS NOT NULL THEN 'sender'
              ELSE NULL
-           END AS remote_content_allowed_scope
+           END AS remote_content_allowed_scope,
+           COALESCE(messages.date_received, messages.internal_date, messages.created_at) AS page_sort_key
          FROM messages
          JOIN accounts ON accounts.id = messages.account_id
          JOIN folders ON folders.account_id = messages.account_id
@@ -514,6 +595,246 @@ struct ValidatedSearchRequest {
     account_id: Option<String>,
     folder_id: Option<String>,
     limit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidatedMessagePageRequest {
+    account_id: Option<String>,
+    folder_id: Option<String>,
+    unified_inbox: bool,
+    cursor: Option<MailMessagePageCursor>,
+    limit: u32,
+}
+
+fn validate_message_page_request(
+    connection: &Connection,
+    request: MailMessagePageRequest,
+) -> Result<ValidatedMessagePageRequest, MailShellError> {
+    if request.unified_inbox && (request.account_id.is_some() || request.folder_id.is_some()) {
+        return Err(MailShellError::new(
+            "unified message pages cannot include account or folder scope",
+        ));
+    }
+
+    if !request.unified_inbox && request.account_id.is_none() && request.folder_id.is_none() {
+        return Err(MailShellError::new("message page scope is required"));
+    }
+
+    if let Some(account_id) = request.account_id.as_deref() {
+        validate_entity_id("account_id", account_id)?;
+        if !active_account_exists(connection, account_id)? {
+            return Err(IpcValidationError::UnknownAccount.into());
+        }
+    }
+
+    if let Some(folder_id) = request.folder_id.as_deref() {
+        validate_entity_id("folder_id", folder_id)?;
+        if !folder_exists_in_scope(connection, request.account_id.as_deref(), folder_id)? {
+            return Err(IpcValidationError::UnknownFolder.into());
+        }
+    }
+
+    if let Some(cursor) = request.cursor.as_ref() {
+        validate_entity_id("cursor.message_id", &cursor.message_id)?;
+        validate_bounded_text(
+            "cursor.sort_key",
+            &cursor.sort_key,
+            MAX_PAGE_CURSOR_SORT_KEY_BYTES,
+        )?;
+        reject_raw_sql("cursor.sort_key", &cursor.sort_key)?;
+        reject_unsanitized_html("cursor.sort_key", &cursor.sort_key)?;
+        if !page_cursor_matches_scope(connection, &request, cursor)? {
+            return Err(MailShellError::new("message page cursor is invalid"));
+        }
+    }
+
+    Ok(ValidatedMessagePageRequest {
+        account_id: request.account_id,
+        folder_id: request.folder_id,
+        unified_inbox: request.unified_inbox,
+        cursor: request.cursor,
+        limit: request
+            .limit
+            .unwrap_or(MESSAGE_PAGE_DEFAULT_LIMIT)
+            .clamp(1, MESSAGE_PAGE_MAX_LIMIT),
+    })
+}
+
+fn page_cursor_matches_scope(
+    connection: &Connection,
+    request: &MailMessagePageRequest,
+    cursor: &MailMessagePageCursor,
+) -> rusqlite::Result<bool> {
+    let exists = connection.query_row(
+        "SELECT EXISTS (
+           SELECT 1
+           FROM messages
+           JOIN accounts ON accounts.id = messages.account_id
+           JOIN folders ON folders.account_id = messages.account_id
+            AND folders.id = messages.folder_id
+           LEFT JOIN settings AS account_preferences
+             ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
+           WHERE messages.id = ?1
+             AND COALESCE(messages.date_received, messages.internal_date, messages.created_at) = ?2
+             AND accounts.removed_at IS NULL
+             AND accounts.auth_status != 'removed'
+             AND (
+               ?3 = 0 OR (
+                 folders.kind = 'inbox'
+                 AND COALESCE(
+                   json_extract(account_preferences.value_json, '$.includeInUnifiedInbox'),
+                   1
+                 ) != 0
+               )
+             )
+             AND (?4 IS NULL OR messages.account_id = ?4)
+             AND (?5 IS NULL OR messages.folder_id = ?5)
+         )",
+        params![
+            cursor.message_id.as_str(),
+            cursor.sort_key.as_str(),
+            request.unified_inbox as i64,
+            request.account_id.as_deref(),
+            request.folder_id.as_deref(),
+        ],
+        |row| row.get::<_, i64>(0),
+    )?;
+
+    Ok(exists == 1)
+}
+
+fn count_messages_for_page(
+    connection: &Connection,
+    request: &ValidatedMessagePageRequest,
+) -> rusqlite::Result<u32> {
+    let count = connection.query_row(
+        "SELECT COUNT(*)
+         FROM messages
+         JOIN accounts ON accounts.id = messages.account_id
+         JOIN folders ON folders.account_id = messages.account_id
+          AND folders.id = messages.folder_id
+         LEFT JOIN settings AS account_preferences
+           ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
+         WHERE accounts.removed_at IS NULL
+           AND accounts.auth_status != 'removed'
+           AND (
+             ?1 = 0 OR (
+               folders.kind = 'inbox'
+               AND COALESCE(
+                 json_extract(account_preferences.value_json, '$.includeInUnifiedInbox'),
+                 1
+               ) != 0
+             )
+           )
+           AND (?2 IS NULL OR messages.account_id = ?2)
+           AND (?3 IS NULL OR messages.folder_id = ?3)",
+        params![
+            request.unified_inbox as i64,
+            request.account_id.as_deref(),
+            request.folder_id.as_deref()
+        ],
+        |row| checked_u32(row.get::<_, i64>(0)?, "message page count"),
+    )?;
+
+    Ok(count)
+}
+
+fn load_messages_page(
+    connection: &Connection,
+    request: &ValidatedMessagePageRequest,
+    fetch_limit: u32,
+) -> rusqlite::Result<Vec<MailShellMessage>> {
+    let cursor_sort_key = request
+        .cursor
+        .as_ref()
+        .map(|cursor| cursor.sort_key.as_str());
+    let cursor_message_id = request
+        .cursor
+        .as_ref()
+        .map(|cursor| cursor.message_id.as_str());
+    let mut statement = connection.prepare(
+        "WITH scoped_messages AS (
+           SELECT
+             messages.id,
+             messages.account_id,
+             messages.folder_id,
+             COALESCE(NULLIF(messages.sender_name, ''), NULLIF(messages.sender_email, ''), '') AS sender,
+             COALESCE(messages.sender_email, '') AS sender_email,
+             messages.subject,
+             COALESCE(NULLIF(messages.snippet, ''), NULLIF(messages.body_text, ''), '') AS preview,
+             COALESCE(messages.date_received, messages.internal_date, '') AS received_at,
+             messages.is_read,
+             messages.is_flagged,
+             messages.body_text,
+             messages.body_html,
+             messages.rfc_message_id,
+             messages.in_reply_to,
+             messages.references_json,
+             messages.to_addresses_json,
+             messages.cc_addresses_json,
+             CASE
+               WHEN message_remote_content.id IS NOT NULL THEN 1
+               WHEN sender_remote_content.id IS NOT NULL THEN 1
+               ELSE 0
+             END AS remote_content_allowed,
+             CASE
+               WHEN message_remote_content.id IS NOT NULL THEN 'message'
+               WHEN sender_remote_content.id IS NOT NULL THEN 'sender'
+               ELSE NULL
+             END AS remote_content_allowed_scope,
+             COALESCE(messages.date_received, messages.internal_date, messages.created_at) AS page_sort_key
+           FROM messages
+           JOIN accounts ON accounts.id = messages.account_id
+           JOIN folders ON folders.account_id = messages.account_id
+            AND folders.id = messages.folder_id
+           LEFT JOIN settings AS account_preferences
+             ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
+           LEFT JOIN remote_content_preferences AS message_remote_content
+             ON message_remote_content.account_id = messages.account_id
+            AND message_remote_content.scope = 'message'
+            AND message_remote_content.message_id = messages.id
+           LEFT JOIN remote_content_preferences AS sender_remote_content
+             ON sender_remote_content.account_id = messages.account_id
+            AND sender_remote_content.scope = 'sender'
+            AND sender_remote_content.normalized_sender_email = LOWER(TRIM(COALESCE(messages.sender_email, '')))
+           WHERE accounts.removed_at IS NULL
+             AND accounts.auth_status != 'removed'
+             AND (
+               ?1 = 0 OR (
+                 folders.kind = 'inbox'
+                 AND COALESCE(
+                   json_extract(account_preferences.value_json, '$.includeInUnifiedInbox'),
+                   1
+                 ) != 0
+               )
+             )
+             AND (?2 IS NULL OR messages.account_id = ?2)
+             AND (?3 IS NULL OR messages.folder_id = ?3)
+         )
+         SELECT *
+         FROM scoped_messages
+         WHERE (
+           ?4 IS NULL
+           OR page_sort_key < ?4
+           OR (page_sort_key = ?4 AND id > ?5)
+         )
+         ORDER BY page_sort_key DESC, id
+         LIMIT ?6",
+    )?;
+
+    let rows = statement.query_map(
+        params![
+            request.unified_inbox as i64,
+            request.account_id.as_deref(),
+            request.folder_id.as_deref(),
+            cursor_sort_key,
+            cursor_message_id,
+            fetch_limit
+        ],
+        mail_shell_message_from_row,
+    )?;
+
+    collect_rows(rows)
 }
 
 fn validate_search_request(
@@ -586,6 +907,7 @@ fn search_messages(
              WHEN sender_remote_content.id IS NOT NULL THEN 'sender'
              ELSE NULL
            END AS remote_content_allowed_scope,
+           COALESCE(messages.date_received, messages.internal_date, messages.created_at) AS page_sort_key,
            bm25(messages_fts) AS rank
          FROM messages_fts
          JOIN messages ON messages.rowid = messages_fts.rowid
@@ -655,9 +977,11 @@ fn attach_message_attachments(
 
 fn mail_shell_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailShellMessage> {
     let preview = trim_preview(row.get::<_, String>(6)?);
+    let id = row.get::<_, String>(0)?;
+    let page_sort_key = row.get::<_, String>(19)?;
 
     Ok(MailShellMessage {
-        id: row.get(0)?,
+        id: id.clone(),
         account_id: row.get(1)?,
         folder_id: row.get(2)?,
         sender: row.get(3)?,
@@ -677,6 +1001,10 @@ fn mail_shell_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mail
         remote_content_allowed: row.get::<_, i64>(17)? == 1,
         remote_content_allowed_scope: row.get(18)?,
         attachments: Vec::new(),
+        page_cursor: Some(MailMessagePageCursor {
+            sort_key: page_sort_key,
+            message_id: id,
+        }),
     })
 }
 
@@ -1416,6 +1744,159 @@ mod tests {
             .expect("missing-label message should be searchable");
         assert_eq!(search_message.sender, "");
         assert_eq!(search_message.attachments[0].display_filename, "");
+    }
+
+    #[test]
+    fn load_message_page_reads_scoped_cache_incrementally_without_duplicates() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+        for index in 0..60 {
+            connection
+                .execute(
+                    "INSERT INTO messages (
+                       id,
+                       account_id,
+                       folder_id,
+                       imap_uid,
+                       uid_validity,
+                       subject,
+                       sender_name,
+                       sender_email,
+                       date_received,
+                       is_read,
+                       is_flagged,
+                       body_text,
+                       snippet
+                     )
+                     VALUES (?1, 'acct_personal', 'folder_personal_inbox', ?2, 10, ?3, 'Pager', 'pager@example.com', ?4, 1, 0, ?5, ?5)",
+                    params![
+                        format!("msg_page_{index:03}"),
+                        1000 + index,
+                        format!("Paged message {index:03}"),
+                        format!("2026-05-24T00:{index:02}:00Z"),
+                        format!("Paged body {index:03}")
+                    ],
+                )
+                .unwrap();
+        }
+
+        let first_page = load_message_page_from_connection(
+            &connection,
+            MailMessagePageRequest {
+                account_id: Some("acct_personal".to_string()),
+                folder_id: Some("folder_personal_inbox".to_string()),
+                unified_inbox: false,
+                cursor: None,
+                limit: Some(25),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first_page.total_count, 61);
+        assert_eq!(first_page.messages.len(), 25);
+        assert!(first_page.has_more);
+        assert_eq!(first_page.messages[0].id, "msg_page_059");
+        assert_eq!(first_page.messages[24].id, "msg_page_035");
+        assert!(first_page
+            .messages
+            .iter()
+            .all(|message| message.account_id == "acct_personal"
+                && message.folder_id == "folder_personal_inbox"));
+
+        let second_page = load_message_page_from_connection(
+            &connection,
+            MailMessagePageRequest {
+                account_id: Some("acct_personal".to_string()),
+                folder_id: Some("folder_personal_inbox".to_string()),
+                unified_inbox: false,
+                cursor: first_page.next_cursor.clone(),
+                limit: Some(25),
+            },
+        )
+        .unwrap();
+        let first_ids = first_page
+            .messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(second_page.messages.len(), 25);
+        assert_eq!(second_page.messages[0].id, "msg_page_034");
+        assert!(second_page
+            .messages
+            .iter()
+            .all(|message| !first_ids.contains(message.id.as_str())));
+        assert!(second_page.has_more);
+    }
+
+    #[test]
+    fn load_message_page_validates_scope_and_cursor_before_querying() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+
+        let mixed_scope = load_message_page_from_connection(
+            &connection,
+            MailMessagePageRequest {
+                account_id: Some("acct_personal".to_string()),
+                folder_id: None,
+                unified_inbox: true,
+                cursor: None,
+                limit: Some(25),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            mixed_scope.reason,
+            "unified message pages cannot include account or folder scope"
+        );
+
+        let unowned_folder = load_message_page_from_connection(
+            &connection,
+            MailMessagePageRequest {
+                account_id: Some("acct_work".to_string()),
+                folder_id: Some("folder_personal_inbox".to_string()),
+                unified_inbox: false,
+                cursor: None,
+                limit: Some(25),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(unowned_folder.reason, "folder was not found for account");
+
+        let bad_cursor = load_message_page_from_connection(
+            &connection,
+            MailMessagePageRequest {
+                account_id: Some("acct_personal".to_string()),
+                folder_id: None,
+                unified_inbox: false,
+                cursor: Some(MailMessagePageCursor {
+                    sort_key: "2026-05-24'; DELETE FROM messages; --".to_string(),
+                    message_id: "msg_personal".to_string(),
+                }),
+                limit: Some(25),
+            },
+        )
+        .unwrap_err();
+        assert!(!bad_cursor.reason.contains("DELETE FROM messages"));
+
+        let cursor_outside_scope = load_message_page_from_connection(
+            &connection,
+            MailMessagePageRequest {
+                account_id: Some("acct_personal".to_string()),
+                folder_id: None,
+                unified_inbox: false,
+                cursor: Some(MailMessagePageCursor {
+                    sort_key: "2026-05-22T10:30:00Z".to_string(),
+                    message_id: "msg_work".to_string(),
+                }),
+                limit: Some(25),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            cursor_outside_scope.reason,
+            "message page cursor is invalid"
+        );
     }
 
     #[test]

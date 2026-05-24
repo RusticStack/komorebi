@@ -13,6 +13,7 @@ import {
   isTauriRuntime,
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
+  loadMessagePageFromTauri,
   loadMailShellDataFromTauri,
   openExternalLinkFromTauri,
   performMailActionFromTauri,
@@ -34,6 +35,7 @@ import {
 function App(props: MailClientShellProps) {
   const isRuntime = isTauriRuntime();
   const runtimeLoader = isRuntime ? loadMailShellDataFromTauri : undefined;
+  const runtimeMessagePageLoader = isRuntime ? loadMessagePageFromTauri : undefined;
   const runtimeSearch = isRuntime ? searchMailFromTauri : undefined;
   const runtimeAllowRemoteContent = isRuntime
     ? allowRemoteContentFromTauri
@@ -90,6 +92,7 @@ function App(props: MailClientShellProps) {
     <MailClientShell
       {...props}
       loadMailShellData={props.loadMailShellData ?? runtimeLoader}
+      loadMessagePage={props.loadMessagePage ?? runtimeMessagePageLoader}
       searchMail={props.searchMail ?? runtimeSearch}
       allowRemoteContent={
         props.allowRemoteContent ?? runtimeAllowRemoteContent

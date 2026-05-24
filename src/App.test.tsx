@@ -27,6 +27,8 @@ import type {
   ExternalLinkOpenResponse,
   MailActionRequest,
   MailActionResponse,
+  MailMessagePageRequest,
+  MailMessagePageResponse,
   MailMessage,
   MailSearchRequest,
   MailSearchResponse,
@@ -1553,6 +1555,128 @@ describe("App", () => {
       }).length,
     ).toBeLessThan(80);
     expect(screen.queryByText("Bulk message 05000")).not.toBeInTheDocument();
+  });
+
+  it("loads folder messages incrementally while preserving selection and keyboard flow", async () => {
+    const initialData = createLargeMailFixture(0);
+    initialData.accounts[0] = {
+      ...initialData.accounts[0],
+      unreadCount: 65,
+    };
+    initialData.folders[0] = {
+      ...initialData.folders[0],
+      totalCount: 130,
+      unreadCount: 65,
+    };
+
+    const createPagedMessage = (index: number): MailMessage => {
+      const paddedIndex = index.toString().padStart(3, "0");
+      const receivedAt = `2026-05-24T${Math.floor(index / 60)
+        .toString()
+        .padStart(2, "0")}:${(index % 60).toString().padStart(2, "0")}:00`;
+
+      return {
+        accountId: "acct_bulk",
+        attachments: [],
+        bodyHtml: null,
+        bodyText: `Body for paged message ${paddedIndex}.`,
+        flagged: false,
+        folderId: "folder_bulk_inbox",
+        id: `msg_paged_${paddedIndex}`,
+        pageCursor: {
+          messageId: `msg_paged_${paddedIndex}`,
+          sortKey: receivedAt,
+        },
+        preview: `Snippet for paged message ${paddedIndex}.`,
+        receivedAt,
+        sender: `Paged Sender ${index}`,
+        senderEmail: `paged${index}@example.com`,
+        subject: `Paged message ${paddedIndex}`,
+        unread: index % 2 === 0,
+      };
+    };
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      createPagedMessage(index),
+    );
+    const secondPage = Array.from({ length: 30 }, (_, index) =>
+      createPagedMessage(index + 100),
+    );
+    const loadMessagePage = vi.fn(
+      async (
+        request: MailMessagePageRequest,
+      ): Promise<MailMessagePageResponse> => {
+        if (!request.cursor) {
+          const lastFirstPageMessage = firstPage[firstPage.length - 1];
+          return {
+            hasMore: true,
+            messages: firstPage,
+            nextCursor: lastFirstPageMessage?.pageCursor ?? null,
+            totalCount: 130,
+          };
+        }
+
+        return {
+          hasMore: false,
+          messages: secondPage,
+          nextCursor: null,
+          totalCount: 130,
+        };
+      },
+    );
+
+    render(<App initialData={initialData} loadMessagePage={loadMessagePage} />);
+
+    const firstMessage = await screen.findByRole("button", {
+      name: /Paged message 000/,
+    });
+    expect(loadMessagePage).toHaveBeenCalledWith(
+      {
+        accountId: null,
+        cursor: null,
+        folderId: null,
+        limit: 100,
+        unifiedInbox: true,
+      },
+      expect.any(AbortSignal),
+    );
+
+    fireEvent.click(firstMessage);
+    fireEvent.keyDown(firstMessage, { key: "End" });
+
+    await waitFor(() => expect(loadMessagePage).toHaveBeenCalledTimes(2));
+    expect(loadMessagePage).toHaveBeenLastCalledWith(
+      {
+        accountId: null,
+        cursor: firstPage[firstPage.length - 1]?.pageCursor,
+        folderId: null,
+        limit: 100,
+        unifiedInbox: true,
+      },
+      expect.any(AbortSignal),
+    );
+    const boundaryMessage = await screen.findByRole("button", {
+      name: /Paged message 099/,
+    });
+    await waitFor(() =>
+      expect(boundaryMessage).toHaveAttribute("aria-current", "true"),
+    );
+    expect(screen.getByTestId("message-virtual-list")).toHaveAttribute(
+      "data-message-count",
+      "130",
+    );
+
+    fireEvent.keyDown(boundaryMessage, { key: "ArrowDown" });
+    const nextPageMessage = await screen.findByRole("button", {
+      name: /Paged message 100/,
+    });
+    await waitFor(() => expect(nextPageMessage).toHaveFocus());
+    expect(nextPageMessage).toHaveAttribute("aria-current", "true");
+    expect(
+      within(screen.getByRole("region", { name: "Selected message" })).getByRole(
+        "heading",
+        { name: "Paged message 100" },
+      ),
+    ).toBeVisible();
   });
 
   it("shows account sync detail and launches OAuth reconnect from the status surface", async () => {

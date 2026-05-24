@@ -21,6 +21,8 @@ import type {
   MailActionRequest,
   MailActionResponse,
   MailMessage,
+  MailMessagePageRequest,
+  MailMessagePageResponse,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
@@ -38,6 +40,7 @@ import {
 
 type E2eEvent =
   | { name: "load-mail-shell" }
+  | { name: "load-message-page"; request: MailMessagePageRequest }
   | { name: "list-drafts" }
   | { name: "search-mail"; request: MailSearchRequest }
   | { name: "allow-remote-content"; request: RemoteContentPreferenceRequest }
@@ -253,6 +256,61 @@ async function loadMailShellData(): Promise<MailShellData> {
   await delay(performanceFixture ? 0 : 50);
 
   return clone(activeMail);
+}
+
+async function loadMessagePage(
+  request: MailMessagePageRequest,
+  signal: AbortSignal,
+): Promise<MailMessagePageResponse> {
+  e2eEvents.push({ name: "load-message-page", request });
+  await delay(25, signal);
+
+  const limit = Math.max(1, Math.min(request.limit ?? 100, 250));
+  const messages = activeMail.messages
+    .filter((message) => {
+      if (request.folderId) {
+        return (
+          message.folderId === request.folderId &&
+          (!request.accountId || message.accountId === request.accountId)
+        );
+      }
+
+      if (request.unifiedInbox) {
+        const folder = activeMail.folders.find(
+          (candidate) =>
+            candidate.id === message.folderId &&
+            candidate.accountId === message.accountId,
+        );
+
+        return folder?.kind === "inbox";
+      }
+
+      return !request.accountId || message.accountId === request.accountId;
+    })
+    .sort((left, right) => {
+      const byReceivedAt = right.receivedAt.localeCompare(left.receivedAt);
+      return byReceivedAt === 0 ? left.id.localeCompare(right.id) : byReceivedAt;
+    });
+
+  const startIndex = request.cursor
+    ? messages.findIndex((message) => message.id === request.cursor?.messageId) + 1
+    : 0;
+  const boundedStartIndex = Math.max(0, startIndex);
+  const page = messages.slice(boundedStartIndex, boundedStartIndex + limit);
+  const hasMore = boundedStartIndex + page.length < messages.length;
+  const lastPageMessage = page[page.length - 1] ?? null;
+
+  return {
+    hasMore,
+    messages: clone(page),
+    nextCursor: hasMore
+      ? lastPageMessage?.pageCursor ?? {
+          messageId: lastPageMessage?.id ?? "",
+          sortKey: lastPageMessage?.receivedAt ?? "",
+        }
+      : null,
+    totalCount: messages.length,
+  };
 }
 
 async function loadComposerDrafts(): Promise<ComposerDraft[]> {
@@ -606,6 +664,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       downloadAttachment={downloadAttachment}
       loadComposerDrafts={loadComposerDrafts}
       loadMailShellData={loadMailShellData}
+      loadMessagePage={performanceFixture ? undefined : loadMessagePage}
       loadRecentRecipients={listRecentRecipients}
       openExternalLink={openExternalLink}
       performMailAction={performMailAction}

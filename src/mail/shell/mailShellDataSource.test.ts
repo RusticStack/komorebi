@@ -10,6 +10,8 @@ import type {
   ExternalLinkOpenResponse,
   MailActionRequest,
   MailActionResponse,
+  MailMessagePageRequest,
+  MailMessagePageResponse,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
@@ -38,6 +40,7 @@ import {
   isTauriRuntime,
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
+  loadMessagePageFromTauri,
   loadMailShellDataFromTauri,
   openExternalLinkFromTauri,
   performMailActionFromTauri,
@@ -83,6 +86,22 @@ describe("mailShellDataSource", () => {
   });
 
   it("maps mail shell reads and search requests to typed Tauri commands", async () => {
+    const pageRequest: MailMessagePageRequest = {
+      accountId: "acct_personal",
+      cursor: null,
+      folderId: "folder_inbox",
+      limit: 100,
+      unifiedInbox: false,
+    };
+    const pageResponse: MailMessagePageResponse = {
+      hasMore: true,
+      messages: [],
+      nextCursor: {
+        messageId: "msg_099",
+        sortKey: "2026-05-22T09:00:00Z",
+      },
+      totalCount: 250,
+    };
     const searchResponse: MailSearchResponse = {
       indexStatus: "ready",
       query: "phoenix",
@@ -90,6 +109,7 @@ describe("mailShellDataSource", () => {
     };
     invokeMock
       .mockResolvedValueOnce(shellResponse)
+      .mockResolvedValueOnce(pageResponse)
       .mockResolvedValueOnce(searchResponse);
 
     await expect(loadMailShellDataFromTauri()).resolves.toBe(shellResponse);
@@ -97,9 +117,16 @@ describe("mailShellDataSource", () => {
 
     const controller = new AbortController();
     await expect(
+      loadMessagePageFromTauri(pageRequest, controller.signal),
+    ).resolves.toBe(pageResponse);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "load_message_page", {
+      request: pageRequest,
+    });
+
+    await expect(
       searchMailFromTauri(searchRequest, controller.signal),
     ).resolves.toBe(searchResponse);
-    expect(invokeMock).toHaveBeenNthCalledWith(2, "search_mail", {
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "search_mail", {
       request: searchRequest,
     });
   });
@@ -237,6 +264,18 @@ describe("mailShellDataSource", () => {
 
     await expect(
       searchMailFromTauri(searchRequest, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await expect(
+      loadMessagePageFromTauri(
+        {
+          accountId: "acct_personal",
+          cursor: null,
+          folderId: "folder_inbox",
+          limit: 100,
+          unifiedInbox: false,
+        },
+        controller.signal,
+      ),
     ).rejects.toMatchObject({ name: "AbortError" });
     await expect(
       listRecentRecipientsFromTauri(

@@ -124,6 +124,12 @@
       "unread": "Por ler",
       "unknownSender": "Remetente desconhecido"
     },
+    "pagination": {
+      "complete_one": "{{formattedCount}} mensagem carregada",
+      "complete_other": "{{formattedCount}} mensagens carregadas",
+      "error": "Nao foi possivel carregar mais mensagens.",
+      "loading": "A carregar mais mensagens."
+    },
     "reader": {
       "actions": {
         "label": "Acoes da mensagem",

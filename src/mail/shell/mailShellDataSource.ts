@@ -22,6 +22,8 @@ import type {
   RemoteContentPreferenceResponse,
   MailSearchRequest,
   MailSearchResponse,
+  MailMessagePageRequest,
+  MailMessagePageResponse,
   MailShellData,
   RecentRecipientSearchRequest,
   RecentRecipientSuggestion,
@@ -58,6 +60,7 @@ export type SyncStatusEventHandler = (
 ) => void;
 
 const LOAD_MAIL_SHELL_COMMAND = "load_mail_shell";
+const LOAD_MESSAGE_PAGE_COMMAND = "load_message_page";
 const SEARCH_MAIL_COMMAND = "search_mail";
 const ALLOW_REMOTE_CONTENT_COMMAND = "allow_remote_content";
 const PERFORM_MAIL_ACTION_COMMAND = "perform_mail_action";
@@ -93,6 +96,20 @@ export function isTauriRuntime() {
 
 export async function loadMailShellDataFromTauri(): Promise<MailShellData> {
   return invoke<MailShellData>(LOAD_MAIL_SHELL_COMMAND);
+}
+
+export async function loadMessagePageFromTauri(
+  request: MailMessagePageRequest,
+  signal: AbortSignal,
+): Promise<MailMessagePageResponse> {
+  throwIfAborted(signal);
+  const response = await invoke<MailMessagePageResponse>(
+    LOAD_MESSAGE_PAGE_COMMAND,
+    { request },
+  );
+  throwIfAborted(signal);
+
+  return response;
 }
 
 export async function searchMailFromTauri(

@@ -43,8 +43,9 @@ use komorebi_lib::{
         PerformMailActionRequest, RetryDecision, UserConfirmation,
     },
     mail_shell::{
-        allow_remote_content_from_connection, search_mail_from_connection, MailSearchRequest,
-        RemoteContentPreferenceRequest, RemoteContentPreferenceScope,
+        allow_remote_content_from_connection, load_message_page_from_connection,
+        search_mail_from_connection, MailMessagePageCursor, MailMessagePageRequest,
+        MailSearchRequest, RemoteContentPreferenceRequest, RemoteContentPreferenceScope,
     },
     schema::apply_migrations,
     token_lifecycle::SecretString,
@@ -132,6 +133,51 @@ fn mail_search_command_rejects_sql_html_invalid_ids_unowned_scope_and_oversized_
     )
     .expect_err("folder outside account scope is rejected");
     assert_eq!(unowned_folder.reason, "folder was not found for account");
+
+    let page_scope_required = load_message_page_from_connection(
+        &connection,
+        MailMessagePageRequest {
+            account_id: None,
+            folder_id: None,
+            unified_inbox: false,
+            cursor: None,
+            limit: Some(25),
+        },
+    )
+    .expect_err("message page scope is required");
+    assert_eq!(page_scope_required.reason, "message page scope is required");
+
+    let page_unowned_folder = load_message_page_from_connection(
+        &connection,
+        MailMessagePageRequest {
+            account_id: Some(ACCOUNT_ID.into()),
+            folder_id: Some(OTHER_FOLDER_ID.into()),
+            unified_inbox: false,
+            cursor: None,
+            limit: Some(25),
+        },
+    )
+    .expect_err("message page folder outside account scope is rejected");
+    assert_eq!(
+        page_unowned_folder.reason,
+        "folder was not found for account"
+    );
+
+    let page_bad_cursor = load_message_page_from_connection(
+        &connection,
+        MailMessagePageRequest {
+            account_id: Some(ACCOUNT_ID.into()),
+            folder_id: None,
+            unified_inbox: false,
+            cursor: Some(MailMessagePageCursor {
+                sort_key: "2026-05-24'; DELETE FROM messages; --".into(),
+                message_id: MESSAGE_ID.into(),
+            }),
+            limit: Some(25),
+        },
+    )
+    .expect_err("message page cursor rejects raw SQL-shaped text");
+    assert!(!page_bad_cursor.reason.contains("DELETE FROM messages"));
 
     for path in [
         "C:\\Users\\Alice\\mail-cache.sqlite3",

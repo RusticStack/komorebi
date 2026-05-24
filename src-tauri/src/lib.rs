@@ -54,6 +54,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             mail_shell::load_mail_shell,
+            mail_shell::load_message_page,
             mail_shell::search_mail,
             mail_shell::allow_remote_content,
             mail_actions::perform_mail_action,

@@ -1,5 +1,6 @@
 const APP_COMMANDS: &[&str] = &[
     "load_mail_shell",
+    "load_message_page",
     "search_mail",
     "allow_remote_content",
     "perform_mail_action",

@@ -124,6 +124,12 @@
       "unread": "Unread",
       "unknownSender": "Unknown sender"
     },
+    "pagination": {
+      "complete_one": "{{formattedCount}} message loaded",
+      "complete_other": "{{formattedCount}} messages loaded",
+      "error": "More messages could not be loaded.",
+      "loading": "Loading more messages."
+    },
     "reader": {
       "actions": {
         "label": "Message actions",

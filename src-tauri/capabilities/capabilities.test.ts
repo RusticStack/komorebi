@@ -135,6 +135,7 @@ const oauthLoopbackCommandNames = new Set([
 function rustCommandPath(command: string) {
   if (
     command === "load_mail_shell" ||
+    command === "load_message_page" ||
     command === "search_mail" ||
     command === "allow_remote_content"
   ) {
@@ -224,6 +225,7 @@ describe("Tauri capabilities", () => {
       "core:event:allow-listen",
       "core:event:allow-unlisten",
       "allow-load-mail-shell",
+      "allow-load-message-page",
       "allow-search-mail",
       "allow-allow-remote-content",
       "allow-perform-mail-action",
@@ -283,6 +285,7 @@ describe("Tauri capabilities", () => {
 
     for (const command of [
       "load_mail_shell",
+      "load_message_page",
       "search_mail",
       "allow_remote_content",
       "perform_mail_action",

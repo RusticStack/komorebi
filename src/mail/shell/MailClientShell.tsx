@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -58,6 +59,9 @@ import {
   type MailActionUndo,
   type MailSearchRequest,
   type MailSearchResponse,
+  type MailMessagePageCursor,
+  type MailMessagePageRequest,
+  type MailMessagePageResponse,
   type MailMessage,
   type MailShellState,
   type ComposerDraft,
@@ -92,6 +96,10 @@ export type MailSearchFunction = (
   request: MailSearchRequest,
   signal: AbortSignal,
 ) => Promise<MailSearchResponse>;
+export type MailMessagePageFunction = (
+  request: MailMessagePageRequest,
+  signal: AbortSignal,
+) => Promise<MailMessagePageResponse>;
 export type RemoteContentPreferenceFunction = (
   request: RemoteContentPreferenceRequest,
 ) => Promise<RemoteContentPreferenceResponse>;
@@ -148,6 +156,7 @@ export type MailClientShellProps = {
   initialComposerDrafts?: ComposerDraft[];
   initialLoadState?: MailShellLoadState;
   loadMailShellData?: () => Promise<MailShellData>;
+  loadMessagePage?: MailMessagePageFunction;
   loadComposerDrafts?: ComposerDraftListFunction;
   searchMail?: MailSearchFunction;
   allowRemoteContent?: RemoteContentPreferenceFunction;
@@ -188,6 +197,19 @@ type MailSearchUiState = {
   results: MailMessage[];
   status: MailSearchUiStatus;
 };
+type MailMessagePageUiStatus = "idle" | "loading" | "error";
+type MailMessagePageScope = {
+  accountId: string | null;
+  folderId: string | null;
+  unifiedInbox: boolean;
+};
+type MailMessagePageUiState = {
+  scopeKey: string;
+  status: MailMessagePageUiStatus;
+  cursor: MailMessagePageCursor | null;
+  hasMore: boolean;
+  totalCount: number | null;
+};
 type AttachmentActionState = {
   attachmentId: string | null;
   status: "idle" | "loading" | "saved" | "downloaded" | "error";
@@ -220,6 +242,8 @@ type MailActionConfirmation = {
 
 const MESSAGE_ROW_HEIGHT_PX = 136;
 const MESSAGE_LIST_OVERSCAN = 8;
+const MESSAGE_PAGE_LOAD_AHEAD_ROWS = 20;
+const MESSAGE_PAGE_SIZE = 100;
 const MAIL_SEARCH_DEBOUNCE_MS = 250;
 const MAIL_SEARCH_RESULT_LIMIT = 100;
 const ATTACHMENT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
@@ -238,6 +262,13 @@ const emptySearchState: MailSearchUiState = {
   query: "",
   results: [],
   status: "idle",
+};
+const emptyMessagePageState: MailMessagePageUiState = {
+  cursor: null,
+  hasMore: false,
+  scopeKey: "",
+  status: "idle",
+  totalCount: null,
 };
 const emptyAttachmentActionState: AttachmentActionState = {
   attachmentId: null,
@@ -270,6 +301,7 @@ export function MailClientShell({
   initialComposerDrafts = [],
   initialLoadState = readyMailShellLoadState,
   loadMailShellData,
+  loadMessagePage,
   loadComposerDrafts,
   searchMail,
   allowRemoteContent,
@@ -306,6 +338,9 @@ export function MailClientShell({
   const [searchState, setSearchState] =
     useState<MailSearchUiState>(emptySearchState);
   const [searchRetryNonce, setSearchRetryNonce] = useState(0);
+  const [messagePageState, setMessagePageState] =
+    useState<MailMessagePageUiState>(emptyMessagePageState);
+  const [messagePageRetryNonce, setMessagePageRetryNonce] = useState(0);
   const [composerDrafts, setComposerDrafts] =
     useState<ComposerDraft[]>(initialComposerDrafts);
   const [composerDraftsLoadState, setComposerDraftsLoadState] =
@@ -345,6 +380,26 @@ export function MailClientShell({
   const isBackendSearchActive = Boolean(searchMail && searchQuery);
   const searchAccountId = state.unifiedInbox ? null : state.selectedAccountId;
   const searchFolderId = state.selectedFolderId;
+  const messagePageScope = useMemo(
+    () =>
+      messagePageScopeForSelection(
+        state.data.folders,
+        state.selectedAccountId,
+        state.selectedFolderId,
+        state.unifiedInbox,
+      ),
+    [
+      state.data.folders,
+      state.selectedAccountId,
+      state.selectedFolderId,
+      state.unifiedInbox,
+    ],
+  );
+  const messagePageScopeKey = messagePageScopeKeyForScope(messagePageScope);
+  const activeMessagePageState =
+    messagePageState.scopeKey === messagePageScopeKey
+      ? messagePageState
+      : emptyMessagePageState;
   const hasFreshSearchResults = searchState.query === searchQuery;
   const effectiveSearchStatus: MailSearchUiStatus = isBackendSearchActive
     ? hasFreshSearchResults
@@ -538,6 +593,7 @@ export function MailClientShell({
       setState((current) =>
         mergeMailShellData(current, data, readyMailShellLoadState),
       );
+      setMessagePageState(emptyMessagePageState);
     } catch {
       setState((current) => ({
         ...current,
@@ -1078,6 +1134,7 @@ export function MailClientShell({
         setState((current) =>
           mergeMailShellData(current, data, readyMailShellLoadState),
         );
+        setMessagePageState(emptyMessagePageState);
       })
       .catch(() => {
         if (cancelled) {
@@ -1145,6 +1202,7 @@ export function MailClientShell({
             setState((current) =>
               mergeMailShellData(current, data, readyMailShellLoadState),
             );
+            setMessagePageState(emptyMessagePageState);
           })
           .catch(() => {
             if (cancelled) {
@@ -1178,6 +1236,171 @@ export function MailClientShell({
       }
     };
   }, [loadMailShellData, subscribeToSyncStatus]);
+
+  useEffect(() => {
+    if (
+      !loadMessagePage ||
+      !hasAccounts ||
+      searchQuery ||
+      state.loadState.messages !== "ready"
+    ) {
+      return;
+    }
+
+    const scope = messagePageScope;
+    const scopeKey = messagePageScopeKey;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      setMessagePageState({
+        cursor: null,
+        hasMore: false,
+        scopeKey,
+        status: "loading",
+        totalCount: null,
+      });
+
+      loadMessagePage(
+        messagePageRequestForScope(scope, null, MESSAGE_PAGE_SIZE),
+        controller.signal,
+      )
+        .then((response) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          setState((current) =>
+            currentMessagePageScopeKey(current) === scopeKey
+              ? mergeMessagePageIntoState(
+                  current,
+                  scope,
+                  response.messages,
+                  "replace",
+                )
+              : current,
+          );
+          setMessagePageState((current) =>
+            current.scopeKey === scopeKey
+              ? {
+                  cursor: response.nextCursor,
+                  hasMore: response.hasMore,
+                  scopeKey,
+                  status: "idle",
+                  totalCount: response.totalCount,
+                }
+              : current,
+          );
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted || isAbortError(error)) {
+            return;
+          }
+
+          setMessagePageState((current) =>
+            current.scopeKey === scopeKey
+              ? {
+                  ...current,
+                  hasMore: false,
+                  status: "error",
+                }
+              : current,
+          );
+        });
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    hasAccounts,
+    loadMessagePage,
+    messagePageRetryNonce,
+    messagePageScope,
+    messagePageScopeKey,
+    searchQuery,
+    state.loadState.messages,
+  ]);
+
+  const loadNextMessagePage = useCallback(() => {
+    if (
+      !loadMessagePage ||
+      !hasAccounts ||
+      searchQuery ||
+      state.loadState.messages !== "ready" ||
+      activeMessagePageState.status === "loading" ||
+      !activeMessagePageState.hasMore ||
+      !activeMessagePageState.cursor
+    ) {
+      return;
+    }
+
+    const scope = messagePageScope;
+    const scopeKey = messagePageScopeKey;
+    const cursor = activeMessagePageState.cursor;
+    const controller = new AbortController();
+    setMessagePageState((current) =>
+      current.scopeKey === scopeKey
+        ? {
+            ...current,
+            status: "loading",
+          }
+        : current,
+    );
+
+    loadMessagePage(
+      messagePageRequestForScope(scope, cursor, MESSAGE_PAGE_SIZE),
+      controller.signal,
+    )
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setState((current) =>
+          currentMessagePageScopeKey(current) === scopeKey
+            ? mergeMessagePageIntoState(current, scope, response.messages, "append")
+            : current,
+        );
+        setMessagePageState((current) =>
+          current.scopeKey === scopeKey
+            ? {
+                cursor: response.nextCursor,
+                hasMore: response.hasMore,
+                scopeKey,
+                status: "idle",
+                totalCount: response.totalCount,
+              }
+            : current,
+        );
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || isAbortError(error)) {
+          return;
+        }
+
+        setMessagePageState((current) =>
+          current.scopeKey === scopeKey
+            ? {
+                ...current,
+                status: "error",
+              }
+            : current,
+        );
+      });
+  }, [
+    activeMessagePageState.cursor,
+    activeMessagePageState.hasMore,
+    activeMessagePageState.status,
+    hasAccounts,
+    loadMessagePage,
+    messagePageScope,
+    messagePageScopeKey,
+    searchQuery,
+    state.loadState.messages,
+  ]);
 
   useEffect(() => {
     if (
@@ -1506,8 +1729,15 @@ export function MailClientShell({
           isBackendSearchActive={isBackendSearchActive}
           state={state}
           searchStatus={effectiveSearchStatus}
+          paginationStatus={activeMessagePageState}
           visibleMessages={visibleMessages}
+          onLoadMoreMessages={
+            loadMessagePage && !isBackendSearchActive
+              ? loadNextMessagePage
+              : undefined
+          }
           onRetry={loadMailShellData ? reloadMailShell : undefined}
+          onRetryPage={() => setMessagePageRetryNonce((current) => current + 1)}
           onRetrySearch={() => setSearchRetryNonce((current) => current + 1)}
           onSelectMessage={(messageId) => {
             clearReaderActionUi();
@@ -1744,6 +1974,129 @@ function searchRequestForScope(
     limit: MAIL_SEARCH_RESULT_LIMIT,
     query,
   };
+}
+
+function messagePageScopeForSelection(
+  folders: MailShellState["data"]["folders"],
+  selectedAccountId: string | null,
+  selectedFolderId: string | null,
+  unifiedInbox: boolean,
+): MailMessagePageScope {
+  if (selectedFolderId) {
+    const folder = folders.find(
+      (candidate) => candidate.id === selectedFolderId,
+    );
+    return {
+      accountId: folder?.accountId ?? selectedAccountId,
+      folderId: selectedFolderId,
+      unifiedInbox: false,
+    };
+  }
+
+  if (unifiedInbox) {
+    return {
+      accountId: null,
+      folderId: null,
+      unifiedInbox: true,
+    };
+  }
+
+  return {
+    accountId: selectedAccountId,
+    folderId: null,
+    unifiedInbox: false,
+  };
+}
+
+function messagePageScopeForState(state: MailShellState): MailMessagePageScope {
+  return messagePageScopeForSelection(
+    state.data.folders,
+    state.selectedAccountId,
+    state.selectedFolderId,
+    state.unifiedInbox,
+  );
+}
+
+function messagePageScopeKeyForScope(scope: MailMessagePageScope) {
+  if (scope.unifiedInbox) {
+    return "unified";
+  }
+
+  return `account:${scope.accountId ?? "none"}:folder:${scope.folderId ?? "all"}`;
+}
+
+function currentMessagePageScopeKey(state: MailShellState) {
+  return messagePageScopeKeyForScope(messagePageScopeForState(state));
+}
+
+function messagePageRequestForScope(
+  scope: MailMessagePageScope,
+  cursor: MailMessagePageCursor | null,
+  limit: number,
+): MailMessagePageRequest {
+  return {
+    accountId: scope.accountId,
+    cursor,
+    folderId: scope.folderId,
+    limit,
+    unifiedInbox: scope.unifiedInbox,
+  };
+}
+
+function mergeMessagePageIntoState(
+  state: MailShellState,
+  scope: MailMessagePageScope,
+  messages: MailMessage[],
+  mode: "replace" | "append",
+): MailShellState {
+  const incomingIds = new Set(messages.map((message) => message.id));
+  const retainedMessages = state.data.messages
+    .filter((message) => !incomingIds.has(message.id))
+    .filter((message) =>
+      mode === "append" ? true : !messageBelongsToPageScope(state, scope, message),
+    );
+
+  return mergeMailShellData(
+    state,
+    {
+      ...state.data,
+      messages: [...retainedMessages, ...messages],
+    },
+    state.loadState,
+  );
+}
+
+function messageBelongsToPageScope(
+  state: MailShellState,
+  scope: MailMessagePageScope,
+  message: MailMessage,
+) {
+  if (scope.folderId) {
+    return (
+      message.folderId === scope.folderId &&
+      (!scope.accountId || message.accountId === scope.accountId)
+    );
+  }
+
+  if (scope.unifiedInbox) {
+    const account = state.data.accounts.find(
+      (candidate) => candidate.id === message.accountId,
+    );
+    const folder = state.data.folders.find(
+      (candidate) =>
+        candidate.id === message.folderId &&
+        candidate.accountId === message.accountId,
+    );
+
+    return (
+      Boolean(account) &&
+      Boolean(folder) &&
+      accountLocalPreferences(account!).includeInUnifiedInbox &&
+      folder!.kind === "inbox"
+    );
+  }
+
+  return Boolean(scope.accountId) && message.accountId === scope.accountId;
 }
 
 function isAbortError(error: unknown) {
@@ -2455,10 +2808,13 @@ function MessageListState({
   accountById,
   folderById,
   isBackendSearchActive,
+  paginationStatus,
   state,
   searchStatus,
   visibleMessages,
+  onLoadMoreMessages,
   onRetry,
+  onRetryPage,
   onRetrySearch,
   onSelectMessage,
   onReadMessage,
@@ -2466,10 +2822,13 @@ function MessageListState({
   accountById: Map<string, { label: string }>;
   folderById: Map<string, { name: string }>;
   isBackendSearchActive: boolean;
+  paginationStatus: MailMessagePageUiState;
   state: MailShellState;
   searchStatus: MailSearchUiStatus;
   visibleMessages: ReturnType<typeof messagesForScope>;
+  onLoadMoreMessages?: () => void;
   onRetry?: () => void;
+  onRetryPage: () => void;
   onRetrySearch: () => void;
   onSelectMessage: (messageId: string) => void;
   onReadMessage: (messageId: string) => void;
@@ -2547,6 +2906,33 @@ function MessageListState({
     messageButton.focus();
     pendingFocusIndexRef.current = null;
   }, [state.selectedMessageId, virtualRows]);
+
+  useEffect(() => {
+    if (
+      isBackendSearchActive ||
+      !onLoadMoreMessages ||
+      paginationStatus.status === "loading" ||
+      !paginationStatus.hasMore ||
+      visibleMessages.length === 0
+    ) {
+      return;
+    }
+
+    const lastVirtualRow = virtualRows[virtualRows.length - 1];
+    if (
+      lastVirtualRow &&
+      visibleMessages.length - lastVirtualRow.index <= MESSAGE_PAGE_LOAD_AHEAD_ROWS
+    ) {
+      onLoadMoreMessages();
+    }
+  }, [
+    isBackendSearchActive,
+    onLoadMoreMessages,
+    paginationStatus.hasMore,
+    paginationStatus.status,
+    virtualRows,
+    visibleMessages.length,
+  ]);
 
   if (state.loadState.messages === "loading") {
     return (
@@ -2693,8 +3079,63 @@ function MessageListState({
           );
         })}
       </div>
+      {!isBackendSearchActive ? (
+        <MessagePaginationStatus
+          loadedCount={visibleMessages.length}
+          onRetry={onRetryPage}
+          status={paginationStatus}
+        />
+      ) : null}
     </div>
   );
+}
+
+function MessagePaginationStatus({
+  loadedCount,
+  onRetry,
+  status,
+}: {
+  loadedCount: number;
+  onRetry: () => void;
+  status: MailMessagePageUiState;
+}) {
+  const { t } = useTranslation();
+  const localeFormat = useLocaleFormatters();
+  if (!status.scopeKey) {
+    return null;
+  }
+
+  if (status.status === "loading") {
+    return (
+      <p className="message-pagination-status" role="status">
+        {t("mail.pagination.loading")}
+      </p>
+    );
+  }
+
+  if (status.status === "error") {
+    return (
+      <div className="message-pagination-status message-pagination-status--error" role="alert">
+        <span>{t("mail.pagination.error")}</span>
+        <button type="button" onClick={onRetry}>
+          {t("common.actions.retry")}
+        </button>
+      </div>
+    );
+  }
+
+  if (!status.hasMore && status.totalCount !== null && loadedCount >= status.totalCount) {
+    return (
+      <p className="message-pagination-status" role="status">
+        {t("mail.pagination.complete", {
+          count: status.totalCount,
+          formattedCount: localeFormat.count(loadedCount),
+        })}
+      </p>
+    );
+  }
+
+  return null;
 }
 
 function MessageRow({

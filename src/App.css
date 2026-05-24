@@ -436,6 +436,24 @@ textarea:disabled {
   width: 100%;
 }
 
+.message-pagination-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0;
+  border-top: 1px solid #eee8df;
+  color: #716d66;
+  background: #fbfaf8;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.message-pagination-status--error {
+  color: #774331;
+}
+
 .message {
   display: grid;
   gap: 6px;

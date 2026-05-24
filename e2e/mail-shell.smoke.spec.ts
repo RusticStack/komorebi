@@ -148,8 +148,10 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
             name: string;
             request?: {
               accountId?: string;
+              cursor?: { messageId?: string; sortKey?: string } | null;
               draftId?: string;
               folderId?: string;
+              limit?: number;
               messageId?: string;
               action?: { kind?: string; read?: boolean };
               scope?: string;
@@ -162,6 +164,7 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
               to?: Array<{ address?: string; name?: string | null }>;
               cc?: Array<{ address?: string; name?: string | null }>;
               subject?: string;
+              unifiedInbox?: boolean;
             };
           }>;
         }
@@ -177,6 +180,9 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
       mailActions: events.filter(
         (event) => event.name === "perform-mail-action",
       ),
+      messagePages: events.filter(
+        (event) => event.name === "load-message-page",
+      ),
       savedDrafts: events.filter((event) => event.name === "save-draft"),
       sent: events.filter((event) => event.name === "send-mail"),
       stagedForwardedAttachments: events.filter(
@@ -185,6 +191,19 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
     };
   });
   expect(events.externalLinks).toHaveLength(1);
+  expect(events.messagePages).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        request: expect.objectContaining({
+          accountId: null,
+          cursor: null,
+          folderId: null,
+          limit: 100,
+          unifiedInbox: true,
+        }),
+      }),
+    ]),
+  );
   expect(events.externalLinks[0]?.request).toMatchObject({
     url: "https://example.com/invoice",
     userRequested: true,
