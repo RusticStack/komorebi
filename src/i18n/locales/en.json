@@ -16,6 +16,7 @@
   },
   "common": {
     "actions": {
+      "cancel": "Cancel",
       "close": "Close",
       "retry": "Retry",
       "save": "Save"
@@ -133,8 +134,15 @@
         "forwardUnavailable": "Forward unavailable",
         "forwardUnavailableTitle": "Composer forward routing is not implemented yet.",
         "loadRemote": "Load remote content",
+        "loadRemoteAllowedMessage": "Remote content allowed for this message",
+        "loadRemoteAllowedMessageTitle": "Remote image loading is allowed for this message.",
+        "loadRemoteAllowedSender": "Remote content allowed for this sender",
+        "loadRemoteAllowedSenderTitle": "Remote image loading is allowed for this sender on this account.",
+        "loadRemoteNoContent": "No remote content to load",
+        "loadRemoteNoContentTitle": "This message does not include blocked remote resources.",
+        "loadRemoteTitle": "Choose whether to load remote images for this message or sender.",
         "loadRemoteUnavailable": "Load remote content unavailable; remote resources are blocked by default",
-        "loadRemoteUnavailableTitle": "Remote resources stay blocked until a per-message or per-sender preference command exists.",
+        "loadRemoteUnavailableTitle": "Remote resources stay blocked until the backend preference command is available.",
         "markRead": "Mark read",
         "markReadUnavailable": "Mark read unavailable",
         "markUnread": "Mark unread",
@@ -162,6 +170,26 @@
         "heading": "Loading message view",
         "label": "Reader loading",
         "status": "Loading local cache"
+      },
+      "remoteContent": {
+        "actionsAria": "Remote content preference choices",
+        "allowMessage": "Allow this message",
+        "allowSender": "Always allow this sender",
+        "allowSenderTitle": "Allow validated remote images from this sender on this account.",
+        "allowSenderUnavailableTitle": "This message has no usable sender address.",
+        "allowedMessageStatus": "Remote content allowed for this message",
+        "allowedSenderStatus": "Remote content allowed for this sender",
+        "body": "Remote images can reveal when and where mail is opened.",
+        "error": "Remote content preference could not be saved.",
+        "heading": "Remote content",
+        "loading": "Saving remote preference",
+        "panelAria": "Remote content preference"
+      },
+      "links": {
+        "error": "External link could not be opened.",
+        "opened": "External link opened.",
+        "opening": "Opening external link.",
+        "unavailable": "External link opening is unavailable."
       },
       "remoteBlocked": "Remote content blocked by default",
       "selectedEyebrow": "Selected message"

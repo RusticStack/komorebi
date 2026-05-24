@@ -4,6 +4,7 @@ import {
   type MailClientShellProps,
 } from "./mail/shell/MailClientShell";
 import {
+  allowRemoteContentFromTauri,
   autosaveComposerDraftFromTauri,
   createAccountFromTauri,
   discardComposerDraftFromTauri,
@@ -13,6 +14,7 @@ import {
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
+  openExternalLinkFromTauri,
   previewAttachmentFromTauri,
   reauthAccountFromTauri,
   removeAccountFromTauri,
@@ -31,6 +33,12 @@ function App(props: MailClientShellProps) {
   const isRuntime = isTauriRuntime();
   const runtimeLoader = isRuntime ? loadMailShellDataFromTauri : undefined;
   const runtimeSearch = isRuntime ? searchMailFromTauri : undefined;
+  const runtimeAllowRemoteContent = isRuntime
+    ? allowRemoteContentFromTauri
+    : undefined;
+  const runtimeOpenExternalLink = isRuntime
+    ? openExternalLinkFromTauri
+    : undefined;
   const runtimeAttachmentPreview = isRuntime
     ? previewAttachmentFromTauri
     : undefined;
@@ -77,6 +85,10 @@ function App(props: MailClientShellProps) {
       {...props}
       loadMailShellData={props.loadMailShellData ?? runtimeLoader}
       searchMail={props.searchMail ?? runtimeSearch}
+      allowRemoteContent={
+        props.allowRemoteContent ?? runtimeAllowRemoteContent
+      }
+      openExternalLink={props.openExternalLink ?? runtimeOpenExternalLink}
       previewAttachment={props.previewAttachment ?? runtimeAttachmentPreview}
       saveAttachment={props.saveAttachment ?? runtimeAttachmentSave}
       downloadAttachment={props.downloadAttachment ?? runtimeAttachmentDownload}

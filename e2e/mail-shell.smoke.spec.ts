@@ -22,6 +22,26 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
   await expect(
     invoiceReader.getByRole("heading", { name: "Invoice question" }),
   ).toBeVisible();
+  await expect(
+    invoiceReader.getByText("Remote content blocked", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    invoiceReader.locator('img[alt="tracking pixel"][src]'),
+  ).toHaveCount(0);
+  await invoiceReader.getByRole("link", { name: "invoice portal" }).click();
+  await expect(invoiceReader.getByText("External link opened.")).toBeVisible();
+  await invoiceReader.getByRole("button", { name: "Load remote content" }).click();
+  await invoiceReader
+    .getByRole("button", { name: "Allow this message" })
+    .click();
+  await expect(
+    invoiceReader.getByText("Remote content allowed for this message").first(),
+  ).toBeVisible();
+  await expect(
+    invoiceReader.locator(
+      'img[alt="tracking pixel"][src="https://tracker.example/pixel.png"]',
+    ),
+  ).toHaveCount(1);
   await expect(invoiceReader.getByText("notes.txt")).toBeVisible();
   await invoiceReader.getByRole("button", { name: "Preview notes.txt" }).click();
   await expect(
@@ -77,19 +97,48 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
   await expect(composer.getByText("Message sent")).toBeVisible();
   await expect(composer.getByText("SMTP accepted")).toBeVisible();
 
-  const sentEvents = await page.evaluate(() => {
+  const events = await page.evaluate(() => {
     const events =
       (
         window as Window & {
           __KOMOREBI_E2E_EVENTS__?: Array<{
             name: string;
-            request?: { draftId?: string };
+            request?: {
+              accountId?: string;
+              draftId?: string;
+              folderId?: string;
+              messageId?: string;
+              scope?: string;
+              url?: string;
+              userRequested?: boolean;
+            };
           }>;
         }
       ).__KOMOREBI_E2E_EVENTS__ ?? [];
 
-    return events.filter((event) => event.name === "send-mail");
+    return {
+      remoteContent: events.filter(
+        (event) => event.name === "allow-remote-content",
+      ),
+      externalLinks: events.filter(
+        (event) => event.name === "open-external-link",
+      ),
+      sent: events.filter((event) => event.name === "send-mail"),
+    };
   });
-  expect(sentEvents).toHaveLength(1);
-  expect(sentEvents[0]?.request?.draftId).toBe("draft_e2e_saved");
+  expect(events.externalLinks).toHaveLength(1);
+  expect(events.externalLinks[0]?.request).toMatchObject({
+    url: "https://example.com/invoice",
+    userRequested: true,
+  });
+  expect(events.remoteContent).toHaveLength(1);
+  expect(events.remoteContent[0]?.request).toMatchObject({
+    accountId: "acct_work",
+    folderId: "folder_work_inbox",
+    messageId: "msg_invoice",
+    scope: "message",
+    userRequested: true,
+  });
+  expect(events.sent).toHaveLength(1);
+  expect(events.sent[0]?.request?.draftId).toBe("draft_e2e_saved");
 });

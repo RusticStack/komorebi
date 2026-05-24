@@ -13,6 +13,10 @@ import type {
   AttachmentDownloadResponse,
   AttachmentPreviewResponse,
   AttachmentSaveResponse,
+  ExternalLinkOpenRequest,
+  ExternalLinkOpenResponse,
+  RemoteContentPreferenceRequest,
+  RemoteContentPreferenceResponse,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
@@ -52,6 +56,8 @@ export type SyncStatusEventHandler = (
 
 const LOAD_MAIL_SHELL_COMMAND = "load_mail_shell";
 const SEARCH_MAIL_COMMAND = "search_mail";
+const ALLOW_REMOTE_CONTENT_COMMAND = "allow_remote_content";
+const OPEN_EXTERNAL_LINK_COMMAND = "open_external_link";
 const PREVIEW_ATTACHMENT_COMMAND = "preview_attachment";
 const SAVE_ATTACHMENT_COMMAND = "save_attachment";
 const DOWNLOAD_ATTACHMENT_COMMAND = "download_attachment";
@@ -95,6 +101,22 @@ export async function searchMailFromTauri(
   throwIfAborted(signal);
 
   return response;
+}
+
+export async function allowRemoteContentFromTauri(
+  request: RemoteContentPreferenceRequest,
+): Promise<RemoteContentPreferenceResponse> {
+  return invoke<RemoteContentPreferenceResponse>(ALLOW_REMOTE_CONTENT_COMMAND, {
+    request,
+  });
+}
+
+export async function openExternalLinkFromTauri(
+  request: ExternalLinkOpenRequest,
+): Promise<ExternalLinkOpenResponse> {
+  return invoke<ExternalLinkOpenResponse>(OPEN_EXTERNAL_LINK_COMMAND, {
+    request,
+  });
 }
 
 export async function previewAttachmentFromTauri(

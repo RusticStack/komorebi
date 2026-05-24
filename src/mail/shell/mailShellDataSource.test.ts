@@ -5,10 +5,14 @@ import type {
   AttachmentPreviewResponse,
   AttachmentSaveResponse,
   ComposerDraftSaveRequest,
+  ExternalLinkOpenRequest,
+  ExternalLinkOpenResponse,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
   RecentRecipientSuggestion,
+  RemoteContentPreferenceRequest,
+  RemoteContentPreferenceResponse,
 } from "./mailShellState";
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -23,6 +27,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import {
+  allowRemoteContentFromTauri,
   autosaveComposerDraftFromTauri,
   createAccountFromTauri,
   downloadAttachmentFromTauri,
@@ -31,6 +36,7 @@ import {
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
+  openExternalLinkFromTauri,
   previewAttachmentFromTauri,
   reauthAccountFromTauri,
   removeAccountFromTauri,
@@ -147,6 +153,46 @@ describe("mailShellDataSource", () => {
       request,
     });
     expect(invokeMock).toHaveBeenNthCalledWith(3, "download_attachment", {
+      request,
+    });
+  });
+
+  it("maps remote-content preferences to the typed Tauri command", async () => {
+    const request: RemoteContentPreferenceRequest = {
+      accountId: "acct_work",
+      folderId: "folder_inbox",
+      messageId: "msg_invoice",
+      scope: "sender",
+      userRequested: true,
+    };
+    const response: RemoteContentPreferenceResponse = {
+      accountId: "acct_work",
+      messageId: "msg_invoice",
+      remoteContentAllowed: true,
+      scope: "sender",
+      senderEmail: "finance@example.com",
+    };
+    invokeMock.mockResolvedValueOnce(response);
+
+    await expect(allowRemoteContentFromTauri(request)).resolves.toBe(response);
+    expect(invokeMock).toHaveBeenCalledWith("allow_remote_content", {
+      request,
+    });
+  });
+
+  it("maps external link opening to the typed Tauri command", async () => {
+    const request: ExternalLinkOpenRequest = {
+      url: "mailto:person@example.com?subject=Hello",
+      userRequested: true,
+    };
+    const response: ExternalLinkOpenResponse = {
+      opened: true,
+      openedUrl: request.url,
+    };
+    invokeMock.mockResolvedValueOnce(response);
+
+    await expect(openExternalLinkFromTauri(request)).resolves.toBe(response);
+    expect(invokeMock).toHaveBeenCalledWith("open_external_link", {
       request,
     });
   });

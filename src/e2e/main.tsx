@@ -15,12 +15,16 @@ import type {
   ComposerDraftSaveResponse,
   ComposerSendRequest,
   ComposerSendResponse,
+  ExternalLinkOpenRequest,
+  ExternalLinkOpenResponse,
   MailMessage,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
   RecentRecipientSearchRequest,
   RecentRecipientSuggestion,
+  RemoteContentPreferenceRequest,
+  RemoteContentPreferenceResponse,
 } from "../mail/shell/mailShellState";
 import {
   createPerformanceMailFixture,
@@ -33,6 +37,8 @@ type E2eEvent =
   | { name: "load-mail-shell" }
   | { name: "list-drafts" }
   | { name: "search-mail"; request: MailSearchRequest }
+  | { name: "allow-remote-content"; request: RemoteContentPreferenceRequest }
+  | { name: "open-external-link"; request: ExternalLinkOpenRequest }
   | { name: "preview-attachment"; request: AttachmentCommandRequest }
   | { name: "save-attachment"; request: AttachmentCommandRequest }
   | { name: "download-attachment"; request: AttachmentCommandRequest }
@@ -147,7 +153,7 @@ const fixtureMail: MailShellData = {
         },
       ],
       bodyHtml:
-        '<p>Can you <strong>confirm</strong> the invoice number?</p><img src="https://tracker.example/pixel.png" alt="tracking pixel">',
+        '<p>Can you <strong>confirm</strong> the invoice number in the <a href="https://example.com/invoice">invoice portal</a>?</p><a href="javascript:alert(1)">bad link</a><img src="https://tracker.example/pixel.png" alt="tracking pixel">',
       bodyText: "Can you confirm the invoice number?",
       flagged: true,
       folderId: "folder_work_inbox",
@@ -259,6 +265,46 @@ async function searchMail(
     indexStatus: "ready",
     query: request.query,
     results: clone(results),
+  };
+}
+
+async function allowRemoteContent(
+  request: RemoteContentPreferenceRequest,
+): Promise<RemoteContentPreferenceResponse> {
+  e2eEvents.push({ name: "allow-remote-content", request });
+  await delay(20);
+
+  const message = activeMail.messages.find(
+    (candidate) =>
+      candidate.accountId === request.accountId &&
+      candidate.folderId === request.folderId &&
+      candidate.id === request.messageId,
+  );
+  if (!message) {
+    throw new Error("message was not found");
+  }
+
+  message.remoteContentAllowed = true;
+  message.remoteContentAllowedScope = request.scope;
+
+  return {
+    accountId: request.accountId,
+    messageId: request.messageId,
+    remoteContentAllowed: true,
+    scope: request.scope,
+    senderEmail: request.scope === "sender" ? message.senderEmail : null,
+  };
+}
+
+async function openExternalLink(
+  request: ExternalLinkOpenRequest,
+): Promise<ExternalLinkOpenResponse> {
+  e2eEvents.push({ name: "open-external-link", request });
+  await delay(20);
+
+  return {
+    opened: true,
+    openedUrl: request.url,
   };
 }
 
@@ -436,11 +482,13 @@ function clone<T>(value: T): T {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App
+      allowRemoteContent={allowRemoteContent}
       discardComposerDraft={discardComposerDraft}
       downloadAttachment={downloadAttachment}
       loadComposerDrafts={loadComposerDrafts}
       loadMailShellData={loadMailShellData}
       loadRecentRecipients={listRecentRecipients}
+      openExternalLink={openExternalLink}
       previewAttachment={previewAttachment}
       saveAttachment={saveAttachment}
       saveComposerDraft={saveComposerDraft}

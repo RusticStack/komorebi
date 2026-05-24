@@ -99,6 +99,34 @@ export type AttachmentSaveResponse = {
   bytesWritten: number;
 };
 
+export type RemoteContentPreferenceScope = "message" | "sender";
+
+export type RemoteContentPreferenceRequest = {
+  accountId: string;
+  folderId: string;
+  messageId: string;
+  scope: RemoteContentPreferenceScope;
+  userRequested: boolean;
+};
+
+export type RemoteContentPreferenceResponse = {
+  accountId: string;
+  messageId: string;
+  scope: RemoteContentPreferenceScope;
+  senderEmail: string | null;
+  remoteContentAllowed: boolean;
+};
+
+export type ExternalLinkOpenRequest = {
+  url: string;
+  userRequested: boolean;
+};
+
+export type ExternalLinkOpenResponse = {
+  openedUrl: string;
+  opened: boolean;
+};
+
 export type MailMessage = {
   id: string;
   accountId: string;
@@ -112,6 +140,8 @@ export type MailMessage = {
   flagged: boolean;
   bodyText: string | null;
   bodyHtml: string | null;
+  remoteContentAllowed?: boolean;
+  remoteContentAllowedScope?: RemoteContentPreferenceScope | null;
   attachments: MailAttachment[];
 };
 

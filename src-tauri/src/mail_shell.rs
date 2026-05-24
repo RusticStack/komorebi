@@ -2,6 +2,7 @@ use std::{collections::HashMap, fs, path::Path};
 
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::Manager;
 
 use crate::ipc_validation::{
@@ -15,6 +16,7 @@ const MESSAGE_SNAPSHOT_LIMIT: i64 = 500;
 const MAIL_SEARCH_RESULT_LIMIT: u32 = 100;
 const MAX_SEARCH_QUERY_BYTES: usize = 512;
 const MAX_SEARCH_TERMS: usize = 12;
+const MAX_SENDER_EMAIL_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +77,8 @@ pub struct MailShellMessage {
     pub flagged: bool,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
+    pub remote_content_allowed: bool,
+    pub remote_content_allowed_scope: Option<String>,
     pub attachments: Vec<MailShellAttachment>,
 }
 
@@ -103,6 +107,33 @@ pub struct MailSearchResponse {
     pub query: String,
     pub index_status: MailSearchIndexStatus,
     pub results: Vec<MailShellMessage>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteContentPreferenceScope {
+    Message,
+    Sender,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteContentPreferenceRequest {
+    pub account_id: String,
+    pub folder_id: String,
+    pub message_id: String,
+    pub scope: RemoteContentPreferenceScope,
+    pub user_requested: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteContentPreferenceResponse {
+    pub account_id: String,
+    pub message_id: String,
+    pub scope: RemoteContentPreferenceScope,
+    pub sender_email: Option<String>,
+    pub remote_content_allowed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -190,6 +221,53 @@ pub fn search_mail_from_path(
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
     search_mail_from_connection(&connection, request)
+}
+
+#[tauri::command]
+pub fn allow_remote_content(
+    app: tauri::AppHandle,
+    request: RemoteContentPreferenceRequest,
+) -> Result<RemoteContentPreferenceResponse, MailShellError> {
+    let app_data_dir = app.path().app_data_dir()?;
+    fs::create_dir_all(&app_data_dir)?;
+    let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+
+    allow_remote_content_from_path(&cache_path, request)
+}
+
+pub fn allow_remote_content_from_path(
+    cache_path: &Path,
+    request: RemoteContentPreferenceRequest,
+) -> Result<RemoteContentPreferenceResponse, MailShellError> {
+    let mut connection = Connection::open(cache_path)?;
+    apply_migrations(&mut connection)?;
+    allow_remote_content_from_connection(&connection, request)
+}
+
+pub fn allow_remote_content_from_connection(
+    connection: &Connection,
+    request: RemoteContentPreferenceRequest,
+) -> Result<RemoteContentPreferenceResponse, MailShellError> {
+    let message = validate_remote_content_preference_request(connection, &request)?;
+    let sender_email = match request.scope {
+        RemoteContentPreferenceScope::Message => None,
+        RemoteContentPreferenceScope::Sender => Some(message.sender_email.clone()),
+    };
+    let preference = RemoteContentPreferenceRecord {
+        account_id: request.account_id.clone(),
+        message_id: request.message_id.clone(),
+        scope: request.scope.clone(),
+        sender_email,
+    };
+    upsert_remote_content_preference(connection, &preference)?;
+
+    Ok(RemoteContentPreferenceResponse {
+        account_id: request.account_id,
+        message_id: request.message_id,
+        scope: request.scope,
+        sender_email: preference.sender_email,
+        remote_content_allowed: true,
+    })
 }
 
 pub fn search_mail_from_connection(
@@ -370,11 +448,29 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
            messages.is_read,
            messages.is_flagged,
            messages.body_text,
-           messages.body_html
+           messages.body_html,
+           CASE
+             WHEN message_remote_content.id IS NOT NULL THEN 1
+             WHEN sender_remote_content.id IS NOT NULL THEN 1
+             ELSE 0
+           END AS remote_content_allowed,
+           CASE
+             WHEN message_remote_content.id IS NOT NULL THEN 'message'
+             WHEN sender_remote_content.id IS NOT NULL THEN 'sender'
+             ELSE NULL
+           END AS remote_content_allowed_scope
          FROM messages
          JOIN accounts ON accounts.id = messages.account_id
          JOIN folders ON folders.account_id = messages.account_id
           AND folders.id = messages.folder_id
+         LEFT JOIN remote_content_preferences AS message_remote_content
+           ON message_remote_content.account_id = messages.account_id
+          AND message_remote_content.scope = 'message'
+          AND message_remote_content.message_id = messages.id
+         LEFT JOIN remote_content_preferences AS sender_remote_content
+           ON sender_remote_content.account_id = messages.account_id
+          AND sender_remote_content.scope = 'sender'
+          AND sender_remote_content.normalized_sender_email = LOWER(TRIM(COALESCE(messages.sender_email, '')))
          WHERE accounts.removed_at IS NULL
            AND accounts.auth_status != 'removed'
          ORDER BY
@@ -384,23 +480,7 @@ fn load_messages(connection: &Connection) -> rusqlite::Result<Vec<MailShellMessa
     )?;
 
     let rows = statement.query_map(params![MESSAGE_SNAPSHOT_LIMIT], |row| {
-        let preview = trim_preview(row.get::<_, String>(6)?);
-
-        Ok(MailShellMessage {
-            id: row.get(0)?,
-            account_id: row.get(1)?,
-            folder_id: row.get(2)?,
-            sender: row.get(3)?,
-            sender_email: row.get(4)?,
-            subject: row.get(5)?,
-            preview,
-            received_at: row.get(7)?,
-            unread: row.get::<_, i64>(8)? == 0,
-            flagged: row.get::<_, i64>(9)? == 1,
-            body_text: row.get(10)?,
-            body_html: row.get(11)?,
-            attachments: Vec::new(),
-        })
+        mail_shell_message_from_row(row)
     })?;
 
     let mut messages = collect_rows(rows)?;
@@ -473,6 +553,16 @@ fn search_messages(
            messages.is_flagged,
            messages.body_text,
            messages.body_html,
+           CASE
+             WHEN message_remote_content.id IS NOT NULL THEN 1
+             WHEN sender_remote_content.id IS NOT NULL THEN 1
+             ELSE 0
+           END AS remote_content_allowed,
+           CASE
+             WHEN message_remote_content.id IS NOT NULL THEN 'message'
+             WHEN sender_remote_content.id IS NOT NULL THEN 'sender'
+             ELSE NULL
+           END AS remote_content_allowed_scope,
            bm25(messages_fts) AS rank
          FROM messages_fts
          JOIN messages ON messages.rowid = messages_fts.rowid
@@ -481,6 +571,14 @@ fn search_messages(
           AND folders.id = messages.folder_id
          LEFT JOIN settings AS account_preferences
            ON account_preferences.key = 'account:' || accounts.id || ':local_preferences'
+         LEFT JOIN remote_content_preferences AS message_remote_content
+           ON message_remote_content.account_id = messages.account_id
+          AND message_remote_content.scope = 'message'
+          AND message_remote_content.message_id = messages.id
+         LEFT JOIN remote_content_preferences AS sender_remote_content
+           ON sender_remote_content.account_id = messages.account_id
+          AND sender_remote_content.scope = 'sender'
+          AND sender_remote_content.normalized_sender_email = LOWER(TRIM(COALESCE(messages.sender_email, '')))
          WHERE messages_fts MATCH ?1
            AND accounts.removed_at IS NULL
            AND accounts.auth_status != 'removed'
@@ -507,25 +605,7 @@ fn search_messages(
             request.folder_id.as_deref(),
             request.limit
         ],
-        |row| {
-            let preview = trim_preview(row.get::<_, String>(6)?);
-
-            Ok(MailShellMessage {
-                id: row.get(0)?,
-                account_id: row.get(1)?,
-                folder_id: row.get(2)?,
-                sender: row.get(3)?,
-                sender_email: row.get(4)?,
-                subject: row.get(5)?,
-                preview,
-                received_at: row.get(7)?,
-                unread: row.get::<_, i64>(8)? == 0,
-                flagged: row.get::<_, i64>(9)? == 1,
-                body_text: row.get(10)?,
-                body_html: row.get(11)?,
-                attachments: Vec::new(),
-            })
-        },
+        mail_shell_message_from_row,
     )?;
 
     collect_rows(rows)
@@ -548,6 +628,221 @@ fn attach_message_attachments(
     }
 
     Ok(())
+}
+
+fn mail_shell_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailShellMessage> {
+    let preview = trim_preview(row.get::<_, String>(6)?);
+
+    Ok(MailShellMessage {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        folder_id: row.get(2)?,
+        sender: row.get(3)?,
+        sender_email: row.get(4)?,
+        subject: row.get(5)?,
+        preview,
+        received_at: row.get(7)?,
+        unread: row.get::<_, i64>(8)? == 0,
+        flagged: row.get::<_, i64>(9)? == 1,
+        body_text: row.get(10)?,
+        body_html: row.get(11)?,
+        remote_content_allowed: row.get::<_, i64>(12)? == 1,
+        remote_content_allowed_scope: row.get(13)?,
+        attachments: Vec::new(),
+    })
+}
+
+#[derive(Debug, Clone)]
+struct RemoteContentMessageRow {
+    sender_email: String,
+}
+
+#[derive(Debug, Clone)]
+struct RemoteContentPreferenceRecord {
+    account_id: String,
+    message_id: String,
+    scope: RemoteContentPreferenceScope,
+    sender_email: Option<String>,
+}
+
+fn validate_remote_content_preference_request(
+    connection: &Connection,
+    request: &RemoteContentPreferenceRequest,
+) -> Result<RemoteContentMessageRow, MailShellError> {
+    validate_entity_id("account_id", &request.account_id)?;
+    validate_entity_id("folder_id", &request.folder_id)?;
+    validate_entity_id("message_id", &request.message_id)?;
+
+    if !request.user_requested {
+        return Err(MailShellError::new(
+            "remote content preference requires user intent",
+        ));
+    }
+
+    if !active_account_exists(connection, &request.account_id)? {
+        return Err(IpcValidationError::UnknownAccount.into());
+    }
+
+    if !folder_exists_in_scope(connection, Some(&request.account_id), &request.folder_id)? {
+        return Err(IpcValidationError::UnknownFolder.into());
+    }
+
+    let row = connection
+        .query_row(
+            "SELECT COALESCE(messages.sender_email, '') AS sender_email
+             FROM messages
+             JOIN accounts ON accounts.id = messages.account_id
+             JOIN folders ON folders.account_id = messages.account_id
+              AND folders.id = messages.folder_id
+             WHERE accounts.removed_at IS NULL
+               AND accounts.auth_status != 'removed'
+               AND messages.account_id = ?1
+               AND messages.folder_id = ?2
+               AND messages.id = ?3",
+            params![request.account_id, request.folder_id, request.message_id],
+            |row| {
+                Ok(RemoteContentMessageRow {
+                    sender_email: row.get(0)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or(IpcValidationError::UnknownMessage)?;
+
+    if matches!(request.scope, RemoteContentPreferenceScope::Sender) {
+        let sender_email = row.sender_email.trim();
+        validate_bounded_text("sender_email", sender_email, MAX_SENDER_EMAIL_BYTES)?;
+        if sender_email.contains(char::is_whitespace)
+            || sender_email.contains('<')
+            || sender_email.contains('>')
+            || sender_email.matches('@').count() != 1
+            || sender_email.starts_with('@')
+            || sender_email.ends_with('@')
+        {
+            return Err(MailShellError::new("message sender is unavailable"));
+        }
+    }
+
+    Ok(row)
+}
+
+fn upsert_remote_content_preference(
+    connection: &Connection,
+    preference: &RemoteContentPreferenceRecord,
+) -> Result<(), MailShellError> {
+    match preference.scope {
+        RemoteContentPreferenceScope::Message => {
+            let existing_id = connection
+                .query_row(
+                    "SELECT id
+                     FROM remote_content_preferences
+                     WHERE account_id = ?1
+                       AND scope = 'message'
+                       AND message_id = ?2",
+                    params![preference.account_id, preference.message_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+
+            if let Some(existing_id) = existing_id {
+                connection.execute(
+                    "UPDATE remote_content_preferences
+                     SET updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?1",
+                    [existing_id],
+                )?;
+                return Ok(());
+            }
+
+            connection.execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   message_id
+                 )
+                 VALUES (?1, ?2, 'message', ?3)",
+                params![
+                    stable_remote_content_preference_id(
+                        &preference.account_id,
+                        "message",
+                        &preference.message_id
+                    ),
+                    preference.account_id,
+                    preference.message_id
+                ],
+            )?;
+        }
+        RemoteContentPreferenceScope::Sender => {
+            let sender_email = preference
+                .sender_email
+                .as_deref()
+                .ok_or_else(|| MailShellError::new("message sender is unavailable"))?
+                .trim()
+                .to_string();
+            let normalized_sender_email = sender_email.to_ascii_lowercase();
+            let existing_id = connection
+                .query_row(
+                    "SELECT id
+                     FROM remote_content_preferences
+                     WHERE account_id = ?1
+                       AND scope = 'sender'
+                       AND normalized_sender_email = ?2",
+                    params![preference.account_id, normalized_sender_email],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+
+            if let Some(existing_id) = existing_id {
+                connection.execute(
+                    "UPDATE remote_content_preferences
+                     SET sender_email = ?2,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?1",
+                    params![existing_id, sender_email],
+                )?;
+                return Ok(());
+            }
+
+            connection.execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   sender_email,
+                   normalized_sender_email
+                 )
+                 VALUES (?1, ?2, 'sender', ?3, ?4)",
+                params![
+                    stable_remote_content_preference_id(
+                        &preference.account_id,
+                        "sender",
+                        &normalized_sender_email
+                    ),
+                    preference.account_id,
+                    sender_email,
+                    normalized_sender_email
+                ],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn stable_remote_content_preference_id(account_id: &str, scope: &str, target: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(account_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(scope.as_bytes());
+    hasher.update([0]);
+    hasher.update(target.as_bytes());
+    let hash = hasher.finalize();
+    let mut id = String::from("rc_");
+    for byte in hash.iter().take(16) {
+        id.push_str(&format!("{byte:02x}"));
+    }
+    id
 }
 
 fn load_message_attachments_by_ids(
@@ -1160,6 +1455,185 @@ mod tests {
         .unwrap();
         assert_eq!(account_search.results.len(), 1);
         assert_eq!(account_search.results[0].id, "msg_work");
+    }
+
+    #[test]
+    fn remote_content_preferences_are_persisted_for_message_and_sender_scopes() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+
+        let message_response = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "acct_work".to_string(),
+                folder_id: "folder_work_inbox".to_string(),
+                message_id: "msg_work".to_string(),
+                scope: RemoteContentPreferenceScope::Message,
+                user_requested: true,
+            },
+        )
+        .expect("message preference persists");
+
+        assert_eq!(
+            message_response,
+            RemoteContentPreferenceResponse {
+                account_id: "acct_work".to_string(),
+                message_id: "msg_work".to_string(),
+                scope: RemoteContentPreferenceScope::Message,
+                sender_email: None,
+                remote_content_allowed: true,
+            }
+        );
+
+        let snapshot = load_mail_shell_from_connection(&connection).unwrap();
+        let work_message = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "msg_work")
+            .expect("work message loaded");
+        assert!(work_message.remote_content_allowed);
+        assert_eq!(
+            work_message.remote_content_allowed_scope.as_deref(),
+            Some("message")
+        );
+
+        let sender_response = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "acct_personal".to_string(),
+                folder_id: "folder_personal_inbox".to_string(),
+                message_id: "msg_personal".to_string(),
+                scope: RemoteContentPreferenceScope::Sender,
+                user_requested: true,
+            },
+        )
+        .expect("sender preference persists");
+        assert_eq!(
+            sender_response.sender_email.as_deref(),
+            Some("ada@example.com")
+        );
+
+        let sender_snapshot = load_mail_shell_from_connection(&connection).unwrap();
+        let personal_message = sender_snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "msg_personal")
+            .expect("personal message loaded");
+        assert!(personal_message.remote_content_allowed);
+        assert_eq!(
+            personal_message.remote_content_allowed_scope.as_deref(),
+            Some("sender")
+        );
+
+        let sender_row_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM remote_content_preferences
+                 WHERE account_id = 'acct_personal'
+                   AND scope = 'sender'
+                   AND normalized_sender_email = 'ada@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sender_row_count, 1);
+    }
+
+    #[test]
+    fn remote_content_preferences_validate_scope_and_intent_before_persistence() {
+        let connection = migrated_connection();
+        seed_shell_cache(&connection);
+
+        let no_intent = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "acct_work".to_string(),
+                folder_id: "folder_work_inbox".to_string(),
+                message_id: "msg_work".to_string(),
+                scope: RemoteContentPreferenceScope::Message,
+                user_requested: false,
+            },
+        )
+        .expect_err("user intent is required");
+        assert_eq!(
+            no_intent.reason,
+            "remote content preference requires user intent"
+        );
+
+        let invalid_account = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "../secret".to_string(),
+                folder_id: "folder_work_inbox".to_string(),
+                message_id: "msg_work".to_string(),
+                scope: RemoteContentPreferenceScope::Message,
+                user_requested: true,
+            },
+        )
+        .expect_err("invalid account id is rejected");
+        assert!(invalid_account.reason.contains("account_id is invalid"));
+
+        let unowned_folder = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "acct_work".to_string(),
+                folder_id: "folder_personal_inbox".to_string(),
+                message_id: "msg_work".to_string(),
+                scope: RemoteContentPreferenceScope::Message,
+                user_requested: true,
+            },
+        )
+        .expect_err("unowned folder is rejected");
+        assert_eq!(unowned_folder.reason, "folder was not found for account");
+
+        let missing_message = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "acct_work".to_string(),
+                folder_id: "folder_work_inbox".to_string(),
+                message_id: "msg_missing".to_string(),
+                scope: RemoteContentPreferenceScope::Message,
+                user_requested: true,
+            },
+        )
+        .expect_err("missing message is rejected");
+        assert_eq!(missing_message.reason, "message was not found for folder");
+
+        connection
+            .execute(
+                "INSERT INTO messages (
+                   id,
+                   account_id,
+                   folder_id,
+                   imap_uid,
+                   uid_validity,
+                   subject,
+                   sender_email
+                 )
+                 VALUES (
+                   'msg_no_sender',
+                   'acct_personal',
+                   'folder_personal_inbox',
+                   4,
+                   10,
+                   'No sender',
+                   ''
+                 )",
+                [],
+            )
+            .expect("seed no-sender message");
+        let sender_unavailable = allow_remote_content_from_connection(
+            &connection,
+            RemoteContentPreferenceRequest {
+                account_id: "acct_personal".to_string(),
+                folder_id: "folder_personal_inbox".to_string(),
+                message_id: "msg_no_sender".to_string(),
+                scope: RemoteContentPreferenceScope::Sender,
+                user_requested: true,
+            },
+        )
+        .expect_err("sender preference requires a usable sender email");
+        assert_eq!(sender_unavailable.reason, "sender_email is required");
     }
 
     #[test]

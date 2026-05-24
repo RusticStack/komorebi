@@ -22,6 +22,8 @@ import type {
   ComposerDraftSaveResponse,
   ComposerSendRequest,
   ComposerSendResponse,
+  ExternalLinkOpenRequest,
+  ExternalLinkOpenResponse,
   MailMessage,
   MailSearchRequest,
   MailSearchResponse,
@@ -29,6 +31,8 @@ import type {
   MailShellLoadState,
   RecentRecipientSearchRequest,
   RecentRecipientSuggestion,
+  RemoteContentPreferenceRequest,
+  RemoteContentPreferenceResponse,
 } from "./mail/shell/mailShellState";
 
 const fixtureMail: MailShellData = {
@@ -120,7 +124,7 @@ const fixtureMail: MailShellData = {
       flagged: true,
       bodyText: "Can you confirm the invoice number?",
       bodyHtml:
-        '<p>Can you <strong>confirm</strong> the invoice number?</p><img src="https://tracker.example/pixel.png" alt="tracking pixel"><script>alert("xss")</script>',
+        '<p>Can you <strong>confirm</strong> the invoice number in the <a href="https://example.com/invoice">invoice portal</a>?</p><a href="javascript:alert(1)">bad link</a><img src="https://tracker.example/pixel.png" alt="tracking pixel"><script>alert("xss")</script>',
       attachments: [
         {
           id: "att_invoice",
@@ -679,7 +683,9 @@ describe("App", () => {
     expect(
       within(reader).getByRole("heading", { name: "Invoice question" }),
     ).toBeVisible();
-    expect(reader).toHaveTextContent("Can you confirm the invoice number?");
+    expect(reader).toHaveTextContent(
+      "Can you confirm the invoice number in the invoice portal?",
+    );
     expect(within(reader).getByText("Remote content blocked")).toBeVisible();
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("img[src]")).toBeNull();
@@ -724,6 +730,107 @@ describe("App", () => {
     ).toBeDisabled();
     expect(reader).not.toHaveTextContent("AppData");
     expect(reader).not.toHaveTextContent("att_invoice.pdf");
+  });
+
+  it("opens safe message links through the typed command and leaves unsafe links inert", async () => {
+    const openExternalLink = vi.fn(
+      async (
+        request: ExternalLinkOpenRequest,
+      ): Promise<ExternalLinkOpenResponse> => ({
+        opened: true,
+        openedUrl: request.url,
+      }),
+    );
+
+    render(
+      <App initialData={fixtureMail} openExternalLink={openExternalLink} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Invoice question/ }));
+    const reader = screen.getByRole("region", { name: "Selected message" });
+
+    fireEvent.click(
+      within(reader).getByRole("link", { name: "invoice portal" }),
+    );
+
+    await waitFor(() =>
+      expect(openExternalLink).toHaveBeenCalledWith({
+        url: "https://example.com/invoice",
+        userRequested: true,
+      }),
+    );
+    expect(await within(reader).findByText("External link opened.")).toBeVisible();
+
+    fireEvent.click(within(reader).getByText("bad link"));
+    expect(openExternalLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists narrow remote-content preferences and renders consented remote images", async () => {
+    const allowRemoteContent = vi.fn(
+      async (
+        request: RemoteContentPreferenceRequest,
+      ): Promise<RemoteContentPreferenceResponse> => ({
+        accountId: request.accountId,
+        messageId: request.messageId,
+        remoteContentAllowed: true,
+        scope: request.scope,
+        senderEmail:
+          request.scope === "sender" ? "finance@example.com" : null,
+      }),
+    );
+
+    render(
+      <App
+        allowRemoteContent={allowRemoteContent}
+        initialData={fixtureMail}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Invoice question/ }));
+    const reader = screen.getByRole("region", { name: "Selected message" });
+    expect(reader.querySelector("img[src]")).toBeNull();
+
+    fireEvent.click(
+      within(reader).getByRole("button", { name: "Load remote content" }),
+    );
+    const preferencePanel = within(reader).getByRole("region", {
+      name: "Remote content preference",
+    });
+    expect(
+      within(preferencePanel).getByText(
+        "Remote images can reveal when and where mail is opened.",
+      ),
+    ).toBeVisible();
+
+    fireEvent.click(
+      within(preferencePanel).getByRole("button", {
+        name: "Allow this message",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(allowRemoteContent).toHaveBeenCalledWith({
+        accountId: "acct_work",
+        folderId: "folder_work_inbox",
+        messageId: "msg_invoice",
+        scope: "message",
+        userRequested: true,
+      }),
+    );
+    expect(
+      (
+        await within(reader).findAllByText(
+          "Remote content allowed for this message",
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+    const remoteImage = reader.querySelector<HTMLImageElement>(
+      'img[alt="tracking pixel"]',
+    );
+    expect(remoteImage?.getAttribute("src")).toBe(
+      "https://tracker.example/pixel.png",
+    );
+    expect(reader.querySelector("script")).toBeNull();
   });
 
   it("routes reader attachment preview, save, and download through typed commands", async () => {

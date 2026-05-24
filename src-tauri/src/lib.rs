@@ -7,6 +7,7 @@ pub mod auth;
 pub mod composer;
 pub mod credentials;
 pub mod draft_persistence;
+pub mod external_links;
 pub mod imap_live;
 pub mod imap_sync;
 pub mod ipc_boundary;
@@ -54,6 +55,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mail_shell::load_mail_shell,
             mail_shell::search_mail,
+            mail_shell::allow_remote_content,
+            external_links::open_external_link,
             attachment_commands::preview_attachment,
             attachment_commands::save_attachment,
             attachment_commands::download_attachment,

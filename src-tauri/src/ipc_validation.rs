@@ -1,5 +1,6 @@
 use std::{error::Error, fmt};
 
+use lettre::Address;
 use url::Url;
 
 pub const MAX_IPC_PAYLOAD_BYTES: usize = 1024 * 1024;
@@ -156,6 +157,38 @@ pub fn validate_checked_url(field: &'static str, value: &str) -> Result<Url, Ipc
     Ok(parsed)
 }
 
+pub fn validate_external_link_url(
+    field: &'static str,
+    value: &str,
+) -> Result<Url, IpcValidationError> {
+    validate_bounded_text(field, value, MAX_URL_BYTES)?;
+
+    if contains_control_or_encoded_control(value) {
+        return Err(IpcValidationError::UnsafeUrl {
+            field,
+            reason: "control characters are not allowed",
+        });
+    }
+
+    let parsed = Url::parse(value).map_err(|_| IpcValidationError::UnsafeUrl {
+        field,
+        reason: "absolute http, https, or mailto URL required",
+    })?;
+
+    match parsed.scheme() {
+        "http" | "https" => validate_openable_web_url(field, &parsed)?,
+        "mailto" => validate_openable_mailto_url(field, &parsed)?,
+        _ => {
+            return Err(IpcValidationError::UnsafeUrl {
+                field,
+                reason: "only http, https, and mailto URLs are allowed",
+            })
+        }
+    }
+
+    Ok(parsed)
+}
+
 pub fn reject_unsanitized_html(field: &'static str, value: &str) -> Result<(), IpcValidationError> {
     validate_bounded_text(field, value, MAX_TEXT_FIELD_BYTES)?;
 
@@ -294,6 +327,148 @@ fn looks_like_sql(value: &str) -> bool {
     ) || matches!((first, second), (Some("WITH"), Some(_)))
 }
 
+fn validate_openable_web_url(field: &'static str, parsed: &Url) -> Result<(), IpcValidationError> {
+    let host = parsed.host_str().ok_or(IpcValidationError::UnsafeUrl {
+        field,
+        reason: "host is required",
+    })?;
+
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(IpcValidationError::UnsafeUrl {
+            field,
+            reason: "embedded credentials are not allowed",
+        });
+    }
+
+    if is_local_or_private_host(host) {
+        return Err(IpcValidationError::UnsafeUrl {
+            field,
+            reason: "local and private network hosts are not allowed",
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_openable_mailto_url(
+    field: &'static str,
+    parsed: &Url,
+) -> Result<(), IpcValidationError> {
+    if parsed.host_str().is_some() || !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(IpcValidationError::UnsafeUrl {
+            field,
+            reason: "mailto URL must not contain authority or credentials",
+        });
+    }
+
+    let mut has_recipient = false;
+    if !parsed.path().trim().is_empty() {
+        validate_mailto_address_list(field, parsed.path())?;
+        has_recipient = true;
+    }
+
+    for (key, value) in parsed.query_pairs() {
+        let lowered_key = key.to_ascii_lowercase();
+        if contains_control_character(&key) || contains_control_character(&value) {
+            return Err(IpcValidationError::UnsafeUrl {
+                field,
+                reason: "control characters are not allowed",
+            });
+        }
+
+        match lowered_key.as_str() {
+            "subject" => {}
+            "to" | "cc" | "bcc" => {
+                validate_mailto_address_list(field, &value)?;
+                has_recipient = true;
+            }
+            _ => {
+                return Err(IpcValidationError::UnsafeUrl {
+                    field,
+                    reason: "unsupported mailto field",
+                })
+            }
+        }
+    }
+
+    if !has_recipient {
+        return Err(IpcValidationError::UnsafeUrl {
+            field,
+            reason: "mailto recipient is required",
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_mailto_address_list(
+    field: &'static str,
+    value: &str,
+) -> Result<(), IpcValidationError> {
+    let addresses: Vec<_> = value.split(',').map(str::trim).collect();
+    if addresses.is_empty() || addresses.iter().any(|address| address.is_empty()) {
+        return Err(IpcValidationError::UnsafeUrl {
+            field,
+            reason: "mailto recipient is required",
+        });
+    }
+
+    for address in addresses {
+        if contains_control_character(address) || address.contains('%') {
+            return Err(IpcValidationError::UnsafeUrl {
+                field,
+                reason: "mailto recipient is invalid",
+            });
+        }
+
+        address
+            .parse::<Address>()
+            .map_err(|_| IpcValidationError::UnsafeUrl {
+                field,
+                reason: "mailto recipient is invalid",
+            })?;
+    }
+
+    Ok(())
+}
+
+fn contains_control_or_encoded_control(value: &str) -> bool {
+    contains_control_character(value) || {
+        let lowered = value.to_ascii_lowercase();
+        lowered.contains("%00") || lowered.contains("%0a") || lowered.contains("%0d")
+    }
+}
+
+fn contains_control_character(value: &str) -> bool {
+    value.chars().any(char::is_control)
+}
+
+fn is_local_or_private_host(host: &str) -> bool {
+    let lowered = host.trim_matches(['[', ']']).to_ascii_lowercase();
+
+    if lowered == "localhost" || lowered.ends_with(".localhost") {
+        return true;
+    }
+
+    let Ok(address) = lowered.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+
+    match address {
+        std::net::IpAddr::V4(address) => {
+            address.is_loopback()
+                || address.is_private()
+                || address.is_link_local()
+                || address.octets()[0] == 0
+        }
+        std::net::IpAddr::V6(address) => {
+            address.is_loopback()
+                || address.is_unicast_link_local()
+                || matches!(address.segments()[0] & 0xfe00, 0xfc00)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,6 +546,45 @@ mod tests {
         assert!(validate_checked_url("link", "mailto:person@example.com").is_err());
         assert!(validate_checked_url("link", "https://user:pass@example.com").is_err());
         assert!(validate_checked_url("link", "https://example.com/message").is_ok());
+    }
+
+    #[test]
+    fn validates_external_link_urls_for_safe_opening() {
+        for value in [
+            "https://example.com/message",
+            "http://example.com/message",
+            "mailto:person@example.com",
+            "mailto:person@example.com?subject=Hello",
+            "mailto:?to=person@example.com&cc=copy@example.com",
+        ] {
+            assert!(
+                validate_external_link_url("url", value).is_ok(),
+                "{value} should be allowed"
+            );
+        }
+
+        for value in [
+            "javascript:alert(1)",
+            "data:text/html,<script>",
+            "file:///C:/Windows/win.ini",
+            "C:\\Windows\\win.ini",
+            "/relative",
+            "https://user:pass@example.com",
+            "https://localhost/message",
+            "http://127.0.0.1:8080/message",
+            "https://10.0.0.8/message",
+            "https://[::1]/message",
+            "mailto:",
+            "mailto:person@example.com?body=leak",
+            "mailto:person@example.com?attach=file:///C:/secret.txt",
+            "mailto:person@example.com%0D%0ABcc:other@example.com",
+            "mailto:?to=not-an-address",
+        ] {
+            assert!(
+                validate_external_link_url("url", value).is_err(),
+                "{value} should be rejected"
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,8 @@
 const APP_COMMANDS: &[&str] = &[
     "load_mail_shell",
     "search_mail",
+    "allow_remote_content",
+    "open_external_link",
     "preview_attachment",
     "save_attachment",
     "download_attachment",

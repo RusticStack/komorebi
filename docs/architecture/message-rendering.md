@@ -1,6 +1,6 @@
 # Message Rendering Boundary
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 
 ## Current State
 
@@ -27,20 +27,33 @@ Remote and inline-resource loading is blocked by default. The renderer removes `
 
 Future inline CID image support must map a parsed MIME attachment to an app-generated local preview URL through a typed Rust command and `docs/architecture/attachment-safety.md`. Sender-provided URLs and filenames must never become resource URLs directly.
 
-The reader exposes a disabled `Load remote content` control as the future preference entry point. Remote-content preferences, if added, must be scoped narrowly to the sender or message and must not weaken sanitizer rules.
+The reader now exposes a typed remote-content preference workflow. `allow_remote_content` persists a local-only preference in SQLite for either one message or one sender on the account. React sends account/folder/message ids, scope, and `userRequested=true`; Rust validates ownership and derives sender scope from the cached message row. React never sends remote URLs or sender email for this command.
+
+When a stored message/sender preference exists, `SafeEmailBody` may preserve remote image `src` values only when `isSafeRemoteImageUrl` accepts them. The allowed resource policy is:
+
+- HTTPS images only.
+- Host required.
+- No embedded URL credentials.
+- Loopback, localhost, link-local, and private network hosts are denied.
+- `srcset`, CSS resources, `http`, protocol-relative, `cid`, `data`, SVG/MathML, scripts, events, styles, and unsupported resource attributes remain blocked.
+- Preserved images receive `loading="lazy"` and `referrerpolicy="no-referrer"` after attacker-supplied resource-control attributes are stripped.
+
+The Tauri production CSP allows `https:` only in `img-src` so explicitly consented remote images can render. It does not allow frontend HTTP client permissions, remote scripts, or remote `connect-src`.
 
 ## Links
 
 Links are not left as direct navigations. The renderer:
 
 - Allows only `http`, `https`, and `mailto` URLs.
-- Rejects embedded credentials.
+- Rejects embedded credentials, localhost/private network hosts, unsupported `mailto` fields, encoded control characters, local paths, custom schemes, and malformed URLs.
 - Rewrites safe links to `href="#"` with `data-komorebi-url`.
 - Adds `rel="noreferrer noopener nofollow"`.
 - Blocks `javascript:`, `data:`, `file:`, and malformed URLs.
-- Delegates clicks through `SafeEmailBody` so a future opener command can validate and ask for user intent.
+- Delegates clicks through `SafeEmailBody` to the typed `open_external_link` Rust command.
 
-The Tauri opener plugin remains denied. Adding external open behavior requires a typed backend command or narrowly scoped capability and tests.
+`open_external_link` accepts only a sanitized URL plus `userRequested=true`. Rust validates the URL again through `validate_external_link_url` before calling the Windows system opener. `http`/`https` links require a public host and no credentials; `mailto` links require at least one valid recipient and allow only `to`, `cc`, `bcc`, and `subject` fields. React never calls `window.open`, browser navigation, or the Tauri opener plugin for message links.
+
+The Tauri opener plugin remains denied. External link opening uses only the generated command permission `allow-open-external-link`; broad opener plugin permissions remain absent.
 
 ## Plain Text Fallback
 
@@ -56,11 +69,13 @@ The same file includes a categorized sanitizer bypass corpus for mixed-case and 
 
 - Hostile fixture tags and attributes are removed.
 - Remote resource attributes are removed and reported as blocked.
+- Explicitly consented HTTPS image resources are preserved only after URL validation; insecure, credentialed, private-host, `cid`, and `data` image sources remain blocked.
 - Safe links are rewritten for delegated opening.
 - Unsafe links are stripped.
 - Attacker-supplied Komorebi link metadata is stripped before delegated-link rewriting.
+- The shell opens delegated `http`/`https`/safe `mailto` links only through the typed command and leaves unsafe links inert.
 - Sanitized output stays safe after browser insertion and serialization.
-- CSS-hidden remote resources are reported before styles are removed.
+- CSS-hidden remote resources are reported before styles are removed, and scripts/unsafe links remain blocked even when remote images are allowed.
 - Plain text fallback does not interpret markup.
 
 `src/App.test.tsx` verifies the shell detail view keeps remote images blocked while rendering selected sanitized HTML and plain-text-backed messages.

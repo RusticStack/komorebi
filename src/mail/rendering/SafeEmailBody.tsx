@@ -7,20 +7,25 @@ import {
 } from "./emailHtml";
 
 export type SafeEmailBodyProps = {
+  allowRemoteContent?: boolean;
   bodyHtml?: string | null;
   bodyText?: string | null;
   onOpenExternalLink?: (link: SafeEmailLink) => void;
 };
 
 export function SafeEmailBody({
+  allowRemoteContent = false,
   bodyHtml,
   bodyText,
   onOpenExternalLink,
 }: SafeEmailBodyProps) {
   const { t } = useTranslation();
   const sanitized = useMemo(
-    () => (bodyHtml ? sanitizeEmailHtml(bodyHtml) : null),
-    [bodyHtml],
+    () =>
+      bodyHtml
+        ? sanitizeEmailHtml(bodyHtml, allowRemoteContent ? "allowed" : "blocked")
+        : null,
+    [allowRemoteContent, bodyHtml],
   );
   const hasRenderableHtml = Boolean(sanitized?.html.trim());
   const fallbackText = bodyText?.trim() || sanitized?.plainText || "";

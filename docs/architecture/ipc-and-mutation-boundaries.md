@@ -4,7 +4,7 @@ Last updated: 2026-05-24
 
 ## Current State
 
-Komorebi has reviewed frontend-callable Rust commands for the shell read model, FTS search, reader attachment preview/save/download, account management, backend-owned OAuth loopback, and the TipTap composer MVP. There is still no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. Attachment commands are typed Rust boundaries for validating stored source files, previewing allowed types, saving through a backend-owned native dialog, and returning safe download bytes. Account-management commands are typed Rust boundaries for credential-backed generic account setup, live generic setup login validation, display/signature/preference persistence, generic reauthentication, removal, and redacted auth status; they also notify the backend sync scheduler after account lifecycle changes. OAuth loopback commands are typed Rust boundaries for Gmail/Microsoft browser authorization, callback validation, token exchange, refresh-token storage, and non-secret OAuth runtime metadata persistence. Composer commands are typed Rust boundaries for local-only draft autosave/discard/reload, staged attachment writes, local recent-recipient lookup, and SMTP send orchestration. Live sync adapters, pending Sent APPEND upload, and background scheduler orchestration exist; reply/forward routing and external attachment open/extract remain future work. Provider Drafts upload is intentionally deferred and the composer discloses that drafts stay local until sent or discarded.
+Komorebi has reviewed frontend-callable Rust commands for the shell read model, FTS search, remote-content preferences, external link opening, reader attachment preview/save/download, account management, backend-owned OAuth loopback, and the TipTap composer MVP. There is still no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. `allow_remote_content` is a typed local preference mutation that validates stored account/folder/message ownership and derives sender scope in Rust; it never accepts frontend URLs or sender addresses. `open_external_link` is a typed user-intent command for sanitized message links; it validates `http`, `https`, and `mailto` URLs in Rust before opening and never grants React opener plugin access. Attachment commands are typed Rust boundaries for validating stored source files, previewing allowed types, saving through a backend-owned native dialog, and returning safe download bytes. Account-management commands are typed Rust boundaries for credential-backed generic account setup, live generic setup login validation, display/signature/preference persistence, generic reauthentication, removal, and redacted auth status; they also notify the backend sync scheduler after account lifecycle changes. OAuth loopback commands are typed Rust boundaries for Gmail/Microsoft browser authorization, callback validation, token exchange, refresh-token storage, and non-secret OAuth runtime metadata persistence. Composer commands are typed Rust boundaries for local-only draft autosave/discard/reload, staged attachment writes, local recent-recipient lookup, and SMTP send orchestration. Live sync adapters, pending Sent APPEND upload, and background scheduler orchestration exist; reply/forward routing and external attachment open/extract remain future work. Provider Drafts upload is intentionally deferred and the composer discloses that drafts stay local until sent or discarded.
 
 The accepted boundary is:
 
@@ -34,6 +34,24 @@ The accepted boundary is:
 - returns full safe message rows plus display-safe attachment metadata so search results outside the recent snapshot can still open in the reader
 - reports a missing FTS index as `unavailable` instead of exposing raw SQLite errors to React
 - does not expose raw SQL, filesystem paths, credential refs, passwords, tokens, or attachment storage paths
+
+`allow_remote_content` also lives in `src-tauri/src/mail_shell.rs`. It:
+
+- accepts typed account/folder/message ids, `scope`, and `userRequested=true`
+- validates active account, folder, and message ownership before persistence
+- allows only `message` or `sender` scope
+- derives sender email from the stored message row for sender scope
+- persists only local preference metadata in `remote_content_preferences`
+- does not accept remote URLs, sender addresses, HTML, filesystem paths, credential refs, or provider command strings from React
+
+`open_external_link` lives in `src-tauri/src/external_links.rs`. It:
+
+- accepts only a typed URL and `userRequested=true`
+- revalidates the delegated sanitizer URL through `validate_external_link_url`
+- allows `http`/`https` only with public hosts and no embedded credentials
+- allows `mailto` only with at least one valid recipient and `to`/`cc`/`bcc`/`subject` fields
+- rejects scripts, local paths, custom schemes, private/local hosts, unsupported `mailto` fields, encoded control characters, and malformed URLs before opening
+- opens through a backend-owned Windows system opener call and does not install or grant the Tauri opener plugin
 
 Reader attachment commands live in `src-tauri/src/attachment_commands.rs`:
 
@@ -112,11 +130,12 @@ Do not expose commands that accept raw SQL, arbitrary filesystem paths, arbitrar
 - `src-tauri/src/draft_persistence.rs` tests enforce backend-owned draft autosave/discard/sent conversion and provider-aware Sent-copy state.
 - `src-tauri/src/composer.rs` tests enforce composer command mapping, staged attachment storage/cleanup, invalid attachment denial, invalid address denial, duplicate recipient normalization, recent-recipient lookup/persistence, and fake SMTP send through the typed boundary.
 - `src-tauri/src/attachment_commands.rs` tests enforce reader attachment source validation, preview allowlisting, download byte export, backend-selected save behavior, hash/size/type checks, no-overwrite saves, and path redaction.
+- `src-tauri/src/external_links.rs` and `src-tauri/tests/ipc_denial_paths.rs` tests enforce external-link URL validation, missing-intent denial, redacted errors, and fake-opener success without real browser use.
 - `src-tauri/src/account_management.rs` tests enforce provider/auth policy, live generic setup login before credential persistence, credential-before-metadata ordering, credential-write failure rollback, generic reauthentication, public Gmail/Microsoft secret-handoff denial, account settings display/signature/preference persistence, account removal, and redacted auth status persistence.
 - `src-tauri/src/oauth_loopback.rs` tests enforce browser URL opening, backend code exchange, callback denial, state mismatch, timeout, invalid grant, missing refresh token, generic-provider denial, token storage, and local TCP loopback callback behavior.
 - `src-tauri/src/account_signatures.rs` tests enforce backend-owned per-account signature storage, sanitization, clearing, and deterministic insertion.
 - `src-tauri/src/ipc_validation.rs` tests enforce the shared IPC denial policy before any command is registered.
-- `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, and unreviewed custom commands.
+- `src-tauri/capabilities/capabilities.test.ts` rejects SQL plugin dependencies, `sql:*` capability permissions, frontend SQL imports, forbidden local-system plugins, unreviewed custom commands, and CSP broadening outside the reviewed remote-image allowance.
 - `docs/architecture/tauri-capabilities.md` defines the capability permission policy.
 - `pnpm check` runs these tests through Vitest and Rust.
 

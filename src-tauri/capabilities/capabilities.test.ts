@@ -71,7 +71,7 @@ const expectedProductionCsp = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https:",
   "font-src 'self'",
   "connect-src 'self' ipc: http://ipc.localhost",
   "media-src 'none'",
@@ -89,7 +89,7 @@ const expectedDevelopmentCsp = [
   "default-src 'self' http://localhost:1420",
   "script-src 'self' 'unsafe-eval' http://localhost:1420",
   "style-src 'self' 'unsafe-inline' http://localhost:1420",
-  "img-src 'self' data: blob: http://localhost:1420",
+  "img-src 'self' data: blob: https: http://localhost:1420",
   "font-src 'self' data: http://localhost:1420",
   "connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 ws://localhost:1421",
   "media-src 'none'",
@@ -133,8 +133,16 @@ const oauthLoopbackCommandNames = new Set([
 ]);
 
 function rustCommandPath(command: string) {
-  if (command === "load_mail_shell" || command === "search_mail") {
+  if (
+    command === "load_mail_shell" ||
+    command === "search_mail" ||
+    command === "allow_remote_content"
+  ) {
     return `mail_shell::${command}`;
+  }
+
+  if (command === "open_external_link") {
+    return `external_links::${command}`;
   }
 
   if (
@@ -176,9 +184,10 @@ describe("Tauri capabilities", () => {
     expect(csp).not.toContain("*");
     expect(csp).not.toContain("'unsafe-eval'");
     expect(csp).not.toContain("http://localhost");
-    expect(csp).not.toContain("https:");
+    expect(csp).toContain("img-src 'self' data: blob: https:");
+    expect(csp).not.toContain("connect-src https:");
+    expect(csp).not.toContain("script-src https:");
     expect(csp).toContain("connect-src 'self' ipc: http://ipc.localhost");
-    expect(csp).toContain("img-src 'self' data: blob:");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
   });
@@ -189,7 +198,9 @@ describe("Tauri capabilities", () => {
 
     expect(devCsp).toBe(expectedDevelopmentCsp);
     expect(devCsp).not.toContain("*");
-    expect(devCsp).not.toContain("https:");
+    expect(devCsp).toContain("img-src 'self' data: blob: https:");
+    expect(devCsp).not.toContain("connect-src https:");
+    expect(devCsp).not.toContain("script-src https:");
     expect(devCsp).toContain("http://localhost:1420");
     expect(devCsp).toContain("ws://localhost:1420");
     expect(devCsp).toContain("ws://localhost:1421");
@@ -198,7 +209,7 @@ describe("Tauri capabilities", () => {
     expect(devCsp).toContain("frame-ancestors 'none'");
   });
 
-  it("keeps the main window limited to reviewed mail-shell, composer, account commands, and sync status events", () => {
+  it("keeps the main window limited to reviewed mail-shell, link, composer, account commands, and sync status events", () => {
     const defaultCapability = readCapability("default.json");
 
     expect(defaultCapability.identifier).toBe("default");
@@ -210,6 +221,8 @@ describe("Tauri capabilities", () => {
       "core:event:allow-unlisten",
       "allow-load-mail-shell",
       "allow-search-mail",
+      "allow-allow-remote-content",
+      "allow-open-external-link",
       "allow-preview-attachment",
       "allow-save-attachment",
       "allow-download-attachment",
@@ -265,6 +278,8 @@ describe("Tauri capabilities", () => {
     for (const command of [
       "load_mail_shell",
       "search_mail",
+      "allow_remote_content",
+      "open_external_link",
       "preview_attachment",
       "save_attachment",
       "download_attachment",
@@ -327,8 +342,10 @@ describe("Tauri capabilities", () => {
       const source = readFileSync(resolve(frontendSourceDir, String(fileName)), "utf8");
 
       expect(source).not.toContain("@tauri-apps/plugin-opener");
+      expect(source).not.toMatch(/\bopenUrl\s*\(/);
       expect(source).not.toMatch(/\bopenPath\s*\(/);
       expect(source).not.toMatch(/\brevealItemInDir\s*\(/);
+      expect(source).not.toMatch(/\bwindow\.open\s*\(/);
     }
   });
 });

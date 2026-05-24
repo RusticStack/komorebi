@@ -3,7 +3,7 @@ use std::{error::Error, fmt, time::Duration};
 use rusqlite::{params, Connection};
 
 pub const KOMOREBI_APPLICATION_ID: i64 = 1_263_354_434;
-pub const LATEST_SCHEMA_VERSION: u32 = 9;
+pub const LATEST_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Migration {
@@ -57,6 +57,11 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 9,
         name: "sent_mail_append_payloads",
         sql: include_str!("../migrations/009_sent_mail_append_payloads.sql"),
+    },
+    Migration {
+        version: 10,
+        name: "remote_content_preferences",
+        sql: include_str!("../migrations/010_remote_content_preferences.sql"),
     },
 ];
 
@@ -419,6 +424,7 @@ mod tests {
             "composer_attachments",
             "recent_recipients",
             "sent_mail_copies",
+            "remote_content_preferences",
             "templates",
             "template_versions",
         ] {
@@ -444,6 +450,10 @@ mod tests {
             "idx_recent_recipients_account_email",
             "idx_sent_mail_copies_account_state",
             "idx_sent_mail_copies_pending_append",
+            "ux_messages_account_message_id",
+            "ux_remote_content_preferences_message",
+            "ux_remote_content_preferences_sender",
+            "idx_remote_content_preferences_account",
             "idx_templates_account",
         ] {
             assert!(indexes.contains(index), "missing index {index}");
@@ -462,6 +472,7 @@ mod tests {
             "composer_attachments_touch_updated_at",
             "recent_recipients_touch_updated_at",
             "sent_mail_copies_touch_updated_at",
+            "remote_content_preferences_touch_updated_at",
             "templates_touch_updated_at",
         ] {
             assert!(triggers.contains(trigger), "missing trigger {trigger}");
@@ -641,6 +652,20 @@ mod tests {
                 .as_slice(),
             ),
             (
+                "remote_content_preferences",
+                [
+                    "id",
+                    "account_id",
+                    "scope",
+                    "message_id",
+                    "sender_email",
+                    "normalized_sender_email",
+                    "created_at",
+                    "updated_at",
+                ]
+                .as_slice(),
+            ),
+            (
                 "templates",
                 [
                     "id",
@@ -730,7 +755,12 @@ mod tests {
             .execute("DELETE FROM accounts WHERE id = 'acct_1'", [])
             .unwrap();
 
-        for table in ["folders", "messages", "attachments"] {
+        for table in [
+            "folders",
+            "messages",
+            "attachments",
+            "remote_content_preferences",
+        ] {
             let count: i64 = connection
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
@@ -1026,7 +1056,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![2, 3, 4, 5, 6, 7, 8, 9]
+            vec![2, 3, 4, 5, 6, 7, 8, 9, 10]
         );
         assert_eq!(
             search_messages_fts(&connection, "schema", 10)
@@ -1073,7 +1103,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![3, 4, 5, 6, 7, 8, 9]
+            vec![3, 4, 5, 6, 7, 8, 9, 10]
         );
         let attributes_json = connection
             .query_row(
@@ -1112,7 +1142,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![4, 5, 6, 7, 8, 9]
+            vec![4, 5, 6, 7, 8, 9, 10]
         );
         connection
             .execute(
@@ -1205,7 +1235,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![5, 6, 7, 8, 9]
+            vec![5, 6, 7, 8, 9, 10]
         );
         connection
             .execute(
@@ -1297,7 +1327,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![6, 7, 8, 9]
+            vec![6, 7, 8, 9, 10]
         );
         connection
             .execute(
@@ -1355,7 +1385,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![7, 8, 9]
+            vec![7, 8, 9, 10]
         );
         connection
             .execute(
@@ -1422,7 +1452,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![8, 9]
+            vec![8, 9, 10]
         );
         let warnings_json: String = connection
             .query_row(
@@ -1470,7 +1500,7 @@ mod tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            vec![9]
+            vec![9, 10]
         );
         connection
             .execute(
@@ -1515,5 +1545,125 @@ mod tests {
                 [],
             )
             .is_err());
+    }
+
+    #[test]
+    fn remote_content_preferences_migration_adds_narrow_message_and_sender_scopes_to_v9_database() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        for migration in &MIGRATIONS[..9] {
+            connection.execute_batch(migration.sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                    (migration.version, migration.name),
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch("PRAGMA user_version = 9;")
+            .unwrap();
+        seed_account_folder_message(&connection);
+
+        let report = apply_migrations(&mut connection).unwrap();
+
+        assert_eq!(report.current_version, 9);
+        assert_eq!(
+            report
+                .applied
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+
+        connection
+            .execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   message_id
+                 )
+                 VALUES ('rc_message', 'acct_1', 'message', 'msg_1')",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   message_id
+                 )
+                 VALUES ('rc_duplicate_message', 'acct_1', 'message', 'msg_1')",
+                [],
+            )
+            .is_err());
+
+        connection
+            .execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   sender_email,
+                   normalized_sender_email
+                 )
+                 VALUES (
+                   'rc_sender',
+                   'acct_1',
+                   'sender',
+                   'Sender@example.com',
+                   'sender@example.com'
+                 )",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   sender_email,
+                   normalized_sender_email
+                 )
+                 VALUES (
+                   'rc_duplicate_sender',
+                   'acct_1',
+                   'sender',
+                   'sender@example.com',
+                   'sender@example.com'
+                 )",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO remote_content_preferences (
+                   id,
+                   account_id,
+                   scope,
+                   sender_email,
+                   normalized_sender_email
+                 )
+                 VALUES ('rc_invalid_sender', 'acct_1', 'sender', '', '')",
+                [],
+            )
+            .is_err());
+
+        connection
+            .execute("DELETE FROM accounts WHERE id = 'acct_1'", [])
+            .unwrap();
+        let preference_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM remote_content_preferences",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preference_count, 0);
     }
 }

@@ -16,6 +16,10 @@ import {
 import { useLocaleFormatters } from "../../i18n";
 import { SafeEmailBody } from "../rendering/SafeEmailBody";
 import {
+  hasRemoteContentReferences,
+  type SafeEmailLink,
+} from "../rendering/emailHtml";
+import {
   TipTapComposer,
   type ComposerAttachmentStageFunction,
   type ComposerDraftDiscardFunction,
@@ -67,6 +71,11 @@ import {
   type AttachmentDownloadResponse,
   type AttachmentPreviewResponse,
   type AttachmentSaveResponse,
+  type ExternalLinkOpenRequest,
+  type ExternalLinkOpenResponse,
+  type RemoteContentPreferenceRequest,
+  type RemoteContentPreferenceResponse,
+  type RemoteContentPreferenceScope,
   type LoadStatus,
 } from "./mailShellState";
 
@@ -74,6 +83,12 @@ export type MailSearchFunction = (
   request: MailSearchRequest,
   signal: AbortSignal,
 ) => Promise<MailSearchResponse>;
+export type RemoteContentPreferenceFunction = (
+  request: RemoteContentPreferenceRequest,
+) => Promise<RemoteContentPreferenceResponse>;
+export type ExternalLinkOpenFunction = (
+  request: ExternalLinkOpenRequest,
+) => Promise<ExternalLinkOpenResponse>;
 export type AccountCreateFunction = (
   request: AccountSetupRequest,
 ) => Promise<AccountSetupResponse>;
@@ -120,6 +135,8 @@ export type MailClientShellProps = {
   loadMailShellData?: () => Promise<MailShellData>;
   loadComposerDrafts?: ComposerDraftListFunction;
   searchMail?: MailSearchFunction;
+  allowRemoteContent?: RemoteContentPreferenceFunction;
+  openExternalLink?: ExternalLinkOpenFunction;
   previewAttachment?: AttachmentPreviewFunction;
   saveAttachment?: AttachmentSaveFunction;
   downloadAttachment?: AttachmentDownloadFunction;
@@ -158,6 +175,16 @@ type AttachmentActionState = {
   status: "idle" | "loading" | "saved" | "downloaded" | "error";
   message: string | null;
 };
+type RemoteContentActionState = {
+  messageId: string | null;
+  status: "idle" | "loading" | "saved" | "error";
+  message: string | null;
+};
+type ExternalLinkActionState = {
+  linkId: string | null;
+  status: "idle" | "opening" | "opened" | "error";
+  message: string | null;
+};
 
 const MESSAGE_ROW_HEIGHT_PX = 136;
 const MESSAGE_LIST_OVERSCAN = 8;
@@ -185,6 +212,16 @@ const emptyAttachmentActionState: AttachmentActionState = {
   status: "idle",
   message: null,
 };
+const emptyRemoteContentActionState: RemoteContentActionState = {
+  messageId: null,
+  status: "idle",
+  message: null,
+};
+const emptyExternalLinkActionState: ExternalLinkActionState = {
+  linkId: null,
+  status: "idle",
+  message: null,
+};
 
 export function MailClientShell({
   initialData = emptyMailShellData,
@@ -193,6 +230,8 @@ export function MailClientShell({
   loadMailShellData,
   loadComposerDrafts,
   searchMail,
+  allowRemoteContent,
+  openExternalLink,
   previewAttachment,
   saveAttachment,
   downloadAttachment,
@@ -235,6 +274,10 @@ export function MailClientShell({
     useState<AttachmentPreviewResponse | null>(null);
   const [attachmentAction, setAttachmentAction] =
     useState<AttachmentActionState>(emptyAttachmentActionState);
+  const [remoteContentAction, setRemoteContentAction] =
+    useState<RemoteContentActionState>(emptyRemoteContentActionState);
+  const [externalLinkAction, setExternalLinkAction] =
+    useState<ExternalLinkActionState>(emptyExternalLinkActionState);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -475,6 +518,12 @@ export function MailClientShell({
     setAttachmentAction(emptyAttachmentActionState);
   }
 
+  function clearReaderActionUi() {
+    clearAttachmentUi();
+    setRemoteContentAction(emptyRemoteContentActionState);
+    setExternalLinkAction(emptyExternalLinkActionState);
+  }
+
   async function handlePreviewAttachment(
     message: MailMessage,
     attachment: MailAttachment,
@@ -567,6 +616,85 @@ export function MailClientShell({
       setAttachmentAction({
         attachmentId: attachment.id,
         message: t("mail.attachments.downloadError"),
+        status: "error",
+      });
+    }
+  }
+
+  async function handleAllowRemoteContent(
+    message: MailMessage,
+    scope: RemoteContentPreferenceScope,
+  ) {
+    if (!allowRemoteContent) {
+      return;
+    }
+
+    setRemoteContentAction({
+      message: null,
+      messageId: message.id,
+      status: "loading",
+    });
+
+    try {
+      const response = await allowRemoteContent({
+        accountId: message.accountId,
+        folderId: message.folderId,
+        messageId: message.id,
+        scope,
+        userRequested: true,
+      });
+      applyRemoteContentPreferenceResponse(response);
+      setRemoteContentAction({
+        message: t(
+          scope === "sender"
+            ? "mail.reader.remoteContent.allowedSenderStatus"
+            : "mail.reader.remoteContent.allowedMessageStatus",
+        ),
+        messageId: message.id,
+        status: "saved",
+      });
+      if (loadMailShellData) {
+        await reloadMailShell({ showLoading: false });
+      }
+    } catch {
+      setRemoteContentAction({
+        message: t("mail.reader.remoteContent.error"),
+        messageId: message.id,
+        status: "error",
+      });
+    }
+  }
+
+  async function handleOpenExternalLink(link: SafeEmailLink) {
+    if (!openExternalLink) {
+      setExternalLinkAction({
+        linkId: link.id,
+        message: t("mail.reader.links.unavailable"),
+        status: "error",
+      });
+      return;
+    }
+
+    setExternalLinkAction({
+      linkId: link.id,
+      message: t("mail.reader.links.opening"),
+      status: "opening",
+    });
+
+    try {
+      await openExternalLink({
+        url: link.url,
+        userRequested: true,
+      });
+      setExternalLinkAction({
+        linkId: link.id,
+        message: t("mail.reader.links.opened"),
+        status: "opened",
+      });
+    } catch {
+      setExternalLinkAction({
+        linkId: link.id,
+        message: t("mail.reader.links.error"),
         status: "error",
       });
     }
@@ -669,6 +797,32 @@ export function MailClientShell({
             : currentAccount,
         ),
       },
+    }));
+  }
+
+  function applyRemoteContentPreferenceResponse(
+    response: RemoteContentPreferenceResponse,
+  ) {
+    const patchMessage = (message: MailMessage): MailMessage =>
+      message.id === response.messageId &&
+      message.accountId === response.accountId
+        ? {
+            ...message,
+            remoteContentAllowed: response.remoteContentAllowed,
+            remoteContentAllowedScope: response.scope,
+          }
+        : message;
+
+    setState((current) => ({
+      ...current,
+      data: {
+        ...current.data,
+        messages: current.data.messages.map(patchMessage),
+      },
+    }));
+    setSearchState((current) => ({
+      ...current,
+      results: current.results.map(patchMessage),
     }));
   }
 
@@ -1095,10 +1249,11 @@ export function MailClientShell({
             disabled={!hasAccounts || state.loadState.messages !== "ready"}
             value={state.searchQuery}
             onChange={(event) => {
-              clearAttachmentUi();
-              patchState({
-                searchQuery: event.target.value,
-                selectedMessageId: null,
+            clearAttachmentUi();
+            setRemoteContentAction(emptyRemoteContentActionState);
+            patchState({
+              searchQuery: event.target.value,
+              selectedMessageId: null,
               });
             }}
           />
@@ -1119,13 +1274,13 @@ export function MailClientShell({
           onRetry={loadMailShellData ? reloadMailShell : undefined}
           onRetrySearch={() => setSearchRetryNonce((current) => current + 1)}
           onSelectMessage={(messageId) => {
-            clearAttachmentUi();
+            clearReaderActionUi();
             patchState({
               selectedMessageId: messageId,
             });
           }}
           onReadMessage={(messageId) => {
-            clearAttachmentUi();
+            clearReaderActionUi();
             patchState({
               selectedMessageId: messageId,
             });
@@ -1141,6 +1296,7 @@ export function MailClientShell({
         tabIndex={-1}
       >
         <ReaderPane
+          key={activeMessage?.id ?? "empty-reader"}
           state={state}
           message={activeMessage}
           hasVisibleMessages={visibleMessages.length > 0}
@@ -1148,11 +1304,16 @@ export function MailClientShell({
           previewAttachment={previewAttachment}
           saveAttachment={saveAttachment}
           downloadAttachment={downloadAttachment}
+          allowRemoteContent={allowRemoteContent}
           attachmentPreview={attachmentPreview}
           attachmentAction={attachmentAction}
+          remoteContentAction={remoteContentAction}
+          externalLinkAction={externalLinkAction}
           onPreviewAttachment={handlePreviewAttachment}
           onSaveAttachment={handleSaveAttachment}
           onDownloadAttachment={handleDownloadAttachment}
+          onAllowRemoteContent={handleAllowRemoteContent}
+          onOpenExternalLink={handleOpenExternalLink}
           onCloseAttachmentPreview={() => setAttachmentPreview(null)}
         />
       </section>
@@ -1908,11 +2069,16 @@ function ReaderPane({
   message,
   hasVisibleMessages,
   onRetry,
+  allowRemoteContent,
   previewAttachment,
   saveAttachment,
   downloadAttachment,
   attachmentPreview,
   attachmentAction,
+  remoteContentAction,
+  externalLinkAction,
+  onAllowRemoteContent,
+  onOpenExternalLink,
   onPreviewAttachment,
   onSaveAttachment,
   onDownloadAttachment,
@@ -1922,11 +2088,19 @@ function ReaderPane({
   message: ReturnType<typeof selectedMessage>;
   hasVisibleMessages: boolean;
   onRetry?: () => void;
+  allowRemoteContent?: RemoteContentPreferenceFunction;
   previewAttachment?: AttachmentPreviewFunction;
   saveAttachment?: AttachmentSaveFunction;
   downloadAttachment?: AttachmentDownloadFunction;
   attachmentPreview: AttachmentPreviewResponse | null;
   attachmentAction: AttachmentActionState;
+  remoteContentAction: RemoteContentActionState;
+  externalLinkAction: ExternalLinkActionState;
+  onAllowRemoteContent: (
+    message: MailMessage,
+    scope: RemoteContentPreferenceScope,
+  ) => Promise<void>;
+  onOpenExternalLink: (link: SafeEmailLink) => Promise<void>;
   onPreviewAttachment: (message: MailMessage, attachment: MailAttachment) => void;
   onSaveAttachment: (message: MailMessage, attachment: MailAttachment) => void;
   onDownloadAttachment: (message: MailMessage, attachment: MailAttachment) => void;
@@ -1935,6 +2109,19 @@ function ReaderPane({
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
   const sender = message ? messageSenderLabel(message, t) : "";
+  const [remoteContentPanelOpen, setRemoteContentPanelOpen] = useState(false);
+  const messageHasRemoteContent = hasRemoteContentReferences(message?.bodyHtml);
+  const remoteContentAllowed = Boolean(message?.remoteContentAllowed);
+  const remoteContentAllowedScope = message?.remoteContentAllowedScope ?? null;
+  const remoteContentBusy =
+    Boolean(message) &&
+    remoteContentAction.messageId === message?.id &&
+    remoteContentAction.status === "loading";
+  const remoteContentStatusMessage =
+    message && remoteContentAction.messageId === message.id
+      ? remoteContentAction.message
+      : null;
+  const externalLinkStatusMessage = externalLinkAction.message;
 
   if (state.loadState.messages === "loading") {
     return (
@@ -2042,16 +2229,84 @@ function ReaderPane({
         </button>
         <button
           type="button"
-          disabled
-          title={t("mail.reader.actions.loadRemoteUnavailableTitle")}
-          aria-label={t("mail.reader.actions.loadRemoteUnavailable")}
+          disabled={
+            !messageHasRemoteContent ||
+            remoteContentAllowed ||
+            !allowRemoteContent ||
+            remoteContentBusy
+          }
+          title={remoteContentActionTitle({
+            allowRemoteContentAvailable: Boolean(allowRemoteContent),
+            allowedScope: remoteContentAllowedScope,
+            hasRemoteContent: messageHasRemoteContent,
+            t,
+          })}
+          aria-label={remoteContentActionLabel({
+            allowRemoteContentAvailable: Boolean(allowRemoteContent),
+            allowedScope: remoteContentAllowedScope,
+            hasRemoteContent: messageHasRemoteContent,
+            t,
+          })}
+          onClick={() => setRemoteContentPanelOpen((current) => !current)}
         >
-          {t("mail.reader.actions.loadRemote")}
+          {remoteContentBusy
+            ? t("mail.reader.remoteContent.loading")
+            : t("mail.reader.actions.loadRemote")}
         </button>
       </div>
 
       <article className="reader-body">
-        <SafeEmailBody bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
+        {remoteContentPanelOpen &&
+        messageHasRemoteContent &&
+        !remoteContentAllowed ? (
+          <RemoteContentPreferencePanel
+            busy={remoteContentBusy}
+            canAllowSender={Boolean(message.senderEmail.trim())}
+            onAllowMessage={() =>
+              void onAllowRemoteContent(message, "message").then(() =>
+                setRemoteContentPanelOpen(false),
+              )
+            }
+            onAllowSender={() =>
+              void onAllowRemoteContent(message, "sender").then(() =>
+                setRemoteContentPanelOpen(false),
+              )
+            }
+            onCancel={() => setRemoteContentPanelOpen(false)}
+          />
+        ) : null}
+        <SafeEmailBody
+          allowRemoteContent={remoteContentAllowed}
+          bodyHtml={message.bodyHtml}
+          bodyText={message.bodyText}
+          onOpenExternalLink={(link) => {
+            void onOpenExternalLink(link);
+          }}
+        />
+        {externalLinkStatusMessage ? (
+          <p
+            className={
+              externalLinkAction.status === "error"
+                ? "external-link-status external-link-status--error"
+                : "external-link-status"
+            }
+            role={externalLinkAction.status === "error" ? "alert" : "status"}
+          >
+            {externalLinkStatusMessage}
+          </p>
+        ) : null}
+        {remoteContentStatusMessage ? (
+          <p
+            className={
+              remoteContentAction.status === "error"
+                ? "remote-content-status remote-content-status--error"
+                : "remote-content-status"
+            }
+            role={remoteContentAction.status === "error" ? "alert" : "status"}
+          >
+            {remoteContentStatusMessage}
+          </p>
+        ) : null}
         <AttachmentList
           action={attachmentAction}
           attachments={message.attachments}
@@ -2069,8 +2324,129 @@ function ReaderPane({
         />
       </article>
 
-      <ReaderStatus text={t("mail.reader.remoteBlocked")} />
+      <ReaderStatus
+        text={
+          remoteContentAllowed
+            ? t(
+                remoteContentAllowedScope === "sender"
+                  ? "mail.reader.remoteContent.allowedSenderStatus"
+                  : "mail.reader.remoteContent.allowedMessageStatus",
+              )
+            : t("mail.reader.remoteBlocked")
+        }
+      />
     </>
+  );
+}
+
+function remoteContentActionLabel({
+  allowRemoteContentAvailable,
+  allowedScope,
+  hasRemoteContent,
+  t,
+}: {
+  allowRemoteContentAvailable: boolean;
+  allowedScope: RemoteContentPreferenceScope | null;
+  hasRemoteContent: boolean;
+  t: TFunction;
+}) {
+  if (allowedScope) {
+    return t(
+      allowedScope === "sender"
+        ? "mail.reader.actions.loadRemoteAllowedSender"
+        : "mail.reader.actions.loadRemoteAllowedMessage",
+    );
+  }
+
+  if (!hasRemoteContent) {
+    return t("mail.reader.actions.loadRemoteNoContent");
+  }
+
+  if (!allowRemoteContentAvailable) {
+    return t("mail.reader.actions.loadRemoteUnavailable");
+  }
+
+  return t("mail.reader.actions.loadRemote");
+}
+
+function remoteContentActionTitle({
+  allowRemoteContentAvailable,
+  allowedScope,
+  hasRemoteContent,
+  t,
+}: {
+  allowRemoteContentAvailable: boolean;
+  allowedScope: RemoteContentPreferenceScope | null;
+  hasRemoteContent: boolean;
+  t: TFunction;
+}) {
+  if (allowedScope) {
+    return t(
+      allowedScope === "sender"
+        ? "mail.reader.actions.loadRemoteAllowedSenderTitle"
+        : "mail.reader.actions.loadRemoteAllowedMessageTitle",
+    );
+  }
+
+  if (!hasRemoteContent) {
+    return t("mail.reader.actions.loadRemoteNoContentTitle");
+  }
+
+  if (!allowRemoteContentAvailable) {
+    return t("mail.reader.actions.loadRemoteUnavailableTitle");
+  }
+
+  return t("mail.reader.actions.loadRemoteTitle");
+}
+
+function RemoteContentPreferencePanel({
+  busy,
+  canAllowSender,
+  onAllowMessage,
+  onAllowSender,
+  onCancel,
+}: {
+  busy: boolean;
+  canAllowSender: boolean;
+  onAllowMessage: () => void;
+  onAllowSender: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <section
+      className="remote-content-panel"
+      aria-label={t("mail.reader.remoteContent.panelAria")}
+    >
+      <div>
+        <h3>{t("mail.reader.remoteContent.heading")}</h3>
+        <p>{t("mail.reader.remoteContent.body")}</p>
+      </div>
+      <div
+        className="remote-content-panel__actions"
+        aria-label={t("mail.reader.remoteContent.actionsAria")}
+      >
+        <button type="button" disabled={busy} onClick={onAllowMessage}>
+          {t("mail.reader.remoteContent.allowMessage")}
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canAllowSender}
+          title={
+            canAllowSender
+              ? t("mail.reader.remoteContent.allowSenderTitle")
+              : t("mail.reader.remoteContent.allowSenderUnavailableTitle")
+          }
+          onClick={onAllowSender}
+        >
+          {t("mail.reader.remoteContent.allowSender")}
+        </button>
+        <button type="button" disabled={busy} onClick={onCancel}>
+          {t("common.actions.cancel")}
+        </button>
+      </div>
+    </section>
   );
 }
 

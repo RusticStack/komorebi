@@ -16,6 +16,7 @@
   },
   "common": {
     "actions": {
+      "cancel": "Cancelar",
       "close": "Fechar",
       "retry": "Tentar novamente",
       "save": "Guardar"
@@ -133,8 +134,15 @@
         "forwardUnavailable": "Reencaminhamento indisponivel",
         "forwardUnavailableTitle": "O encaminhamento para o compositor ainda nao esta implementado.",
         "loadRemote": "Carregar conteudo remoto",
+        "loadRemoteAllowedMessage": "Conteudo remoto permitido para esta mensagem",
+        "loadRemoteAllowedMessageTitle": "O carregamento de imagens remotas esta permitido para esta mensagem.",
+        "loadRemoteAllowedSender": "Conteudo remoto permitido para este remetente",
+        "loadRemoteAllowedSenderTitle": "O carregamento de imagens remotas esta permitido para este remetente nesta conta.",
+        "loadRemoteNoContent": "Sem conteudo remoto para carregar",
+        "loadRemoteNoContentTitle": "Esta mensagem nao inclui recursos remotos bloqueados.",
+        "loadRemoteTitle": "Escolha se pretende carregar imagens remotas para esta mensagem ou remetente.",
         "loadRemoteUnavailable": "Carregar conteudo remoto indisponivel; os recursos remotos estao bloqueados por defeito",
-        "loadRemoteUnavailableTitle": "Os recursos remotos ficam bloqueados ate existir um comando de preferencia por mensagem ou remetente.",
+        "loadRemoteUnavailableTitle": "Os recursos remotos ficam bloqueados ate o comando de preferencia do backend estar disponivel.",
         "markRead": "Marcar como lida",
         "markReadUnavailable": "Marcar como lida indisponivel",
         "markUnread": "Marcar como por ler",
@@ -162,6 +170,26 @@
         "heading": "A carregar vista da mensagem",
         "label": "Leitor a carregar",
         "status": "A carregar cache local"
+      },
+      "remoteContent": {
+        "actionsAria": "Opcoes de preferencia de conteudo remoto",
+        "allowMessage": "Permitir esta mensagem",
+        "allowSender": "Permitir sempre este remetente",
+        "allowSenderTitle": "Permitir imagens remotas validadas deste remetente nesta conta.",
+        "allowSenderUnavailableTitle": "Esta mensagem nao tem um endereco de remetente utilizavel.",
+        "allowedMessageStatus": "Conteudo remoto permitido para esta mensagem",
+        "allowedSenderStatus": "Conteudo remoto permitido para este remetente",
+        "body": "Imagens remotas podem revelar quando e onde o correio e aberto.",
+        "error": "Nao foi possivel guardar a preferencia de conteudo remoto.",
+        "heading": "Conteudo remoto",
+        "loading": "A guardar preferencia remota",
+        "panelAria": "Preferencia de conteudo remoto"
+      },
+      "links": {
+        "error": "Nao foi possivel abrir a ligacao externa.",
+        "opened": "Ligacao externa aberta.",
+        "opening": "A abrir ligacao externa.",
+        "unavailable": "A abertura de ligacoes externas esta indisponivel."
       },
       "remoteBlocked": "Conteudo remoto bloqueado por defeito",
       "selectedEyebrow": "Mensagem selecionada"

@@ -1,7 +1,7 @@
 # SQLite Schema And Migrations
 
-Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning/upload state, per-account signatures, per-account local preferences, and MIME parse-warning storage implemented.
-Last reviewed: 2026-05-23.
+Status: initial production schema, FTS5 search index and shell search command, SMTP send receipts, draft persistence, staged composer attachments, local recent recipients, Sent-copy planning/upload state, per-account signatures, per-account local preferences, remote-content preferences, and MIME parse-warning storage implemented.
+Last reviewed: 2026-05-24.
 
 ## Implementation
 
@@ -31,6 +31,8 @@ Per-account signature persistence is implemented in `src-tauri/src/account_signa
 
 Per-account local preferences are implemented in `src-tauri/src/account_management.rs` through the existing JSON `settings` table using keys shaped as `account:{account_id}:local_preferences`. The current preference is `includeInUnifiedInbox`, which `load_mail_shell` and `search_mail` use to exclude opted-out accounts from unified views while leaving explicit account scope usable. No schema migration was required because `settings` already stores validated JSON objects.
 
+Remote-content preferences are implemented by migration `010_remote_content_preferences.sql` and `src-tauri/src/mail_shell.rs`. The table stores explicit user consent for either one stored message or one normalized sender within an account. React chooses only the scope; Rust validates the account/folder/message and derives sender addresses from the cached message row.
+
 ## Tables
 
 The current schema defines:
@@ -46,6 +48,7 @@ The current schema defines:
 - `composer_attachments`: staged outbound composer attachment metadata and backend-generated storage references.
 - `recent_recipients`: account-scoped local-only autocomplete rows populated after confirmed composer sends.
 - `sent_mail_copies`: provider-aware Sent-folder copy/upload state for confirmed sends, including temporary pending APPEND payloads for providers that require IMAP Sent upload.
+- `remote_content_preferences`: local-only message/sender remote-image consent rows.
 - `templates`: future composer template records.
 - `template_versions`: version history for future template editing.
 - `messages_fts`: FTS5 external-content search index over message subject, sender, and body columns.
@@ -107,6 +110,7 @@ The schema uses primary keys, foreign keys, unique constraints, partial unique i
 - `accounts.credential_ref` is the only persisted secret reference and is unique.
 - `accounts.signature_html` stores optional sanitized HTML account metadata. Empty signatures store `NULL`.
 - Per-account local preference rows in `settings` store validated JSON objects and are deleted during account removal.
+- Remote-content preference rows reference an account and either one message or one normalized sender. Message-scoped rows cascade when the message/account is deleted; sender-scoped rows cascade when the account is deleted. Uniqueness allows one row per `(account_id, message_id)` message scope and one row per `(account_id, normalized_sender_email)` sender scope.
 - Generic IMAP/SMTP accounts must include IMAP and SMTP host, port, and security metadata.
 - Folders are unique by `(account_id, remote_id)` and `(account_id, name)`.
 - `folders.attributes_json` must be valid JSON and stores normalized provider LIST/XLIST/SPECIAL-USE attributes for roles the current enum does not model directly.
@@ -149,6 +153,7 @@ Encrypted local mail storage is future work. This schema/storage model stores me
 - Recent-recipient migration adds `recent_recipients`, autocomplete indexes, uniqueness, and timestamp trigger to version-6 databases.
 - MIME parse-warning migration adds `messages.mime_parse_warnings_json` with a checked `[]` default to version-7 databases.
 - Sent APPEND payload migration adds retry payload/hash/attempt/upload columns and a pending-append index to version-8 databases.
+- Remote-content preference migration adds message/sender consent rows, uniqueness, account/message foreign keys, timestamp trigger, and account cascade behavior to version-9 databases.
 - JSON validation for settings and templates.
 - `PRAGMA foreign_key_check` on valid seed data.
 
