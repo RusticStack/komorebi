@@ -43,6 +43,7 @@ const forbiddenPermissionPrefixes = [
   "shell:",
   "process:",
   "http:",
+  "dialog:",
 ];
 
 const forbiddenRustPlugins = [
@@ -62,10 +63,8 @@ const forbiddenRustPlugins = [
 
 const forbiddenAttachmentOpenCommands = [
   "open_attachment",
-  "preview_attachment",
-  "save_attachment",
-  "download_attachment",
   "extract_attachment",
+  "extract_attachment_archive",
 ];
 
 const expectedProductionCsp = [
@@ -138,6 +137,14 @@ function rustCommandPath(command: string) {
     return `mail_shell::${command}`;
   }
 
+  if (
+    command === "preview_attachment" ||
+    command === "save_attachment" ||
+    command === "download_attachment"
+  ) {
+    return `attachment_commands::${command}`;
+  }
+
   if (accountCommandNames.has(command)) {
     return `account_management::${command}`;
   }
@@ -203,6 +210,9 @@ describe("Tauri capabilities", () => {
       "core:event:allow-unlisten",
       "allow-load-mail-shell",
       "allow-search-mail",
+      "allow-preview-attachment",
+      "allow-save-attachment",
+      "allow-download-attachment",
       "allow-autosave-composer-draft",
       "allow-discard-composer-draft",
       "allow-stage-composer-attachment",
@@ -255,6 +265,9 @@ describe("Tauri capabilities", () => {
     for (const command of [
       "load_mail_shell",
       "search_mail",
+      "preview_attachment",
+      "save_attachment",
+      "download_attachment",
       "autosave_composer_draft",
       "discard_composer_draft",
       "stage_composer_attachment",
@@ -291,7 +304,7 @@ describe("Tauri capabilities", () => {
     }
   });
 
-  it("does not expose attachment open, save, download, or extraction surfaces", () => {
+  it("keeps attachment file operations typed and denies opener or extraction surfaces", () => {
     const packageJson = readFileSync(packageJsonPath, "utf8");
     const buildScript = readFileSync(buildScriptPath, "utf8");
     const libRs = readFileSync(libRsPath, "utf8");
@@ -300,6 +313,14 @@ describe("Tauri capabilities", () => {
     for (const command of forbiddenAttachmentOpenCommands) {
       expect(buildScript).not.toContain(`"${command}"`);
       expect(libRs).not.toContain(command);
+    }
+    for (const command of [
+      "preview_attachment",
+      "save_attachment",
+      "download_attachment",
+    ]) {
+      expect(buildScript).toContain(`"${command}"`);
+      expect(libRs).toContain(rustCommandPath(command));
     }
 
     for (const fileName of frontendSourceFileNames) {

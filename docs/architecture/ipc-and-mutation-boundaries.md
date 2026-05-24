@@ -1,10 +1,10 @@
 # IPC And Mutation Boundaries
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 
 ## Current State
 
-Komorebi has reviewed frontend-callable Rust commands for the shell read model, FTS search, account management, backend-owned OAuth loopback, and the TipTap composer MVP. There is still no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. Account-management commands are typed Rust boundaries for credential-backed generic account setup, live generic setup login validation, display/signature/preference persistence, generic reauthentication, removal, and redacted auth status; they also notify the backend sync scheduler after account lifecycle changes. OAuth loopback commands are typed Rust boundaries for Gmail/Microsoft browser authorization, callback validation, token exchange, refresh-token storage, and non-secret OAuth runtime metadata persistence. Composer commands are typed Rust boundaries for local-only draft autosave/discard/reload, staged attachment writes, local recent-recipient lookup, and SMTP send orchestration. Live sync adapters, pending Sent APPEND upload, and background scheduler orchestration exist; reply/forward routing and attachment preview/save remain future work. Provider Drafts upload is intentionally deferred and the composer discloses that drafts stay local until sent or discarded.
+Komorebi has reviewed frontend-callable Rust commands for the shell read model, FTS search, reader attachment preview/save/download, account management, backend-owned OAuth loopback, and the TipTap composer MVP. There is still no frontend SQL access. `load_mail_shell` is a read-only, inputless local-cache snapshot command for account/folder/message navigation. `search_mail` is a read-only, typed, validated FTS query command for subject/sender/body search over the local cache. Attachment commands are typed Rust boundaries for validating stored source files, previewing allowed types, saving through a backend-owned native dialog, and returning safe download bytes. Account-management commands are typed Rust boundaries for credential-backed generic account setup, live generic setup login validation, display/signature/preference persistence, generic reauthentication, removal, and redacted auth status; they also notify the backend sync scheduler after account lifecycle changes. OAuth loopback commands are typed Rust boundaries for Gmail/Microsoft browser authorization, callback validation, token exchange, refresh-token storage, and non-secret OAuth runtime metadata persistence. Composer commands are typed Rust boundaries for local-only draft autosave/discard/reload, staged attachment writes, local recent-recipient lookup, and SMTP send orchestration. Live sync adapters, pending Sent APPEND upload, and background scheduler orchestration exist; reply/forward routing and external attachment open/extract remain future work. Provider Drafts upload is intentionally deferred and the composer discloses that drafts stay local until sent or discarded.
 
 The accepted boundary is:
 
@@ -34,6 +34,12 @@ The accepted boundary is:
 - returns full safe message rows plus display-safe attachment metadata so search results outside the recent snapshot can still open in the reader
 - reports a missing FTS index as `unavailable` instead of exposing raw SQLite errors to React
 - does not expose raw SQL, filesystem paths, credential refs, passwords, tokens, or attachment storage paths
+
+Reader attachment commands live in `src-tauri/src/attachment_commands.rs`:
+
+- `preview_attachment` accepts typed account/folder/message/attachment ids and `userRequested=true`. It verifies active ownership, resolves only app-generated stored attachment paths, canonicalizes under app data, validates persisted size and SHA-256, re-sniffs the content type, applies the preview allowlist, and returns plain text or raster-image bytes only. It never opens external apps.
+- `save_attachment` accepts the same typed request, performs the same stored-source validation, opens a backend-owned native save dialog through Rust-only `tauri-plugin-dialog`, enforces the canonical extension, refuses overwrite, writes from Rust, and returns only display-safe filename/destination labels.
+- `download_attachment` accepts the same typed request, performs the same stored-source validation, and returns bytes plus a safe export filename for browser Blob download. It does not return source paths, hashes, opener handles, or arbitrary file handles.
 
 Composer commands live in `src-tauri/src/composer.rs`:
 
@@ -105,6 +111,7 @@ Do not expose commands that accept raw SQL, arbitrary filesystem paths, arbitrar
 - `src-tauri/src/smtp_send.rs` tests enforce backend SMTP send composition, auth resolution, attachment streaming, and confirmed send receipt behavior.
 - `src-tauri/src/draft_persistence.rs` tests enforce backend-owned draft autosave/discard/sent conversion and provider-aware Sent-copy state.
 - `src-tauri/src/composer.rs` tests enforce composer command mapping, staged attachment storage/cleanup, invalid attachment denial, invalid address denial, duplicate recipient normalization, recent-recipient lookup/persistence, and fake SMTP send through the typed boundary.
+- `src-tauri/src/attachment_commands.rs` tests enforce reader attachment source validation, preview allowlisting, download byte export, backend-selected save behavior, hash/size/type checks, no-overwrite saves, and path redaction.
 - `src-tauri/src/account_management.rs` tests enforce provider/auth policy, live generic setup login before credential persistence, credential-before-metadata ordering, credential-write failure rollback, generic reauthentication, public Gmail/Microsoft secret-handoff denial, account settings display/signature/preference persistence, account removal, and redacted auth status persistence.
 - `src-tauri/src/oauth_loopback.rs` tests enforce browser URL opening, backend code exchange, callback denial, state mismatch, timeout, invalid grant, missing refresh token, generic-provider denial, token storage, and local TCP loopback callback behavior.
 - `src-tauri/src/account_signatures.rs` tests enforce backend-owned per-account signature storage, sanitization, clearing, and deterministic insertion.

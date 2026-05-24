@@ -1,12 +1,12 @@
 # Attachment Storage And Preview Safety
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 
 ## Current State
 
-Komorebi has no reader-facing attachment preview, save, export, or open commands yet. Live MIME sync persists storage-safe inbound attachment bytes and inert metadata from fetched messages, and the reader can display that local-cache metadata, but it does not receive storage paths or preview URLs. The TipTap composer can stage user-selected outbound attachment bytes through a typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist or preview untrusted attachment content with ad hoc path handling.
+Komorebi has typed reader-facing attachment preview, save, and download commands. Live MIME sync persists storage-safe inbound attachment bytes and inert metadata from fetched messages; the reader displays metadata and can request bytes only through `preview_attachment`, `save_attachment`, or `download_attachment` with explicit user intent. The reader still does not receive storage paths, hashes, or preview URLs through `load_mail_shell`. External open and archive extraction remain unsupported. The TipTap composer can stage user-selected outbound attachment bytes through a separate typed Rust command. The attachment safety layer exists so sync, MIME normalization, reader UI, and composer staging cannot persist, preview, save, or download untrusted attachment content with ad hoc path handling.
 
-The storage/preview code source of truth is `src-tauri/src/attachment_safety.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`. Composer staging is implemented in `src-tauri/src/composer.rs`.
+The storage/preview policy source of truth is `src-tauri/src/attachment_safety.rs`. Reader commands are implemented in `src-tauri/src/attachment_commands.rs`. The safe reader projection is `src-tauri/src/mail_shell.rs`. Composer staging is implemented in `src-tauri/src/composer.rs`.
 
 ## Storage Rules
 
@@ -40,7 +40,7 @@ Path segments are validated internal IDs with only ASCII letters, digits, hyphen
 
 Sender filenames are display-only metadata. They are sanitized for display by stripping path components, replacing Windows-reserved filename characters, removing controls, trimming leading/trailing dots, and bounding length. Sanitized display filenames are not used for storage, preview URLs, download destinations, or opener commands.
 
-The frontend mail shell may receive only attachment id, sanitized display filename, MIME type, size, and disposition. It must not receive `storage_relative_path`, local paths, hashes, sender filename storage hints, preview URLs, or opener/download targets through `load_mail_shell`.
+The frontend mail shell may receive only attachment id, sanitized display filename, MIME type, size, and disposition through the shell snapshot and search response. It must not receive `storage_relative_path`, local paths, hashes, sender filename storage hints, preview URLs, or opener targets through `load_mail_shell` or `search_mail`. Attachment bytes may cross IPC only as the response to `preview_attachment` or `download_attachment` after the backend revalidates ownership, app-data storage scope, file size, SHA-256, and content type. `save_attachment` writes from Rust after the same validation and does not return local source paths.
 
 Attachment bytes are not encrypted at rest in the current implementation. This is documented in `docs/architecture/local-cache-encryption.md`; do not claim attachment storage is encrypted until a reviewed encryption design covers attachment files and preview materialization.
 
@@ -64,7 +64,7 @@ Current storage allowlist:
 
 The safety layer sniffs content bytes and compares them to the declared MIME type when a declared type is present. `application/octet-stream` may be accepted only when sniffing identifies an allowed type. Explicitly dangerous declared types such as HTML, SVG, JavaScript, shell/batch/MSI/downloadable executable types, and legacy Office binary types are rejected.
 
-`src-tauri/src/mime_normalization.rs` applies this validation while parsing inbound MIME parts. A parsed attachment that fails storage validation may remain as metadata with a warning, but it does not carry bytes into sync storage and must not be previewed or saved later unless a future command revalidates user intent, ownership, path, size, and type.
+`src-tauri/src/mime_normalization.rs` applies this validation while parsing inbound MIME parts. A parsed attachment that fails storage validation may remain as metadata with a warning, but it does not carry bytes into sync storage and cannot be previewed, saved, or downloaded later because reader commands require a stored app-data path, matching SHA-256, matching size, and a storage-allowlisted type.
 
 Any expansion of the allowlist must add tests for declared type, sniffed bytes, storage extension, preview behavior, and unsafe-open denial.
 
@@ -79,9 +79,15 @@ Previewable types are currently limited to:
 
 PDF and ZIP can be stored when validated but are not previewable in the current safety model. SVG and HTML are rejected instead of previewed because they can execute active content in browser-like surfaces.
 
-`AUTO_OPEN_ATTACHMENTS` is false and must stay false. Opening a file externally is not implemented. If an open/save flow is added, it needs explicit user intent, a typed Rust command, path/type validation, and narrow Tauri capabilities. Do not add the opener plugin broadly to the main webview.
+`AUTO_OPEN_ATTACHMENTS` is false and must stay false. Opening a file externally is not implemented. Any future external-open flow needs explicit user intent, a typed Rust command, path/type validation, and narrow Tauri capabilities. Do not add the opener plugin broadly to the main webview.
 
-Current Tauri capability tests deny attachment open, preview, save, download, and archive-extraction command names as well as frontend opener APIs. Adding one of these surfaces requires updating the capability tests and this document with the reviewed policy.
+`preview_attachment` validates account/folder/message/attachment ownership, requires `userRequested=true`, resolves only stored `attachments/...` app-data-relative paths, canonicalizes the source under app data, reads within the 25 MiB storage limit, checks the persisted SHA-256 and size, re-sniffs type, and then applies the preview allowlist. Plain text previews return text; raster-image previews return bytes for in-app rendering. PDF, ZIP, HTML, SVG, executable, and unknown content are not previewable.
+
+`download_attachment` performs the same validation and returns bytes plus a safe export filename with the canonical extension for the detected content type. It does not return source paths, hashes, or opener handles.
+
+`save_attachment` performs the same validation, opens a backend-owned native save dialog, suggests the safe export filename, enforces the canonical extension, refuses overwrite through `create_new`, writes the selected file from Rust, and returns only display-safe filename/destination labels. React never passes a save path to Rust.
+
+Current Tauri capability tests allow only `preview_attachment`, `save_attachment`, and `download_attachment` for reader attachment work. They still deny opener, archive-extraction, frontend filesystem, frontend dialog, and broad local-system plugin permissions.
 
 ## Tests
 
@@ -103,7 +109,11 @@ Current Tauri capability tests deny attachment open, preview, save, download, an
 
 `src-tauri/src/composer.rs` tests cover composer attachment staging under generated app-data paths, malicious display filenames not creating or overwriting sibling files, corrupted stored relative paths being rejected before file open/streaming, unsafe type denial, staged attachment streaming during fake SMTP send, and cleanup after confirmed send.
 
-`src-tauri/capabilities/capabilities.test.ts` covers opener/download/preview/extraction denial by absence until typed attachment commands exist.
+`src-tauri/src/attachment_commands.rs` tests cover preview/download/save success, missing user intent, ownership failures, path traversal in persisted storage paths, corrupt hashes, mismatched declared/sniffed types, metadata-only attachments, unpreviewable stored types, safe export filenames, selected-save extension enforcement, and no-overwrite behavior.
+
+`src-tauri/tests/ipc_denial_paths.rs` covers command-level attachment denial paths for invalid ids, unowned scope, missing intent, corrupt hashes, traversal paths, and metadata-only rows with disposable SQLite and temp app-data directories.
+
+`src-tauri/capabilities/capabilities.test.ts` covers reviewed attachment command allowlisting and opener/dialog/filesystem/extraction denial by absence.
 
 `pnpm check` runs these tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

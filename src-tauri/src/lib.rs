@@ -1,6 +1,7 @@
 pub mod account_connection;
 pub mod account_management;
 pub mod account_signatures;
+pub mod attachment_commands;
 pub mod attachment_safety;
 pub mod auth;
 pub mod composer;
@@ -27,6 +28,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(sync_scheduler::BackgroundSyncScheduler::default())
         .setup(|app| {
             let cache_path = account_management::mail_cache_path(app.handle())?;
@@ -52,6 +54,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mail_shell::load_mail_shell,
             mail_shell::search_mail,
+            attachment_commands::preview_attachment,
+            attachment_commands::save_attachment,
+            attachment_commands::download_attachment,
             composer::autosave_composer_draft,
             composer::discard_composer_draft,
             composer::stage_composer_attachment,

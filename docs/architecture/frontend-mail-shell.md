@@ -1,7 +1,7 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering, English/pt-PT i18n, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
-Last reviewed: 2026-05-23.
+Status: 3-pane shell, multi-account local-cache navigation, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed attachment preview/save/download, English/pt-PT i18n, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
+Last reviewed: 2026-05-24.
 
 ## Current Scope
 
@@ -15,6 +15,7 @@ The code source of truth is:
 - `src/i18n/`
 - `src/App.tsx`
 - `src/App.css`
+- `src-tauri/src/attachment_commands.rs`
 - `src-tauri/src/mail_shell.rs`
 - `src-tauri/src/sync_scheduler.rs`
 
@@ -33,7 +34,7 @@ The default state is an accountless local shell with:
 - settings entry
 - empty states
 
-Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `search_mail` queries the same cache through FTS5 when the user searches; composer data-source functions call the typed Rust draft, attachment staging, recent-recipient, and send commands. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
+Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `search_mail` queries the same cache through FTS5 when the user searches; reader attachment actions call typed preview/save/download commands; composer data-source functions call the typed Rust draft, attachment staging, recent-recipient, and send commands. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
 
 ## State Model
 
@@ -50,7 +51,7 @@ Tests may inject fixture mail through `initialData` to verify workflows. In Taur
 - selected message
 - search query
 
-The navigation state is frontend-local. Cache reads come from the Rust `load_mail_shell` and `search_mail` commands. Composer draft/save/send actions are the only current frontend-triggered mutations and go through typed Rust commands; the shell still does not expose frontend SQL, credentials, arbitrary paths, or provider command strings.
+The navigation state is frontend-local. Cache reads come from the Rust `load_mail_shell` and `search_mail` commands. Reader attachment preview/save/download and composer draft/save/send actions go through typed Rust commands; the shell still does not expose frontend SQL, credentials, arbitrary paths, or provider command strings.
 
 ## Local Cache Read Model
 
@@ -172,12 +173,12 @@ The reader pane supports:
 - plain-text fallback through React text output
 - sanitized HTML through `SafeEmailBody`
 - default remote-resource blocking status
-- inert attachment metadata list
+- attachment metadata list with typed Preview, Save, and Download actions when the backend commands are available
 - disabled reply, forward, archive, mark-read, and remote-content controls until typed backend commands exist
 
 Message body rendering reuses `SafeEmailBody`. Do not add another untrusted HTML sink in the shell.
 
-Attachment rows are metadata only. The frontend receives display filenames, MIME type, size, and disposition; it does not receive `storage_relative_path`, local filesystem paths, sender filenames as storage hints, hashes, or preview URLs. Preview and save buttons are intentionally disabled until a future typed attachment command validates user intent, ownership, path, size, and content type.
+Attachment rows in the shell snapshot/search response are metadata only. The frontend receives display filenames, MIME type, size, and disposition; it does not receive `storage_relative_path`, local filesystem paths, sender filenames as storage hints, hashes, or preview URLs. Preview/Save/Download buttons are enabled only when the corresponding typed function is injected by Tauri runtime or tests. They send account/folder/message/attachment ids plus `userRequested=true`; Rust revalidates ownership, source path, hash, size, MIME/type sniffing, preview allowlist, and save destination policy before returning bytes or writing a file. External open remains unavailable.
 
 Remote content remains blocked by the sanitizer. The reader exposes a disabled `Load remote content` control as the future preference entry point, but no per-message or per-sender remote-content preference is persisted yet.
 
@@ -209,8 +210,9 @@ The Tauri runtime wiring is:
 - `send_composer_email` for draft validation, SMTP send, confirmed send persistence, and staged attachment cleanup after success
 - `list_recent_recipients` for account-scoped local autocomplete suggestions from SQLite
 - `list_composer_drafts` for active local draft reload/reopen data with display-safe staged attachment metadata
+- `preview_attachment`, `save_attachment`, and `download_attachment` for reader attachment byte access after backend validation
 
-The frontend never receives attachment storage paths and never sends local filesystem paths to Rust. It sends user-selected bytes from the WebView file input to the staging command. The backend validates MIME/type/size and owns the final app-data path.
+The frontend never receives attachment storage paths and never sends local filesystem paths to Rust. It sends user-selected bytes from the WebView file input to the composer staging command. Reader save uses a backend-owned native dialog; React sends only attachment identity and explicit intent. The backend validates MIME/type/size and owns the final app-data path.
 
 Active local drafts load on app startup and after composer/account lifecycle changes. Reopening a draft hydrates the same draft id, account, recipients, subject, rich body/signature content, and staged attachment metadata into TipTap. The account selector is locked for reopened drafts so the frontend cannot accidentally save an existing draft under another account. Discard and confirmed send remove the local draft from the Drafts list.
 
@@ -263,7 +265,7 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 - account navigation
 - folder navigation
 - selected-message preservation for compatible scope changes
-- safe message detail rendering with sanitized HTML, remote image blocking, inert attachment metadata, and disabled reply/forward/remote-content controls
+- safe message detail rendering with sanitized HTML, remote image blocking, typed attachment preview/save/download handlers, and disabled reply/forward/remote-content controls
 - local fixture search and FTS-backed search with debounce, cancellation, result origin labels, no-match state, no-index state, and retryable error state
 - TipTap composer address validation, duplicate recipient handling, keyboard autocomplete from recent recipients, signature insertion, local-only draft disclosure, active draft list/reopen hydration, draft save, attachment staging, inline image CID conversion, send command request shape, send progress, and validation errors
 - TipTap rich formatting extension output and sanitizer behavior in `src/mail/composer/TipTapComposer.test.tsx`
@@ -279,9 +281,9 @@ These states are wired to the local-cache command when running in Tauri. Retry b
 
 `src/mail/shell/mailShellState.test.ts` covers pure shell state rules: unified/account/folder scope filtering, local search fallback behavior, cache-reload selection preservation, and stale backend row clearing.
 
-`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, recent-recipient lookup, composer draft list loading, composer autosave, generic account commands, OAuth loopback commands, sync-status event subscription, and cancellation before invoke or after a stale response.
+`src/mail/shell/mailShellDataSource.test.ts` covers the frontend backend boundary: Tauri runtime detection, typed `invoke` command payloads for shell load/search, attachment preview/save/download, recent-recipient lookup, composer draft list loading, composer autosave, generic account commands, OAuth loopback commands, sync-status event subscription, and cancellation before invoke or after a stale response.
 
-`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, runs backend-shaped search, opens a search result in the reader, opens the Drafts drawer, reopens a saved local draft in the composer, verifies the local-only draft disclosure, sends through typed fixture handlers with the original draft id, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
+`e2e/mail-shell.smoke.spec.ts` covers a browser-level Playwright smoke path against the test-only `/e2e/` Vite entry. It loads fixture mail through `src/e2e/main.tsx`, opens inbox and archive messages, previews/saves a fixture attachment through typed handlers, runs backend-shaped search, opens a search result in the reader, opens the Drafts drawer, reopens a saved local draft in the composer, verifies the local-only draft disclosure, sends through typed fixture handlers with the original draft id, and retains screenshots, video, and traces on failure through `playwright.config.ts`.
 
 `perf/mail-shell.benchmark.spec.ts` covers a browser-level benchmark path against the same test-only `/e2e/` entry with `?fixture=performance`. It uses the deterministic generator in `src/perf/mailPerformanceFixtures.ts` to populate 10,000 synthetic messages and representative attachment metadata, then reports Chromium heap usage, search latency, virtualized scroll timing, selected-row timing, and mounted row count through `pnpm perf:mail-shell` and `playwright.perf.config.ts`. The benchmark also guards the browser virtualizer path by requiring fewer than 80 mounted message rows for the 10,000-message fixture.
 
@@ -296,7 +298,7 @@ Normal automated tests use no real mailbox data, real credentials, or live provi
 - TanStack Query integration.
 - Live reply/forward routing.
 - Remote-content preference persistence and allowlisting.
-- Attachment preview/save commands.
+- External attachment open, archive extraction, and attachment preview types beyond plain text/raster images.
 - Language picker, persisted locale preference, relative date wording, and broad translated-layout screenshot coverage.
 - E2E accessibility, axe, or real screen-reader harness.
 - Release-build Tauri-shell performance measurements against live adapters and persisted SQLite fixture databases.

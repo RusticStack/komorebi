@@ -9,6 +9,10 @@ import type {
   ComposerDraftSaveResponse,
   ComposerSendRequest,
   ComposerSendResponse,
+  AttachmentCommandRequest,
+  AttachmentDownloadResponse,
+  AttachmentPreviewResponse,
+  AttachmentSaveResponse,
   MailSearchRequest,
   MailSearchResponse,
   MailShellData,
@@ -48,6 +52,9 @@ export type SyncStatusEventHandler = (
 
 const LOAD_MAIL_SHELL_COMMAND = "load_mail_shell";
 const SEARCH_MAIL_COMMAND = "search_mail";
+const PREVIEW_ATTACHMENT_COMMAND = "preview_attachment";
+const SAVE_ATTACHMENT_COMMAND = "save_attachment";
+const DOWNLOAD_ATTACHMENT_COMMAND = "download_attachment";
 const AUTOSAVE_COMPOSER_DRAFT_COMMAND = "autosave_composer_draft";
 const DISCARD_COMPOSER_DRAFT_COMMAND = "discard_composer_draft";
 const STAGE_COMPOSER_ATTACHMENT_COMMAND = "stage_composer_attachment";
@@ -88,6 +95,30 @@ export async function searchMailFromTauri(
   throwIfAborted(signal);
 
   return response;
+}
+
+export async function previewAttachmentFromTauri(
+  request: AttachmentCommandRequest,
+): Promise<AttachmentPreviewResponse> {
+  return invoke<AttachmentPreviewResponse>(PREVIEW_ATTACHMENT_COMMAND, {
+    request,
+  });
+}
+
+export async function saveAttachmentFromTauri(
+  request: AttachmentCommandRequest,
+): Promise<AttachmentSaveResponse> {
+  return invoke<AttachmentSaveResponse>(SAVE_ATTACHMENT_COMMAND, {
+    request,
+  });
+}
+
+export async function downloadAttachmentFromTauri(
+  request: AttachmentCommandRequest,
+): Promise<AttachmentDownloadResponse> {
+  return invoke<AttachmentDownloadResponse>(DOWNLOAD_ATTACHMENT_COMMAND, {
+    request,
+  });
 }
 
 export async function autosaveComposerDraftFromTauri(

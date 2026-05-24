@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process,
 };
 
@@ -16,6 +16,10 @@ use komorebi_lib::{
         AccountAuthStatusRequest, AccountCredentialStore, AccountLocalPreferences,
         AccountReauthRequest, AccountRemovalRequest, AccountSettingsUpdateRequest,
         AccountSetupRequest,
+    },
+    attachment_commands::{
+        download_attachment_from_connection, preview_attachment_from_connection,
+        save_attachment_from_connection, AttachmentCommandRequest,
     },
     attachment_safety::MAX_ATTACHMENT_BYTES,
     composer::{
@@ -35,6 +39,7 @@ use komorebi_lib::{
     token_lifecycle::SecretString,
 };
 use rusqlite::{params, Connection};
+use sha2::{Digest, Sha256};
 
 const ACCOUNT_ID: &str = "acct_ipc";
 const OTHER_ACCOUNT_ID: &str = "acct_other";
@@ -42,6 +47,7 @@ const DRAFT_ID: &str = "draft_ipc";
 const INBOX_ID: &str = "folder_inbox";
 const OTHER_FOLDER_ID: &str = "folder_other";
 const MESSAGE_ID: &str = "msg_ipc";
+const ATTACHMENT_ID: &str = "att_ipc";
 
 #[test]
 fn mail_search_command_rejects_sql_html_invalid_ids_unowned_scope_and_oversized_queries() {
@@ -211,6 +217,99 @@ fn composer_commands_reject_invalid_ids_unowned_attachments_unsafe_html_and_over
         .contains("recipient_query exceeds 256 bytes"));
 
     fs::remove_dir_all(app_data_dir).expect("remove temp app data dir");
+}
+
+#[test]
+fn attachment_commands_reject_invalid_scope_corrupt_content_and_missing_intent() {
+    let connection = migrated_connection();
+    seed_accounts_and_folders(&connection);
+    let app_data_dir = temp_app_data_dir("ipc-denial-attachments");
+    let save_root = temp_app_data_dir("ipc-denial-attachment-save");
+    seed_message_and_attachment(&connection, &app_data_dir, b"safe attachment notes");
+
+    let no_intent =
+        preview_attachment_from_connection(&connection, &app_data_dir, attachment_request(false))
+            .expect_err("preview requires explicit user intent");
+    assert_eq!(no_intent.reason, "attachment preview requires user intent");
+
+    let mut invalid_id = attachment_request(true);
+    invalid_id.attachment_id = "../secret".into();
+    let invalid_id_error =
+        download_attachment_from_connection(&connection, &app_data_dir, invalid_id)
+            .expect_err("invalid attachment id is rejected");
+    assert!(invalid_id_error.reason.contains("attachment_id is invalid"));
+
+    let mut wrong_scope = attachment_request(true);
+    wrong_scope.folder_id = OTHER_FOLDER_ID.into();
+    let wrong_scope_error =
+        download_attachment_from_connection(&connection, &app_data_dir, wrong_scope)
+            .expect_err("unowned attachment scope is rejected");
+    assert_eq!(wrong_scope_error.reason, "attachment was not found");
+
+    let preview =
+        preview_attachment_from_connection(&connection, &app_data_dir, attachment_request(true))
+            .expect("owned text attachment previews");
+    assert_eq!(preview.text.as_deref(), Some("safe attachment notes"));
+    assert!(!preview.auto_open);
+
+    let saved = save_attachment_from_connection(
+        &connection,
+        &app_data_dir,
+        &save_root,
+        attachment_request(true),
+    )
+    .expect("owned attachment saves under selected test scope");
+    assert_eq!(saved.saved_filename, "notes.txt");
+    assert_eq!(
+        fs::read(save_root.join("notes.txt")).unwrap(),
+        b"safe attachment notes"
+    );
+
+    connection
+        .execute(
+            "UPDATE attachments
+             SET sha256 = ?1
+             WHERE id = ?2",
+            params![
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                ATTACHMENT_ID
+            ],
+        )
+        .expect("corrupt stored hash");
+    let corrupt =
+        download_attachment_from_connection(&connection, &app_data_dir, attachment_request(true))
+            .expect_err("hash mismatch is rejected before export");
+    assert_eq!(corrupt.reason, "attachment hash mismatch");
+
+    connection
+        .execute(
+            "UPDATE attachments
+             SET sha256 = ?1,
+                 storage_relative_path = '../outside.txt'
+             WHERE id = ?2",
+            params![sha256_hex(b"safe attachment notes"), ATTACHMENT_ID],
+        )
+        .expect("corrupt stored path");
+    let traversal =
+        download_attachment_from_connection(&connection, &app_data_dir, attachment_request(true))
+            .expect_err("stored traversal path is rejected");
+    assert_eq!(traversal.reason, "attachment path is outside app data");
+
+    connection
+        .execute(
+            "UPDATE attachments
+             SET storage_relative_path = NULL
+             WHERE id = ?1",
+            [ATTACHMENT_ID],
+        )
+        .expect("mark metadata-only");
+    let unavailable =
+        download_attachment_from_connection(&connection, &app_data_dir, attachment_request(true))
+            .expect_err("metadata-only attachment cannot be exported");
+    assert_eq!(unavailable.reason, "attachment content is unavailable");
+
+    fs::remove_dir_all(app_data_dir).expect("remove temp app data dir");
+    fs::remove_dir_all(save_root).expect("remove temp save dir");
 }
 
 #[test]
@@ -568,6 +667,80 @@ fn draft_request() -> ComposerDraftSaveRequest {
         body_html: Some("<p>Plain body</p>".into()),
         attachment_ids: Vec::new(),
     }
+}
+
+fn attachment_request(user_requested: bool) -> AttachmentCommandRequest {
+    AttachmentCommandRequest {
+        account_id: ACCOUNT_ID.into(),
+        folder_id: INBOX_ID.into(),
+        message_id: MESSAGE_ID.into(),
+        attachment_id: ATTACHMENT_ID.into(),
+        user_requested,
+    }
+}
+
+fn seed_message_and_attachment(connection: &Connection, app_data_dir: &Path, bytes: &[u8]) {
+    connection
+        .execute(
+            "INSERT INTO messages (
+               id,
+               account_id,
+               folder_id,
+               imap_uid,
+               uid_validity,
+               subject,
+               sender_email,
+               body_text
+             )
+             VALUES (?1, ?2, ?3, 1, 1, 'Attachment IPC', 'sender@example.com', 'Body')",
+            params![MESSAGE_ID, ACCOUNT_ID, INBOX_ID],
+        )
+        .expect("seed message");
+
+    let relative_path =
+        format!("attachments/{ACCOUNT_ID}/{INBOX_ID}/{MESSAGE_ID}/{ATTACHMENT_ID}.txt");
+    let full_path = app_data_dir.join(&relative_path);
+    fs::create_dir_all(full_path.parent().expect("attachment parent"))
+        .expect("create attachment storage");
+    fs::write(&full_path, bytes).expect("write attachment bytes");
+
+    connection
+        .execute(
+            "INSERT INTO attachments (
+               id,
+               account_id,
+               folder_id,
+               message_id,
+               content_id,
+               display_filename,
+               canonical_mime,
+               content_type,
+               size_bytes,
+               storage_relative_path,
+               sha256,
+               disposition
+             )
+             VALUES (?1, ?2, ?3, ?4, NULL, 'notes.exe', 'text/plain', 'text/plain', ?5, ?6, ?7, 'attachment')",
+            params![
+                ATTACHMENT_ID,
+                ACCOUNT_ID,
+                INBOX_ID,
+                MESSAGE_ID,
+                bytes.len() as i64,
+                relative_path,
+                sha256_hex(bytes)
+            ],
+        )
+        .expect("seed attachment");
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::new();
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
 }
 
 fn account_setup_request() -> AccountSetupRequest {

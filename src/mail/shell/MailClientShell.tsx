@@ -63,6 +63,10 @@ import {
   type AccountManagementView,
   type AccountSettingsUpdateRequest,
   type AccountSettingsUpdateResponse,
+  type AttachmentCommandRequest,
+  type AttachmentDownloadResponse,
+  type AttachmentPreviewResponse,
+  type AttachmentSaveResponse,
   type LoadStatus,
 } from "./mailShellState";
 
@@ -95,6 +99,15 @@ export type AccountSettingsUpdateFunction = (
   request: AccountSettingsUpdateRequest,
 ) => Promise<AccountSettingsUpdateResponse>;
 export type ComposerDraftListFunction = () => Promise<ComposerDraft[]>;
+export type AttachmentPreviewFunction = (
+  request: AttachmentCommandRequest,
+) => Promise<AttachmentPreviewResponse>;
+export type AttachmentSaveFunction = (
+  request: AttachmentCommandRequest,
+) => Promise<AttachmentSaveResponse>;
+export type AttachmentDownloadFunction = (
+  request: AttachmentCommandRequest,
+) => Promise<AttachmentDownloadResponse>;
 export type SyncStatusUnsubscribeFunction = () => void | Promise<void>;
 export type SyncStatusSubscribeFunction = (
   handler: (payload: unknown) => void,
@@ -107,6 +120,9 @@ export type MailClientShellProps = {
   loadMailShellData?: () => Promise<MailShellData>;
   loadComposerDrafts?: ComposerDraftListFunction;
   searchMail?: MailSearchFunction;
+  previewAttachment?: AttachmentPreviewFunction;
+  saveAttachment?: AttachmentSaveFunction;
+  downloadAttachment?: AttachmentDownloadFunction;
   searchDebounceMs?: number;
   loadRecentRecipients?: RecentRecipientSearchFunction;
   saveComposerDraft?: ComposerDraftSaveFunction;
@@ -137,11 +153,24 @@ type MailSearchUiState = {
   results: MailMessage[];
   status: MailSearchUiStatus;
 };
+type AttachmentActionState = {
+  attachmentId: string | null;
+  status: "idle" | "loading" | "saved" | "downloaded" | "error";
+  message: string | null;
+};
 
 const MESSAGE_ROW_HEIGHT_PX = 136;
 const MESSAGE_LIST_OVERSCAN = 8;
 const MAIL_SEARCH_DEBOUNCE_MS = 250;
 const MAIL_SEARCH_RESULT_LIMIT = 100;
+const ATTACHMENT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
+const PREVIEWABLE_ATTACHMENT_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+]);
 const MESSAGE_LIST_FALLBACK_RECT: Rect = {
   width: 420,
   height: 640,
@@ -151,6 +180,11 @@ const emptySearchState: MailSearchUiState = {
   results: [],
   status: "idle",
 };
+const emptyAttachmentActionState: AttachmentActionState = {
+  attachmentId: null,
+  status: "idle",
+  message: null,
+};
 
 export function MailClientShell({
   initialData = emptyMailShellData,
@@ -159,6 +193,9 @@ export function MailClientShell({
   loadMailShellData,
   loadComposerDrafts,
   searchMail,
+  previewAttachment,
+  saveAttachment,
+  downloadAttachment,
   searchDebounceMs = MAIL_SEARCH_DEBOUNCE_MS,
   loadRecentRecipients,
   saveComposerDraft,
@@ -194,6 +231,10 @@ export function MailClientShell({
   const [statusAccountId, setStatusAccountId] = useState<string | null>(null);
   const [selectedComposerDraftId, setSelectedComposerDraftId] =
     useState<string | null>(null);
+  const [attachmentPreview, setAttachmentPreview] =
+    useState<AttachmentPreviewResponse | null>(null);
+  const [attachmentAction, setAttachmentAction] =
+    useState<AttachmentActionState>(emptyAttachmentActionState);
   const accountButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const folderButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -426,6 +467,108 @@ export function MailClientShell({
       );
     } catch {
       setComposerDraftsLoadState("error");
+    }
+  }
+
+  function clearAttachmentUi() {
+    setAttachmentPreview(null);
+    setAttachmentAction(emptyAttachmentActionState);
+  }
+
+  async function handlePreviewAttachment(
+    message: MailMessage,
+    attachment: MailAttachment,
+  ) {
+    if (!previewAttachment) {
+      return;
+    }
+
+    setAttachmentAction({
+      attachmentId: attachment.id,
+      message: null,
+      status: "loading",
+    });
+
+    try {
+      const preview = await previewAttachment(
+        attachmentRequestFor(message, attachment),
+      );
+      setAttachmentPreview(preview);
+      setAttachmentAction(emptyAttachmentActionState);
+    } catch {
+      setAttachmentAction({
+        attachmentId: attachment.id,
+        message: t("mail.attachments.previewError"),
+        status: "error",
+      });
+    }
+  }
+
+  async function handleSaveAttachment(
+    message: MailMessage,
+    attachment: MailAttachment,
+  ) {
+    if (!saveAttachment) {
+      return;
+    }
+
+    setAttachmentAction({
+      attachmentId: attachment.id,
+      message: null,
+      status: "loading",
+    });
+
+    try {
+      const saved = await saveAttachment(attachmentRequestFor(message, attachment));
+      setAttachmentAction({
+        attachmentId: attachment.id,
+        message: t("mail.attachments.saveSuccess", {
+          filename: saved.savedFilename,
+          destination: saved.destinationLabel,
+        }),
+        status: "saved",
+      });
+    } catch {
+      setAttachmentAction({
+        attachmentId: attachment.id,
+        message: t("mail.attachments.saveError"),
+        status: "error",
+      });
+    }
+  }
+
+  async function handleDownloadAttachment(
+    message: MailMessage,
+    attachment: MailAttachment,
+  ) {
+    if (!downloadAttachment) {
+      return;
+    }
+
+    setAttachmentAction({
+      attachmentId: attachment.id,
+      message: null,
+      status: "loading",
+    });
+
+    try {
+      const download = await downloadAttachment(
+        attachmentRequestFor(message, attachment),
+      );
+      triggerBrowserDownload(download);
+      setAttachmentAction({
+        attachmentId: attachment.id,
+        message: t("mail.attachments.downloadStarted", {
+          filename: download.displayFilename,
+        }),
+        status: "downloaded",
+      });
+    } catch {
+      setAttachmentAction({
+        attachmentId: attachment.id,
+        message: t("mail.attachments.downloadError"),
+        status: "error",
+      });
     }
   }
 
@@ -951,12 +1094,13 @@ export function MailClientShell({
             placeholder={t("mail.search.placeholder")}
             disabled={!hasAccounts || state.loadState.messages !== "ready"}
             value={state.searchQuery}
-            onChange={(event) =>
+            onChange={(event) => {
+              clearAttachmentUi();
               patchState({
                 searchQuery: event.target.value,
                 selectedMessageId: null,
-              })
-            }
+              });
+            }}
           />
           <SearchStatusLine
             isBackendSearchActive={isBackendSearchActive}
@@ -974,12 +1118,14 @@ export function MailClientShell({
           visibleMessages={visibleMessages}
           onRetry={loadMailShellData ? reloadMailShell : undefined}
           onRetrySearch={() => setSearchRetryNonce((current) => current + 1)}
-          onSelectMessage={(messageId) =>
+          onSelectMessage={(messageId) => {
+            clearAttachmentUi();
             patchState({
               selectedMessageId: messageId,
-            })
-          }
+            });
+          }}
           onReadMessage={(messageId) => {
+            clearAttachmentUi();
             patchState({
               selectedMessageId: messageId,
             });
@@ -999,6 +1145,15 @@ export function MailClientShell({
           message={activeMessage}
           hasVisibleMessages={visibleMessages.length > 0}
           onRetry={loadMailShellData ? reloadMailShell : undefined}
+          previewAttachment={previewAttachment}
+          saveAttachment={saveAttachment}
+          downloadAttachment={downloadAttachment}
+          attachmentPreview={attachmentPreview}
+          attachmentAction={attachmentAction}
+          onPreviewAttachment={handlePreviewAttachment}
+          onSaveAttachment={handleSaveAttachment}
+          onDownloadAttachment={handleDownloadAttachment}
+          onCloseAttachmentPreview={() => setAttachmentPreview(null)}
         />
       </section>
 
@@ -1216,6 +1371,51 @@ function SearchStatusLine({
   }
 
   return null;
+}
+
+function attachmentRequestFor(
+  message: MailMessage,
+  attachment: MailAttachment,
+): AttachmentCommandRequest {
+  return {
+    accountId: message.accountId,
+    folderId: message.folderId,
+    messageId: message.id,
+    attachmentId: attachment.id,
+    userRequested: true,
+  };
+}
+
+function triggerBrowserDownload(download: AttachmentDownloadResponse) {
+  const blob = new Blob([new Uint8Array(download.bytes)], {
+    type: download.contentType,
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = download.displayFilename;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function bytesToDataUrl(contentType: string, bytes: number[]) {
+  let binary = "";
+  const chunkSize = 8192;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+
+  return `data:${contentType};base64,${btoa(binary)}`;
+}
+
+function canPreviewAttachmentMetadata(attachment: MailAttachment) {
+  return (
+    PREVIEWABLE_ATTACHMENT_TYPES.has(attachment.contentType.toLocaleLowerCase()) &&
+    attachment.sizeBytes <= ATTACHMENT_PREVIEW_MAX_BYTES
+  );
 }
 
 function DraftsDrawer({
@@ -1708,11 +1908,29 @@ function ReaderPane({
   message,
   hasVisibleMessages,
   onRetry,
+  previewAttachment,
+  saveAttachment,
+  downloadAttachment,
+  attachmentPreview,
+  attachmentAction,
+  onPreviewAttachment,
+  onSaveAttachment,
+  onDownloadAttachment,
+  onCloseAttachmentPreview,
 }: {
   state: MailShellState;
   message: ReturnType<typeof selectedMessage>;
   hasVisibleMessages: boolean;
   onRetry?: () => void;
+  previewAttachment?: AttachmentPreviewFunction;
+  saveAttachment?: AttachmentSaveFunction;
+  downloadAttachment?: AttachmentDownloadFunction;
+  attachmentPreview: AttachmentPreviewResponse | null;
+  attachmentAction: AttachmentActionState;
+  onPreviewAttachment: (message: MailMessage, attachment: MailAttachment) => void;
+  onSaveAttachment: (message: MailMessage, attachment: MailAttachment) => void;
+  onDownloadAttachment: (message: MailMessage, attachment: MailAttachment) => void;
+  onCloseAttachmentPreview: () => void;
 }) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
@@ -1834,7 +2052,21 @@ function ReaderPane({
 
       <article className="reader-body">
         <SafeEmailBody bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
-        <AttachmentList attachments={message.attachments} />
+        <AttachmentList
+          action={attachmentAction}
+          attachments={message.attachments}
+          canDownload={Boolean(downloadAttachment)}
+          canPreview={Boolean(previewAttachment)}
+          canSave={Boolean(saveAttachment)}
+          message={message}
+          onDownloadAttachment={onDownloadAttachment}
+          onPreviewAttachment={onPreviewAttachment}
+          onSaveAttachment={onSaveAttachment}
+        />
+        <AttachmentPreviewPanel
+          onClose={onCloseAttachmentPreview}
+          preview={attachmentPreview}
+        />
       </article>
 
       <ReaderStatus text={t("mail.reader.remoteBlocked")} />
@@ -1842,7 +2074,27 @@ function ReaderPane({
   );
 }
 
-function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
+function AttachmentList({
+  action,
+  attachments,
+  canDownload,
+  canPreview,
+  canSave,
+  message,
+  onDownloadAttachment,
+  onPreviewAttachment,
+  onSaveAttachment,
+}: {
+  action: AttachmentActionState;
+  attachments: MailAttachment[];
+  canDownload: boolean;
+  canPreview: boolean;
+  canSave: boolean;
+  message: MailMessage;
+  onDownloadAttachment: (message: MailMessage, attachment: MailAttachment) => void;
+  onPreviewAttachment: (message: MailMessage, attachment: MailAttachment) => void;
+  onSaveAttachment: (message: MailMessage, attachment: MailAttachment) => void;
+}) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
 
@@ -1860,6 +2112,12 @@ function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
             t("mail.attachments.attachmentFallback");
           const contentType =
             attachment.contentType.trim() || "application/octet-stream";
+          const isBusy =
+            action.attachmentId === attachment.id && action.status === "loading";
+          const statusMessage =
+            action.attachmentId === attachment.id ? action.message : null;
+          const canPreviewThisAttachment =
+            canPreview && canPreviewAttachmentMetadata(attachment);
 
           return (
             <li className="attachment-item" key={attachment.id}>
@@ -1873,25 +2131,87 @@ function AttachmentList({ attachments }: { attachments: MailAttachment[] }) {
               <div className="attachment-actions" aria-label={t("mail.attachments.actionsLabel")}>
                 <button
                   type="button"
-                  disabled
-                  title={t("mail.attachments.previewUnavailableTitle")}
-                  aria-label={t("mail.attachments.previewUnavailable", {
-                    filename: displayFilename,
-                  })}
+                  disabled={!canPreviewThisAttachment || isBusy}
+                  title={
+                    canPreviewThisAttachment
+                      ? t("mail.attachments.previewTitle")
+                      : canPreview
+                        ? t("mail.attachments.previewUnsupportedTitle")
+                      : t("mail.attachments.previewUnavailableTitle")
+                  }
+                  aria-label={
+                    canPreviewThisAttachment
+                      ? t("mail.attachments.previewNamed", {
+                          filename: displayFilename,
+                        })
+                      : t("mail.attachments.previewUnavailable", {
+                          filename: displayFilename,
+                        })
+                  }
+                  onClick={() => onPreviewAttachment(message, attachment)}
                 >
                   {t("mail.attachments.preview")}
                 </button>
                 <button
                   type="button"
-                  disabled
-                  title={t("mail.attachments.saveUnavailableTitle")}
-                  aria-label={t("mail.attachments.saveUnavailable", {
-                    filename: displayFilename,
-                  })}
+                  disabled={!canSave || isBusy}
+                  title={
+                    canSave
+                      ? t("mail.attachments.saveTitle")
+                      : t("mail.attachments.saveUnavailableTitle")
+                  }
+                  aria-label={
+                    canSave
+                      ? t("mail.attachments.saveNamed", {
+                          filename: displayFilename,
+                        })
+                      : t("mail.attachments.saveUnavailable", {
+                          filename: displayFilename,
+                        })
+                  }
+                  onClick={() => onSaveAttachment(message, attachment)}
                 >
                   {t("mail.attachments.save")}
                 </button>
+                <button
+                  type="button"
+                  disabled={!canDownload || isBusy}
+                  title={
+                    canDownload
+                      ? t("mail.attachments.downloadTitle")
+                      : t("mail.attachments.downloadUnavailableTitle")
+                  }
+                  aria-label={
+                    canDownload
+                      ? t("mail.attachments.downloadNamed", {
+                          filename: displayFilename,
+                        })
+                      : t("mail.attachments.downloadUnavailable", {
+                          filename: displayFilename,
+                        })
+                  }
+                  onClick={() => onDownloadAttachment(message, attachment)}
+                >
+                  {t("mail.attachments.download")}
+                </button>
               </div>
+              {isBusy ? (
+                <small className="attachment-status" role="status">
+                  {t("mail.attachments.working")}
+                </small>
+              ) : null}
+              {statusMessage ? (
+                <small
+                  className={
+                    action.status === "error"
+                      ? "attachment-status attachment-status--error"
+                      : "attachment-status"
+                  }
+                  role="status"
+                >
+                  {statusMessage}
+                </small>
+              ) : null}
             </li>
           );
         })}
@@ -2036,6 +2356,44 @@ function AccountStatusDrawer({
         <p className="settings-error" role="alert">
           {error}
         </p>
+      ) : null}
+    </section>
+  );
+}
+
+function AttachmentPreviewPanel({
+  onClose,
+  preview,
+}: {
+  onClose: () => void;
+  preview: AttachmentPreviewResponse | null;
+}) {
+  const { t } = useTranslation();
+
+  if (!preview) {
+    return null;
+  }
+
+  const imageUrl =
+    preview.kind === "raster-image" && preview.bytes
+      ? bytesToDataUrl(preview.contentType, preview.bytes)
+      : null;
+
+  return (
+    <section className="attachment-preview" aria-label={t("mail.attachments.previewHeading")}>
+      <header>
+        <div>
+          <p className="eyebrow">{t("mail.attachments.previewEyebrow")}</p>
+          <h3>{preview.displayFilename}</h3>
+        </div>
+        <button type="button" onClick={onClose}>
+          {t("mail.attachments.closePreview")}
+        </button>
+      </header>
+      {preview.kind === "plain-text" ? (
+        <pre>{preview.text}</pre>
+      ) : imageUrl ? (
+        <img src={imageUrl} alt={preview.displayFilename} />
       ) : null}
     </section>
   );

@@ -1,6 +1,6 @@
 # IPC Input Validation
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 
 ## Current State
 
@@ -8,6 +8,9 @@ Komorebi has reviewed frontend-callable IPC commands:
 
 - `load_mail_shell`: inputless, read-only local-cache shell snapshot.
 - `search_mail`: read-only local-cache FTS query with a typed request.
+- `preview_attachment`: typed reader preview for stored local-cache attachment content.
+- `save_attachment`: typed reader save for stored local-cache attachment content through a backend-owned native save dialog.
+- `download_attachment`: typed reader byte download for stored local-cache attachment content.
 - `autosave_composer_draft`: typed local draft autosave.
 - `discard_composer_draft`: typed local draft discard and staged attachment cleanup.
 - `stage_composer_attachment`: typed user-selected byte staging with backend-generated storage paths.
@@ -24,6 +27,8 @@ Komorebi has reviewed frontend-callable IPC commands:
 - `get_account_auth_status`: typed redacted auth-status lookup.
 
 `search_mail` validates the query and optional account/folder scope before executing the parameterized FTS query. It rejects raw SQL-shaped input, raw HTML/markup, oversized queries, invalid IDs, unknown accounts, and folders outside the requested account scope. It does not accept raw SQL, paths, URLs, message bodies, HTML to persist, or cache filenames from React.
+
+Attachment reader commands validate account/folder/message/attachment id shape, active ownership, `userRequested=true`, stored app-data-relative source paths, canonicalized source containment under app data, persisted size, persisted SHA-256, sniffed-vs-declared MIME type, type/size allowlists, and preview allowlists before returning bytes or writing a selected file. React never provides local source or destination paths. `save_attachment` receives the native save-dialog result in Rust, enforces the canonical extension, refuses overwrite, and returns only display-safe labels.
 
 Composer commands validate account/draft/attachment ids, payload sizes, address shapes on send, sanitized body wrappers, staged attachment ownership, MIME type/size, local recent-recipient account scope, and app-data storage scope before side effects. They never accept frontend-supplied filesystem paths, raw SQL, credential material, or arbitrary provider commands. `stage_composer_attachment` accepts bytes from a browser `File` selected by the user and writes only to a Rust-generated app-data path. `list_composer_drafts` accepts no request fields and returns active local drafts with typed address/body fields and display-safe attachment metadata only; it does not expose storage paths or hashes.
 
@@ -80,6 +85,8 @@ Do not add a command if validation depends on real mailboxes, real credentials, 
 
 `search_mail` is the read-only example of an accepted input-bearing command: request fields are typed, query length is bounded, user input is converted into sanitized FTS terms rather than raw `MATCH` syntax, account/folder scope is validated against active cache rows, and denial paths are covered in `src-tauri/src/mail_shell.rs`.
 
+Reader attachment commands are the file-operation examples: request fields are typed, IDs are ownership-checked against active account/folder/message rows, persisted source paths are treated as untrusted cache state and canonicalized under app data, content is revalidated by hash/size/sniffing before any IPC byte response or file write, save destinations come from a backend-owned native dialog, overwrites are refused, and external open remains unavailable.
+
 Composer commands are the mutating examples: request fields are typed, HTML is accepted only through sanitizer-backed frontend output plus backend `DraftHtml`/`SanitizedHtml` wrappers, rich formatting is constrained to the reviewed TipTap/sanitizer whitelist, attachments are staged by bytes rather than paths, staged ids are ownership-checked, duplicate recipients are normalized before persistence/send, recent-recipient lookup is account-scoped and read-only, and send calls the existing SMTP boundary plus pending Sent APPEND scheduler path instead of exposing credentials or transport details to React.
 
 Cross-command denial coverage lives in `src-tauri/tests/ipc_denial_paths.rs`. Keep it focused on public command-level entry points, disposable SQLite databases, temp app-data directories, and fake stores; it should fail before any new IPC surface accepts invalid IDs, raw SQL-shaped text, frontend paths, unowned scope, oversized payloads, or unauthorized server-affecting actions.
@@ -97,10 +104,11 @@ Rust tests cover:
 - Invalid id shapes before lookup.
 - Validation errors not echoing sensitive input values.
 - `search_mail` denial paths for raw SQL-shaped queries, raw HTML, invalid account IDs, unknown scoped folders, and missing FTS index reporting.
+- Reader attachment denial paths for missing user intent, invalid IDs, unowned scope, missing stored content, persisted path traversal, hash mismatch, size/type mismatch, unpreviewable types, spoofed selected-save extensions, and overwrite refusal.
 - Composer denial paths for unsafe attachment MIME/content, invalid recipient addresses, invalid ids, unknown staged attachments, unsafe storage-relative paths, duplicate recipient normalization, recent-recipient scope/search behavior, sanitized rich-HTML handling, and send validation before SMTP work.
 - Account-management denial paths for unsupported provider/auth combinations, invalid account ids, invalid hosts, plaintext transport, protocol-injection secrets, oversized account fields, direct Gmail/Microsoft secret-handoff rejection, live generic login failure before credential persistence, credential-store failure before metadata persistence, unknown account removal, account settings invalid/unknown/oversized field rejection, and redacted auth status.
 - OAuth loopback denial paths for unsupported generic-provider setup, denied consent/cancellation, callback state mismatch, timeout, invalid grant, provider errors, missing refresh token, and non-OAuth reauthentication targets.
-- `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search input, unowned account/folder/message scope, oversized search/composer/recent-recipient/attachment/account payloads, account settings denial paths, account credential failure, and unauthorized mail actions rejected before fake-store mutation.
+- `src-tauri/tests/ipc_denial_paths.rs` integration coverage for command-level invalid IDs, frontend path denial, raw SQL/HTML search input, unowned account/folder/message/attachment scope, oversized search/composer/recent-recipient/attachment/account payloads, account settings denial paths, account credential failure, reader attachment source denial, and unauthorized mail actions rejected before fake-store mutation.
 
 `pnpm check` runs the validation tests through `cargo test --manifest-path src-tauri/Cargo.toml --all-features`.
 

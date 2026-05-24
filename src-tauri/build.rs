@@ -1,6 +1,9 @@
 const APP_COMMANDS: &[&str] = &[
     "load_mail_shell",
     "search_mail",
+    "preview_attachment",
+    "save_attachment",
+    "download_attachment",
     "autosave_composer_draft",
     "discard_composer_draft",
     "stage_composer_attachment",

@@ -17,6 +17,23 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
       .getByRole("heading", { name: "Roadmap review" }),
   ).toBeVisible();
 
+  await page.getByRole("button", { name: /Invoice question/ }).click();
+  const invoiceReader = page.getByRole("region", { name: "Selected message" });
+  await expect(
+    invoiceReader.getByRole("heading", { name: "Invoice question" }),
+  ).toBeVisible();
+  await expect(invoiceReader.getByText("notes.txt")).toBeVisible();
+  await invoiceReader.getByRole("button", { name: "Preview notes.txt" }).click();
+  await expect(
+    invoiceReader
+      .getByRole("region", { name: "Attachment preview" })
+      .getByText("E2E attachment notes"),
+  ).toBeVisible();
+  await invoiceReader.getByRole("button", { name: "Save notes.txt" }).click();
+  await expect(
+    invoiceReader.getByText("Saved notes.txt to notes.txt."),
+  ).toBeVisible();
+
   await page.getByRole("button", { name: /Personal.+person@example\.com/ }).click();
   await page.getByRole("button", { name: /Archive folder/ }).click();
   await expect(

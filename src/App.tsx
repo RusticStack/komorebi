@@ -7,13 +7,16 @@ import {
   autosaveComposerDraftFromTauri,
   createAccountFromTauri,
   discardComposerDraftFromTauri,
+  downloadAttachmentFromTauri,
   getAccountAuthStatusFromTauri,
   isTauriRuntime,
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
+  previewAttachmentFromTauri,
   reauthAccountFromTauri,
   removeAccountFromTauri,
+  saveAttachmentFromTauri,
   searchMailFromTauri,
   sendComposerMailFromTauri,
   stageComposerAttachmentFromTauri,
@@ -28,6 +31,13 @@ function App(props: MailClientShellProps) {
   const isRuntime = isTauriRuntime();
   const runtimeLoader = isRuntime ? loadMailShellDataFromTauri : undefined;
   const runtimeSearch = isRuntime ? searchMailFromTauri : undefined;
+  const runtimeAttachmentPreview = isRuntime
+    ? previewAttachmentFromTauri
+    : undefined;
+  const runtimeAttachmentSave = isRuntime ? saveAttachmentFromTauri : undefined;
+  const runtimeAttachmentDownload = isRuntime
+    ? downloadAttachmentFromTauri
+    : undefined;
   const runtimeDraftSave = isRuntime ? autosaveComposerDraftFromTauri : undefined;
   const runtimeDraftDiscard = isRuntime
     ? discardComposerDraftFromTauri
@@ -67,6 +77,9 @@ function App(props: MailClientShellProps) {
       {...props}
       loadMailShellData={props.loadMailShellData ?? runtimeLoader}
       searchMail={props.searchMail ?? runtimeSearch}
+      previewAttachment={props.previewAttachment ?? runtimeAttachmentPreview}
+      saveAttachment={props.saveAttachment ?? runtimeAttachmentSave}
+      downloadAttachment={props.downloadAttachment ?? runtimeAttachmentDownload}
       saveComposerDraft={props.saveComposerDraft ?? runtimeDraftSave}
       discardComposerDraft={props.discardComposerDraft ?? runtimeDraftDiscard}
       stageComposerAttachment={

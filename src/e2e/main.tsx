@@ -3,6 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "../App";
 import "../i18n";
 import type {
+  AttachmentCommandRequest,
+  AttachmentDownloadResponse,
+  AttachmentPreviewResponse,
+  AttachmentSaveResponse,
   ComposerAttachment,
   ComposerAttachmentStageRequest,
   ComposerDraft,
@@ -29,6 +33,9 @@ type E2eEvent =
   | { name: "load-mail-shell" }
   | { name: "list-drafts" }
   | { name: "search-mail"; request: MailSearchRequest }
+  | { name: "preview-attachment"; request: AttachmentCommandRequest }
+  | { name: "save-attachment"; request: AttachmentCommandRequest }
+  | { name: "download-attachment"; request: AttachmentCommandRequest }
   | { name: "save-draft"; request: ComposerDraftSaveRequest }
   | { name: "discard-draft"; request: ComposerDraftDiscardRequest }
   | { name: "stage-attachment"; request: ComposerAttachmentStageRequest }
@@ -130,6 +137,13 @@ const fixtureMail: MailShellData = {
           disposition: "attachment",
           id: "att_invoice",
           sizeBytes: 24_576,
+        },
+        {
+          contentType: "text/plain",
+          displayFilename: "notes.txt",
+          disposition: "attachment",
+          id: "att_invoice_notes",
+          sizeBytes: 20,
         },
       ],
       bodyHtml:
@@ -245,6 +259,56 @@ async function searchMail(
     indexStatus: "ready",
     query: request.query,
     results: clone(results),
+  };
+}
+
+async function previewAttachment(
+  request: AttachmentCommandRequest,
+): Promise<AttachmentPreviewResponse> {
+  e2eEvents.push({ name: "preview-attachment", request });
+  await delay(20);
+
+  return {
+    attachmentId: request.attachmentId,
+    autoOpen: false,
+    bytes: null,
+    contentType: "text/plain",
+    displayFilename: "notes.txt",
+    kind: "plain-text",
+    sizeBytes: 20,
+    text: "E2E attachment notes",
+  };
+}
+
+async function saveAttachment(
+  request: AttachmentCommandRequest,
+): Promise<AttachmentSaveResponse> {
+  e2eEvents.push({ name: "save-attachment", request });
+  await delay(20);
+
+  return {
+    attachmentId: request.attachmentId,
+    bytesWritten: 20,
+    contentType: "text/plain",
+    destinationLabel: "notes.txt",
+    displayFilename: "notes.txt",
+    savedFilename: "notes.txt",
+    sizeBytes: 20,
+  };
+}
+
+async function downloadAttachment(
+  request: AttachmentCommandRequest,
+): Promise<AttachmentDownloadResponse> {
+  e2eEvents.push({ name: "download-attachment", request });
+  await delay(20);
+
+  return {
+    attachmentId: request.attachmentId,
+    bytes: Array.from(new TextEncoder().encode("E2E attachment notes")),
+    contentType: "text/plain",
+    displayFilename: "notes.txt",
+    sizeBytes: 20,
   };
 }
 
@@ -373,9 +437,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App
       discardComposerDraft={discardComposerDraft}
+      downloadAttachment={downloadAttachment}
       loadComposerDrafts={loadComposerDrafts}
       loadMailShellData={loadMailShellData}
       loadRecentRecipients={listRecentRecipients}
+      previewAttachment={previewAttachment}
+      saveAttachment={saveAttachment}
       saveComposerDraft={saveComposerDraft}
       searchMail={searchMail}
       searchDebounceMs={performanceFixture ? 25 : undefined}

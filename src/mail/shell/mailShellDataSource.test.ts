@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  AttachmentCommandRequest,
+  AttachmentDownloadResponse,
+  AttachmentPreviewResponse,
+  AttachmentSaveResponse,
   ComposerDraftSaveRequest,
   MailSearchRequest,
   MailSearchResponse,
@@ -21,13 +25,16 @@ vi.mock("@tauri-apps/api/event", () => ({
 import {
   autosaveComposerDraftFromTauri,
   createAccountFromTauri,
+  downloadAttachmentFromTauri,
   getAccountAuthStatusFromTauri,
   isTauriRuntime,
   listComposerDraftsFromTauri,
   listRecentRecipientsFromTauri,
   loadMailShellDataFromTauri,
+  previewAttachmentFromTauri,
   reauthAccountFromTauri,
   removeAccountFromTauri,
+  saveAttachmentFromTauri,
   searchMailFromTauri,
   startOAuthAccountReauthFromTauri,
   startOAuthAccountSetupFromTauri,
@@ -83,6 +90,64 @@ describe("mailShellDataSource", () => {
     ).resolves.toBe(searchResponse);
     expect(invokeMock).toHaveBeenNthCalledWith(2, "search_mail", {
       request: searchRequest,
+    });
+  });
+
+  it("maps attachment preview, save, and download to typed Tauri commands", async () => {
+    const request: AttachmentCommandRequest = {
+      accountId: "acct_personal",
+      folderId: "folder_inbox",
+      messageId: "msg_invoice",
+      attachmentId: "att_invoice",
+      userRequested: true,
+    };
+    const previewResponse: AttachmentPreviewResponse = {
+      attachmentId: "att_invoice",
+      autoOpen: false,
+      bytes: null,
+      contentType: "text/plain",
+      displayFilename: "invoice.txt",
+      kind: "plain-text",
+      sizeBytes: 13,
+      text: "Invoice notes",
+    };
+    const saveResponse: AttachmentSaveResponse = {
+      attachmentId: "att_invoice",
+      bytesWritten: 13,
+      contentType: "text/plain",
+      destinationLabel: "invoice.txt",
+      displayFilename: "invoice.txt",
+      savedFilename: "invoice.txt",
+      sizeBytes: 13,
+    };
+    const downloadResponse: AttachmentDownloadResponse = {
+      attachmentId: "att_invoice",
+      bytes: [73, 110, 118, 111, 105, 99, 101],
+      contentType: "text/plain",
+      displayFilename: "invoice.txt",
+      sizeBytes: 7,
+    };
+    invokeMock
+      .mockResolvedValueOnce(previewResponse)
+      .mockResolvedValueOnce(saveResponse)
+      .mockResolvedValueOnce(downloadResponse);
+
+    await expect(previewAttachmentFromTauri(request)).resolves.toBe(
+      previewResponse,
+    );
+    await expect(saveAttachmentFromTauri(request)).resolves.toBe(saveResponse);
+    await expect(downloadAttachmentFromTauri(request)).resolves.toBe(
+      downloadResponse,
+    );
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "preview_attachment", {
+      request,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "save_attachment", {
+      request,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "download_attachment", {
+      request,
     });
   });
 

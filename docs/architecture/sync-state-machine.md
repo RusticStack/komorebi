@@ -1,7 +1,7 @@
 # IMAP Sync State Machine
 
 Status: Rust state machine, live IMAP protocol adapter, app-managed background scheduler, pending Sent APPEND upload, folder worker, folder/flag semantics, and SQLite cache integration implemented.
-Last reviewed: 2026-05-23.
+Last reviewed: 2026-05-24.
 
 ## Current Scope
 
@@ -49,7 +49,7 @@ Implemented now:
 Not implemented by this task:
 
 - Tokio/`async-imap` integration or migration.
-- Reader-facing attachment preview/save/export commands.
+- External attachment open/extract and non-plain/raster preview types.
 - Opt-in live-provider smoke tests using user-provided test accounts.
 
 ## State Flow

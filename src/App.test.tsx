@@ -10,6 +10,10 @@ import { vi } from "vitest";
 import App from "./App";
 import { formatDateTime } from "./i18n";
 import type {
+  AttachmentCommandRequest,
+  AttachmentDownloadResponse,
+  AttachmentPreviewResponse,
+  AttachmentSaveResponse,
   ComposerAttachment,
   ComposerAttachmentStageRequest,
   ComposerDraft,
@@ -713,8 +717,146 @@ describe("App", () => {
         name: "Save invoice.pdf unavailable",
       }),
     ).toBeDisabled();
+    expect(
+      within(attachments).getByRole("button", {
+        name: "Download invoice.pdf unavailable",
+      }),
+    ).toBeDisabled();
     expect(reader).not.toHaveTextContent("AppData");
     expect(reader).not.toHaveTextContent("att_invoice.pdf");
+  });
+
+  it("routes reader attachment preview, save, and download through typed commands", async () => {
+    const expectedRequest: AttachmentCommandRequest = {
+      accountId: "acct_work",
+      folderId: "folder_work_inbox",
+      messageId: "msg_invoice",
+      attachmentId: "att_inline_logo",
+      userRequested: true,
+    };
+    const previewAttachment = vi.fn(
+      async (
+        request: AttachmentCommandRequest,
+      ): Promise<AttachmentPreviewResponse> => ({
+        attachmentId: request.attachmentId,
+        autoOpen: false,
+        bytes: [137, 80, 78, 71],
+        contentType: "image/png",
+        displayFilename: "logo.png",
+        kind: "raster-image",
+        sizeBytes: 4,
+        text: null,
+      }),
+    );
+    const saveAttachment = vi.fn(
+      async (
+        request: AttachmentCommandRequest,
+      ): Promise<AttachmentSaveResponse> => ({
+        attachmentId: request.attachmentId,
+        bytesWritten: 4,
+        contentType: "image/png",
+        destinationLabel: "logo.png",
+        displayFilename: "logo.png",
+        savedFilename: "logo.png",
+        sizeBytes: 4,
+      }),
+    );
+    const downloadAttachment = vi.fn(
+      async (
+        request: AttachmentCommandRequest,
+      ): Promise<AttachmentDownloadResponse> => ({
+        attachmentId: request.attachmentId,
+        bytes: [137, 80, 78, 71],
+        contentType: "image/png",
+        displayFilename: "logo.png",
+        sizeBytes: 4,
+      }),
+    );
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:komorebi-attachment");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    try {
+      render(
+        <App
+          downloadAttachment={downloadAttachment}
+          initialData={fixtureMail}
+          previewAttachment={previewAttachment}
+          saveAttachment={saveAttachment}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /Invoice question/ }));
+      const reader = screen.getByRole("region", { name: "Selected message" });
+      const attachments = within(reader).getByRole("region", {
+        name: "Attachments",
+      });
+      expect(
+        within(attachments).getByRole("button", {
+          name: "Preview invoice.pdf unavailable",
+        }),
+      ).toBeDisabled();
+
+      fireEvent.click(
+        within(attachments).getByRole("button", { name: "Preview logo.png" }),
+      );
+      await waitFor(() =>
+        expect(previewAttachment).toHaveBeenCalledWith(expectedRequest),
+      );
+      const preview = within(reader).getByRole("region", {
+        name: "Attachment preview",
+      });
+      expect(within(preview).getByRole("img", { name: "logo.png" })).toBeVisible();
+
+      fireEvent.click(
+        within(attachments).getByRole("button", { name: "Save logo.png" }),
+      );
+      await waitFor(() =>
+        expect(saveAttachment).toHaveBeenCalledWith(expectedRequest),
+      );
+      expect(attachments).toHaveTextContent("Saved logo.png to logo.png.");
+
+      fireEvent.click(
+        within(attachments).getByRole("button", { name: "Download logo.png" }),
+      );
+      await waitFor(() =>
+        expect(downloadAttachment).toHaveBeenCalledWith(expectedRequest),
+      );
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:komorebi-attachment");
+      expect(attachments).toHaveTextContent("Download prepared for logo.png.");
+    } finally {
+      anchorClick.mockRestore();
+      if (originalCreateObjectUrl) {
+        Object.defineProperty(URL, "createObjectURL", {
+          configurable: true,
+          value: originalCreateObjectUrl,
+        });
+      } else {
+        delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      }
+      if (originalRevokeObjectUrl) {
+        Object.defineProperty(URL, "revokeObjectURL", {
+          configurable: true,
+          value: originalRevokeObjectUrl,
+        });
+      } else {
+        delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+      }
+    }
   });
 
   it("debounces and cancels FTS-backed search while identifying result account and folder", async () => {

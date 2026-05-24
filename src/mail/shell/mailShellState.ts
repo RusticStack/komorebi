@@ -62,6 +62,43 @@ export type MailAttachment = {
   disposition: "attachment" | "inline";
 };
 
+export type AttachmentCommandRequest = {
+  accountId: string;
+  folderId: string;
+  messageId: string;
+  attachmentId: string;
+  userRequested: boolean;
+};
+
+export type AttachmentPreviewResponse = {
+  attachmentId: string;
+  displayFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  kind: "plain-text" | "raster-image";
+  text: string | null;
+  bytes: number[] | null;
+  autoOpen: boolean;
+};
+
+export type AttachmentDownloadResponse = {
+  attachmentId: string;
+  displayFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  bytes: number[];
+};
+
+export type AttachmentSaveResponse = {
+  attachmentId: string;
+  displayFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  savedFilename: string;
+  destinationLabel: string;
+  bytesWritten: number;
+};
+
 export type MailMessage = {
   id: string;
   accountId: string;
