@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   font-family:
     "Segoe UI",
@@ -2383,5 +2385,227 @@ textarea:focus-visible,
 
   .account-setup-wizard__steps {
     grid-template-columns: 1fr;
+  }
+}
+
+.route-fallback {
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgb(243 248 242 / 92%), rgb(253 250 244 / 95%)),
+    var(--komorebi-canvas);
+}
+
+.mail-onboarding {
+  grid-column: 2 / 4;
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 82%), rgb(239 248 239 / 72%)),
+    var(--komorebi-surface-solid);
+  box-shadow: var(--komorebi-shadow);
+}
+
+.mail-onboarding__panel {
+  display: grid;
+  width: min(560px, calc(100% - 48px));
+  justify-items: start;
+  gap: 14px;
+}
+
+.mail-onboarding__mark,
+.settings-page__mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--komorebi-accent-soft);
+  color: var(--komorebi-accent-strong);
+}
+
+.mail-onboarding h2 {
+  max-width: 520px;
+  margin: 0;
+  color: var(--komorebi-ink);
+  font-size: 2rem;
+  line-height: 1.12;
+}
+
+.mail-onboarding p {
+  max-width: 540px;
+  margin: 0;
+  color: var(--komorebi-muted);
+  font-size: 1rem;
+}
+
+.mail-onboarding__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.mail-onboarding__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid var(--komorebi-accent);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: var(--komorebi-accent);
+  color: #fffefa;
+  font-weight: 650;
+}
+
+.mail-onboarding__actions span {
+  color: var(--komorebi-subtle);
+  font-size: 0.9rem;
+}
+
+.settings-page {
+  min-height: 100vh;
+  color: var(--komorebi-ink);
+  background:
+    radial-gradient(circle at 12% 0%, rgb(213 231 213 / 42%), transparent 32%),
+    linear-gradient(135deg, rgb(247 250 246 / 96%), rgb(252 249 242 / 96%));
+}
+
+.settings-page__titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  border-bottom: 1px solid var(--komorebi-line);
+  padding: 10px 24px;
+  background: rgb(247 250 246 / 86%);
+  backdrop-filter: blur(22px);
+}
+
+.settings-page__titlebar h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.settings-page__grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 920px);
+  gap: 18px;
+  width: min(1280px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 24px 0 40px;
+}
+
+.settings-page__intro {
+  align-self: start;
+  position: sticky;
+  top: 88px;
+}
+
+.settings-page__intro p {
+  color: var(--komorebi-muted);
+}
+
+.settings-page .settings-panel {
+  min-height: 70vh;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 82%);
+  box-shadow: var(--komorebi-shadow);
+}
+
+.settings-page .settings-panel__header {
+  margin: 0;
+}
+
+.settings-tabs {
+  padding: 0 22px 22px;
+}
+
+.settings-tabs [role="tablist"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+
+.settings-tabs [role="tabpanel"] > section,
+.settings-tabs [role="tabpanel"] > form {
+  border-radius: 10px;
+  background: rgb(255 255 255 / 72%);
+}
+
+.composer-loading {
+  min-height: 260px;
+}
+
+@media (max-width: 920px) {
+  .mail-onboarding {
+    grid-column: 2;
+  }
+
+  .settings-page__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page__intro {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .mail-onboarding {
+    grid-column: 1;
+    min-height: 520px;
+  }
+
+  .settings-page__titlebar {
+    grid-template-columns: 1fr auto;
+    padding-inline: 12px;
+  }
+
+  .settings-page__titlebar > div {
+    display: none;
+  }
+
+  .settings-page__grid {
+    width: 100%;
+    padding: 12px 8px 24px;
+  }
+
+  .settings-page .settings-panel {
+    padding: 16px 0;
+  }
+
+  .settings-page .settings-panel__header {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+    justify-content: start;
+    max-width: 100%;
+    padding-inline: 8px;
+    overflow-wrap: anywhere;
+  }
+
+  .settings-page .settings-panel__header button {
+    justify-self: start;
+  }
+
+  .settings-tabs {
+    padding-inline: 8px;
+  }
+
+  .account-setup-wizard__header {
+    min-width: 0;
+    padding: 14px 12px;
+    overflow-wrap: anywhere;
   }
 }

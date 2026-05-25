@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { SafeEmailBody } from "../mail/rendering/SafeEmailBody";
 import { sanitizeSignatureHtml } from "../mail/signatures/signatureHtml";
 import type {
@@ -42,6 +43,7 @@ export type SignatureAccountOption = {
 
 export type AccountSignatureSettingsProps = {
   accounts: SignatureAccountOption[];
+  defaultTab?: "accounts" | "diagnostics" | "preferences" | "signatures";
   initialAccountId?: string | null;
   languagePreference?: UiLanguagePreference | null;
   languagePreferenceStatus?: LoadStatus;
@@ -123,6 +125,7 @@ const defaultLocalPreferences: AccountLocalPreferences = {
 
 export function AccountSignatureSettings({
   accounts,
+  defaultTab,
   initialAccountId,
   languagePreference = null,
   languagePreferenceStatus = "ready",
@@ -142,6 +145,26 @@ export function AccountSignatureSettings({
   onClose,
 }: AccountSignatureSettingsProps) {
   const { t, i18n } = useTranslation();
+  const hasAccountManagement =
+    Boolean(onCreateAccount) ||
+    Boolean(onTestAccountConnection) ||
+    Boolean(onReauthAccount) ||
+    Boolean(onRemoveAccount) ||
+    Boolean(onGetAccountAuthStatus) ||
+    Boolean(onStartOAuthAccountSetup) ||
+    Boolean(onStartOAuthAccountReauth) ||
+    Boolean(onSaveAccountSettings);
+  const resolvedDefaultTab =
+    defaultTab ??
+    (onChangeLanguagePreference
+      ? "preferences"
+      : onExportDiagnostics || onLoadDiagnosticsHealth
+        ? "diagnostics"
+        : hasAccountManagement || accounts.length === 0
+          ? "accounts"
+          : accounts.length > 0
+            ? "signatures"
+            : "accounts");
   const [selectedAccountId, setSelectedAccountId] = useState(
     initialAccountId ?? accounts[0]?.id ?? "",
   );
@@ -277,6 +300,24 @@ export function AccountSignatureSettings({
         ) : null}
       </header>
 
+      <Tabs
+        defaultValue={resolvedDefaultTab}
+        className="settings-tabs"
+      >
+        <TabsList aria-label={t("settings.aria.panel")}>
+          <TabsTrigger value="accounts">
+            {t("settings.accounts.heading")}
+          </TabsTrigger>
+          <TabsTrigger value="signatures">{t("settings.heading")}</TabsTrigger>
+          <TabsTrigger value="preferences">
+            {t("settings.language.heading")}
+          </TabsTrigger>
+          <TabsTrigger value="diagnostics">
+            {t("settings.diagnostics.heading")}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="preferences">
       <section
         className="app-preferences"
         aria-label={t("settings.language.heading")}
@@ -334,7 +375,9 @@ export function AccountSignatureSettings({
           </p>
         ) : null}
       </section>
+        </TabsContent>
 
+        <TabsContent value="diagnostics">
       <section
         className="diagnostics-settings"
         aria-label={t("settings.diagnostics.heading")}
@@ -419,7 +462,9 @@ export function AccountSignatureSettings({
           </p>
         ) : null}
       </section>
+        </TabsContent>
 
+        <TabsContent value="accounts">
       <section
         className="account-settings"
         aria-label={t("settings.accounts.heading")}
@@ -848,7 +893,9 @@ export function AccountSignatureSettings({
           </p>
         ) : null}
       </section>
+        </TabsContent>
 
+        <TabsContent value="signatures">
       {accounts.length === 0 ? null : (
         <form
           className="signature-settings"
@@ -923,6 +970,18 @@ export function AccountSignatureSettings({
           </div>
         </form>
       )}
+      {accountNotice ? (
+        <p className="settings-notice" role="status">
+          {accountNotice}
+        </p>
+      ) : null}
+      {accountError ? (
+        <p className="settings-error" role="alert">
+          {accountError}
+        </p>
+      ) : null}
+        </TabsContent>
+      </Tabs>
     </section>
   );
 

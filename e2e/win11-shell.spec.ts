@@ -43,7 +43,7 @@ test.describe("Windows 11 shell refresh", () => {
     await expect(addAccount).toBeEnabled();
     await addAccount.click();
 
-    const settings = page.getByRole("dialog", { name: "Settings" });
+    const settings = page.getByRole("region", { name: "Settings" });
     const accountsRegion = settings.getByRole("region", { name: "Accounts" });
     await accountsRegion.scrollIntoViewIfNeeded();
     await expect(
@@ -71,9 +71,10 @@ test.describe("Windows 11 shell refresh", () => {
     ).toBeVisible();
 
     await expectNoHorizontalOverflow(page);
-    await page
-      .locator(".app-frame")
-      .screenshot({ path: `${screenshotDir}/win11-shell-desktop.png` });
+    await page.screenshot({
+      fullPage: true,
+      path: `${screenshotDir}/win11-shell-desktop.png`,
+    });
   });
 
   test("keeps the refreshed shell usable on a narrow viewport", async ({
@@ -86,7 +87,7 @@ test.describe("Windows 11 shell refresh", () => {
     await expect(page.getByText("Sunlit mail")).toBeVisible();
     await page.getByRole("button", { name: "Add account" }).click();
 
-    const settings = page.getByRole("dialog", { name: "Settings" });
+    const settings = page.getByRole("region", { name: "Settings" });
     const accountsRegion = settings.getByRole("region", { name: "Accounts" });
     await accountsRegion.scrollIntoViewIfNeeded();
     await expect(
@@ -101,8 +102,9 @@ test.describe("Windows 11 shell refresh", () => {
     ).toBeVisible();
 
     await expectNoHorizontalOverflow(page);
-    await page
-      .locator(".app-frame")
-      .screenshot({ path: `${screenshotDir}/win11-shell-narrow.png` });
+    await page.screenshot({
+      fullPage: true,
+      path: `${screenshotDir}/win11-shell-narrow.png`,
+    });
   });
 });

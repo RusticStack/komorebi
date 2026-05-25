@@ -30,6 +30,9 @@
     "check": "pnpm fmt:check && pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-router": "^1.170.8",
     "@tanstack/react-virtual": "^3.13.25",
     "@tauri-apps/api": "^2",
     "@tiptap/core": "3.23.6",
@@ -47,15 +50,20 @@
     "@tiptap/pm": "^3.23.6",
     "@tiptap/react": "^3.23.6",
     "@tiptap/starter-kit": "^3.23.6",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "dompurify": "^3.4.5",
     "i18next": "^26.2.0",
+    "lucide-react": "^1.16.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-i18next": "^17.0.8"
+    "react-i18next": "^17.0.8",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
+    "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -68,6 +76,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
+    "tailwindcss": "^4.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.59.4",
     "vite": "^7.0.4",

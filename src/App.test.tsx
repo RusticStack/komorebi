@@ -376,6 +376,12 @@ function composerTestHandlers() {
   };
 }
 
+async function findComposerDialog() {
+  const composer = await screen.findByRole("dialog", { name: "Composer" });
+  await within(composer).findByRole("heading", { name: "New message" });
+  return composer;
+}
+
 describe("App", () => {
   it("renders the accountless mail client shell without fake mailbox data", () => {
     render(<App />);
@@ -384,22 +390,26 @@ describe("App", () => {
       screen.getByRole("heading", { name: "Komorebi" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Folders" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "Messages" })).toBeVisible();
     expect(
-      screen.getByRole("region", { name: "Selected message" }),
+      screen.getByRole("region", { name: "Account setup" }),
     ).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "Unified inbox" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Add account" })).toBeEnabled();
-    expect(screen.getByText("No accounts configured.")).toBeVisible();
-    expect(screen.getByRole("region", { name: "Empty inbox" })).toBeVisible();
     expect(
-      screen.getByRole("region", { name: "No selected message" }),
+      screen.getByRole("heading", {
+        name: "Bring your mail into one calm workspace",
+      }),
     ).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Add account" }).length).toBe(2);
+    expect(screen.getByText("No accounts configured.")).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Compose" }),
-    ).toBeDisabled();
+      screen.queryByRole("region", { name: "Messages" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Selected message" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Compose" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings" })).toBeEnabled();
-    expect(screen.getByRole("searchbox")).toBeDisabled();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Welcome to Tauri + React"),
     ).not.toBeInTheDocument();
@@ -407,7 +417,7 @@ describe("App", () => {
     expect(screen.queryByText("Client kickoff agenda")).not.toBeInTheDocument();
   });
 
-  it("supports account, folder, search, reader, composer, and settings workflows", () => {
+  it("supports account, folder, search, reader, composer, and settings workflows", async () => {
     render(<App initialData={fixtureMail} />);
 
     expect(screen.getByRole("checkbox", { name: "Unified inbox" })).toBeChecked();
@@ -453,15 +463,15 @@ describe("App", () => {
     expect(screen.queryByText("Invoice question")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
-    expect(screen.getByRole("region", { name: "Composer" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "New message" })).toBeVisible();
+    expect(await findComposerDialog()).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const settings = screen.getByRole("region", { name: "Settings" });
     expect(settings).toBeVisible();
-    expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
-    expect(within(settings).getByLabelText("Account")).toHaveValue("acct_personal");
+    expect(
+      within(settings).getByRole("heading", { name: "Accounts", level: 3 }),
+    ).toBeVisible();
   });
 
   it("builds a TipTap composer draft, stages attachments, sends, and reports progress", async () => {
@@ -469,7 +479,7 @@ describe("App", () => {
     render(<App initialData={fixtureMail} {...handlers} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
     expect(
       within(composer).getByText(
         "Drafts stay local to this device until sent or discarded.",
@@ -600,7 +610,7 @@ describe("App", () => {
       }),
     );
 
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
     expect(within(composer).getByLabelText("From")).toHaveValue("acct_personal");
     expect(within(composer).getByLabelText("From")).toBeDisabled();
     expect(within(composer).getByLabelText("To")).toHaveValue(
@@ -636,7 +646,7 @@ describe("App", () => {
     render(<App initialData={fixtureMail} {...handlers} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
 
     fireEvent.change(within(composer).getByLabelText("To"), {
       target: { value: "not-an-address" },
@@ -658,7 +668,7 @@ describe("App", () => {
     render(<App initialData={fixtureMail} {...handlers} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
     fireEvent.change(within(composer).getByLabelText("To"), {
       target: { value: "Recipient <recipient@example.com>" },
     });
@@ -678,7 +688,7 @@ describe("App", () => {
     render(<App initialData={fixtureMail} {...handlers} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
     const toInput = within(composer).getByLabelText("To");
 
     fireEvent.focus(toInput);
@@ -704,7 +714,7 @@ describe("App", () => {
     render(<App initialData={fixtureMail} {...handlers} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Compose" }));
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
 
     fireEvent.change(within(composer).getByLabelText("To"), {
       target: {
@@ -822,7 +832,7 @@ describe("App", () => {
     const reader = screen.getByRole("region", { name: "Selected message" });
     fireEvent.click(within(reader).getByRole("button", { name: "Reply all" }));
 
-    let composer = screen.getByRole("dialog", { name: "Composer" });
+    let composer = await findComposerDialog();
     expect(within(composer).getByLabelText("From")).toHaveValue("acct_work");
     expect(within(composer).getByLabelText("From")).toBeDisabled();
     expect(within(composer).getByLabelText("To")).toHaveValue(
@@ -853,7 +863,7 @@ describe("App", () => {
     fireEvent.click(
       within(reader).getByRole("button", { name: "Forward attachments" }),
     );
-    composer = await screen.findByRole("dialog", { name: "Composer" });
+    composer = await findComposerDialog();
     expect(handlers.stageForwardedAttachments).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: "acct_work",
@@ -1551,7 +1561,7 @@ describe("App", () => {
     composeButton.focus();
     fireEvent.click(composeButton);
 
-    const composer = screen.getByRole("dialog", { name: "Composer" });
+    const composer = await findComposerDialog();
     await waitFor(() => {
       expect(within(composer).getByLabelText("To")).toHaveFocus();
     });
@@ -1571,7 +1581,7 @@ describe("App", () => {
     fireEvent.click(settingsButton);
 
     const settings = screen.getByRole("dialog", { name: "Settings" });
-    expect(within(settings).getByRole("heading", { name: "Signatures" })).toBeVisible();
+    expect(within(settings).getByRole("heading", { name: "Accounts" })).toBeVisible();
 
     fireEvent.keyDown(settings, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
@@ -2001,9 +2011,6 @@ describe("App", () => {
       target: { value: "Sender" },
     });
     fireEvent.click(within(settings).getByLabelText("Include in unified inbox"));
-    fireEvent.change(within(settings).getByLabelText("Signature HTML"), {
-      target: { value: "<p>Regards</p>" },
-    });
     fireEvent.click(within(settings).getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>
@@ -2011,7 +2018,7 @@ describe("App", () => {
         accountId: "acct_personal",
         displayName: "Sender",
         localPreferences: { includeInUnifiedInbox: false },
-        signatureHtml: "<p>Regards</p>",
+        signatureHtml: "<p>Personal signature</p>",
       }),
     );
     await waitFor(() => expect(loadMailShellData).toHaveBeenCalledTimes(2));
@@ -2038,6 +2045,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     const settings = screen.getByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(settings).getByRole("tab", { name: "Language" }));
     await act(async () => {
       fireEvent.change(within(settings).getByLabelText("Language preference"), {
         target: { value: "pt-PT" },
@@ -2101,7 +2109,9 @@ describe("App", () => {
     const settings = screen.getByRole("region", { name: "Settings" });
 
     expect(settings).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Signatures" })).toBeVisible();
+    expect(
+      within(settings).getByRole("heading", { name: "Accounts", level: 3 }),
+    ).toBeVisible();
     expect(within(settings).getByText("No accounts configured.")).toBeVisible();
     expect(screen.queryByText("Personal signature")).not.toBeInTheDocument();
   });

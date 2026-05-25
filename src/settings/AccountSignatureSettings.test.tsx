@@ -206,6 +206,7 @@ describe("AccountSignatureSettings", () => {
     const onSaveSignature = vi.fn();
     render(
       <AccountSignatureSettings
+        key="signatures"
         accounts={[
           {
             id: "acct_1",
@@ -254,20 +255,19 @@ describe("AccountSignatureSettings", () => {
       signatureHtml: "<p>Regards</p>",
     });
 
-    render(
+    const account = {
+      authKind: "app_password" as const,
+      displayName: "Personal",
+      email: "sender@example.com",
+      id: "acct_1",
+      label: "Personal",
+      localPreferences: { includeInUnifiedInbox: true },
+      providerKind: "generic_imap_smtp" as const,
+      signatureHtml: null,
+    };
+    const { rerender } = render(
       <AccountSignatureSettings
-        accounts={[
-          {
-            authKind: "app_password",
-            displayName: "Personal",
-            email: "sender@example.com",
-            id: "acct_1",
-            label: "Personal",
-            localPreferences: { includeInUnifiedInbox: true },
-            providerKind: "generic_imap_smtp",
-            signatureHtml: null,
-          },
-        ]}
+        accounts={[account]}
         onSaveAccountSettings={onSaveAccountSettings}
       />,
     );
@@ -276,15 +276,41 @@ describe("AccountSignatureSettings", () => {
       target: { value: "Sender" },
     });
     fireEvent.click(screen.getByLabelText("Include in unified inbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() =>
+      expect(onSaveAccountSettings).toHaveBeenCalledWith({
+        accountId: "acct_1",
+        displayName: "Sender",
+        localPreferences: { includeInUnifiedInbox: false },
+        signatureHtml: "",
+      }),
+    );
+
+    rerender(
+      <AccountSignatureSettings
+        key="signatures"
+        accounts={[
+          {
+            ...account,
+            displayName: "Sender",
+            label: "Sender",
+            localPreferences: { includeInUnifiedInbox: false },
+          },
+        ]}
+        defaultTab="signatures"
+        onSaveAccountSettings={onSaveAccountSettings}
+      />,
+    );
     fireEvent.change(screen.getByLabelText("Signature HTML"), {
       target: {
         value: '<p onclick="alert(1)">Regards<script>alert(1)</script></p>',
       },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save signature" }));
 
     await waitFor(() =>
-      expect(onSaveAccountSettings).toHaveBeenCalledWith({
+      expect(onSaveAccountSettings).toHaveBeenLastCalledWith({
         accountId: "acct_1",
         displayName: "Sender",
         localPreferences: { includeInUnifiedInbox: false },

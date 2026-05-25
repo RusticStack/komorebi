@@ -328,6 +328,13 @@
       },
       "toolsAria": "Filtros de pesquisa e pesquisas guardadas"
     },
+    "onboarding": {
+      "body": "Ligue Gmail, Outlook ou uma conta IMAP compativel. O Komorebi detecta fornecedores conhecidos e guarda segredos no cofre de credenciais do Windows.",
+      "eyebrow": "Configuracao tranquila",
+      "heading": "Traga o seu correio para um espaco calmo",
+      "label": "Configuracao de conta",
+      "secondary": "Pode rever cada definicao do servidor antes de guardar."
+    },
     "states": {
       "accountsError": "Lista de contas indisponivel",
       "accountsLoading": "A carregar contas",

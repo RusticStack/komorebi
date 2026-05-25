@@ -920,6 +920,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       openExternalLink={openExternalLink}
       performMailAction={performMailAction}
       previewAttachment={previewAttachment}
+      routerBasepath="/e2e"
       saveAttachment={saveAttachment}
       saveComposerDraft={saveComposerDraft}
       searchMail={searchMail}

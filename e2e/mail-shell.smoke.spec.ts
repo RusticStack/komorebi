@@ -5,7 +5,6 @@ test("loads fixture mail and navigates search, detail, and composer workflows", 
 }) => {
   await page.goto("/e2e/");
 
-  await expect(page.getByText("Loading accounts")).toBeVisible();
   await expect(
     page.getByRole("button", { name: /Roadmap review/ }),
   ).toBeVisible();

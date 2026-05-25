@@ -1,5 +1,7 @@
 import {
   useEffect,
+  lazy,
+  Suspense,
   useCallback,
   useMemo,
   useRef,
@@ -9,6 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { Leaf, Plus, Settings } from "lucide-react";
 import {
   useVirtualizer,
   type Rect,
@@ -26,7 +29,6 @@ import {
   type SafeEmailLink,
 } from "../rendering/emailHtml";
 import {
-  TipTapComposer,
   type ComposerAttachmentStageFunction,
   type ComposerDraftDiscardFunction,
   type ComposerDraftSaveFunction,
@@ -34,6 +36,7 @@ import {
   type ComposerSendFunction,
 } from "../composer/TipTapComposer";
 import { AccountSignatureSettings } from "../../settings/AccountSignatureSettings";
+import { MailClientTitleBar } from "./MailClientTitleBar";
 import {
   accountLocalPreferences,
   createMailShellState,
@@ -204,6 +207,7 @@ export type MailClientShellProps = {
   exportDiagnosticsBundle?: DiagnosticsExportFunction;
   loadDiagnosticsHealth?: DiagnosticsHealthLoadFunction;
   subscribeToSyncStatus?: SyncStatusSubscribeFunction;
+  onOpenSettings?: () => void;
 };
 
 type Drawer = "composer" | "drafts" | "settings" | "account-status" | null;
@@ -334,6 +338,12 @@ const emptyMailActionUiState: MailActionUiState = {
   retryRequest: null,
 };
 
+const ComposerDrawer = lazy(() =>
+  import("../composer/TipTapComposer").then((module) => ({
+    default: module.TipTapComposer,
+  })),
+);
+
 export function MailClientShell({
   initialData = emptyMailShellData,
   initialComposerDrafts = [],
@@ -368,6 +378,7 @@ export function MailClientShell({
   exportDiagnosticsBundle,
   loadDiagnosticsHealth,
   subscribeToSyncStatus,
+  onOpenSettings,
 }: MailClientShellProps) {
   const { t } = useTranslation();
   const localeFormat = useLocaleFormatters();
@@ -489,6 +500,8 @@ export function MailClientShell({
     [state.data.folders],
   );
   const hasAccounts = state.data.accounts.length > 0;
+  const showAccountOnboarding =
+    !hasAccounts && state.loadState.accounts === "ready";
   const canCompose = hasAccounts && state.loadState.accounts === "ready";
   const statusAccount = statusAccountId
     ? accountById.get(statusAccountId) ?? null
@@ -528,6 +541,16 @@ export function MailClientShell({
   function openDrawer(nextDrawer: Drawer, restoreFocus: HTMLElement | null) {
     restoreFocusRef.current = restoreFocus;
     setDrawer(nextDrawer);
+  }
+
+  function openSettings(restoreFocus: HTMLElement | null) {
+    if (onOpenSettings) {
+      restoreFocusRef.current = restoreFocus;
+      onOpenSettings();
+      return;
+    }
+
+    openDrawer("settings", restoreFocus);
   }
 
   function closeDrawer() {
@@ -1659,7 +1682,7 @@ export function MailClientShell({
 
   return (
     <main className="app-frame" onKeyDown={handleShellKeyDown}>
-      <KomorebiTitleBar
+      <MailClientTitleBar
         scopeLabel={
           state.unifiedInbox
             ? t("app.scope.allAccounts")
@@ -1686,9 +1709,9 @@ export function MailClientShell({
               className="icon-command"
               type="button"
               aria-label={t("mail.account.add")}
-              onClick={(event) => openDrawer("settings", event.currentTarget)}
+              onClick={(event) => openSettings(event.currentTarget)}
             >
-              +
+              <Plus aria-hidden="true" size={16} />
             </button>
           </div>
 
@@ -1843,13 +1866,34 @@ export function MailClientShell({
             className="settings-button"
             type="button"
             ref={settingsButtonRef}
-            onClick={() => openDrawer("settings", settingsButtonRef.current)}
+            onClick={() => openSettings(settingsButtonRef.current)}
           >
+            <Settings aria-hidden="true" size={16} />
             {t("settings.section")}
           </button>
         </section>
       </aside>
 
+      {showAccountOnboarding ? (
+        <section className="mail-onboarding" aria-label={t("mail.onboarding.label")}>
+          <div className="mail-onboarding__panel">
+            <span className="mail-onboarding__mark" aria-hidden="true">
+              <Leaf size={28} />
+            </span>
+            <p className="eyebrow">{t("mail.onboarding.eyebrow")}</p>
+            <h2>{t("mail.onboarding.heading")}</h2>
+            <p>{t("mail.onboarding.body")}</p>
+            <div className="mail-onboarding__actions">
+              <button type="button" onClick={() => openSettings(null)}>
+                <Plus aria-hidden="true" size={16} />
+                {t("mail.account.add")}
+              </button>
+              <span>{t("mail.onboarding.secondary")}</span>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
       <section className="message-list" aria-label={t("app.sections.messages")}>
         <header className="list-toolbar">
           <div>
@@ -2013,6 +2057,8 @@ export function MailClientShell({
           onCloseAttachmentPreview={() => setAttachmentPreview(null)}
         />
       </section>
+        </>
+      )}
 
       {drawer === "settings" ? (
         <div
@@ -2149,20 +2195,24 @@ export function MailClientShell({
           tabIndex={-1}
           onKeyDown={handleDrawerKeyDown}
         >
-          <ComposerDrawer
-            accounts={state.data.accounts}
-            discardDraft={discardComposerDraft}
-            initialDraft={activeComposerDraft}
-            initialAccountId={activeAccount?.id ?? state.data.accounts[0]?.id ?? null}
-            loadRecentRecipients={loadRecentRecipients}
-            onClose={closeDrawer}
-            onDraftDiscarded={handleComposerDraftClosed}
-            onDraftSaved={handleComposerDraftChanged}
-            onDraftSent={handleComposerDraftClosed}
-            saveDraft={saveComposerDraft}
-            sendMail={sendComposerMail}
-            stageAttachment={stageComposerAttachment}
-          />
+          <Suspense fallback={<div className="composer-loading" />}>
+            <ComposerDrawer
+              accounts={state.data.accounts}
+              discardDraft={discardComposerDraft}
+              initialDraft={activeComposerDraft}
+              initialAccountId={
+                activeAccount?.id ?? state.data.accounts[0]?.id ?? null
+              }
+              loadRecentRecipients={loadRecentRecipients}
+              onClose={closeDrawer}
+              onDraftDiscarded={handleComposerDraftClosed}
+              onDraftSaved={handleComposerDraftChanged}
+              onDraftSent={handleComposerDraftClosed}
+              saveDraft={saveComposerDraft}
+              sendMail={sendComposerMail}
+              stageAttachment={stageComposerAttachment}
+            />
+          </Suspense>
         </div>
       ) : null}
       </section>
@@ -4691,8 +4741,6 @@ function ReaderStatus({ text }: { text: string }) {
     </footer>
   );
 }
-
-const ComposerDrawer = TipTapComposer;
 
 function AccountStatusDrawer({
   account,

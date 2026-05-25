@@ -328,6 +328,13 @@
       },
       "toolsAria": "Search filters and saved searches"
     },
+    "onboarding": {
+      "body": "Connect Gmail, Outlook, or a compatible IMAP account. Komorebi will detect known providers and keep secrets in the Windows credential store.",
+      "eyebrow": "Quiet setup",
+      "heading": "Bring your mail into one calm workspace",
+      "label": "Account setup",
+      "secondary": "You can review every server setting before anything is saved."
+    },
     "states": {
       "accountsError": "Account list unavailable",
       "accountsLoading": "Loading accounts",
