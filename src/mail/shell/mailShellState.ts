@@ -22,6 +22,92 @@ export type DiagnosticsExportResponse = {
   includedSyntheticFixtures: boolean;
 };
 
+export type DiagnosticsHealthStatus = "healthy" | "attention" | "error";
+
+export type DiagnosticsHealthCategory =
+  | "authentication"
+  | "provider-server"
+  | "network"
+  | "local-cache"
+  | "attachment-storage"
+  | "ipc-command"
+  | "unknown";
+
+export type DiagnosticsMigrationStatus =
+  | "missing"
+  | "current"
+  | "needs-migration"
+  | "newer-than-app"
+  | "unavailable";
+
+export type DiagnosticsRemediationCode =
+  | "cache-missing"
+  | "schema-needs-migration"
+  | "schema-newer-than-app"
+  | "schema-unavailable"
+  | "reconnect-accounts"
+  | "sync-errors"
+  | "retries-active"
+  | "attachment-storage-issues"
+  | "command-failures"
+  | "healthy";
+
+export type DiagnosticsHealthEvent = {
+  timestampUnixMs: number;
+  level: "info" | "warn" | "error";
+  component: string;
+  event: string;
+  category: DiagnosticsHealthCategory;
+  state: string | null;
+  action: string | null;
+  code: string | null;
+};
+
+export type DiagnosticsCacheHealth = {
+  mailCachePresent: boolean;
+  schemaVersion: number | null;
+  latestSchemaVersion: number;
+  migrationStatus: DiagnosticsMigrationStatus;
+  accountCount: number;
+  folderCount: number;
+  messageCount: number;
+  attachmentMetadataCount: number;
+  settingsCount: number;
+  authStatusCounts: Record<string, number>;
+  syncStatusCounts: Record<string, number>;
+};
+
+export type DiagnosticsSyncHealth = {
+  logPresent: boolean;
+  warningCount: number;
+  errorCount: number;
+  retryEventCount: number;
+  lastRetryAtUnixMs: number | null;
+  categoryCounts: Record<string, number>;
+  recentEvents: DiagnosticsHealthEvent[];
+};
+
+export type DiagnosticsAttachmentHealth = {
+  metadataCount: number;
+  storedCount: number;
+  checkedFiles: number;
+  missingFiles: number;
+  unreadableFiles: number;
+  invalidPaths: number;
+  oversizedFiles: number;
+  sizeMismatches: number;
+  hashMismatches: number;
+};
+
+export type DiagnosticsHealthView = {
+  status: DiagnosticsHealthStatus;
+  generatedAtUnixMs: number;
+  cache: DiagnosticsCacheHealth;
+  sync: DiagnosticsSyncHealth;
+  attachments: DiagnosticsAttachmentHealth;
+  remediationSteps: DiagnosticsRemediationCode[];
+};
+
 export type AccountStatus =
   | "connected"
   | "idle"

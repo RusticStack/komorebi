@@ -82,7 +82,8 @@ pub fn run() {
             account_management::get_account_auth_status,
             oauth_loopback::start_oauth_account_setup,
             oauth_loopback::start_oauth_account_reauth,
-            diagnostics::export_diagnostics_bundle
+            diagnostics::export_diagnostics_bundle,
+            diagnostics::get_diagnostics_health
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -99,6 +99,7 @@ import {
   type UiPreferencesView,
   type DiagnosticsExportRequest,
   type DiagnosticsExportResponse,
+  type DiagnosticsHealthView,
   type LoadStatus,
 } from "./mailShellState";
 
@@ -150,6 +151,7 @@ export type UiPreferencesUpdateFunction = (
 export type DiagnosticsExportFunction = (
   request: DiagnosticsExportRequest,
 ) => Promise<DiagnosticsExportResponse>;
+export type DiagnosticsHealthLoadFunction = () => Promise<DiagnosticsHealthView>;
 export type ComposerDraftListFunction = () => Promise<ComposerDraft[]>;
 export type ComposerForwardedAttachmentStageFunction = (
   request: ComposerForwardedAttachmentStageRequest,
@@ -200,6 +202,7 @@ export type MailClientShellProps = {
   testAccountConnection?: AccountConnectionTestFunction;
   getAccountAuthStatus?: AccountAuthStatusFunction;
   exportDiagnosticsBundle?: DiagnosticsExportFunction;
+  loadDiagnosticsHealth?: DiagnosticsHealthLoadFunction;
   subscribeToSyncStatus?: SyncStatusSubscribeFunction;
 };
 
@@ -363,6 +366,7 @@ export function MailClientShell({
   testAccountConnection,
   getAccountAuthStatus,
   exportDiagnosticsBundle,
+  loadDiagnosticsHealth,
   subscribeToSyncStatus,
 }: MailClientShellProps) {
   const { t } = useTranslation();
@@ -2045,6 +2049,7 @@ export function MailClientShell({
             onTestAccountConnection={testAccountConnection}
             onGetAccountAuthStatus={getAccountAuthStatus}
             onExportDiagnostics={exportDiagnosticsBundle}
+            onLoadDiagnosticsHealth={loadDiagnosticsHealth}
             onClose={closeDrawer}
           />
         </div>

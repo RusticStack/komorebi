@@ -608,6 +608,69 @@
       "exported": "Diagnostics exported to {{filename}} with {{count}} log entries.",
       "exporting": "Exporting diagnostics",
       "heading": "Diagnostics",
+      "health": {
+        "accounts": "Accounts",
+        "attachmentChecked": "{{checked}} stored files verified",
+        "attachmentIssueBreakdown": "{{missing}} missing, {{unreadable}} unreadable, {{invalid}} invalid path, {{size}} size mismatch, {{hash}} hash mismatch",
+        "attachmentIssues": "Attachment issues",
+        "attachmentStored": "{{stored}} stored attachments from {{metadata}} metadata rows",
+        "attachments": "Attachment storage",
+        "cache": "Local cache",
+        "categories": "Provider and server categories",
+        "category": {
+          "attachment-storage": "Attachment storage",
+          "authentication": "Authentication",
+          "ipc-command": "Command failure",
+          "local-cache": "Local cache",
+          "network": "Network",
+          "provider-server": "Provider or server",
+          "unknown": "Unknown"
+        },
+        "event": "{{time}} - {{level}} - {{category}} - {{component}}/{{event}}; state {{state}}; action {{action}}; code {{code}}",
+        "generated": "Refreshed {{time}}.",
+        "heading": "Health",
+        "level": {
+          "error": "error",
+          "info": "info",
+          "warn": "warning"
+        },
+        "loading": "Refreshing",
+        "logIssues": "Log issues",
+        "messages": "Messages",
+        "migration": {
+          "current": "Schema {{current}} is current",
+          "missing": "Cache is not created yet",
+          "needs-migration": "Schema {{current}} needs migration to {{latest}}",
+          "newer-than-app": "Schema {{current}} is newer than this app",
+          "unavailable": "Schema status is unavailable"
+        },
+        "noLogCategories": "No classified log events.",
+        "noRecentEvents": "No recent health events.",
+        "notAvailable": "n/a",
+        "recentEvents": "Retry and error history",
+        "refresh": "Refresh health",
+        "remediation": "Remediation",
+        "remediationSteps": {
+          "attachment-storage-issues": "Use attachment save/download again after the next sync; export diagnostics if files still appear missing or corrupted.",
+          "cache-missing": "Open the app once with the normal profile so the local cache can be created.",
+          "command-failures": "Retry the failed action from the UI; export diagnostics if the same command keeps failing.",
+          "healthy": "No remediation is needed.",
+          "reconnect-accounts": "Reconnect the affected accounts from Settings.",
+          "retries-active": "Wait for the current backoff window or reconnect the account if retries continue.",
+          "schema-needs-migration": "Restart the app so migrations can run before using the mailbox.",
+          "schema-newer-than-app": "Upgrade the app before opening this profile again.",
+          "schema-unavailable": "Close the app and check whether another process has locked or corrupted the local cache.",
+          "sync-errors": "Review the account status drawer and reconnect or retry the affected account."
+        },
+        "retries": "Retries",
+        "status": {
+          "attention": "Needs attention",
+          "error": "Action needed",
+          "healthy": "Healthy"
+        },
+        "unavailable": "Health status is unavailable in this runtime.",
+        "warningErrorCount": "{{warnings}} warnings, {{errors}} errors"
+      },
       "includeSynthetic": "Include synthetic fixtures",
       "unavailable": "Diagnostics export is unavailable in this runtime."
     },

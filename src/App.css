@@ -1161,6 +1161,107 @@ textarea:disabled {
   border-bottom: 1px solid #e7e1d8;
 }
 
+.diagnostics-health {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e7e1d8;
+  border-radius: 8px;
+  background: #fffdf9;
+}
+
+.diagnostics-health__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagnostics-health__header h4,
+.diagnostics-health__group h5 {
+  margin: 0;
+}
+
+.diagnostics-health__header p {
+  margin: 4px 0 0;
+  color: #716d66;
+  font-size: 0.78rem;
+}
+
+.diagnostics-health__body,
+.diagnostics-health__group {
+  display: grid;
+  gap: 10px;
+}
+
+.diagnostics-health__status {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.diagnostics-health__status--healthy {
+  border: 1px solid #c8d4c2;
+  background: #f3f7ef;
+  color: #43523c;
+}
+
+.diagnostics-health__status--attention {
+  border: 1px solid #e2cf9d;
+  background: #fff8df;
+  color: #6d5521;
+}
+
+.diagnostics-health__status--error {
+  border: 1px solid #dfb8aa;
+  background: #fff4ef;
+  color: #7a3d2d;
+}
+
+.diagnostics-health__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.diagnostics-health__metric {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #ece6dc;
+  border-radius: 8px;
+  background: #f8f5ef;
+}
+
+.diagnostics-health__metric span {
+  color: #716d66;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.diagnostics-health__metric strong {
+  color: #2d2d2d;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.diagnostics-health__group ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #4f4840;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.diagnostics-health__group li {
+  overflow-wrap: anywhere;
+}
+
 .account-form {
   display: grid;
   gap: 12px;

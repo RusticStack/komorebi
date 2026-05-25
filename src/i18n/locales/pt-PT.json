@@ -608,6 +608,69 @@
       "exported": "Diagnosticos exportados para {{filename}} com {{count}} entradas de registo.",
       "exporting": "A exportar diagnosticos",
       "heading": "Diagnosticos",
+      "health": {
+        "accounts": "Contas",
+        "attachmentChecked": "{{checked}} ficheiros guardados verificados",
+        "attachmentIssueBreakdown": "{{missing}} em falta, {{unreadable}} ilegivel, {{invalid}} caminho invalido, {{size}} tamanho divergente, {{hash}} hash divergente",
+        "attachmentIssues": "Problemas de anexos",
+        "attachmentStored": "{{stored}} anexos guardados de {{metadata}} linhas de metadados",
+        "attachments": "Armazenamento de anexos",
+        "cache": "Cache local",
+        "categories": "Categorias de fornecedor e servidor",
+        "category": {
+          "attachment-storage": "Armazenamento de anexos",
+          "authentication": "Autenticacao",
+          "ipc-command": "Falha de comando",
+          "local-cache": "Cache local",
+          "network": "Rede",
+          "provider-server": "Fornecedor ou servidor",
+          "unknown": "Desconhecido"
+        },
+        "event": "{{time}} - {{level}} - {{category}} - {{component}}/{{event}}; estado {{state}}; acao {{action}}; codigo {{code}}",
+        "generated": "Atualizado {{time}}.",
+        "heading": "Saude",
+        "level": {
+          "error": "erro",
+          "info": "info",
+          "warn": "aviso"
+        },
+        "loading": "A atualizar",
+        "logIssues": "Problemas de registo",
+        "messages": "Mensagens",
+        "migration": {
+          "current": "Esquema {{current}} esta atual",
+          "missing": "A cache ainda nao foi criada",
+          "needs-migration": "Esquema {{current}} precisa de migracao para {{latest}}",
+          "newer-than-app": "Esquema {{current}} e mais recente do que esta app",
+          "unavailable": "Estado do esquema indisponivel"
+        },
+        "noLogCategories": "Sem eventos de registo classificados.",
+        "noRecentEvents": "Sem eventos de saude recentes.",
+        "notAvailable": "n/d",
+        "recentEvents": "Historico de novas tentativas e erros",
+        "refresh": "Atualizar saude",
+        "remediation": "Remediacao",
+        "remediationSteps": {
+          "attachment-storage-issues": "Use guardar/descarregar anexo novamente apos a proxima sincronizacao; exporte diagnosticos se os ficheiros continuarem em falta ou corrompidos.",
+          "cache-missing": "Abra a app uma vez com o perfil normal para criar a cache local.",
+          "command-failures": "Repita a acao na interface; exporte diagnosticos se o mesmo comando continuar a falhar.",
+          "healthy": "Nao e necessaria remediacao.",
+          "reconnect-accounts": "Volte a ligar as contas afetadas nas Definicoes.",
+          "retries-active": "Aguarde pela janela de backoff atual ou volte a ligar a conta se as tentativas continuarem.",
+          "schema-needs-migration": "Reinicie a app para executar migracoes antes de usar a caixa de correio.",
+          "schema-newer-than-app": "Atualize a app antes de abrir este perfil novamente.",
+          "schema-unavailable": "Feche a app e verifique se outro processo bloqueou ou corrompeu a cache local.",
+          "sync-errors": "Veja o painel de estado da conta e volte a ligar ou repita a conta afetada."
+        },
+        "retries": "Novas tentativas",
+        "status": {
+          "attention": "Requer atencao",
+          "error": "Acao necessaria",
+          "healthy": "Saudavel"
+        },
+        "unavailable": "O estado de saude esta indisponivel neste runtime.",
+        "warningErrorCount": "{{warnings}} avisos, {{errors}} erros"
+      },
       "includeSynthetic": "Incluir fixtures sinteticos",
       "unavailable": "A exportacao de diagnosticos esta indisponivel neste runtime."
     },

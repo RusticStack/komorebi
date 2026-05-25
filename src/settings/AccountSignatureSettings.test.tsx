@@ -78,6 +78,130 @@ describe("AccountSignatureSettings", () => {
     ).toBeVisible();
   });
 
+  it("loads diagnostics health without exposing private diagnostic fields", async () => {
+    const onLoadDiagnosticsHealth = vi
+      .fn()
+      .mockResolvedValueOnce({
+        attachments: {
+          checkedFiles: 4,
+          hashMismatches: 1,
+          invalidPaths: 0,
+          metadataCount: 6,
+          missingFiles: 1,
+          oversizedFiles: 0,
+          sizeMismatches: 0,
+          storedCount: 6,
+          unreadableFiles: 0,
+        },
+        cache: {
+          accountCount: 2,
+          attachmentMetadataCount: 6,
+          authStatusCounts: { connected: 1, reconnect_needed: 1 },
+          folderCount: 12,
+          latestSchemaVersion: 10,
+          mailCachePresent: true,
+          messageCount: 400,
+          migrationStatus: "current",
+          schemaVersion: 10,
+          settingsCount: 5,
+          syncStatusCounts: { error: 1, idle: 1 },
+        },
+        generatedAtUnixMs: Date.UTC(2026, 4, 25, 10, 30),
+        remediationSteps: [
+          "reconnect-accounts",
+          "sync-errors",
+          "retries-active",
+          "attachment-storage-issues",
+        ],
+        status: "error",
+        sync: {
+          categoryCounts: {
+            authentication: 1,
+            "provider-server": 1,
+          },
+          errorCount: 1,
+          lastRetryAtUnixMs: Date.UTC(2026, 4, 25, 10, 20),
+          logPresent: true,
+          recentEvents: [
+            {
+              action: "retry_later",
+              category: "provider-server",
+              code: "connection_failed",
+              component: "sync_scheduler",
+              event: "sync_status",
+              level: "error",
+              state: "error",
+              timestampUnixMs: Date.UTC(2026, 4, 25, 10, 20),
+            },
+          ],
+          retryEventCount: 1,
+          warningCount: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        attachments: {
+          checkedFiles: 4,
+          hashMismatches: 0,
+          invalidPaths: 0,
+          metadataCount: 4,
+          missingFiles: 0,
+          oversizedFiles: 0,
+          sizeMismatches: 0,
+          storedCount: 4,
+          unreadableFiles: 0,
+        },
+        cache: {
+          accountCount: 2,
+          attachmentMetadataCount: 4,
+          authStatusCounts: { connected: 2 },
+          folderCount: 12,
+          latestSchemaVersion: 10,
+          mailCachePresent: true,
+          messageCount: 400,
+          migrationStatus: "current",
+          schemaVersion: 10,
+          settingsCount: 5,
+          syncStatusCounts: { idle: 2 },
+        },
+        generatedAtUnixMs: Date.UTC(2026, 4, 25, 10, 35),
+        remediationSteps: ["healthy"],
+        status: "healthy",
+        sync: {
+          categoryCounts: {},
+          errorCount: 0,
+          lastRetryAtUnixMs: null,
+          logPresent: true,
+          recentEvents: [],
+          retryEventCount: 0,
+          warningCount: 0,
+        },
+      });
+
+    render(
+      <AccountSignatureSettings
+        accounts={[]}
+        onLoadDiagnosticsHealth={onLoadDiagnosticsHealth}
+      />,
+    );
+
+    expect(await screen.findByText("Action needed")).toBeVisible();
+    expect(screen.getByText("Provider or server: 1")).toBeVisible();
+    expect(screen.getByText("Reconnect the affected accounts from Settings.")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Use attachment save/download again after the next sync; export diagnostics if files still appear missing or corrupted.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(/sync_scheduler\/sync_status/)).toBeVisible();
+    expect(screen.queryByText(/ada@example.com/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Private acquisition/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh health" }));
+
+    await waitFor(() => expect(onLoadDiagnosticsHealth).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Healthy")).toBeVisible();
+  });
+
   it("sanitizes the edited signature before saving per account", () => {
     const onSaveSignature = vi.fn();
     render(

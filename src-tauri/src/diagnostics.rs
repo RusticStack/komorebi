@@ -12,16 +12,20 @@ use std::{
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::schema::{apply_migrations, current_schema_version};
+use crate::schema::{apply_migrations, current_schema_version, LATEST_SCHEMA_VERSION};
 
 const MAIL_CACHE_FILE_NAME: &str = "mail-cache.sqlite3";
 const LOG_DIR_NAME: &str = "logs";
 const LOG_FILE_NAME: &str = "komorebi.ndjson";
 const MAX_LOG_READ_BYTES: u64 = 1024 * 1024;
 const MAX_EXPORTED_LOG_ENTRIES: usize = 1000;
+const INBOUND_ATTACHMENT_DIR_NAME: &str = "attachments";
+const MAX_HEALTH_LOG_EVENTS: usize = 12;
+const MAX_ATTACHMENT_HEALTH_BYTES: u64 = 25 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -55,6 +59,131 @@ pub struct DiagnosticsExportResponse {
     pub bytes_written: u64,
     pub included_log_entries: usize,
     pub included_synthetic_fixtures: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiagnosticsHealthStatus {
+    Healthy,
+    Attention,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiagnosticsHealthCategory {
+    Authentication,
+    ProviderServer,
+    Network,
+    LocalCache,
+    AttachmentStorage,
+    IpcCommand,
+    Unknown,
+}
+
+impl DiagnosticsHealthCategory {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Authentication => "authentication",
+            Self::ProviderServer => "provider-server",
+            Self::Network => "network",
+            Self::LocalCache => "local-cache",
+            Self::AttachmentStorage => "attachment-storage",
+            Self::IpcCommand => "ipc-command",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiagnosticsMigrationStatus {
+    Missing,
+    Current,
+    NeedsMigration,
+    NewerThanApp,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiagnosticsRemediationCode {
+    CacheMissing,
+    SchemaNeedsMigration,
+    SchemaNewerThanApp,
+    SchemaUnavailable,
+    ReconnectAccounts,
+    SyncErrors,
+    RetriesActive,
+    AttachmentStorageIssues,
+    CommandFailures,
+    Healthy,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsHealthView {
+    pub status: DiagnosticsHealthStatus,
+    pub generated_at_unix_ms: i64,
+    pub cache: DiagnosticsCacheHealth,
+    pub sync: DiagnosticsSyncHealth,
+    pub attachments: DiagnosticsAttachmentHealth,
+    pub remediation_steps: Vec<DiagnosticsRemediationCode>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsCacheHealth {
+    pub mail_cache_present: bool,
+    pub schema_version: Option<u32>,
+    pub latest_schema_version: u32,
+    pub migration_status: DiagnosticsMigrationStatus,
+    pub account_count: i64,
+    pub folder_count: i64,
+    pub message_count: i64,
+    pub attachment_metadata_count: i64,
+    pub settings_count: i64,
+    pub auth_status_counts: BTreeMap<String, i64>,
+    pub sync_status_counts: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsSyncHealth {
+    pub log_present: bool,
+    pub warning_count: usize,
+    pub error_count: usize,
+    pub retry_event_count: usize,
+    pub last_retry_at_unix_ms: Option<i64>,
+    pub category_counts: BTreeMap<String, usize>,
+    pub recent_events: Vec<DiagnosticsHealthEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsHealthEvent {
+    pub timestamp_unix_ms: i64,
+    pub level: DiagnosticLogLevel,
+    pub component: String,
+    pub event: String,
+    pub category: DiagnosticsHealthCategory,
+    pub state: Option<String>,
+    pub action: Option<String>,
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsAttachmentHealth {
+    pub metadata_count: i64,
+    pub stored_count: i64,
+    pub checked_files: i64,
+    pub missing_files: i64,
+    pub unreadable_files: i64,
+    pub invalid_paths: i64,
+    pub oversized_files: i64,
+    pub size_mismatches: i64,
+    pub hash_mismatches: i64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -114,6 +243,17 @@ pub fn export_diagnostics_bundle(
     let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
     let destination = selected_diagnostics_destination(&app)?;
     export_diagnostics_bundle_to_path(&app_data_dir, &cache_path, &destination, request)
+}
+
+#[tauri::command]
+pub fn get_diagnostics_health(
+    app: tauri::AppHandle,
+) -> Result<DiagnosticsHealthView, DiagnosticsCommandError> {
+    let app_data_dir = app.path().app_data_dir()?;
+    fs::create_dir_all(&app_data_dir)
+        .map_err(|_| DiagnosticsCommandError::new("diagnostics app data is unavailable"))?;
+    let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+    get_diagnostics_health_from_paths(&app_data_dir, &cache_path)
 }
 
 pub fn diagnostics_log_path(app_data_dir: &Path) -> PathBuf {
@@ -351,6 +491,28 @@ pub fn export_diagnostics_bundle_to_path(
     })
 }
 
+pub fn get_diagnostics_health_from_paths(
+    app_data_dir: &Path,
+    cache_path: &Path,
+) -> Result<DiagnosticsHealthView, DiagnosticsCommandError> {
+    let database = summarize_database(cache_path);
+    let logs = read_redacted_log_entries(app_data_dir)?;
+    let cache = cache_health_from_summary(&database);
+    let sync = sync_health_from_logs(&logs);
+    let attachments = attachment_health(cache_path, app_data_dir);
+    let remediation_steps = remediation_steps(&cache, &sync, &attachments);
+    let status = health_status(&remediation_steps);
+
+    Ok(DiagnosticsHealthView {
+        status,
+        generated_at_unix_ms: unix_now_millis(),
+        cache,
+        sync,
+        attachments,
+        remediation_steps,
+    })
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DiagnosticBundle {
@@ -427,6 +589,373 @@ fn summarize_database(cache_path: &Path) -> DatabaseDiagnosticSummary {
     summary.auth_status_counts = grouped_count(&connection, "accounts", "auth_status");
     summary.sync_status_counts = sync_status_counts(&connection);
     summary
+}
+
+fn cache_health_from_summary(summary: &DatabaseDiagnosticSummary) -> DiagnosticsCacheHealth {
+    let schema_version = summary.schema_version;
+    let migration_status = if !summary.mail_cache_present {
+        DiagnosticsMigrationStatus::Missing
+    } else if summary.error.is_some() || schema_version.is_none() {
+        DiagnosticsMigrationStatus::Unavailable
+    } else {
+        match schema_version
+            .unwrap_or_default()
+            .cmp(&LATEST_SCHEMA_VERSION)
+        {
+            std::cmp::Ordering::Less => DiagnosticsMigrationStatus::NeedsMigration,
+            std::cmp::Ordering::Equal => DiagnosticsMigrationStatus::Current,
+            std::cmp::Ordering::Greater => DiagnosticsMigrationStatus::NewerThanApp,
+        }
+    };
+
+    DiagnosticsCacheHealth {
+        mail_cache_present: summary.mail_cache_present,
+        schema_version,
+        latest_schema_version: LATEST_SCHEMA_VERSION,
+        migration_status,
+        account_count: count_from_summary(summary, "accounts"),
+        folder_count: count_from_summary(summary, "folders"),
+        message_count: count_from_summary(summary, "messages"),
+        attachment_metadata_count: count_from_summary(summary, "attachments"),
+        settings_count: count_from_summary(summary, "settings"),
+        auth_status_counts: summary.auth_status_counts.clone(),
+        sync_status_counts: summary.sync_status_counts.clone(),
+    }
+}
+
+fn count_from_summary(summary: &DatabaseDiagnosticSummary, table: &str) -> i64 {
+    summary.counts.get(table).copied().unwrap_or_default()
+}
+
+fn sync_health_from_logs(logs: &[DiagnosticLogEntry]) -> DiagnosticsSyncHealth {
+    let mut warning_count = 0;
+    let mut error_count = 0;
+    let mut retry_event_count = 0;
+    let mut last_retry_at_unix_ms = None;
+    let mut category_counts = BTreeMap::new();
+    let mut events = Vec::new();
+
+    for entry in logs {
+        match entry.level {
+            DiagnosticLogLevel::Warn => warning_count += 1,
+            DiagnosticLogLevel::Error => error_count += 1,
+            DiagnosticLogLevel::Info => {}
+        }
+        if entry.event == "retry_scheduled"
+            || entry
+                .fields
+                .get("action")
+                .is_some_and(|value| value == "retry_later")
+        {
+            retry_event_count += 1;
+            last_retry_at_unix_ms = Some(entry.timestamp_unix_ms);
+        }
+
+        let category = classify_health_category(entry);
+        *category_counts
+            .entry(category.as_str().to_string())
+            .or_insert(0) += 1;
+
+        events.push(DiagnosticsHealthEvent {
+            timestamp_unix_ms: entry.timestamp_unix_ms,
+            level: entry.level,
+            component: entry.component.clone(),
+            event: entry.event.clone(),
+            category,
+            state: entry.fields.get("state").cloned(),
+            action: entry.fields.get("action").cloned(),
+            code: entry.fields.get("code").cloned(),
+        });
+    }
+
+    if events.len() > MAX_HEALTH_LOG_EVENTS {
+        events = events[events.len() - MAX_HEALTH_LOG_EVENTS..].to_vec();
+    }
+
+    DiagnosticsSyncHealth {
+        log_present: !logs.is_empty(),
+        warning_count,
+        error_count,
+        retry_event_count,
+        last_retry_at_unix_ms,
+        category_counts,
+        recent_events: events,
+    }
+}
+
+fn classify_health_category(entry: &DiagnosticLogEntry) -> DiagnosticsHealthCategory {
+    let code = entry
+        .fields
+        .get("code")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let action = entry
+        .fields
+        .get("action")
+        .map(String::as_str)
+        .unwrap_or_default();
+    match entry.component.as_str() {
+        "schema" => DiagnosticsHealthCategory::LocalCache,
+        "ipc" => DiagnosticsHealthCategory::IpcCommand,
+        component if component.contains("attachment") => {
+            DiagnosticsHealthCategory::AttachmentStorage
+        }
+        "sync_scheduler" => {
+            if code.contains("auth") || action == "reauthenticate" {
+                DiagnosticsHealthCategory::Authentication
+            } else if code.contains("network") || code.contains("connection") {
+                DiagnosticsHealthCategory::Network
+            } else {
+                DiagnosticsHealthCategory::ProviderServer
+            }
+        }
+        "smtp_send" | "imap_live" | "oauth" | "oauth_loopback" => {
+            if code.contains("auth") || action == "reauthenticate" {
+                DiagnosticsHealthCategory::Authentication
+            } else {
+                DiagnosticsHealthCategory::ProviderServer
+            }
+        }
+        _ => DiagnosticsHealthCategory::Unknown,
+    }
+}
+
+fn attachment_health(cache_path: &Path, app_data_dir: &Path) -> DiagnosticsAttachmentHealth {
+    let mut health = DiagnosticsAttachmentHealth {
+        metadata_count: 0,
+        stored_count: 0,
+        checked_files: 0,
+        missing_files: 0,
+        unreadable_files: 0,
+        invalid_paths: 0,
+        oversized_files: 0,
+        size_mismatches: 0,
+        hash_mismatches: 0,
+    };
+    if !cache_path.exists() {
+        return health;
+    }
+
+    let Ok(connection) = Connection::open_with_flags(cache_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return health;
+    };
+    if !table_exists(&connection, "attachments") {
+        return health;
+    }
+
+    health.metadata_count = table_count(&connection, "attachments").unwrap_or_default();
+    let Ok(mut statement) = connection.prepare(
+        "SELECT storage_relative_path, sha256, size_bytes
+         FROM attachments
+         WHERE storage_relative_path IS NOT NULL",
+    ) else {
+        return health;
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok(AttachmentHealthRow {
+            storage_relative_path: row.get(0)?,
+            sha256: row.get(1)?,
+            size_bytes: row.get(2)?,
+        })
+    }) else {
+        return health;
+    };
+
+    for row in rows.flatten() {
+        health.stored_count += 1;
+        match check_attachment_file(app_data_dir, &row) {
+            AttachmentFileHealth::Ok => health.checked_files += 1,
+            AttachmentFileHealth::InvalidPath => health.invalid_paths += 1,
+            AttachmentFileHealth::Missing => health.missing_files += 1,
+            AttachmentFileHealth::Unreadable => health.unreadable_files += 1,
+            AttachmentFileHealth::Oversized => health.oversized_files += 1,
+            AttachmentFileHealth::SizeMismatch => health.size_mismatches += 1,
+            AttachmentFileHealth::HashMismatch => health.hash_mismatches += 1,
+        }
+    }
+
+    health
+}
+
+struct AttachmentHealthRow {
+    storage_relative_path: String,
+    sha256: Option<String>,
+    size_bytes: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentFileHealth {
+    Ok,
+    InvalidPath,
+    Missing,
+    Unreadable,
+    Oversized,
+    SizeMismatch,
+    HashMismatch,
+}
+
+fn check_attachment_file(app_data_dir: &Path, row: &AttachmentHealthRow) -> AttachmentFileHealth {
+    let Ok(path) = checked_attachment_health_path(app_data_dir, &row.storage_relative_path) else {
+        return AttachmentFileHealth::InvalidPath;
+    };
+    let Ok(metadata) = fs::metadata(&path) else {
+        return AttachmentFileHealth::Missing;
+    };
+    if !metadata.is_file() {
+        return AttachmentFileHealth::Unreadable;
+    }
+    if metadata.len() > MAX_ATTACHMENT_HEALTH_BYTES {
+        return AttachmentFileHealth::Oversized;
+    }
+    if row.size_bytes < 0 || metadata.len() != row.size_bytes as u64 {
+        return AttachmentFileHealth::SizeMismatch;
+    }
+
+    let Some(expected_hash) = row.sha256.as_deref() else {
+        return AttachmentFileHealth::HashMismatch;
+    };
+    if expected_hash.len() != 64 {
+        return AttachmentFileHealth::HashMismatch;
+    }
+    let Ok(mut file) = File::open(path) else {
+        return AttachmentFileHealth::Unreadable;
+    };
+    let mut bytes = Vec::new();
+    if Read::by_ref(&mut file)
+        .take(MAX_ATTACHMENT_HEALTH_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return AttachmentFileHealth::Unreadable;
+    }
+    if bytes.len() as u64 > MAX_ATTACHMENT_HEALTH_BYTES {
+        return AttachmentFileHealth::Oversized;
+    }
+    if sha256_hex(&bytes) != expected_hash {
+        return AttachmentFileHealth::HashMismatch;
+    }
+
+    AttachmentFileHealth::Ok
+}
+
+fn checked_attachment_health_path(
+    app_data_dir: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, DiagnosticsCommandError> {
+    let mut components = Path::new(relative_path).components();
+    let Some(Component::Normal(first)) = components.next() else {
+        return Err(DiagnosticsCommandError::new("attachment path is invalid"));
+    };
+    if first != OsStr::new(INBOUND_ATTACHMENT_DIR_NAME) {
+        return Err(DiagnosticsCommandError::new("attachment path is invalid"));
+    }
+    if components.any(|component| !matches!(component, Component::Normal(_))) {
+        return Err(DiagnosticsCommandError::new("attachment path is invalid"));
+    }
+
+    let root = app_data_dir
+        .canonicalize()
+        .map_err(|_| DiagnosticsCommandError::new("app data is unavailable"))?;
+    let path = app_data_dir.join(relative_path);
+    let Some(parent) = path.parent() else {
+        return Err(DiagnosticsCommandError::new("attachment path is invalid"));
+    };
+    let parent = parent
+        .canonicalize()
+        .map_err(|_| DiagnosticsCommandError::new("attachment file is unavailable"))?;
+    if !parent.starts_with(&root) {
+        return Err(DiagnosticsCommandError::new("attachment path is invalid"));
+    }
+    Ok(path)
+}
+
+fn remediation_steps(
+    cache: &DiagnosticsCacheHealth,
+    sync: &DiagnosticsSyncHealth,
+    attachments: &DiagnosticsAttachmentHealth,
+) -> Vec<DiagnosticsRemediationCode> {
+    let mut steps = Vec::new();
+    match cache.migration_status {
+        DiagnosticsMigrationStatus::Missing => steps.push(DiagnosticsRemediationCode::CacheMissing),
+        DiagnosticsMigrationStatus::NeedsMigration => {
+            steps.push(DiagnosticsRemediationCode::SchemaNeedsMigration)
+        }
+        DiagnosticsMigrationStatus::NewerThanApp => {
+            steps.push(DiagnosticsRemediationCode::SchemaNewerThanApp)
+        }
+        DiagnosticsMigrationStatus::Unavailable => {
+            steps.push(DiagnosticsRemediationCode::SchemaUnavailable)
+        }
+        DiagnosticsMigrationStatus::Current => {}
+    }
+    if cache
+        .auth_status_counts
+        .get("reconnect_needed")
+        .copied()
+        .unwrap_or_default()
+        > 0
+    {
+        steps.push(DiagnosticsRemediationCode::ReconnectAccounts);
+    }
+    if cache
+        .sync_status_counts
+        .get("error")
+        .copied()
+        .unwrap_or_default()
+        > 0
+        || sync.error_count > 0
+    {
+        steps.push(DiagnosticsRemediationCode::SyncErrors);
+    }
+    if sync.retry_event_count > 0 {
+        steps.push(DiagnosticsRemediationCode::RetriesActive);
+    }
+    if attachment_issue_count(attachments) > 0 {
+        steps.push(DiagnosticsRemediationCode::AttachmentStorageIssues);
+    }
+    if sync
+        .category_counts
+        .get(DiagnosticsHealthCategory::IpcCommand.as_str())
+        .copied()
+        .unwrap_or_default()
+        > 0
+    {
+        steps.push(DiagnosticsRemediationCode::CommandFailures);
+    }
+    if steps.is_empty() {
+        steps.push(DiagnosticsRemediationCode::Healthy);
+    }
+    steps
+}
+
+fn health_status(steps: &[DiagnosticsRemediationCode]) -> DiagnosticsHealthStatus {
+    if steps.iter().any(|step| {
+        matches!(
+            step,
+            DiagnosticsRemediationCode::SchemaNewerThanApp
+                | DiagnosticsRemediationCode::SchemaUnavailable
+                | DiagnosticsRemediationCode::AttachmentStorageIssues
+        )
+    }) {
+        DiagnosticsHealthStatus::Error
+    } else if steps
+        .iter()
+        .any(|step| !matches!(step, DiagnosticsRemediationCode::Healthy))
+    {
+        DiagnosticsHealthStatus::Attention
+    } else {
+        DiagnosticsHealthStatus::Healthy
+    }
+}
+
+fn attachment_issue_count(attachments: &DiagnosticsAttachmentHealth) -> i64 {
+    attachments.missing_files
+        + attachments.unreadable_files
+        + attachments.invalid_paths
+        + attachments.oversized_files
+        + attachments.size_mismatches
+        + attachments.hash_mismatches
 }
 
 fn table_count(connection: &Connection, table: &str) -> Option<i64> {
@@ -771,6 +1300,15 @@ fn sanitize_identifier(value: &str) -> String {
     }
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::new();
+    for byte in digest {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
+}
+
 fn unix_now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -931,6 +1469,89 @@ mod tests {
         assert!(fs::read_to_string(synthetic_destination)
             .unwrap()
             .contains("Synthetic fixture subject"));
+
+        fs::remove_dir_all(app_data_dir).unwrap();
+    }
+
+    #[test]
+    fn health_view_reports_cache_retries_categories_and_attachment_storage_safely() {
+        let app_data_dir = temp_app_data_dir("health");
+        let cache_path = app_data_dir.join(MAIL_CACHE_FILE_NAME);
+        seed_private_cache(&cache_path);
+        fs::create_dir_all(app_data_dir.join("attachments/acct_private/msg_private")).unwrap();
+        append_log_event(
+            &app_data_dir,
+            DiagnosticLogLevel::Error,
+            "sync_scheduler",
+            "sync_status",
+            BTreeMap::from([
+                ("account_id".to_string(), "acct_private".to_string()),
+                ("state".to_string(), "error".to_string()),
+                ("action".to_string(), "retry_later".to_string()),
+                ("code".to_string(), "network_connection_failed".to_string()),
+                (
+                    "provider_error".to_string(),
+                    "Connection failed for ada@example.com".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+        append_log_event(
+            &app_data_dir,
+            DiagnosticLogLevel::Error,
+            "ipc",
+            "command_failure",
+            BTreeMap::from([(
+                "reason".to_string(),
+                "Failed to open subject: Private acquisition".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        let health = get_diagnostics_health_from_paths(&app_data_dir, &cache_path).unwrap();
+        assert_eq!(health.status, DiagnosticsHealthStatus::Error);
+        assert_eq!(
+            health.cache.migration_status,
+            DiagnosticsMigrationStatus::Current
+        );
+        assert_eq!(health.cache.message_count, 1);
+        assert_eq!(health.attachments.metadata_count, 1);
+        assert_eq!(health.attachments.stored_count, 1);
+        assert_eq!(health.attachments.missing_files, 1);
+        assert_eq!(health.sync.retry_event_count, 1);
+        assert_eq!(
+            health
+                .sync
+                .category_counts
+                .get("network")
+                .copied()
+                .unwrap_or_default(),
+            1
+        );
+        assert_eq!(
+            health
+                .sync
+                .category_counts
+                .get("ipc-command")
+                .copied()
+                .unwrap_or_default(),
+            1
+        );
+        assert!(health
+            .remediation_steps
+            .contains(&DiagnosticsRemediationCode::AttachmentStorageIssues));
+        assert!(health
+            .remediation_steps
+            .contains(&DiagnosticsRemediationCode::RetriesActive));
+        assert!(health
+            .remediation_steps
+            .contains(&DiagnosticsRemediationCode::CommandFailures));
+
+        let serialized = serde_json::to_string(&health).unwrap();
+        assert!(!serialized.contains("ada@example.com"));
+        assert!(!serialized.contains("Private acquisition"));
+        assert!(!serialized.contains("credential-private"));
+        assert!(!serialized.contains("attachments/acct_private"));
 
         fs::remove_dir_all(app_data_dir).unwrap();
     }

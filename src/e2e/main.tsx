@@ -16,6 +16,7 @@ import type {
   ComposerDraftSaveResponse,
   ComposerSendRequest,
   ComposerSendResponse,
+  DiagnosticsHealthView,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
   MailActionRequest,
@@ -59,7 +60,8 @@ type E2eEvent =
   | { name: "stage-attachment"; request: ComposerAttachmentStageRequest }
   | { name: "stage-forwarded-attachments"; request: ComposerForwardedAttachmentStageRequest }
   | { name: "send-mail"; request: ComposerSendRequest }
-  | { name: "recent-recipients"; request: RecentRecipientSearchRequest };
+  | { name: "recent-recipients"; request: RecentRecipientSearchRequest }
+  | { name: "diagnostics-health" };
 
 declare global {
   interface Window {
@@ -723,6 +725,64 @@ async function listRecentRecipients(
   );
 }
 
+async function loadDiagnosticsHealth(): Promise<DiagnosticsHealthView> {
+  e2eEvents.push({ name: "diagnostics-health" });
+  await delay(20);
+
+  return {
+    attachments: {
+      checkedFiles: 7,
+      hashMismatches: 0,
+      invalidPaths: 0,
+      metadataCount: 7,
+      missingFiles: 0,
+      oversizedFiles: 0,
+      sizeMismatches: 0,
+      storedCount: 7,
+      unreadableFiles: 0,
+    },
+    cache: {
+      accountCount: activeMail.accounts.length,
+      attachmentMetadataCount: 7,
+      authStatusCounts: { connected: 1, reconnect_needed: 1 },
+      folderCount: activeMail.folders.length,
+      latestSchemaVersion: 10,
+      mailCachePresent: true,
+      messageCount: activeMail.messages.length,
+      migrationStatus: "current",
+      schemaVersion: 10,
+      settingsCount: 6,
+      syncStatusCounts: { idle: 1, syncing: 1 },
+    },
+    generatedAtUnixMs: new Date("2026-05-25T11:45:00").getTime(),
+    remediationSteps: ["reconnect-accounts", "retries-active"],
+    status: "attention",
+    sync: {
+      categoryCounts: {
+        authentication: 1,
+        "provider-server": 1,
+      },
+      errorCount: 0,
+      lastRetryAtUnixMs: new Date("2026-05-25T11:40:00").getTime(),
+      logPresent: true,
+      recentEvents: [
+        {
+          action: "retry_later",
+          category: "provider-server",
+          code: "rate_limited",
+          component: "sync_scheduler",
+          event: "retry_scheduled",
+          level: "warn",
+          state: "offline",
+          timestampUnixMs: new Date("2026-05-25T11:40:00").getTime(),
+        },
+      ],
+      retryEventCount: 1,
+      warningCount: 1,
+    },
+  };
+}
+
 function delay(ms: number, signal?: AbortSignal) {
   if (signal?.aborted) {
     return Promise.reject(new DOMException("E2E operation cancelled.", "AbortError"));
@@ -752,6 +812,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       discardComposerDraft={discardComposerDraft}
       downloadAttachment={downloadAttachment}
       loadComposerDrafts={loadComposerDrafts}
+      loadDiagnosticsHealth={loadDiagnosticsHealth}
       loadMailShellData={loadMailShellData}
       loadMessagePage={performanceFixture ? undefined : loadMessagePage}
       loadRecentRecipients={listRecentRecipients}

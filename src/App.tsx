@@ -11,6 +11,7 @@ import {
   downloadAttachmentFromTauri,
   exportDiagnosticsBundleFromTauri,
   getAccountAuthStatusFromTauri,
+  getDiagnosticsHealthFromTauri,
   getUiPreferencesFromTauri,
   isTauriRuntime,
   listComposerDraftsFromTauri,
@@ -94,6 +95,9 @@ function App(props: MailClientShellProps) {
   const runtimeExportDiagnostics = isRuntime
     ? exportDiagnosticsBundleFromTauri
     : undefined;
+  const runtimeDiagnosticsHealth = isRuntime
+    ? getDiagnosticsHealthFromTauri
+    : undefined;
   const runtimeSyncStatusSubscription = isRuntime
     ? subscribeToSyncStatusFromTauri
     : undefined;
@@ -147,6 +151,9 @@ function App(props: MailClientShellProps) {
       }
       exportDiagnosticsBundle={
         props.exportDiagnosticsBundle ?? runtimeExportDiagnostics
+      }
+      loadDiagnosticsHealth={
+        props.loadDiagnosticsHealth ?? runtimeDiagnosticsHealth
       }
       subscribeToSyncStatus={
         props.subscribeToSyncStatus ?? runtimeSyncStatusSubscription

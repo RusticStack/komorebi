@@ -173,7 +173,10 @@ function rustCommandPath(command: string) {
     return `oauth_loopback::${command}`;
   }
 
-  if (command === "export_diagnostics_bundle") {
+  if (
+    command === "export_diagnostics_bundle" ||
+    command === "get_diagnostics_health"
+  ) {
     return `diagnostics::${command}`;
   }
 
@@ -262,6 +265,7 @@ describe("Tauri capabilities", () => {
       "allow-start-oauth-account-setup",
       "allow-start-oauth-account-reauth",
       "allow-export-diagnostics-bundle",
+      "allow-get-diagnostics-health",
     ]);
   });
 
@@ -325,6 +329,7 @@ describe("Tauri capabilities", () => {
       "start_oauth_account_setup",
       "start_oauth_account_reauth",
       "export_diagnostics_bundle",
+      "get_diagnostics_health",
     ]) {
       expect(buildScript).toContain(`"${command}"`);
       expect(libRs).toContain(rustCommandPath(command));

@@ -26,6 +26,7 @@ const APP_COMMANDS: &[&str] = &[
     "start_oauth_account_setup",
     "start_oauth_account_reauth",
     "export_diagnostics_bundle",
+    "get_diagnostics_health",
 ];
 
 fn main() {

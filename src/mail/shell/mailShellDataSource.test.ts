@@ -8,6 +8,7 @@ import type {
   ComposerDraftSaveRequest,
   DiagnosticsExportRequest,
   DiagnosticsExportResponse,
+  DiagnosticsHealthView,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
   MailActionRequest,
@@ -40,6 +41,7 @@ import {
   downloadAttachmentFromTauri,
   exportDiagnosticsBundleFromTauri,
   getAccountAuthStatusFromTauri,
+  getDiagnosticsHealthFromTauri,
   getUiPreferencesFromTauri,
   isTauriRuntime,
   listComposerDraftsFromTauri,
@@ -256,6 +258,51 @@ describe("mailShellDataSource", () => {
     expect(invokeMock).toHaveBeenCalledWith("export_diagnostics_bundle", {
       request,
     });
+  });
+
+  it("maps diagnostics health to an inputless typed Tauri command", async () => {
+    const response: DiagnosticsHealthView = {
+      attachments: {
+        checkedFiles: 7,
+        hashMismatches: 0,
+        invalidPaths: 0,
+        metadataCount: 7,
+        missingFiles: 0,
+        oversizedFiles: 0,
+        sizeMismatches: 0,
+        storedCount: 7,
+        unreadableFiles: 0,
+      },
+      cache: {
+        accountCount: 1,
+        attachmentMetadataCount: 7,
+        authStatusCounts: { connected: 1 },
+        folderCount: 8,
+        latestSchemaVersion: 10,
+        mailCachePresent: true,
+        messageCount: 40,
+        migrationStatus: "current",
+        schemaVersion: 10,
+        settingsCount: 4,
+        syncStatusCounts: { idle: 1 },
+      },
+      generatedAtUnixMs: 1_779_716_800_000,
+      remediationSteps: ["healthy"],
+      status: "healthy",
+      sync: {
+        categoryCounts: {},
+        errorCount: 0,
+        lastRetryAtUnixMs: null,
+        logPresent: true,
+        recentEvents: [],
+        retryEventCount: 0,
+        warningCount: 0,
+      },
+    };
+    invokeMock.mockResolvedValueOnce(response);
+
+    await expect(getDiagnosticsHealthFromTauri()).resolves.toBe(response);
+    expect(invokeMock).toHaveBeenCalledWith("get_diagnostics_health");
   });
 
   it("maps external link opening to the typed Tauri command", async () => {

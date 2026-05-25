@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SafeEmailBody } from "../mail/rendering/SafeEmailBody";
 import { sanitizeSignatureHtml } from "../mail/signatures/signatureHtml";
@@ -23,6 +23,8 @@ import type {
   AccountSetupResponse,
   DiagnosticsExportRequest,
   DiagnosticsExportResponse,
+  DiagnosticsHealthEvent,
+  DiagnosticsHealthView,
   LoadStatus,
   UiLanguagePreference,
 } from "../mail/shell/mailShellState";
@@ -78,6 +80,7 @@ export type AccountSignatureSettingsProps = {
   onExportDiagnostics?: (
     request: DiagnosticsExportRequest,
   ) => Promise<DiagnosticsExportResponse>;
+  onLoadDiagnosticsHealth?: () => Promise<DiagnosticsHealthView>;
   onClose?: () => void;
 };
 
@@ -134,9 +137,10 @@ export function AccountSignatureSettings({
   onTestAccountConnection,
   onGetAccountAuthStatus,
   onExportDiagnostics,
+  onLoadDiagnosticsHealth,
   onClose,
 }: AccountSignatureSettingsProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [selectedAccountId, setSelectedAccountId] = useState(
     initialAccountId ?? accounts[0]?.id ?? "",
   );
@@ -168,6 +172,13 @@ export function AccountSignatureSettings({
     null,
   );
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [diagnosticsHealth, setDiagnosticsHealth] =
+    useState<DiagnosticsHealthView | null>(null);
+  const [diagnosticsHealthLoading, setDiagnosticsHealthLoading] =
+    useState(false);
+  const [diagnosticsHealthError, setDiagnosticsHealthError] = useState<
+    string | null
+  >(null);
   const [authStatus, setAuthStatus] = useState<AccountAuthStatusView | null>(
     null,
   );
@@ -200,6 +211,51 @@ export function AccountSignatureSettings({
     () => sanitizeSignatureHtml(draftHtml),
     [draftHtml],
   );
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const numberFormatter = useMemo(
+    () => new Intl.NumberFormat(locale),
+    [locale],
+  );
+  const dateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    [locale],
+  );
+
+  useEffect(() => {
+    if (!onLoadDiagnosticsHealth) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      setDiagnosticsHealthLoading(true);
+      setDiagnosticsHealthError(null);
+      try {
+        const health = await onLoadDiagnosticsHealth();
+        if (cancelled) {
+          return;
+        }
+        setDiagnosticsHealth(health);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setDiagnosticsHealthError(formatAccountError(error));
+      } finally {
+        if (!cancelled) {
+          setDiagnosticsHealthLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadDiagnosticsHealth]);
 
   return (
     <section className="settings-panel" aria-label={t("settings.aria.panel")}>
@@ -281,6 +337,45 @@ export function AccountSignatureSettings({
         <p className="account-form__hint">
           {t("settings.diagnostics.copy")}
         </p>
+        <section
+          className="diagnostics-health"
+          aria-label={t("settings.diagnostics.health.heading")}
+        >
+          <div className="diagnostics-health__header">
+            <div>
+              <h4>{t("settings.diagnostics.health.heading")}</h4>
+              {diagnosticsHealth ? (
+                <p>
+                  {t("settings.diagnostics.health.generated", {
+                    time: dateFormatter.format(
+                      new Date(diagnosticsHealth.generatedAtUnixMs),
+                    ),
+                  })}
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleRefreshDiagnosticsHealth()}
+              disabled={!onLoadDiagnosticsHealth || diagnosticsHealthLoading}
+            >
+              {diagnosticsHealthLoading
+                ? t("settings.diagnostics.health.loading")
+                : t("settings.diagnostics.health.refresh")}
+            </button>
+          </div>
+          {!onLoadDiagnosticsHealth ? (
+            <p className="account-form__hint">
+              {t("settings.diagnostics.health.unavailable")}
+            </p>
+          ) : null}
+          {diagnosticsHealthError ? (
+            <p className="settings-error" role="alert">
+              {diagnosticsHealthError}
+            </p>
+          ) : null}
+          {diagnosticsHealth ? renderDiagnosticsHealth() : null}
+        </section>
         <label className="checkbox-row">
           <input
             type="checkbox"
@@ -780,6 +875,198 @@ export function AccountSignatureSettings({
     }
   }
 
+  async function handleRefreshDiagnosticsHealth() {
+    if (!onLoadDiagnosticsHealth) {
+      setDiagnosticsHealthError(t("settings.diagnostics.health.unavailable"));
+      return;
+    }
+
+    setDiagnosticsHealthError(null);
+    setDiagnosticsHealthLoading(true);
+    try {
+      setDiagnosticsHealth(await onLoadDiagnosticsHealth());
+    } catch (error) {
+      setDiagnosticsHealthError(formatAccountError(error));
+    } finally {
+      setDiagnosticsHealthLoading(false);
+    }
+  }
+
+  function renderDiagnosticsHealth() {
+    if (!diagnosticsHealth) {
+      return null;
+    }
+
+    const attachmentIssueTotal =
+      diagnosticsHealth.attachments.missingFiles +
+      diagnosticsHealth.attachments.unreadableFiles +
+      diagnosticsHealth.attachments.invalidPaths +
+      diagnosticsHealth.attachments.oversizedFiles +
+      diagnosticsHealth.attachments.sizeMismatches +
+      diagnosticsHealth.attachments.hashMismatches;
+
+    return (
+      <div className="diagnostics-health__body">
+        <p
+          className={`diagnostics-health__status diagnostics-health__status--${diagnosticsHealth.status}`}
+          role="status"
+        >
+          {t(`settings.diagnostics.health.status.${diagnosticsHealth.status}`)}
+        </p>
+        <div className="diagnostics-health__grid">
+          <DiagnosticsHealthMetric
+            label={t("settings.diagnostics.health.cache")}
+            value={t(
+              `settings.diagnostics.health.migration.${diagnosticsHealth.cache.migrationStatus}`,
+              {
+                current:
+                  diagnosticsHealth.cache.schemaVersion ??
+                  t("settings.diagnostics.health.notAvailable"),
+                latest: diagnosticsHealth.cache.latestSchemaVersion,
+              },
+            )}
+          />
+          <DiagnosticsHealthMetric
+            label={t("settings.diagnostics.health.messages")}
+            value={numberFormatter.format(diagnosticsHealth.cache.messageCount)}
+          />
+          <DiagnosticsHealthMetric
+            label={t("settings.diagnostics.health.accounts")}
+            value={numberFormatter.format(diagnosticsHealth.cache.accountCount)}
+          />
+          <DiagnosticsHealthMetric
+            label={t("settings.diagnostics.health.retries")}
+            value={numberFormatter.format(
+              diagnosticsHealth.sync.retryEventCount,
+            )}
+          />
+          <DiagnosticsHealthMetric
+            label={t("settings.diagnostics.health.logIssues")}
+            value={t("settings.diagnostics.health.warningErrorCount", {
+              warnings: numberFormatter.format(
+                diagnosticsHealth.sync.warningCount,
+              ),
+              errors: numberFormatter.format(
+                diagnosticsHealth.sync.errorCount,
+              ),
+            })}
+          />
+          <DiagnosticsHealthMetric
+            label={t("settings.diagnostics.health.attachmentIssues")}
+            value={numberFormatter.format(attachmentIssueTotal)}
+          />
+        </div>
+
+        <section className="diagnostics-health__group">
+          <h5>{t("settings.diagnostics.health.categories")}</h5>
+          <ul>
+            {Object.entries(diagnosticsHealth.sync.categoryCounts).length ===
+            0 ? (
+              <li>{t("settings.diagnostics.health.noLogCategories")}</li>
+            ) : (
+              Object.entries(diagnosticsHealth.sync.categoryCounts).map(
+                ([category, count]) => (
+                  <li key={category}>
+                    {t(`settings.diagnostics.health.category.${category}`, {
+                      defaultValue: category,
+                    })}
+                    : {numberFormatter.format(count)}
+                  </li>
+                ),
+              )
+            )}
+          </ul>
+        </section>
+
+        <section className="diagnostics-health__group">
+          <h5>{t("settings.diagnostics.health.attachments")}</h5>
+          <ul>
+            <li>
+              {t("settings.diagnostics.health.attachmentStored", {
+                stored: numberFormatter.format(
+                  diagnosticsHealth.attachments.storedCount,
+                ),
+                metadata: numberFormatter.format(
+                  diagnosticsHealth.attachments.metadataCount,
+                ),
+              })}
+            </li>
+            <li>
+              {t("settings.diagnostics.health.attachmentChecked", {
+                checked: numberFormatter.format(
+                  diagnosticsHealth.attachments.checkedFiles,
+                ),
+              })}
+            </li>
+            <li>
+              {t("settings.diagnostics.health.attachmentIssueBreakdown", {
+                missing: numberFormatter.format(
+                  diagnosticsHealth.attachments.missingFiles,
+                ),
+                unreadable: numberFormatter.format(
+                  diagnosticsHealth.attachments.unreadableFiles,
+                ),
+                invalid: numberFormatter.format(
+                  diagnosticsHealth.attachments.invalidPaths,
+                ),
+                size: numberFormatter.format(
+                  diagnosticsHealth.attachments.sizeMismatches,
+                ),
+                hash: numberFormatter.format(
+                  diagnosticsHealth.attachments.hashMismatches,
+                ),
+              })}
+            </li>
+          </ul>
+        </section>
+
+        <section className="diagnostics-health__group">
+          <h5>{t("settings.diagnostics.health.remediation")}</h5>
+          <ul>
+            {diagnosticsHealth.remediationSteps.map((step) => (
+              <li key={step}>
+                {t(`settings.diagnostics.health.remediationSteps.${step}`)}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="diagnostics-health__group">
+          <h5>{t("settings.diagnostics.health.recentEvents")}</h5>
+          <ul>
+            {diagnosticsHealth.sync.recentEvents.length === 0 ? (
+              <li>{t("settings.diagnostics.health.noRecentEvents")}</li>
+            ) : (
+              diagnosticsHealth.sync.recentEvents.map((event) => (
+                <li key={diagnosticsHealthEventKey(event)}>
+                  {formatDiagnosticsEvent(event)}
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+      </div>
+    );
+  }
+
+  function formatDiagnosticsEvent(event: DiagnosticsHealthEvent) {
+    return t("settings.diagnostics.health.event", {
+      time: dateFormatter.format(new Date(event.timestampUnixMs)),
+      level: t(`settings.diagnostics.health.level.${event.level}`),
+      category: t(
+        `settings.diagnostics.health.category.${event.category}`,
+        {
+          defaultValue: event.category,
+        },
+      ),
+      component: event.component,
+      event: event.event,
+      state: event.state ?? t("settings.diagnostics.health.notAvailable"),
+      action: event.action ?? t("settings.diagnostics.health.notAvailable"),
+      code: event.code ?? t("settings.diagnostics.health.notAvailable"),
+    });
+  }
+
   function updateAccountForm(update: Partial<AccountFormState>) {
     setAccountForm((current) => ({ ...current, ...update }));
   }
@@ -1014,6 +1301,33 @@ export function AccountSignatureSettings({
       setAccountError(formatAccountError(error));
     }
   }
+}
+
+function DiagnosticsHealthMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="diagnostics-health__metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function diagnosticsHealthEventKey(event: DiagnosticsHealthEvent) {
+  return [
+    event.timestampUnixMs,
+    event.level,
+    event.component,
+    event.event,
+    event.state ?? "",
+    event.action ?? "",
+    event.code ?? "",
+  ].join(":");
 }
 
 function securityOptions(t: ReturnType<typeof useTranslation>["t"]) {
