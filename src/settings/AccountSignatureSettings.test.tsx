@@ -513,10 +513,14 @@ describe("AccountSignatureSettings", () => {
       credentialStored: true,
     });
     const onRemoveAccount = vi.fn().mockResolvedValue({
+      accessCacheCleared: true,
       accountId: "acct_1",
       credentialsDeleted: true,
+      localCacheRetained: false,
       localCacheDeleted: true,
       metadataRemoved: true,
+      providerRevocation: "not-applicable",
+      syncStopped: true,
     });
 
     render(
@@ -554,6 +558,17 @@ describe("AccountSignatureSettings", () => {
       secret: "replacement-password",
     }));
 
+    expect(screen.getByRole("button", { name: "Remove account" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "Removal stops background sync, clears in-memory access state, deletes Credential Manager secrets, and then applies the cache choice below.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByLabelText(
+        "I understand this removes credentials and stops sync for this account.",
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
     await waitFor(() =>
       expect(onRemoveAccount).toHaveBeenCalledWith({
@@ -561,6 +576,11 @@ describe("AccountSignatureSettings", () => {
         deleteLocalCache: true,
       }),
     );
+    expect(
+      await screen.findByText(
+        "Account was removed. Local cache was deleted. No provider token revocation was needed.",
+      ),
+    ).toBeVisible();
   });
 
   it("reauthenticates OAuth accounts through the browser-owned loopback flow", async () => {

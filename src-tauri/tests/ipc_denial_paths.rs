@@ -1230,6 +1230,17 @@ struct RecordingAccountCredentialStore {
 }
 
 impl AccountCredentialStore for RecordingAccountCredentialStore {
+    fn read_account_secret(
+        &mut self,
+        account_id: &str,
+        slot: CredentialSlot,
+    ) -> Result<SecretString, CredentialError> {
+        self.secrets
+            .get(&(account_id.to_string(), slot))
+            .map(|secret| SecretString::new(secret.clone()))
+            .ok_or(CredentialError::NotFound)
+    }
+
     fn write_account_secret(
         &mut self,
         account_id: &str,

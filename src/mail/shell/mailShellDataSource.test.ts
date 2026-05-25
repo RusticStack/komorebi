@@ -566,10 +566,14 @@ describe("mailShellDataSource", () => {
       signatureHtml: "<p>Regards</p>",
     };
     const removalResponse = {
+      accessCacheCleared: true,
       accountId: "acct_generic",
       credentialsDeleted: true,
       localCacheDeleted: true,
+      localCacheRetained: false,
       metadataRemoved: true,
+      providerRevocation: "not-applicable" as const,
+      syncStopped: true,
     };
     const authStatusRequest = { accountId: "acct_generic" };
     const authStatusResponse = {

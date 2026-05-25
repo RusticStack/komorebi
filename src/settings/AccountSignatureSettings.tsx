@@ -157,7 +157,10 @@ export function AccountSignatureSettings({
     defaultAccountForm,
   );
   const [reauthSecret, setReauthSecret] = useState("");
-  const [deleteLocalCache, setDeleteLocalCache] = useState(true);
+  const [removalCacheChoice, setRemovalCacheChoice] = useState<
+    "delete" | "retain"
+  >("delete");
+  const [removalConfirmed, setRemovalConfirmed] = useState(false);
   const [accountNotice, setAccountNotice] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [languageNoticeKey, setLanguageNoticeKey] = useState<string | null>(
@@ -694,14 +697,52 @@ export function AccountSignatureSettings({
                   onChange={(event) => setReauthSecret(event.target.value)}
                 />
               </label>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={deleteLocalCache}
-                  onChange={(event) => setDeleteLocalCache(event.target.checked)}
-                />
-                <span>{t("settings.accounts.fields.deleteLocalCache")}</span>
-              </label>
+              <fieldset className="account-removal-options">
+                <legend>{t("settings.accounts.removal.heading")}</legend>
+                <p className="account-form__hint">
+                  {t("settings.accounts.removal.copy")}
+                </p>
+                <label className="checkbox-row">
+                  <input
+                    type="radio"
+                    name="account-removal-cache"
+                    checked={removalCacheChoice === "delete"}
+                    onChange={() => {
+                      setRemovalCacheChoice("delete");
+                      setRemovalConfirmed(false);
+                    }}
+                  />
+                  <span>{t("settings.accounts.removal.deleteCache")}</span>
+                </label>
+                <p className="account-form__hint">
+                  {t("settings.accounts.removal.deleteCacheHelp")}
+                </p>
+                <label className="checkbox-row">
+                  <input
+                    type="radio"
+                    name="account-removal-cache"
+                    checked={removalCacheChoice === "retain"}
+                    onChange={() => {
+                      setRemovalCacheChoice("retain");
+                      setRemovalConfirmed(false);
+                    }}
+                  />
+                  <span>{t("settings.accounts.removal.retainCache")}</span>
+                </label>
+                <p className="account-form__hint">
+                  {t("settings.accounts.removal.retainCacheHelp")}
+                </p>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={removalConfirmed}
+                    onChange={(event) =>
+                      setRemovalConfirmed(event.target.checked)
+                    }
+                  />
+                  <span>{t("settings.accounts.removal.confirm")}</span>
+                </label>
+              </fieldset>
               <div className="settings-panel__actions">
                 <button
                   type="button"
@@ -716,7 +757,7 @@ export function AccountSignatureSettings({
                 <button
                   type="button"
                   onClick={() => void handleRemoveAccount()}
-                  disabled={!onRemoveAccount}
+                  disabled={!onRemoveAccount || !removalConfirmed}
                 >
                   {t("settings.accounts.actions.remove")}
                 </button>
@@ -1264,15 +1305,25 @@ export function AccountSignatureSettings({
       return;
     }
     await runAccountAction(async () => {
-      await onRemoveAccount({
+      const response = await onRemoveAccount({
         accountId: selectedAccount.id,
-        deleteLocalCache,
+        deleteLocalCache: removalCacheChoice === "delete",
       });
       setSelectedAccountId(
         accounts.find((account) => account.id !== selectedAccount.id)?.id ??
           "",
       );
-      setAccountNotice(t("settings.accounts.notices.removed"));
+      setRemovalConfirmed(false);
+      setAccountNotice(
+        t("settings.accounts.notices.removed", {
+          cache: response.localCacheDeleted
+            ? t("settings.accounts.removal.cacheDeleted")
+            : t("settings.accounts.removal.cacheRetained"),
+          revocation: t(
+            `settings.accounts.removal.revocation.${response.providerRevocation}`,
+          ),
+        }),
+      );
       onAccountChanged?.();
     });
   }

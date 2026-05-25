@@ -565,7 +565,16 @@ export type AccountConnectionTestResponse = {
 export type AccountRemovalResponse = {
   accountId: string;
   credentialsDeleted: boolean;
+  syncStopped: boolean;
+  accessCacheCleared: boolean;
+  providerRevocation:
+    | "revoked"
+    | "unsupported"
+    | "failed"
+    | "no-refresh-token-present"
+    | "not-applicable";
   localCacheDeleted: boolean;
+  localCacheRetained: boolean;
   metadataRemoved: boolean;
 };
 

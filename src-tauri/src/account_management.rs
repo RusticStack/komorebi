@@ -25,9 +25,10 @@ use crate::{
         validate_bounded_text, validate_entity_id, validate_payload_size, IpcValidationError,
         MAX_TEXT_FIELD_BYTES,
     },
+    oauth::{revoke_refresh_token, OAuthHttpClient, ReqwestOAuthHttpClient},
     schema::{apply_migrations, SchemaMigrationError},
     sync_scheduler::{delete_account_sync_scheduler_settings, BackgroundSyncScheduler},
-    token_lifecycle::SecretString,
+    token_lifecycle::{RevocationOutcome, SecretString},
 };
 
 const MAIL_CACHE_FILE_NAME: &str = "mail-cache.sqlite3";
@@ -128,8 +129,22 @@ pub struct AccountConnectionTestResponse {
 pub struct AccountRemovalResponse {
     pub account_id: String,
     pub credentials_deleted: bool,
+    pub sync_stopped: bool,
+    pub access_cache_cleared: bool,
+    pub provider_revocation: AccountProviderRevocationStatus,
     pub local_cache_deleted: bool,
+    pub local_cache_retained: bool,
     pub metadata_removed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccountProviderRevocationStatus {
+    Revoked,
+    Unsupported,
+    Failed,
+    NoRefreshTokenPresent,
+    NotApplicable,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -237,6 +252,12 @@ impl From<serde_json::Error> for AccountCommandError {
 }
 
 pub trait AccountCredentialStore {
+    fn read_account_secret(
+        &mut self,
+        account_id: &str,
+        slot: CredentialSlot,
+    ) -> Result<SecretString, CredentialError>;
+
     fn write_account_secret(
         &mut self,
         account_id: &str,
@@ -254,6 +275,14 @@ pub trait AccountCredentialStore {
 }
 
 impl AccountCredentialStore for WindowsCredentialManager {
+    fn read_account_secret(
+        &mut self,
+        account_id: &str,
+        slot: CredentialSlot,
+    ) -> Result<SecretString, CredentialError> {
+        self.read_secret(account_id, slot)
+    }
+
     fn write_account_secret(
         &mut self,
         account_id: &str,
@@ -331,10 +360,21 @@ pub fn remove_account(
     let cache_path = mail_cache_path(&app)?;
     let scheduler = app.state::<BackgroundSyncScheduler>().inner().clone();
     let account_id = request.account_id.clone();
-    let _ = scheduler.stop_account(&account_id);
+    let sync_stopped = scheduler.stop_account(&account_id).unwrap_or(false);
     let mut credentials = WindowsCredentialManager;
 
-    remove_account_from_path(&cache_path, &mut credentials, request)
+    let mut response = remove_account_from_path(&cache_path, &mut credentials, request);
+    match &mut response {
+        Ok(response) => {
+            response.sync_stopped = sync_stopped;
+            response.access_cache_cleared = true;
+        }
+        Err(_) => {
+            let _ = scheduler.refresh_account(cache_path, &account_id);
+        }
+    }
+
+    response
 }
 
 #[tauri::command]
@@ -573,9 +613,31 @@ pub fn remove_account_from_path(
 ) -> Result<AccountRemovalResponse, AccountCommandError> {
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
+    let revocation_http = ReqwestOAuthHttpClient::default();
+    remove_account_from_path_with_revocation_client(
+        cache_path,
+        &connection,
+        credentials,
+        &revocation_http,
+        request,
+    )
+}
+
+fn remove_account_from_path_with_revocation_client(
+    cache_path: &Path,
+    connection: &Connection,
+    credentials: &mut impl AccountCredentialStore,
+    revocation_http: &impl OAuthHttpClient,
+    request: AccountRemovalRequest,
+) -> Result<AccountRemovalResponse, AccountCommandError> {
     let account_id = request.account_id.clone();
     let delete_local_cache = request.delete_local_cache;
-    let response = remove_account_from_connection(&connection, credentials, request)?;
+    let response = remove_account_from_connection_with_revocation_client(
+        connection,
+        credentials,
+        revocation_http,
+        request,
+    )?;
     if delete_local_cache {
         if let Some(app_data_dir) = cache_path.parent() {
             delete_account_attachment_dir_best_effort(app_data_dir, &account_id);
@@ -590,10 +652,34 @@ pub fn remove_account_from_connection(
     credentials: &mut impl AccountCredentialStore,
     request: AccountRemovalRequest,
 ) -> Result<AccountRemovalResponse, AccountCommandError> {
+    let revocation_http = ReqwestOAuthHttpClient::default();
+    remove_account_from_connection_with_revocation_client(
+        connection,
+        credentials,
+        &revocation_http,
+        request,
+    )
+}
+
+fn remove_account_from_connection_with_revocation_client(
+    connection: &Connection,
+    credentials: &mut impl AccountCredentialStore,
+    revocation_http: &impl OAuthHttpClient,
+    request: AccountRemovalRequest,
+) -> Result<AccountRemovalResponse, AccountCommandError> {
     validate_entity_id("account_id", &request.account_id)?;
-    if !account_exists(connection, &request.account_id)? {
-        return Err(AccountCommandError::new("account was not found"));
-    }
+    ensure_active_account(connection, &request.account_id)?;
+    let account = load_account_for_management(connection, &request.account_id)?
+        .ok_or_else(|| AccountCommandError::new("account was not found"))?;
+    let provider = provider_from_schema(&account.provider_kind)?;
+    let auth_kind = auth_from_schema(&account.auth_kind)?;
+    let provider_revocation = revoke_account_refresh_token(
+        credentials,
+        revocation_http,
+        &request.account_id,
+        provider,
+        auth_kind,
+    );
 
     credentials.delete_account_secrets(&request.account_id)?;
 
@@ -625,7 +711,11 @@ pub fn remove_account_from_connection(
     Ok(AccountRemovalResponse {
         account_id: request.account_id,
         credentials_deleted: true,
+        sync_stopped: false,
+        access_cache_cleared: true,
+        provider_revocation,
         local_cache_deleted: request.delete_local_cache,
+        local_cache_retained: !request.delete_local_cache,
         metadata_removed: true,
     })
 }
@@ -648,6 +738,38 @@ fn delete_account_attachment_dir_best_effort(app_data_dir: &Path, account_id: &s
         .join(INBOUND_ATTACHMENT_DIR_NAME)
         .join(account_id);
     let _ = fs::remove_dir_all(path);
+}
+
+fn revoke_account_refresh_token(
+    credentials: &mut impl AccountCredentialStore,
+    revocation_http: &impl OAuthHttpClient,
+    account_id: &str,
+    provider: ProviderKind,
+    auth_kind: AuthKind,
+) -> AccountProviderRevocationStatus {
+    if provider == ProviderKind::GenericImapSmtp || auth_kind != AuthKind::OAuth2 {
+        return AccountProviderRevocationStatus::NotApplicable;
+    }
+
+    let refresh_token =
+        match credentials.read_account_secret(account_id, CredentialSlot::OAuthRefresh) {
+            Ok(secret) => secret,
+            Err(CredentialError::NotFound) => {
+                return AccountProviderRevocationStatus::NoRefreshTokenPresent;
+            }
+            Err(_) => return AccountProviderRevocationStatus::Failed,
+        };
+
+    match revoke_refresh_token(revocation_http, provider, &refresh_token) {
+        RevocationOutcome::Revoked => AccountProviderRevocationStatus::Revoked,
+        RevocationOutcome::ProviderRevocationUnsupported => {
+            AccountProviderRevocationStatus::Unsupported
+        }
+        RevocationOutcome::Failed => AccountProviderRevocationStatus::Failed,
+        RevocationOutcome::NoRefreshTokenPresent => {
+            AccountProviderRevocationStatus::NoRefreshTokenPresent
+        }
+    }
 }
 
 pub fn update_account_settings_from_connection(
@@ -1278,6 +1400,17 @@ mod tests {
     }
 
     impl AccountCredentialStore for FakeAccountCredentialStore {
+        fn read_account_secret(
+            &mut self,
+            account_id: &str,
+            slot: CredentialSlot,
+        ) -> Result<SecretString, CredentialError> {
+            self.secrets
+                .get(&(account_id.to_string(), slot))
+                .map(|secret| SecretString::new(secret.clone()))
+                .ok_or(CredentialError::NotFound)
+        }
+
         fn write_account_secret(
             &mut self,
             account_id: &str,
@@ -1336,6 +1469,33 @@ mod tests {
             }
 
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeOAuthRevocationHttp {
+        status: u16,
+        requests: Vec<(String, Vec<(String, String)>)>,
+    }
+
+    impl OAuthHttpClient for std::cell::RefCell<FakeOAuthRevocationHttp> {
+        fn post_form(
+            &self,
+            url: &str,
+            fields: &[(&str, String)],
+        ) -> Result<crate::oauth::OAuthHttpResponse, crate::oauth::OAuthHttpError> {
+            let mut borrowed = self.borrow_mut();
+            borrowed.requests.push((
+                url.to_string(),
+                fields
+                    .iter()
+                    .map(|(name, value)| ((*name).to_string(), value.clone()))
+                    .collect(),
+            ));
+            Ok(crate::oauth::OAuthHttpResponse {
+                status: borrowed.status,
+                body: "{}".into(),
+            })
         }
     }
 
@@ -1669,7 +1829,13 @@ mod tests {
         .expect("remove account");
 
         assert!(response.credentials_deleted);
+        assert!(response.access_cache_cleared);
+        assert_eq!(
+            response.provider_revocation,
+            AccountProviderRevocationStatus::NotApplicable
+        );
         assert!(response.local_cache_deleted);
+        assert!(!response.local_cache_retained);
         assert!(credentials.deleted.contains("acct_generic"));
         assert!(!account_exists(&connection, "acct_generic").unwrap());
         let preference_count: i64 = connection
@@ -1680,6 +1846,96 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preference_count, 0);
+    }
+
+    #[test]
+    fn remove_account_revokes_supported_oauth_and_reports_retained_cache() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        let mut request = generic_request();
+        request.account_id = Some("acct_gmail".into());
+        request.provider_kind = "gmail".into();
+        request.auth_kind = "oauth2".into();
+        request.secret = "refresh-token".into();
+        request.imap_host = None;
+        request.imap_port = None;
+        request.imap_security = None;
+        request.smtp_host = None;
+        request.smtp_port = None;
+        request.smtp_security = None;
+        create_account_from_connection(&connection, &mut credentials, request)
+            .expect("create oauth account");
+        let revocation_http = std::cell::RefCell::new(FakeOAuthRevocationHttp {
+            status: 200,
+            requests: Vec::new(),
+        });
+
+        let response = remove_account_from_connection_with_revocation_client(
+            &connection,
+            &mut credentials,
+            &revocation_http,
+            AccountRemovalRequest {
+                account_id: "acct_gmail".into(),
+                delete_local_cache: false,
+            },
+        )
+        .expect("remove oauth account");
+
+        assert!(response.credentials_deleted);
+        assert!(response.access_cache_cleared);
+        assert_eq!(
+            response.provider_revocation,
+            AccountProviderRevocationStatus::Revoked
+        );
+        assert!(!response.local_cache_deleted);
+        assert!(response.local_cache_retained);
+        assert_eq!(revocation_http.borrow().requests.len(), 1);
+        assert_eq!(
+            revocation_http.borrow().requests[0].0,
+            "https://oauth2.googleapis.com/revoke"
+        );
+        assert_eq!(
+            revocation_http.borrow().requests[0].1,
+            vec![("token".to_string(), "refresh-token".to_string())]
+        );
+        let stored_status: String = connection
+            .query_row(
+                "SELECT auth_status FROM accounts WHERE id = 'acct_gmail'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_status, "removed");
+    }
+
+    #[test]
+    fn remove_account_delete_failure_leaves_local_metadata_unchanged() {
+        let connection = migrated_connection();
+        let mut credentials = FakeAccountCredentialStore::default();
+        create_account_from_connection(&connection, &mut credentials, generic_request())
+            .expect("create account");
+        credentials.fail_deletes = true;
+
+        let error = remove_account_from_connection(
+            &connection,
+            &mut credentials,
+            AccountRemovalRequest {
+                account_id: "acct_generic".into(),
+                delete_local_cache: true,
+            },
+        )
+        .expect_err("credential delete failure blocks metadata mutation");
+
+        assert!(error.reason.contains("credential delete failed"));
+        assert!(account_exists(&connection, "acct_generic").unwrap());
+        let stored_status: String = connection
+            .query_row(
+                "SELECT auth_status FROM accounts WHERE id = 'acct_generic'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_status, "connected");
     }
 
     #[test]

@@ -77,6 +77,8 @@ Attachments are never auto-opened. Preview, save, and download require explicit 
 
 Users remove accounts from Settings. Account removal is backend-owned and deletes account credentials from Windows Credential Manager before account metadata/cache cleanup.
 
+Removal stops background sync for the account first. For OAuth accounts, Komorebi attempts provider refresh-token revocation where the provider implementation supports it; Gmail is supported, Microsoft revocation is currently reported as unsupported. Local credential deletion and cache cleanup continue even if provider revocation fails or is unsupported. If Credential Manager deletion fails, local account metadata/cache rows are left unchanged and the app attempts to restart sync for the account.
+
 When removing an account, the user can choose whether to delete local cached mail:
 
 - If local cache deletion is enabled, Komorebi deletes the account row from SQLite, cascades account-owned cache rows, deletes account-local settings, deletes sync scheduler settings, and best-effort deletes that account's inbound attachment directory under app data.

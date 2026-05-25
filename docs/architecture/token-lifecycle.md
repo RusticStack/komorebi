@@ -42,14 +42,14 @@ Account removal is a single backend workflow:
 
 1. Stop sync workers for the account when sync exists.
 2. Read the refresh token if present.
-3. Attempt provider revocation when supported and requested.
-4. Clear any in-memory access token.
-5. Delete all credential entries for the account from Windows Credential Manager.
-6. Delete local mail cache if the user chose local-cache deletion.
-7. Delete account metadata.
-8. Return a redacted `AccountRemovalReport`.
+3. Attempt provider revocation when supported.
+4. Clear in-memory access-token state by stopping the worker/runtime cache for that account.
+5. Delete all credential entries for the account from Windows Credential Manager, ignoring already-missing optional credential slots but failing on real credential-store errors.
+6. Delete local mail cache if the user chose local-cache deletion, or soft-remove the account while retaining local cached rows if the user chose retention.
+7. Delete account-local preferences and scheduler/OAuth runtime settings.
+8. Return a redacted removal response with sync-stop, access-cache-cleared, provider-revocation, credential-deletion, metadata, and cache-retention/deletion status.
 
-Local cleanup must proceed even if provider revocation fails or is unsupported. A failed provider revocation is reported as a status, not as a reason to keep local secrets or local cache.
+Local cleanup proceeds even if provider revocation fails or is unsupported. A failed provider revocation is reported as a status, not as a reason to keep local secrets or local cache. If credential deletion fails, account metadata/cache rows are left unchanged and the Tauri command attempts to restart the account scheduler after the failed removal path.
 
 ## Provider Revocation Policy
 
@@ -66,6 +66,7 @@ Generic OAuth provider revocation is unsupported until provider-specific revocat
 - A rotated refresh token replaces the previous refresh token only after the provider refresh response succeeds.
 - If refresh-token rotation cannot be stored, the access token is discarded and the account enters reconnect-needed state.
 - Account removal deletes Credential Manager entries regardless of provider revocation outcome.
+- Account removal does not mutate account metadata/cache if Credential Manager deletion fails.
 - SQLite account metadata stores auth status and credential references only; it never stores tokens.
 - SQLite may store non-secret OAuth runtime metadata under `account:{account_id}:oauth_client` so Rust workers can reconstruct a provider refresh client. That row must contain only the OAuth client id and loopback redirect URI, never access tokens, refresh tokens, authorization codes, or token responses.
 

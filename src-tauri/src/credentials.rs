@@ -118,7 +118,10 @@ impl WindowsCredentialManager {
             CredentialSlot::OAuthAccess,
             CredentialSlot::GenericPassword,
         ] {
-            self.delete_secret(account_id, slot)?;
+            match self.delete_secret(account_id, slot) {
+                Ok(()) | Err(CredentialError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
         }
 
         Ok(())

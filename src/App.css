@@ -1332,6 +1332,23 @@ textarea:disabled {
   border-radius: 8px;
 }
 
+.account-removal-options {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e7e1d8;
+  border-radius: 8px;
+  background: #fffdf9;
+}
+
+.account-removal-options legend {
+  padding: 0 4px;
+  color: #716d66;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .account-server-grid legend {
   padding: 0 4px;
   color: #716d66;

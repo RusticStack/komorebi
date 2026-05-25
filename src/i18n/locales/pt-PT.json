@@ -567,7 +567,7 @@
         "connectionReady": "Inicio de sessao IMAP e SMTP validado.",
         "created": "{{email}} foi adicionada.",
         "reauthed": "As credenciais da conta foram substituidas.",
-        "removed": "A conta foi removida.",
+        "removed": "A conta foi removida. {{cache}} {{revocation}}",
         "settingsSaved": "As definicoes da conta foram guardadas.",
         "testReady": "Configuracao validada."
       },
@@ -582,6 +582,24 @@
         "outgoing": "Correio enviado",
         "preferences": "Preferencias",
         "selected": "Conta selecionada"
+      },
+      "removal": {
+        "cacheDeleted": "A cache local foi eliminada.",
+        "cacheRetained": "A cache local foi mantida sem segredos.",
+        "confirm": "Compreendo que isto remove credenciais e para a sincronizacao desta conta.",
+        "copy": "A remocao para a sincronizacao em segundo plano, limpa estado de acesso em memoria, elimina segredos do Gestor de Credenciais e aplica a escolha de cache abaixo.",
+        "deleteCache": "Eliminar cache local",
+        "deleteCacheHelp": "Remove linhas de cache da conta e tenta remover anexos recebidos guardados para esta conta.",
+        "heading": "Remocao e limpeza da cache",
+        "retainCache": "Manter cache local",
+        "retainCacheHelp": "Mantem mensagens em cache neste dispositivo, mas remove segredos e marca a conta como removida.",
+        "revocation": {
+          "failed": "A revogacao do token no fornecedor falhou; a limpeza local foi concluida.",
+          "no-refresh-token-present": "Nao havia token de atualizacao do fornecedor para revogar.",
+          "not-applicable": "Nao foi necessaria revogacao de token no fornecedor.",
+          "revoked": "O token de atualizacao do fornecedor foi revogado.",
+          "unsupported": "A revogacao de token no fornecedor nao e suportada; a limpeza local foi concluida."
+        }
       },
       "security": {
         "none": "Nenhuma",

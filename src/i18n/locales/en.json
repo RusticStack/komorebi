@@ -567,7 +567,7 @@
         "connectionReady": "IMAP and SMTP login validated.",
         "created": "{{email}} was added.",
         "reauthed": "Account credentials were replaced.",
-        "removed": "Account was removed.",
+        "removed": "Account was removed. {{cache}} {{revocation}}",
         "settingsSaved": "Account settings were saved.",
         "testReady": "Configuration validated."
       },
@@ -582,6 +582,24 @@
         "outgoing": "Outgoing mail",
         "preferences": "Preferences",
         "selected": "Selected account"
+      },
+      "removal": {
+        "cacheDeleted": "Local cache was deleted.",
+        "cacheRetained": "Local cache was retained without secrets.",
+        "confirm": "I understand this removes credentials and stops sync for this account.",
+        "copy": "Removal stops background sync, clears in-memory access state, deletes Credential Manager secrets, and then applies the cache choice below.",
+        "deleteCache": "Delete local cache",
+        "deleteCacheHelp": "Removes cached account rows and best-effort removes stored inbound attachments for this account.",
+        "heading": "Removal and cache cleanup",
+        "retainCache": "Retain local cache",
+        "retainCacheHelp": "Keeps existing local cached mail rows on this device but removes secrets and marks the account removed.",
+        "revocation": {
+          "failed": "Provider token revocation failed; local cleanup still completed.",
+          "no-refresh-token-present": "No provider refresh token was present to revoke.",
+          "not-applicable": "No provider token revocation was needed.",
+          "revoked": "Provider refresh token was revoked.",
+          "unsupported": "Provider token revocation is unsupported; local cleanup still completed."
+        }
       },
       "security": {
         "none": "None",
