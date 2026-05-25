@@ -12,6 +12,13 @@
       "mailboxes": "Mailboxes",
       "messages": "Messages",
       "selectedMessage": "Selected message"
+    },
+    "titlebar": {
+      "close": "Close window",
+      "maximize": "Maximize window",
+      "minimize": "Minimize window",
+      "subtitle": "Sunlit mail",
+      "windowControls": "Window controls"
     }
   },
   "common": {
@@ -513,9 +520,11 @@
     "accounts": {
       "actions": {
         "add": "Add account",
+        "detect": "Detect settings",
         "oauth": "Start OAuth",
         "reauth": "Reauthenticate",
         "remove": "Remove account",
+        "review": "Review setup",
         "saveSettings": "Save settings",
         "status": "Check status",
         "test": "Test setup"
@@ -566,6 +575,8 @@
       "notices": {
         "connectionReady": "IMAP and SMTP login validated.",
         "created": "{{email}} was added.",
+        "detected": "{{provider}} settings were detected.",
+        "detectedFallback": "No known preset was found, so Komorebi filled the common imap./smtp. host pattern for review.",
         "reauthed": "Account credentials were replaced.",
         "removed": "Account was removed. {{cache}} {{revocation}}",
         "settingsSaved": "Account settings were saved.",
@@ -582,6 +593,16 @@
         "outgoing": "Outgoing mail",
         "preferences": "Preferences",
         "selected": "Selected account"
+      },
+      "wizard": {
+        "copy": "Enter the email first. Komorebi recognizes major providers and fills safe IMAP/SMTP defaults for compatible generic accounts before you test the login.",
+        "eyebrow": "Account setup",
+        "heading": "Add mail account",
+        "steps": {
+          "connection": "Connection",
+          "finish": "Finish",
+          "identity": "Identity"
+        }
       },
       "removal": {
         "cacheDeleted": "Local cache was deleted.",

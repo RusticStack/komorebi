@@ -8,7 +8,7 @@ Komorebi's main webview grants only reviewed feature-specific Tauri permissions.
 
 - `app.security.capabilities` must be `["default"]` until another window or capability is intentionally introduced.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
-- `default.permissions` contains only reviewed listen-only sync status event access plus mail-shell, UI preference, remote-content preference, typed mail-action, external-link opening, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export/health commands: `core:event:allow-listen`, `core:event:allow-unlisten`, `allow-load-mail-shell`, `allow-load-message-page`, `allow-search-mail`, `allow-allow-remote-content`, `allow-get-ui-preferences`, `allow-update-ui-preferences`, `allow-perform-mail-action`, `allow-open-external-link`, `allow-preview-attachment`, `allow-save-attachment`, `allow-download-attachment`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-stage-forwarded-attachments`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-list-composer-drafts`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-update-account-settings`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, `allow-start-oauth-account-reauth`, `allow-export-diagnostics-bundle`, and `allow-get-diagnostics-health`.
+- `default.permissions` contains only reviewed custom-window chrome permissions, listen-only sync status event access, and feature-specific mail-shell, UI preference, remote-content preference, typed mail-action, external-link opening, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export/health commands: `core:event:allow-listen`, `core:event:allow-unlisten`, `core:window:allow-start-dragging`, `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-close`, `allow-load-mail-shell`, `allow-load-message-page`, `allow-search-mail`, `allow-allow-remote-content`, `allow-get-ui-preferences`, `allow-update-ui-preferences`, `allow-perform-mail-action`, `allow-open-external-link`, `allow-preview-attachment`, `allow-save-attachment`, `allow-download-attachment`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-stage-forwarded-attachments`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-list-composer-drafts`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-update-account-settings`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, `allow-start-oauth-account-reauth`, `allow-export-diagnostics-bundle`, and `allow-get-diagnostics-health`.
 - No remote origins are allowed to use Tauri APIs.
 - `app.security.csp` is a reviewed production content security policy. It keeps script execution local-only, blocks object/frame/worker/form/embed surfaces, denies remote script/network sources, permits only Tauri IPC in `connect-src`, and permits `data:`/`blob:` images plus `https:` image loads. The `https:` image source exists only for the explicit-consent remote-content workflow; the sanitizer still removes remote image URLs unless a persisted message/sender preference allows them.
 - `app.security.devCsp` is separate and limited to local Vite/HMR plus Tauri IPC. Do not copy development `unsafe-eval`, localhost, or WebSocket allowances into the production CSP.
@@ -31,6 +31,17 @@ The intentional allowances are narrow:
 - `connect-src ipc: http://ipc.localhost` is required for Tauri IPC.
 
 The production CSP must not include wildcard sources, `unsafe-eval`, localhost development servers, remote `http` sources, remote `https` sources outside `img-src`, broad frame/object/media/worker allowances, or unreviewed custom schemes. Future features that need workers, media, or non-`data:`/`blob:` attachment materialization must update this policy and its tests with the feature-specific threat model.
+
+## Custom Window Chrome
+
+`src-tauri/tauri.conf.json` disables native decorations for the main window so React can render a custom Windows 11-style title bar. The only direct core window permissions granted to the webview are:
+
+- `core:window:allow-start-dragging` for drag regions in the title bar.
+- `core:window:allow-minimize` for the minimize button.
+- `core:window:allow-toggle-maximize` for the maximize/restore button and titlebar double-click.
+- `core:window:allow-close` for the close button.
+
+Do not add create/destroy/hide/show/resize/position/monitor/menu/tray/window-enumeration permissions for titlebar work. If future chrome needs another window action, document the specific interaction and update the capability guard test before shipping it.
 
 ## Denied By Default
 
@@ -109,7 +120,7 @@ Rules for likely future plugins:
 
 - `tauri.conf.json` explicitly enables only `default`.
 - All capability files are parseable and reviewed by the test.
-- The default capability targets only the main window and grants only the reviewed listen/unlisten event permissions plus mail-shell snapshot/page read/search, UI preference, remote-content preference, typed mail-action, external-link, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export/health command permissions.
+- The default capability targets only the main window and grants only the reviewed custom-window chrome permissions, listen/unlisten event permissions, mail-shell snapshot/page read/search, UI preference, remote-content preference, typed mail-action, external-link, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export/health command permissions.
 - Forbidden plugin permissions, remote origins, wildcard windows, and unreviewed custom-command registrations are absent.
 - Rust does not register forbidden Tauri plugins.
 - Production CSP exactly matches the reviewed source list and rejects wildcard, `unsafe-eval`, localhost, and remote HTTPS broadening outside `img-src`.
@@ -121,3 +132,4 @@ Run `pnpm tauri build --no-bundle` after capability, Tauri config, or build scri
 
 - Tauri v2 capabilities: https://v2.tauri.app/security/capabilities/
 - Tauri v2 core permissions: https://v2.tauri.app/reference/acl/core-permissions/
+- Tauri v2 window customization: https://v2.tauri.app/learn/window-customization/

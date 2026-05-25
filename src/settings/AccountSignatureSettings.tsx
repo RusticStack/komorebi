@@ -99,6 +99,7 @@ type AccountFormState = {
   smtpPort: string;
   smtpSecurity: AccountSecurityMode;
 };
+type AccountSetupStep = "identity" | "connection" | "finish";
 
 const defaultAccountForm: AccountFormState = {
   providerKind: "generic_imap_smtp",
@@ -156,6 +157,8 @@ export function AccountSignatureSettings({
   const [accountForm, setAccountForm] = useState<AccountFormState>(
     defaultAccountForm,
   );
+  const [accountSetupStep, setAccountSetupStep] =
+    useState<AccountSetupStep>("identity");
   const [reauthSecret, setReauthSecret] = useState("");
   const [removalCacheChoice, setRemovalCacheChoice] = useState<
     "delete" | "retain"
@@ -423,12 +426,37 @@ export function AccountSignatureSettings({
       >
         <h3>{t("settings.accounts.heading")}</h3>
         <form
-          className="account-form"
+          className="account-form account-setup-wizard"
           onSubmit={(event) => {
             event.preventDefault();
             void handleCreateAccount();
           }}
         >
+          <header className="account-setup-wizard__header">
+            <div>
+              <p className="eyebrow">{t("settings.accounts.wizard.eyebrow")}</p>
+              <h4>{t("settings.accounts.wizard.heading")}</h4>
+              <p className="account-form__hint">
+                {t("settings.accounts.wizard.copy")}
+              </p>
+            </div>
+            <ol className="account-setup-wizard__steps">
+              {(["identity", "connection", "finish"] as const).map((step) => (
+                <li
+                  className={
+                    accountSetupStep === step
+                      ? "account-setup-wizard__step is-active"
+                      : "account-setup-wizard__step"
+                  }
+                  key={step}
+                >
+                  {t(`settings.accounts.wizard.steps.${step}`)}
+                </li>
+              ))}
+            </ol>
+          </header>
+
+          <section className="account-setup-wizard__card">
           <label>
             <span>{t("settings.accounts.fields.provider")}</span>
             <select
@@ -445,6 +473,11 @@ export function AccountSignatureSettings({
                   secret: "",
                   oauthClientId: "",
                 }));
+                setAccountSetupStep(
+                  providerKind === "generic_imap_smtp"
+                    ? "connection"
+                    : "finish",
+                );
               }}
             >
               <option value="generic_imap_smtp">
@@ -463,11 +496,20 @@ export function AccountSignatureSettings({
             <span>{t("settings.accounts.fields.displayEmail")}</span>
             <input
               value={accountForm.displayEmail}
-              onChange={(event) =>
-                updateAccountForm({ displayEmail: event.target.value })
-              }
+              onBlur={() => handleDetectAccountSettings({ silent: true })}
+              onChange={(event) => {
+                updateAccountForm({ displayEmail: event.target.value });
+                setAccountSetupStep("identity");
+              }}
             />
           </label>
+          <button
+            className="account-detect-button"
+            type="button"
+            onClick={() => handleDetectAccountSettings({ silent: false })}
+          >
+            {t("settings.accounts.actions.detect")}
+          </button>
 
           <label>
             <span>{t("settings.accounts.fields.displayName")}</span>
@@ -478,6 +520,9 @@ export function AccountSignatureSettings({
               }
             />
           </label>
+          </section>
+
+          <section className="account-setup-wizard__card">
 
           <label>
             <span>{t("settings.accounts.fields.username")}</span>
@@ -609,6 +654,7 @@ export function AccountSignatureSettings({
               />
             </label>
           )}
+          </section>
 
           <div className="settings-panel__actions">
             <button
@@ -620,6 +666,18 @@ export function AccountSignatureSettings({
               }
             >
               {t("settings.accounts.actions.test")}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setAccountSetupStep(
+                  accountForm.providerKind === "generic_imap_smtp"
+                    ? "connection"
+                    : "finish",
+                )
+              }
+            >
+              {t("settings.accounts.actions.review")}
             </button>
             <button type="submit" disabled={!canSubmitAccountSetup()}>
               {accountForm.providerKind === "generic_imap_smtp"
@@ -1112,6 +1170,54 @@ export function AccountSignatureSettings({
     setAccountForm((current) => ({ ...current, ...update }));
   }
 
+  function handleDetectAccountSettings({ silent }: { silent: boolean }) {
+    const detected = inferAccountSettings(accountForm.displayEmail);
+    if (!detected) {
+      if (!silent) {
+        setAccountNotice(t("settings.accounts.notices.detectedFallback"));
+      }
+      const domain = accountForm.displayEmail.split("@")[1]?.trim().toLowerCase();
+      if (domain) {
+        setAccountForm((current) => ({
+          ...current,
+          authKind: "app_password",
+          imapHost: current.imapHost || `imap.${domain}`,
+          imapPort: current.imapPort || "993",
+          imapSecurity: current.imapSecurity || "tls",
+          providerKind: "generic_imap_smtp",
+          smtpHost: current.smtpHost || `smtp.${domain}`,
+          smtpPort: current.smtpPort || "587",
+          smtpSecurity: current.smtpSecurity || "starttls",
+          username: current.username || current.displayEmail,
+        }));
+        setAccountSetupStep("connection");
+      }
+      return;
+    }
+
+    setAccountForm((current) => ({
+      ...current,
+      ...detected,
+      displayEmail: current.displayEmail,
+      displayName: current.displayName,
+      secret: detected.providerKind === "generic_imap_smtp" ? current.secret : "",
+      oauthClientId:
+        detected.providerKind === "generic_imap_smtp"
+          ? ""
+          : current.oauthClientId,
+    }));
+    setAccountSetupStep(
+      detected.providerKind === "generic_imap_smtp" ? "connection" : "finish",
+    );
+    if (!silent) {
+      setAccountNotice(
+        t("settings.accounts.notices.detected", {
+          provider: t(`settings.accounts.providers.${detected.providerKind}`),
+        }),
+      );
+    }
+  }
+
   function buildSetupRequest(): AccountSetupRequest {
     return {
       providerKind: accountForm.providerKind,
@@ -1352,6 +1458,119 @@ export function AccountSignatureSettings({
       setAccountError(formatAccountError(error));
     }
   }
+}
+
+function inferAccountSettings(
+  email: string,
+): Partial<AccountFormState> & Pick<AccountFormState, "providerKind"> | null {
+  const normalizedEmail = email.trim().toLowerCase();
+  const domain = normalizedEmail.split("@")[1];
+  if (!domain) {
+    return null;
+  }
+
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    return {
+      authKind: "oauth2",
+      providerKind: "gmail",
+      username: normalizedEmail,
+    };
+  }
+
+  if (
+    [
+      "outlook.com",
+      "hotmail.com",
+      "live.com",
+      "msn.com",
+      "office365.com",
+    ].includes(domain)
+  ) {
+    return {
+      authKind: "oauth2",
+      providerKind: "microsoft",
+      username: normalizedEmail,
+    };
+  }
+
+  const genericPresets: Record<string, Partial<AccountFormState>> = {
+    "fastmail.com": {
+      imapHost: "imap.fastmail.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "smtp.fastmail.com",
+      smtpPort: "465",
+      smtpSecurity: "tls",
+    },
+    "icloud.com": {
+      imapHost: "imap.mail.me.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "smtp.mail.me.com",
+      smtpPort: "587",
+      smtpSecurity: "starttls",
+    },
+    "me.com": {
+      imapHost: "imap.mail.me.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "smtp.mail.me.com",
+      smtpPort: "587",
+      smtpSecurity: "starttls",
+    },
+    "yahoo.com": {
+      imapHost: "imap.mail.yahoo.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "smtp.mail.yahoo.com",
+      smtpPort: "465",
+      smtpSecurity: "tls",
+    },
+    "zoho.com": {
+      imapHost: "imap.zoho.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "smtp.zoho.com",
+      smtpPort: "465",
+      smtpSecurity: "tls",
+    },
+    "gmx.com": {
+      imapHost: "imap.gmx.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "mail.gmx.com",
+      smtpPort: "587",
+      smtpSecurity: "starttls",
+    },
+    "gmx.net": {
+      imapHost: "imap.gmx.net",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "mail.gmx.net",
+      smtpPort: "587",
+      smtpSecurity: "starttls",
+    },
+    "mail.com": {
+      imapHost: "imap.mail.com",
+      imapPort: "993",
+      imapSecurity: "tls",
+      smtpHost: "smtp.mail.com",
+      smtpPort: "587",
+      smtpSecurity: "starttls",
+    },
+  };
+
+  const preset = genericPresets[domain];
+  if (!preset) {
+    return null;
+  }
+
+  return {
+    ...preset,
+    authKind: "app_password",
+    providerKind: "generic_imap_smtp",
+    username: normalizedEmail,
+  };
 }
 
 function DiagnosticsHealthMetric({

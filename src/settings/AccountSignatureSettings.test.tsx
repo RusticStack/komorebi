@@ -427,6 +427,52 @@ describe("AccountSignatureSettings", () => {
     expect(onAccountChanged).toHaveBeenCalledTimes(1);
   });
 
+  it("auto-detects common generic IMAP and SMTP settings from the email domain", () => {
+    render(
+      <AccountSignatureSettings
+        accounts={[]}
+        onCreateAccount={vi.fn()}
+        onSaveSignature={() => undefined}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "person@fastmail.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Detect settings" }));
+
+    expect(screen.getByLabelText("Provider")).toHaveValue("generic_imap_smtp");
+    expect(screen.getByLabelText("Username")).toHaveValue("person@fastmail.com");
+    expect(screen.getByLabelText("IMAP host")).toHaveValue("imap.fastmail.com");
+    expect(screen.getByLabelText("IMAP port")).toHaveValue("993");
+    expect(screen.getByLabelText("SMTP host")).toHaveValue("smtp.fastmail.com");
+    expect(screen.getByLabelText("SMTP port")).toHaveValue("465");
+    expect(
+      screen.getByText("Generic IMAP/SMTP settings were detected."),
+    ).toBeVisible();
+  });
+
+  it("auto-routes Gmail setup to OAuth when detected from the email domain", () => {
+    render(
+      <AccountSignatureSettings
+        accounts={[]}
+        onSaveSignature={() => undefined}
+        onStartOAuthAccountSetup={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "person@gmail.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Detect settings" }));
+
+    expect(screen.getByLabelText("Provider")).toHaveValue("gmail");
+    expect(screen.getByLabelText("Username")).toHaveValue("person@gmail.com");
+    expect(screen.queryByLabelText("IMAP host")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("OAuth client ID")).toBeVisible();
+    expect(screen.getByText("Gmail settings were detected.")).toBeVisible();
+  });
+
   it("forces major providers through OAuth setup without generic server fields", async () => {
     const onCreateAccount = vi.fn().mockResolvedValue({
       account: {

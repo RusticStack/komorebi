@@ -389,7 +389,7 @@ describe("App", () => {
       screen.getByRole("region", { name: "Selected message" }),
     ).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "Unified inbox" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Add account" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add account" })).toBeEnabled();
     expect(screen.getByText("No accounts configured.")).toBeVisible();
     expect(screen.getByRole("region", { name: "Empty inbox" })).toBeVisible();
     expect(

@@ -1,6 +1,6 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference and relative date wording, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, background sync/auth status surface, and diagnostics health/export UI implemented.
+Status: Windows 11-inspired custom chrome and 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference and relative date wording, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI with domain-detection wizard, Gmail/Microsoft OAuth loopback UI wiring, background sync/auth status surface, and diagnostics health/export UI implemented.
 Last reviewed: 2026-05-25.
 
 ## Current Scope
@@ -25,10 +25,12 @@ The code source of truth is:
 
 The shell is the first screen of the app. It is not a landing page and it does not seed fake mailbox data in production/default render.
 
+The visual direction follows `docs/architecture/windows-native-ui.md`: Tauri owns a decorationless main window, React renders the custom title bar and Windows 11-style shell, and account setup remains a guided workflow rather than a raw settings form.
+
 The default state is an accountless local shell with:
 
 - account navigation
-- disabled add-account entry
+- enabled add-account entry that opens the settings account wizard
 - disabled unified inbox toggle
 - folder navigation area
 - message list area
@@ -39,6 +41,16 @@ The default state is an accountless local shell with:
 - empty states
 
 Tests may inject fixture mail through `initialData` to verify workflows. In Tauri runtime, `load_mail_shell` reads the local app-data SQLite cache and returns the current account/folder/message shell snapshot; `load_message_page` reads scoped message pages from the same cache for large folder browsing; `search_mail` queries the same cache through FTS5 when the user searches; language preference reads/writes call `get_ui_preferences` and `update_ui_preferences`; reader mail actions call `perform_mail_action`; delegated message links call the typed external-link command; reader attachment actions call typed preview/save/download commands; composer data-source functions call the typed Rust draft, attachment staging, forwarded-attachment staging, recent-recipient, and send commands. In a plain browser/Vite runtime, the shell stays empty because no Tauri IPC bridge exists.
+
+## Custom Window Chrome
+
+`MailClientShell` renders a custom title bar above the mail shell because `src-tauri/tauri.conf.json` sets the main window to `decorations: false`.
+
+- Drag regions use Tauri's data attributes so the title area behaves like native app chrome.
+- Minimize, maximize/restore, and close buttons call Tauri window APIs only when the Tauri runtime is present.
+- The capability file grants only `core:window:allow-start-dragging`, `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, and `core:window:allow-close` for this chrome.
+- Browser/E2E runtimes no-op those commands instead of requiring Tauri internals.
+- The title bar must remain keyboard reachable, labelled, and visible in desktop and narrow screenshots.
 
 ## State Model
 
@@ -280,7 +292,9 @@ The Settings drawer uses `AccountSignatureSettings` for account management and s
 - redacted diagnostics health through inputless `get_diagnostics_health`, showing cache/migration status, retry/category history, attachment storage counts, and remediation steps
 - redacted diagnostics export through `export_diagnostics_bundle`, with `userRequested=true` and optional synthetic fixtures only
 
-With no accounts it still shows the accountless settings state plus the add-account form and diagnostics controls. With account data it edits persisted account display metadata, local unified-inbox preferences, and sanitized signatures through typed account commands. Account removal requires the user to choose whether local cache is deleted or retained, then acknowledge that sync stops and Credential Manager secrets are removed. Signature previews continue to use `SafeEmailBody`. Diagnostics health returns only aggregate counts, categories, bounded event identifiers, and remediation codes; diagnostics export opens a backend-owned save dialog and returns only display-safe metadata. React never receives local log paths, app-data paths, credential refs, provider responses, message bodies, subject lines, addresses, attachment paths, or attachment bytes.
+The add-account form is a guided wizard. Entering or leaving the email field can prefill a provider plan from local domain detection, and the Detect settings button lets users request the same inference explicitly. Gmail/Googlemail routes to Gmail OAuth, Outlook/Hotmail/Live/MSN/Office 365 routes to Microsoft OAuth, known compatible providers prefill reviewed generic IMAP/SMTP presets, and unknown domains fall back to common `imap.<domain>`/`smtp.<domain>` fields for user review. Detection never persists secrets or account metadata by itself; generic live setup validation and OAuth loopback remain the authority.
+
+With no accounts it still shows the accountless settings state plus the add-account wizard and diagnostics controls. With account data it edits persisted account display metadata, local unified-inbox preferences, and sanitized signatures through typed account commands. Account removal requires the user to choose whether local cache is deleted or retained, then acknowledge that sync stops and Credential Manager secrets are removed. Signature previews continue to use `SafeEmailBody`. Diagnostics health returns only aggregate counts, categories, bounded event identifiers, and remediation codes; diagnostics export opens a backend-owned save dialog and returns only display-safe metadata. React never receives local log paths, app-data paths, credential refs, provider responses, message bodies, subject lines, addresses, attachment paths, or attachment bytes.
 
 The Gmail/Microsoft setup and reauth controls never ask for passwords, app passwords, refresh tokens, authorization codes, or access tokens. The backend command opens the system browser and returns only a redacted setup response or error reason. Status-drawer OAuth reconnect reuses the stored non-secret OAuth client id from Rust so the status surface can launch the provider-specific flow without adding a secret field. The generic Test setup button is disabled for OAuth providers because provider consent is validated by the loopback flow, not by a secret-bearing configuration test.
 

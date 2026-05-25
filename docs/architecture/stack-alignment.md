@@ -6,7 +6,7 @@ This document records the implemented stack. It resolves drift from the original
 
 ## Implemented Stack
 
-- Desktop shell: Tauri v2 on Windows with Microsoft Edge WebView2.
+- Desktop shell: Tauri v2 on Windows with Microsoft Edge WebView2, a decorationless main window, and React-rendered custom titlebar chrome.
 - Backend: Rust 1.95.0, Tauri async runtime, blocking `native-tls` TCP adapters where live IMAP/SMTP protocol I/O is implemented, `rusqlite` bundled SQLite, `mail-parser`, `lettre`, `reqwest` blocking OAuth HTTP, Windows Credential Manager through `windows-sys`.
 - Frontend: React 19, TypeScript, Vite, plain CSS, `@tanstack/react-virtual`, `react-i18next`, TipTap, DOMPurify.
 - Tests: Vitest/React Testing Library, Rust unit and integration tests, Playwright browser E2E, Playwright browser performance harness, ignored opt-in live SMTP smoke.
@@ -45,4 +45,5 @@ Keep this document synchronized with:
 - `AGENTS.md`
 - `TODO.md`
 - `docs/architecture/frontend-mail-shell.md`
+- `docs/architecture/windows-native-ui.md`
 - `docs/architecture/sync-state-machine.md`

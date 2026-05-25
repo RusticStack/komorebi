@@ -1658,7 +1658,16 @@ export function MailClientShell({
   }, [drawer]);
 
   return (
-    <main className="app-shell" onKeyDown={handleShellKeyDown}>
+    <main className="app-frame" onKeyDown={handleShellKeyDown}>
+      <KomorebiTitleBar
+        scopeLabel={
+          state.unifiedInbox
+            ? t("app.scope.allAccounts")
+            : activeAccount?.label ?? t("app.scope.local")
+        }
+        title={listTitle}
+      />
+      <section className="app-shell">
       <aside className="sidebar" aria-label={t("app.sections.mailboxes")}>
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -1677,7 +1686,7 @@ export function MailClientShell({
               className="icon-command"
               type="button"
               aria-label={t("mail.account.add")}
-              disabled
+              onClick={(event) => openDrawer("settings", event.currentTarget)}
             >
               +
             </button>
@@ -2156,8 +2165,82 @@ export function MailClientShell({
           />
         </div>
       ) : null}
+      </section>
     </main>
   );
+}
+
+function KomorebiTitleBar({
+  scopeLabel,
+  title,
+}: {
+  scopeLabel: string;
+  title: string;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <header
+      className="window-titlebar"
+      data-tauri-drag-region
+      onDoubleClick={() => void runWindowCommand("toggleMaximize")}
+    >
+      <div className="window-titlebar__brand" data-tauri-drag-region>
+        <span className="window-titlebar__mark" aria-hidden="true">
+          K
+        </span>
+        <div data-tauri-drag-region>
+          <strong data-tauri-drag-region>Komorebi</strong>
+          <span data-tauri-drag-region>{t("app.titlebar.subtitle")}</span>
+        </div>
+      </div>
+      <div className="window-titlebar__context" data-tauri-drag-region>
+        <span data-tauri-drag-region>{scopeLabel}</span>
+        <strong data-tauri-drag-region>{title}</strong>
+      </div>
+      <div className="window-titlebar__controls" aria-label={t("app.titlebar.windowControls")}>
+        <button
+          type="button"
+          aria-label={t("app.titlebar.minimize")}
+          onClick={() => void runWindowCommand("minimize")}
+        >
+          -
+        </button>
+        <button
+          type="button"
+          aria-label={t("app.titlebar.maximize")}
+          onClick={() => void runWindowCommand("toggleMaximize")}
+        >
+          □
+        </button>
+        <button
+          type="button"
+          aria-label={t("app.titlebar.close")}
+          onClick={() => void runWindowCommand("close")}
+        >
+          ×
+        </button>
+      </div>
+    </header>
+  );
+}
+
+async function runWindowCommand(
+  command: "close" | "minimize" | "toggleMaximize",
+) {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    return;
+  }
+
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const appWindow = getCurrentWindow();
+  if (command === "close") {
+    await appWindow.close();
+  } else if (command === "minimize") {
+    await appWindow.minimize();
+  } else {
+    await appWindow.toggleMaximize();
+  }
 }
 
 function searchRequestForScope(

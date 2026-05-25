@@ -8,6 +8,7 @@ This guide documents the provider setup posture implemented in Komorebi today. I
 
 - Account secrets are stored only through Windows Credential Manager/DPAPI.
 - React never receives OAuth authorization codes, access tokens, refresh tokens, passwords, app passwords, or credential target names.
+- The Settings account wizard may prefill a provider plan from the email domain, but detection is only local convenience state. OAuth loopback or live generic IMAP/SMTP validation must still succeed before credentials or account metadata persist.
 - Gmail and Microsoft setup must use OAuth2/XOAUTH2. Password and app-password setup for these providers is intentionally rejected.
 - Generic IMAP/SMTP setup may use a password or app password only for providers that still support that model.
 - Generic setup requires TLS or STARTTLS for both IMAP and SMTP. Plaintext authenticated mail transport is rejected.
@@ -75,6 +76,8 @@ Official references:
 ## Generic IMAP/SMTP
 
 Use this flow only for providers that explicitly support password or app-password authentication over IMAP and SMTP.
+
+The wizard currently pre-fills reviewed generic presets for Fastmail, iCloud, Yahoo, Zoho, GMX, and Mail.com domains. Unknown domains use a common `imap.<domain>`/`smtp.<domain>` fallback so the user can review and edit the configuration before testing. This fallback is not proof that a provider supports generic IMAP/SMTP login.
 
 Komorebi requires:
 

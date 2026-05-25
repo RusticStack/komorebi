@@ -238,6 +238,10 @@ describe("Tauri capabilities", () => {
     expect(defaultCapability.permissions).toEqual([
       "core:event:allow-listen",
       "core:event:allow-unlisten",
+      "core:window:allow-start-dragging",
+      "core:window:allow-minimize",
+      "core:window:allow-toggle-maximize",
+      "core:window:allow-close",
       "allow-load-mail-shell",
       "allow-load-message-page",
       "allow-search-mail",

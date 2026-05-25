@@ -12,6 +12,13 @@
       "mailboxes": "Caixas de correio",
       "messages": "Mensagens",
       "selectedMessage": "Mensagem selecionada"
+    },
+    "titlebar": {
+      "close": "Fechar janela",
+      "maximize": "Maximizar janela",
+      "minimize": "Minimizar janela",
+      "subtitle": "Correio com luz suave",
+      "windowControls": "Controlos da janela"
     }
   },
   "common": {
@@ -513,9 +520,11 @@
     "accounts": {
       "actions": {
         "add": "Adicionar conta",
+        "detect": "Detetar definicoes",
         "oauth": "Iniciar OAuth",
         "reauth": "Reautenticar",
         "remove": "Remover conta",
+        "review": "Rever configuracao",
         "saveSettings": "Guardar definicoes",
         "status": "Ver estado",
         "test": "Testar configuracao"
@@ -566,6 +575,8 @@
       "notices": {
         "connectionReady": "Inicio de sessao IMAP e SMTP validado.",
         "created": "{{email}} foi adicionada.",
+        "detected": "Definicoes de {{provider}} detetadas.",
+        "detectedFallback": "Nenhuma predefinicao conhecida foi encontrada; o Komorebi preencheu o padrao comum imap./smtp. para rever.",
         "reauthed": "As credenciais da conta foram substituidas.",
         "removed": "A conta foi removida. {{cache}} {{revocation}}",
         "settingsSaved": "As definicoes da conta foram guardadas.",
@@ -582,6 +593,16 @@
         "outgoing": "Correio enviado",
         "preferences": "Preferencias",
         "selected": "Conta selecionada"
+      },
+      "wizard": {
+        "copy": "Introduza primeiro o email. O Komorebi reconhece fornecedores principais e preenche valores IMAP/SMTP seguros para contas genericas compativeis antes de testar o inicio de sessao.",
+        "eyebrow": "Configuracao de conta",
+        "heading": "Adicionar conta de correio",
+        "steps": {
+          "connection": "Ligacao",
+          "finish": "Concluir",
+          "identity": "Identidade"
+        }
       },
       "removal": {
         "cacheDeleted": "A cache local foi eliminada.",
