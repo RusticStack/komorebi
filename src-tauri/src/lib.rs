@@ -7,6 +7,7 @@ pub mod attachment_safety;
 pub mod auth;
 pub mod composer;
 pub mod credentials;
+pub mod diagnostics;
 pub mod draft_persistence;
 pub mod external_links;
 pub mod imap_live;
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(sync_scheduler::BackgroundSyncScheduler::default())
         .setup(|app| {
             let cache_path = account_management::mail_cache_path(app.handle())?;
+            let _ = diagnostics::log_startup_migration_status(&cache_path);
             let scheduler = app
                 .state::<sync_scheduler::BackgroundSyncScheduler>()
                 .inner()
@@ -79,7 +81,8 @@ pub fn run() {
             account_management::test_account_connection,
             account_management::get_account_auth_status,
             oauth_loopback::start_oauth_account_setup,
-            oauth_loopback::start_oauth_account_reauth
+            oauth_loopback::start_oauth_account_reauth,
+            diagnostics::export_diagnostics_bundle
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

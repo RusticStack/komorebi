@@ -21,6 +21,8 @@ import type {
   AccountSecurityMode,
   AccountSetupRequest,
   AccountSetupResponse,
+  DiagnosticsExportRequest,
+  DiagnosticsExportResponse,
   LoadStatus,
   UiLanguagePreference,
 } from "../mail/shell/mailShellState";
@@ -73,6 +75,9 @@ export type AccountSignatureSettingsProps = {
   onGetAccountAuthStatus?: (
     request: AccountAuthStatusRequest,
   ) => Promise<AccountAuthStatusView>;
+  onExportDiagnostics?: (
+    request: DiagnosticsExportRequest,
+  ) => Promise<DiagnosticsExportResponse>;
   onClose?: () => void;
 };
 
@@ -128,6 +133,7 @@ export function AccountSignatureSettings({
   onRemoveAccount,
   onTestAccountConnection,
   onGetAccountAuthStatus,
+  onExportDiagnostics,
   onClose,
 }: AccountSignatureSettingsProps) {
   const { t } = useTranslation();
@@ -155,6 +161,13 @@ export function AccountSignatureSettings({
   );
   const [languageError, setLanguageError] = useState<string | null>(null);
   const [languageSaving, setLanguageSaving] = useState(false);
+  const [includeSyntheticFixtures, setIncludeSyntheticFixtures] =
+    useState(false);
+  const [diagnosticsExporting, setDiagnosticsExporting] = useState(false);
+  const [diagnosticsNotice, setDiagnosticsNotice] = useState<string | null>(
+    null,
+  );
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const [authStatus, setAuthStatus] = useState<AccountAuthStatusView | null>(
     null,
   );
@@ -256,6 +269,52 @@ export function AccountSignatureSettings({
         {!onChangeLanguagePreference ? (
           <p className="account-form__hint">
             {t("settings.language.unavailable")}
+          </p>
+        ) : null}
+      </section>
+
+      <section
+        className="diagnostics-settings"
+        aria-label={t("settings.diagnostics.heading")}
+      >
+        <h3>{t("settings.diagnostics.heading")}</h3>
+        <p className="account-form__hint">
+          {t("settings.diagnostics.copy")}
+        </p>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={includeSyntheticFixtures}
+            onChange={(event) =>
+              setIncludeSyntheticFixtures(event.target.checked)
+            }
+          />
+          <span>{t("settings.diagnostics.includeSynthetic")}</span>
+        </label>
+        <div className="settings-panel__actions">
+          <button
+            type="button"
+            onClick={() => void handleExportDiagnostics()}
+            disabled={!onExportDiagnostics || diagnosticsExporting}
+          >
+            {diagnosticsExporting
+              ? t("settings.diagnostics.exporting")
+              : t("settings.diagnostics.export")}
+          </button>
+        </div>
+        {!onExportDiagnostics ? (
+          <p className="account-form__hint">
+            {t("settings.diagnostics.unavailable")}
+          </p>
+        ) : null}
+        {diagnosticsNotice ? (
+          <p className="settings-notice" role="status">
+            {diagnosticsNotice}
+          </p>
+        ) : null}
+        {diagnosticsError ? (
+          <p className="settings-error" role="alert">
+            {diagnosticsError}
           </p>
         ) : null}
       </section>
@@ -691,6 +750,33 @@ export function AccountSignatureSettings({
       setLanguageError(formatAccountError(error));
     } finally {
       setLanguageSaving(false);
+    }
+  }
+
+  async function handleExportDiagnostics() {
+    if (!onExportDiagnostics) {
+      setDiagnosticsError(t("settings.diagnostics.unavailable"));
+      return;
+    }
+
+    setDiagnosticsNotice(null);
+    setDiagnosticsError(null);
+    setDiagnosticsExporting(true);
+    try {
+      const response = await onExportDiagnostics({
+        userRequested: true,
+        includeSyntheticFixtures,
+      });
+      setDiagnosticsNotice(
+        t("settings.diagnostics.exported", {
+          filename: response.destinationLabel,
+          count: response.includedLogEntries,
+        }),
+      );
+    } catch (error) {
+      setDiagnosticsError(formatAccountError(error));
+    } finally {
+      setDiagnosticsExporting(false);
     }
   }
 

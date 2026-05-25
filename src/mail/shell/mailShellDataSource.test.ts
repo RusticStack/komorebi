@@ -6,6 +6,8 @@ import type {
   AttachmentSaveResponse,
   ComposerForwardedAttachmentStageRequest,
   ComposerDraftSaveRequest,
+  DiagnosticsExportRequest,
+  DiagnosticsExportResponse,
   ExternalLinkOpenRequest,
   ExternalLinkOpenResponse,
   MailActionRequest,
@@ -36,6 +38,7 @@ import {
   autosaveComposerDraftFromTauri,
   createAccountFromTauri,
   downloadAttachmentFromTauri,
+  exportDiagnosticsBundleFromTauri,
   getAccountAuthStatusFromTauri,
   getUiPreferencesFromTauri,
   isTauriRuntime,
@@ -231,6 +234,27 @@ describe("mailShellDataSource", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(1, "get_ui_preferences");
     expect(invokeMock).toHaveBeenNthCalledWith(2, "update_ui_preferences", {
       request: { language: "pt-PT" },
+    });
+  });
+
+  it("maps diagnostics export to the typed Tauri command", async () => {
+    const request: DiagnosticsExportRequest = {
+      userRequested: true,
+      includeSyntheticFixtures: false,
+    };
+    const response: DiagnosticsExportResponse = {
+      bytesWritten: 4096,
+      destinationLabel: "komorebi-diagnostics.json",
+      includedLogEntries: 4,
+      includedSyntheticFixtures: false,
+    };
+    invokeMock.mockResolvedValueOnce(response);
+
+    await expect(exportDiagnosticsBundleFromTauri(request)).resolves.toBe(
+      response,
+    );
+    expect(invokeMock).toHaveBeenCalledWith("export_diagnostics_bundle", {
+      request,
     });
   });
 

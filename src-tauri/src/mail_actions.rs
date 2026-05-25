@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::{
+    diagnostics,
     imap_live::{LiveImapAdapter, LiveImapStoreMode},
     imap_sync::{RemoteFlag, SyncError},
     ipc_validation::{validate_entity_id, IpcValidationError},
@@ -388,15 +389,20 @@ pub async fn perform_mail_action(
     let stopped = scheduler.stop_account(&account_id).unwrap_or(false);
     let refresh_path = cache_path.clone();
     let refresh_account_id = account_id.clone();
+    let action_app_data_dir = app_data_dir.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
-        perform_mail_action_from_path(&cache_path, &app_data_dir, request)
+        perform_mail_action_from_path(&cache_path, &action_app_data_dir, request)
     })
     .await
     .map_err(|_| MailActionCommandError::new("mail action worker failed"))?;
 
     if stopped {
         let _ = scheduler.refresh_account(refresh_path, &refresh_account_id);
+    }
+    if let Err(error) = &result {
+        let _ =
+            diagnostics::log_command_failure(&app_data_dir, "perform_mail_action", &error.reason);
     }
 
     result

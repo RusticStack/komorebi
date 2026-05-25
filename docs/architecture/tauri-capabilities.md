@@ -1,6 +1,6 @@
 # Tauri Capability Model
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 
 ## Current Policy
 
@@ -8,7 +8,7 @@ Komorebi's main webview grants only reviewed feature-specific Tauri permissions.
 
 - `app.security.capabilities` must be `["default"]` until another window or capability is intentionally introduced.
 - `src-tauri/capabilities/default.json` applies only to the `main` window label.
-- `default.permissions` contains only reviewed listen-only sync status event access plus mail-shell, UI preference, remote-content preference, typed mail-action, external-link opening, reader-attachment, composer, account-management, and OAuth loopback commands: `core:event:allow-listen`, `core:event:allow-unlisten`, `allow-load-mail-shell`, `allow-load-message-page`, `allow-search-mail`, `allow-allow-remote-content`, `allow-get-ui-preferences`, `allow-update-ui-preferences`, `allow-perform-mail-action`, `allow-open-external-link`, `allow-preview-attachment`, `allow-save-attachment`, `allow-download-attachment`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-stage-forwarded-attachments`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-list-composer-drafts`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-update-account-settings`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, and `allow-start-oauth-account-reauth`.
+- `default.permissions` contains only reviewed listen-only sync status event access plus mail-shell, UI preference, remote-content preference, typed mail-action, external-link opening, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export commands: `core:event:allow-listen`, `core:event:allow-unlisten`, `allow-load-mail-shell`, `allow-load-message-page`, `allow-search-mail`, `allow-allow-remote-content`, `allow-get-ui-preferences`, `allow-update-ui-preferences`, `allow-perform-mail-action`, `allow-open-external-link`, `allow-preview-attachment`, `allow-save-attachment`, `allow-download-attachment`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-stage-forwarded-attachments`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-list-composer-drafts`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-update-account-settings`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, `allow-start-oauth-account-reauth`, and `allow-export-diagnostics-bundle`.
 - No remote origins are allowed to use Tauri APIs.
 - `app.security.csp` is a reviewed production content security policy. It keeps script execution local-only, blocks object/frame/worker/form/embed surfaces, denies remote script/network sources, permits only Tauri IPC in `connect-src`, and permits `data:`/`blob:` images plus `https:` image loads. The `https:` image source exists only for the explicit-consent remote-content workflow; the sanitizer still removes remote image URLs unless a persisted message/sender preference allows them.
 - `app.security.devCsp` is separate and limited to local Vite/HMR plus Tauri IPC. Do not copy development `unsafe-eval`, localhost, or WebSocket allowances into the production CSP.
@@ -41,7 +41,7 @@ The main webview must not receive these permissions by default:
 - Opener permissions. Gmail/Microsoft OAuth and message external links currently open through reviewed Rust Win32 calls in typed Rust commands, not through the frontend opener plugin.
 - Shell or process permissions.
 - HTTP client permissions.
-- Dialog plugin permissions. The Rust backend initializes `tauri-plugin-dialog` only so `save_attachment` can open a backend-owned native save dialog; React must not receive `dialog:*` permissions.
+- Dialog plugin permissions. The Rust backend initializes `tauri-plugin-dialog` only so typed commands such as `save_attachment` and `export_diagnostics_bundle` can open backend-owned native save dialogs; React must not receive `dialog:*` permissions.
 - Wildcard, `allow-all`, or broad plugin default permissions.
 - Frontend event emit permissions. The webview may listen/unlisten for backend-owned sync status events but must not emit events into Rust.
 - Custom application command access before the command is added to the app ACL manifest, covered by tests, and granted through a narrow capability permission.
@@ -78,6 +78,7 @@ Absence of a permission is the denial mechanism. Do not add broad explicit deny 
 - `get_account_auth_status`: typed redacted account status and credential-presence lookup.
 - `start_oauth_account_setup`: typed Gmail/Microsoft OAuth browser loopback setup; validates state/PKCE, exchanges the callback code in Rust, stores refresh tokens through the credential backend, and returns only redacted account setup status.
 - `start_oauth_account_reauth`: typed Gmail/Microsoft OAuth browser loopback reauthentication for existing OAuth accounts; rotates refresh tokens only after backend exchange and may reuse the stored non-secret OAuth client id for account-status reconnect.
+- `export_diagnostics_bundle`: typed local diagnostics export command that requires `userRequested=true`, opens a backend-owned native save dialog, refuses overwrite, writes a redacted JSON bundle, and returns only display-safe export metadata.
 
 `src-tauri/src/lib.rs` must not register any command outside `APP_COMMANDS`, and every registered command must have a matching capability permission.
 
@@ -107,7 +108,7 @@ Rules for likely future plugins:
 
 - `tauri.conf.json` explicitly enables only `default`.
 - All capability files are parseable and reviewed by the test.
-- The default capability targets only the main window and grants only the reviewed listen/unlisten event permissions plus mail-shell snapshot/page read/search, UI preference, remote-content preference, typed mail-action, external-link, reader-attachment, composer, account-management, and OAuth loopback command permissions.
+- The default capability targets only the main window and grants only the reviewed listen/unlisten event permissions plus mail-shell snapshot/page read/search, UI preference, remote-content preference, typed mail-action, external-link, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export command permissions.
 - Forbidden plugin permissions, remote origins, wildcard windows, and unreviewed custom-command registrations are absent.
 - Rust does not register forbidden Tauri plugins.
 - Production CSP exactly matches the reviewed source list and rejects wildcard, `unsafe-eval`, localhost, and remote HTTPS broadening outside `img-src`.

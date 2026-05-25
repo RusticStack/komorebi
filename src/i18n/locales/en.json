@@ -602,6 +602,15 @@
       "system": "System default",
       "unavailable": "Language settings are unavailable in this runtime."
     },
+    "diagnostics": {
+      "copy": "Exports redacted local status, migration, retry, and command-failure data. Credentials, tokens, message bodies, private subjects, and attachment bytes are excluded.",
+      "export": "Export diagnostics",
+      "exported": "Diagnostics exported to {{filename}} with {{count}} log entries.",
+      "exporting": "Exporting diagnostics",
+      "heading": "Diagnostics",
+      "includeSynthetic": "Include synthetic fixtures",
+      "unavailable": "Diagnostics export is unavailable in this runtime."
+    },
     "aria": {
       "panel": "Settings",
       "preview": "Signature preview"

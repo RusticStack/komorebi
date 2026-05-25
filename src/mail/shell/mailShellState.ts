@@ -10,6 +10,18 @@ export type UiPreferencesUpdateRequest = {
   language: UiLanguagePreference | null;
 };
 
+export type DiagnosticsExportRequest = {
+  userRequested: boolean;
+  includeSyntheticFixtures: boolean;
+};
+
+export type DiagnosticsExportResponse = {
+  destinationLabel: string;
+  bytesWritten: number;
+  includedLogEntries: number;
+  includedSyntheticFixtures: boolean;
+};
+
 export type AccountStatus =
   | "connected"
   | "idle"

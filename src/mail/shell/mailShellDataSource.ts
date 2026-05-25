@@ -41,6 +41,8 @@ import type {
   AccountSetupResponse,
   UiPreferencesUpdateRequest,
   UiPreferencesView,
+  DiagnosticsExportRequest,
+  DiagnosticsExportResponse,
 } from "./mailShellState";
 
 export const SYNC_STATUS_EVENT_NAME = "komorebi://sync-status";
@@ -87,6 +89,7 @@ const TEST_ACCOUNT_CONNECTION_COMMAND = "test_account_connection";
 const GET_ACCOUNT_AUTH_STATUS_COMMAND = "get_account_auth_status";
 const START_OAUTH_ACCOUNT_SETUP_COMMAND = "start_oauth_account_setup";
 const START_OAUTH_ACCOUNT_REAUTH_COMMAND = "start_oauth_account_reauth";
+const EXPORT_DIAGNOSTICS_BUNDLE_COMMAND = "export_diagnostics_bundle";
 
 declare global {
   interface Window {
@@ -303,6 +306,14 @@ export async function getAccountAuthStatusFromTauri(
   request: AccountAuthStatusRequest,
 ): Promise<AccountAuthStatusView> {
   return invoke<AccountAuthStatusView>(GET_ACCOUNT_AUTH_STATUS_COMMAND, {
+    request,
+  });
+}
+
+export async function exportDiagnosticsBundleFromTauri(
+  request: DiagnosticsExportRequest,
+): Promise<DiagnosticsExportResponse> {
+  return invoke<DiagnosticsExportResponse>(EXPORT_DIAGNOSTICS_BUNDLE_COMMAND, {
     request,
   });
 }

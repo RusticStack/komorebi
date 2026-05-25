@@ -1,11 +1,11 @@
 # IMAP Sync State Machine
 
-Status: Rust state machine, live IMAP protocol adapter, app-managed background scheduler, pending Sent APPEND upload, folder worker, folder/flag semantics, and SQLite cache integration implemented.
-Last reviewed: 2026-05-24.
+Status: Rust state machine, live IMAP protocol adapter, app-managed background scheduler, pending Sent APPEND upload, folder worker, folder/flag semantics, diagnostics logging, and SQLite cache integration implemented.
+Last reviewed: 2026-05-25.
 
 ## Current Scope
 
-The code sources of truth are `src-tauri/src/imap_sync.rs`, `src-tauri/src/imap_live.rs`, and `src-tauri/src/sync_scheduler.rs`.
+The code sources of truth are `src-tauri/src/imap_sync.rs`, `src-tauri/src/imap_live.rs`, `src-tauri/src/sync_scheduler.rs`, and `src-tauri/src/diagnostics.rs` for redacted scheduler log events.
 
 The sync engine is provider-agnostic and still runs behind `ImapSyncServer` and `ImapIdleServer` traits so sync semantics can be tested without real accounts. `src-tauri/src/imap_live.rs` now implements those traits with blocking `native-tls`/TCP IMAP protocol I/O. The project has not adopted Tokio or `async-imap`; evaluate that separately before changing the runtime model.
 
@@ -42,6 +42,7 @@ Implemented now:
 - Account worker stop on account removal and Tauri window close.
 - Bounded concurrent account workers and capped per-account folder workers.
 - Worker status persisted to `settings` as `account:{account_id}:sync_worker_status`, including state, update time, preserved last successful sync time, redacted user-facing message, action code, and error code. `load_mail_shell` projects active sync/error/auth state into account status.
+- Redacted local diagnostics log events for sync state, provider/scheduler errors, and retry-scheduled status transitions. Logs must not include credentials, tokens, message bodies, subjects, attachment bytes, raw provider responses, or addresses beyond redacted placeholders.
 - Tauri status events emitted as `komorebi://sync-status` after status-row writes; React listens only to refresh the trusted `load_mail_shell` snapshot.
 - Non-secret OAuth client runtime metadata persisted as `account:{account_id}:oauth_client` so backend sync workers can refresh Gmail/Microsoft access tokens without exposing tokens to React.
 - Scheduler tests for active-account startup, restart, removal stop, concurrency bounds, status persistence, and OAuth runtime metadata cleanup.

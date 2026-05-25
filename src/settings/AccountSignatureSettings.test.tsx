@@ -41,6 +41,43 @@ describe("AccountSignatureSettings", () => {
     );
   });
 
+  it("exports a redacted diagnostics bundle only from an explicit settings action", async () => {
+    const onExportDiagnostics = vi.fn().mockResolvedValue({
+      bytesWritten: 2048,
+      destinationLabel: "komorebi-diagnostics.json",
+      includedLogEntries: 7,
+      includedSyntheticFixtures: true,
+    });
+
+    render(
+      <AccountSignatureSettings
+        accounts={[]}
+        onExportDiagnostics={onExportDiagnostics}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        /Credentials, tokens, message bodies, private subjects, and attachment bytes are excluded/,
+      ),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText("Include synthetic fixtures"));
+    fireEvent.click(screen.getByRole("button", { name: "Export diagnostics" }));
+
+    await waitFor(() =>
+      expect(onExportDiagnostics).toHaveBeenCalledWith({
+        userRequested: true,
+        includeSyntheticFixtures: true,
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Diagnostics exported to komorebi-diagnostics.json with 7 log entries.",
+      ),
+    ).toBeVisible();
+  });
+
   it("sanitizes the edited signature before saving per account", () => {
     const onSaveSignature = vi.fn();
     render(

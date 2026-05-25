@@ -16,6 +16,7 @@ use crate::{
     account_connection::{AccountConnectionTestError, MailTransportSecurity},
     auth::{AuthKind, ProviderKind},
     credentials::{CredentialError, CredentialSlot, WindowsCredentialManager},
+    diagnostics,
     draft_persistence::{
         list_pending_sent_mail_appends, mark_sent_mail_append_failed,
         mark_sent_mail_append_uploaded, PendingSentMailAppend,
@@ -1173,7 +1174,17 @@ fn write_sync_status_for_path(
     let mut connection = Connection::open(cache_path)?;
     apply_migrations(&mut connection)?;
     let status = write_sync_worker_status(&connection, account_id, state, message)?;
-    emit_sync_status(status_emitter, account_id, status);
+    emit_sync_status(status_emitter, account_id, status.clone());
+    if let Ok(app_data_dir) = cache_app_data_dir(cache_path) {
+        let _ = diagnostics::log_sync_status(
+            &app_data_dir,
+            account_id,
+            state.schema_value(),
+            status.message.as_deref(),
+            status.action.as_deref(),
+            status.code.as_deref(),
+        );
+    }
     Ok(())
 }
 

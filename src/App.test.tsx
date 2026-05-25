@@ -867,7 +867,7 @@ describe("App", () => {
     expect(within(composer).getByLabelText("Subject")).toHaveValue(
       "Fwd: Invoice question",
     );
-    expect(within(composer).getByText("Forwarded message")).toBeVisible();
+    expect(await within(composer).findByText("Forwarded message")).toBeVisible();
     expect(await within(composer).findByText(/invoice\.pdf/)).toBeVisible();
     expect(await within(composer).findByText(/logo\.png/)).toBeVisible();
 

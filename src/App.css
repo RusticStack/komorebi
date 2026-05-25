@@ -1100,6 +1100,7 @@ textarea:disabled {
 
 .account-settings,
 .app-preferences,
+.diagnostics-settings,
 .signature-settings,
 .composer-form {
   display: grid;
@@ -1149,11 +1150,13 @@ textarea:disabled {
 
 .account-settings h3,
 .account-settings h4,
-.app-preferences h3 {
+.app-preferences h3,
+.diagnostics-settings h3 {
   margin: 0;
 }
 
-.app-preferences {
+.app-preferences,
+.diagnostics-settings {
   padding-bottom: 18px;
   border-bottom: 1px solid #e7e1d8;
 }
@@ -1267,6 +1270,7 @@ textarea:disabled {
 
 .account-form label,
 .app-preferences label,
+.diagnostics-settings label,
 .signature-settings label,
 .composer-form label {
   display: grid;
@@ -1276,7 +1280,8 @@ textarea:disabled {
   font-weight: 700;
 }
 
-.account-form label.checkbox-row {
+.account-form label.checkbox-row,
+.diagnostics-settings label.checkbox-row {
   display: flex;
 }
 

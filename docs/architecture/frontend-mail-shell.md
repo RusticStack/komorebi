@@ -1,7 +1,7 @@
 # Frontend Mail Shell
 
-Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference and relative date wording, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, and background sync/auth status surface implemented.
-Last reviewed: 2026-05-24.
+Status: 3-pane shell, multi-account local-cache navigation, incremental SQLite-backed message paging, FTS-backed search UX, keyboard/accessibility workflows, virtualized message rendering, safe message detail rendering with typed remote-content preferences, typed mail actions, typed external link opening, attachment preview/save/download, reply/reply-all/forward composer routing, English/pt-PT i18n with persisted language preference and relative date wording, TipTap composer with tested rich formatting, local-only draft disclosure, and draft reload/reopen UI, local recent-recipient autocomplete, settings account-management/preference/signature persistence UI, Gmail/Microsoft OAuth loopback UI wiring, background sync/auth status surface, and diagnostics export UI implemented.
+Last reviewed: 2026-05-25.
 
 ## Current Scope
 
@@ -17,6 +17,7 @@ The code source of truth is:
 - `src/App.css`
 - `src-tauri/src/app_preferences.rs`
 - `src-tauri/src/attachment_commands.rs`
+- `src-tauri/src/diagnostics.rs`
 - `src-tauri/src/external_links.rs`
 - `src-tauri/src/mail_actions.rs`
 - `src-tauri/src/mail_shell.rs`
@@ -276,8 +277,9 @@ The Settings drawer uses `AccountSignatureSettings` for account management and s
 - account removal through `remove_account`
 - redacted auth status through `get_account_auth_status`
 - display-name, signature HTML, and per-account unified-inbox preference persistence through `update_account_settings`, followed by a `load_mail_shell` cache reload
+- redacted diagnostics export through `export_diagnostics_bundle`, with `userRequested=true` and optional synthetic fixtures only
 
-With no accounts it still shows the accountless settings state plus the add-account form. With account data it edits persisted account display metadata, local unified-inbox preferences, and sanitized signatures through typed account commands. Signature previews continue to use `SafeEmailBody`.
+With no accounts it still shows the accountless settings state plus the add-account form and diagnostics export controls. With account data it edits persisted account display metadata, local unified-inbox preferences, and sanitized signatures through typed account commands. Signature previews continue to use `SafeEmailBody`. Diagnostics export opens a backend-owned save dialog and returns only display-safe metadata; React never receives local log paths, app-data paths, credential refs, message bodies, subject lines, or attachment bytes.
 
 The Gmail/Microsoft setup and reauth controls never ask for passwords, app passwords, refresh tokens, authorization codes, or access tokens. The backend command opens the system browser and returns only a redacted setup response or error reason. Status-drawer OAuth reconnect reuses the stored non-secret OAuth client id from Rust so the status surface can launch the provider-specific flow without adding a secret field. The generic Test setup button is disabled for OAuth providers because provider consent is validated by the loopback flow, not by a secret-bearing configuration test.
 

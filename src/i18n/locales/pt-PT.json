@@ -602,6 +602,15 @@
       "system": "Predefinicao do sistema",
       "unavailable": "As definicoes de idioma estao indisponiveis neste runtime."
     },
+    "diagnostics": {
+      "copy": "Exporta estado local, migracoes, novas tentativas e falhas de comandos com redacao. Credenciais, tokens, corpos de mensagem, assuntos privados e bytes de anexos ficam excluidos.",
+      "export": "Exportar diagnosticos",
+      "exported": "Diagnosticos exportados para {{filename}} com {{count}} entradas de registo.",
+      "exporting": "A exportar diagnosticos",
+      "heading": "Diagnosticos",
+      "includeSynthetic": "Incluir fixtures sinteticos",
+      "unavailable": "A exportacao de diagnosticos esta indisponivel neste runtime."
+    },
     "aria": {
       "panel": "Definicoes",
       "preview": "Pre-visualizacao da assinatura"

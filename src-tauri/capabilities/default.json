@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window capability. Grants reviewed mail-shell snapshot/page read/search, UI preference, remote-content preference, typed mail actions, external-link opening, typed composer draft/send, typed account-management, backend-owned OAuth loopback account commands, and listen-only sync status events.",
+  "description": "Main window capability. Grants reviewed mail-shell snapshot/page read/search, UI preference, remote-content preference, typed mail actions, external-link opening, typed composer draft/send, typed account-management, backend-owned OAuth loopback account commands, backend-owned diagnostics export, and listen-only sync status events.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
@@ -31,6 +31,7 @@
     "allow-test-account-connection",
     "allow-get-account-auth-status",
     "allow-start-oauth-account-setup",
-    "allow-start-oauth-account-reauth"
+    "allow-start-oauth-account-reauth",
+    "allow-export-diagnostics-bundle"
   ]
 }
