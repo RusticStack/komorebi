@@ -8,7 +8,7 @@ Komorebi has a backend-owned local diagnostics subsystem in `src-tauri/src/diagn
 
 The diagnostics UI lives in `src/settings/AccountSignatureSettings.tsx` and is wired through `src/mail/shell/MailClientShell.tsx`, `src/mail/shell/mailShellDataSource.ts`, `src/App.tsx`, and the Tauri capability allowlist. The health view shows current cache/schema status, account/sync counts, retry/backoff history, provider/server categories, attachment storage health, and remediation steps. The export writes a redacted JSON bundle to a user-selected `.json` file with no overwrite.
 
-The user-facing privacy summary for diagnostics is [../../PRIVACY.md](../../PRIVACY.md). Keep it synchronized with this document whenever diagnostic logs, health output, export contents, or exclusions change.
+The user-facing privacy summary for diagnostics is [../../PRIVACY.md](../../PRIVACY.md). Backup/export/import posture is [backup-export-import.md](backup-export-import.md). Keep both synchronized with this document whenever diagnostic logs, health output, export contents, or exclusions change.
 
 ## Log Rules
 
@@ -62,6 +62,8 @@ The bundle does not contain account email addresses, usernames, display names, c
 
 Synthetic fixtures are generated examples only. They are safe to include for reproduction because they do not come from the user mailbox or app data.
 
+This export is not a mailbox backup, local-cache export, account export, settings export, restore format, or import source. Do not add real mailbox content, raw cache files, attachment bytes, source paths, credentials, tokens, or account portability data to diagnostics as a shortcut around the unsupported backup/export/import posture.
+
 ## Health View Rules
 
 `get_diagnostics_health` accepts no request body and returns only aggregate, display-safe status:
@@ -103,3 +105,4 @@ Capability tests cover reviewed command registration and permission allowlisting
 - Health view additions must stay aggregate/status-only and must not expose ids, paths, provider responses, subjects, bodies, addresses, tokens, or credential refs.
 - Any command failure logging must pass only the command name and a redacted, user-safe reason.
 - Any future diagnostic archive format still must exclude credentials, tokens, raw message bodies, private subjects, and attachment bytes by default.
+- Any future mailbox backup, local-cache export, restore, or import feature must be designed separately from diagnostics and must follow `backup-export-import.md`.

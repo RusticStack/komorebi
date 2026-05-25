@@ -31,6 +31,7 @@ The current explicit posture is safer for users and future agents:
 - Long-lived secrets use Windows Credential Manager/DPAPI.
 - Local mailbox content is stored in ordinary SQLite rows and app-generated attachment files.
 - Documentation is direct about what is and is not protected.
+- Backup/export/import is unsupported, and manual cache copying is not a supported recovery workflow.
 - Encryption can be added later through a reviewed migration and threat model instead of accidental partial coverage.
 
 ## Required Wording
@@ -72,6 +73,7 @@ Keep this document synchronized with:
 - `README.md`
 - `PRIVACY.md`
 - `Project Komorebi - Email Client Plan.md`
+- `docs/architecture/backup-export-import.md`
 - `docs/architecture/schema.md`
 - `docs/architecture/draft-and-sent-persistence.md`
 - `docs/architecture/account-signatures.md`

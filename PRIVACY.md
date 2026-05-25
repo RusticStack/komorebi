@@ -65,6 +65,18 @@ The settings drawer can also export a diagnostic bundle only after explicit user
 
 Komorebi does not upload diagnostics automatically.
 
+## Backup, Export, And Import
+
+Komorebi does not currently provide mailbox backup, full local-cache export, account/settings export, restore, import, cross-device sync, cloud backup, or Komorebi-hosted recovery.
+
+The diagnostics export is not a backup. It is a redacted support artifact and intentionally excludes real mailbox content, attachment bytes, credentials, tokens, credential references, local cache files, app-data paths, private subjects, real addresses, and raw provider responses.
+
+Account secrets are not exportable. Passwords, app passwords, OAuth refresh tokens, access tokens, OAuth codes, authorization headers, credential blobs, and Credential Manager target names must not be included in any export surface.
+
+Manual copying of Komorebi app data is outside the supported workflow. The local mail cache is currently unencrypted plaintext, so a manual copy may expose cached message bodies, subjects, search terms, drafts, pending Sent APPEND payloads, signatures, recent recipients, and attachment files. It also may be inconsistent if background sync or send/upload work is running, and future schema versions are not guaranteed to import copied cache files.
+
+Provider mailboxes remain the source of truth for synchronized messages until a reviewed backup/export/import feature exists.
+
 ## Remote Content And Links
 
 Remote email resources are blocked by default. Loading remote images can reveal information to the sender or remote host, such as that the message was opened and the network address used to fetch the image. Komorebi allows remote images only after explicit consent for a message or sender.
@@ -108,6 +120,7 @@ Any future feature that uploads diagnostics, telemetry, crash reports, or mailbo
 ## Current Limitations
 
 - The local mail cache is plaintext and unencrypted.
+- Backup/export/import is unsupported; diagnostics export is redacted and is not a mailbox backup.
 - Release packaging and provider setup documentation still need final production verification.
 - Opt-in live-provider smoke tests are not part of normal automated tests.
 - External attachment open/extract behavior remains future work; current attachment actions are preview, save, and download only.
@@ -116,6 +129,7 @@ Any future feature that uploads diagnostics, telemetry, crash reports, or mailbo
 
 - [README.md](README.md)
 - [docs/architecture/local-cache-encryption.md](docs/architecture/local-cache-encryption.md)
+- [docs/architecture/backup-export-import.md](docs/architecture/backup-export-import.md)
 - [docs/architecture/credential-model.md](docs/architecture/credential-model.md)
 - [docs/architecture/diagnostics-and-logging.md](docs/architecture/diagnostics-and-logging.md)
 - [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md)
