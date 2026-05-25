@@ -279,6 +279,102 @@ const longStringFixtureMail: MailShellData = {
   ],
 };
 
+const internationalFixtureMail: MailShellData = {
+  accounts: [
+    {
+      email: "marta.sao@example.pt",
+      id: "acct_international",
+      label: "Internacional",
+      lastSuccessfulSyncAt: "2026-05-25T07:05:00",
+      signatureHtml: null,
+      status: "connected",
+      statusUpdatedAt: "2026-05-25T07:06:00",
+      unreadCount: 2,
+    },
+  ],
+  folders: [
+    {
+      accountId: "acct_international",
+      id: "folder_international_inbox",
+      kind: "inbox",
+      name: "Caixa de entrada",
+      totalCount: 2,
+      unreadCount: 2,
+    },
+    {
+      accountId: "acct_international",
+      id: "folder_international_archive",
+      kind: "archive",
+      name: "Arquivo",
+      totalCount: 0,
+      unreadCount: 0,
+    },
+    {
+      accountId: "acct_international",
+      id: "folder_international_trash",
+      kind: "trash",
+      name: "Lixo",
+      totalCount: 0,
+      unreadCount: 0,
+    },
+  ],
+  messages: [
+    {
+      accountId: "acct_international",
+      attachments: [
+        {
+          contentType: "text/plain",
+          displayFilename: "relatorio-acao-日本語.txt",
+          disposition: "attachment",
+          id: "att_international_text",
+          sizeBytes: 2048,
+        },
+      ],
+      bodyHtml: null,
+      bodyText:
+        "Olá Marta,\n\nSegue o relatório de ação com texto 日本語, nomes acentuados, العربية curta, עברית curta, e valores 1 234,56 EUR para validar a apresentação.",
+      flagged: true,
+      folderId: "folder_international_inbox",
+      id: "msg_international_report",
+      preview:
+        "Relatório de ação com texto 日本語, العربية curta, עברית curta, e valores localizados.",
+      receivedAt: "2026-05-25T07:05:00",
+      sender: "João da Silva / 山田 太郎",
+      senderEmail: "joao.silva@example.pt",
+      subject: "Relatório ação 日本語 العربية",
+      toAddresses: [
+        { address: "marta.sao@example.pt", name: "Marta São" },
+        { address: "yamada@example.jp", name: "山田 太郎" },
+      ],
+      unread: true,
+    },
+    {
+      accountId: "acct_international",
+      attachments: [
+        {
+          contentType: "image/png",
+          displayFilename: "assinatura-açores.png",
+          disposition: "inline",
+          id: "att_international_image",
+          sizeBytes: 8192,
+        },
+      ],
+      bodyHtml:
+        "<p>Confirmação recebida com <strong>acentos</strong>, texto 日本語 e conteúdo misto.</p>",
+      bodyText: "Confirmação recebida com acentos, texto 日本語 e conteúdo misto.",
+      flagged: false,
+      folderId: "folder_international_inbox",
+      id: "msg_international_confirmation",
+      preview: "Confirmação recebida com acentos, texto 日本語 e conteúdo misto.",
+      receivedAt: "2026-05-24T16:20:00",
+      sender: "Equipa São Bento",
+      senderEmail: "equipa@example.pt",
+      subject: "Confirmação São Bento",
+      unread: true,
+    },
+  ],
+};
+
 const archiveSearchResult: MailMessage = {
   accountId: "acct_personal",
   attachments: [],
@@ -335,7 +431,11 @@ const performanceFixture =
     : null;
 const activeMail =
   performanceFixture?.data ??
-  (fixtureKind === "long-strings" ? longStringFixtureMail : fixtureMail);
+  (fixtureKind === "long-strings"
+    ? longStringFixtureMail
+    : fixtureKind === "international"
+      ? internationalFixtureMail
+      : fixtureMail);
 window.__KOMOREBI_PERF_FIXTURE__ = performanceFixture?.metadata;
 
 async function loadUiPreferences(): Promise<UiPreferencesView> {

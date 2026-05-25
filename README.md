@@ -2,7 +2,7 @@
 
 Komorebi is a privacy-first Windows 10/11 desktop email client built with Tauri v2, React, TypeScript, Vite, and Rust.
 
-The current implementation is an executable, state-driven mail shell with no seeded mailbox data. In Tauri runtime it can create, reauthenticate, remove, and read local account metadata through typed commands, read account, folder, unread-count, snapshot, and paged message navigation data from the local SQLite cache, preview/save/download stored reader attachments through typed backend validation, route reply/reply-all/forward drafts with thread metadata and optional forwarded attachment staging, run app-managed live IMAP sync workers for configured accounts, send through configured SMTP accounts from the typed composer command, reopen active local drafts, upload pending Microsoft/generic Sent copies through IMAP APPEND after confirmed SMTP acceptance, show redacted diagnostics health status, and export a redacted local diagnostics bundle. Composer drafts are local-only until sent or discarded; provider Drafts-folder sync is intentionally deferred. The app still needs opt-in live IMAP/provider smoke coverage, external attachment open/extract decisions, and release packaging before production mail-provider claims.
+The current implementation is an executable, state-driven mail shell with no seeded mailbox data. In Tauri runtime it can create, reauthenticate, remove, and read local account metadata through typed commands, read account, folder, unread-count, snapshot, and paged message navigation data from the local SQLite cache, preview/save/download stored reader attachments through typed backend validation, route reply/reply-all/forward drafts with thread metadata and optional forwarded attachment staging, run app-managed live IMAP sync workers for configured accounts, send through configured SMTP accounts from the typed composer command, reopen active local drafts, upload pending Microsoft/generic Sent copies through IMAP APPEND after confirmed SMTP acceptance, show redacted diagnostics health status, and export a redacted local diagnostics bundle. Composer drafts are local-only until sent or discarded; provider Drafts-folder sync is intentionally deferred. Provider setup, stack alignment, performance, and compatibility posture are documented, but the app still needs opt-in live IMAP/provider smoke coverage, external attachment open/extract decisions, and P7 release packaging before production mail-provider or installer claims.
 
 ## Toolchain
 
@@ -28,7 +28,11 @@ Install the Visual Studio Build Tools with the `Desktop development with C++` wo
 
 WebView2 is the rendering engine used by Tauri on Windows. It is normally present on Windows 10 version 1803 and later, and on Windows 11. If a supported machine is missing WebView2, install the Microsoft Edge WebView2 Evergreen Runtime before running the app. Release packaging still needs a dedicated verification pass before public distribution.
 
-Reference: https://v2.tauri.app/start/prerequisites/
+References:
+
+- https://v2.tauri.app/start/prerequisites/
+- https://developer.microsoft.com/microsoft-edge/webview2/
+- https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution
 
 ## Security Model
 
@@ -37,6 +41,8 @@ The user-facing zero-telemetry privacy statement is [PRIVACY.md](PRIVACY.md). It
 The accepted credential architecture is documented in [docs/architecture/credential-model.md](docs/architecture/credential-model.md). Komorebi uses Windows Credential Manager/DPAPI for account secrets. Plaintext passwords and tokens are forbidden in SQLite, Tauri Store, browser storage, logs, diagnostics, and frontend state.
 
 Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft account setup is OAuth2/XOAUTH2-only through a backend-owned loopback authorization flow; React supplies only account metadata plus OAuth client ID and never receives codes or tokens. Generic password/app-password setup is limited to compatible generic IMAP/SMTP providers. Generic setup testing now performs backend-owned IMAP LOGIN plus SMTP AUTH over TLS or STARTTLS before account metadata is persisted; background sync starts only for active configured accounts and live provider smoke tests remain opt-in.
+
+Human provider setup requirements are documented in [docs/provider-setup.md](docs/provider-setup.md). It covers Gmail OAuth/XOAUTH2, Microsoft OAuth/XOAUTH2, generic IMAP/SMTP TLS/STARTTLS expectations, unsupported password fallbacks for major providers, and the opt-in live SMTP smoke surface.
 
 Token refresh, reconnect-needed state, provider revocation, and account-removal cleanup are documented in [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md). React receives redacted auth status only; token refresh and revocation handling stay in Rust.
 
@@ -51,6 +57,10 @@ Frontend mail-shell behavior is documented in [docs/architecture/frontend-mail-s
 Local diagnostics are documented in [docs/architecture/diagnostics-and-logging.md](docs/architecture/diagnostics-and-logging.md). Komorebi writes local structured NDJSON logs under app data with redaction for secrets, tokens, message bodies, private subjects, and addresses where practical. The settings drawer shows a redacted health view for cache/migration status, retry/backoff history, provider/server categories, attachment storage health, and remediation steps. It can also export a redacted JSON diagnostic bundle through a backend-owned save dialog; exports include status/count data and redacted logs, never credentials, tokens, raw message bodies, attachment bytes, private subjects, raw provider responses, or app-data paths. Synthetic fixtures are included only when explicitly requested.
 
 Backup/export/import posture is documented in [docs/architecture/backup-export-import.md](docs/architecture/backup-export-import.md). Komorebi currently has no mailbox backup, full local-cache export, account/settings export, restore, or import feature. The diagnostics export is not a backup and intentionally excludes real mailbox content, attachment bytes, credentials, tokens, local cache files, and app-data paths. Manual app-data copying is outside the supported workflow and the local mail cache is currently unencrypted plaintext.
+
+Stack alignment is documented in [docs/architecture/stack-alignment.md](docs/architecture/stack-alignment.md). The implemented frontend uses plain CSS and typed Tauri data-source helpers, not Tailwind or React Query. The implemented live IMAP adapter is the current blocking `native-tls` protocol adapter, not `async-imap`.
+
+Performance and compatibility posture is documented in [docs/architecture/performance-and-compatibility.md](docs/architecture/performance-and-compatibility.md). Numeric claims must come from the checked-in measurement commands or a later reviewed harness. The original plan's sub-50MB and instantaneous-search wording is not a production claim until measured in the relevant release scenario.
 
 Localization uses `i18next` and `react-i18next` with English (`en`) and Portuguese (`pt-PT`) resources. First launch detects `navigator.languages`/`navigator.language`, maps Portuguese locales to `pt-PT`, and falls back to English only when no local override exists. The settings drawer can persist a local language override through typed Rust commands backed by the SQLite `settings` key `ui:language`; resetting to system default deletes that key. Message timestamps use localized today/yesterday/tomorrow wording when close to the current day and absolute `Intl` output otherwise. Counts, search-result status text, attachment sizes, and missing sender/attachment fallback labels format through the active locale.
 
@@ -146,6 +156,17 @@ pnpm perf:mail-shell
 ```
 
 The benchmark launches the test-only `/e2e/` Vite entry with a generated 10,000-message mailbox and representative attachment metadata. It reports browser heap usage, plain search latency, advanced `subject:` search latency, and virtualized list interaction timings in the Playwright output and attached JSON report under ignored `test-results/perf/`.
+
+Run the P10 performance and compatibility reports:
+
+```powershell
+pnpm build
+pnpm tauri build --no-bundle
+pnpm perf:all
+pnpm perf:release-memory
+```
+
+`pnpm perf:all` runs the bundle-size report, backend SQLite/FTS/sync/attachment benchmarks, browser mail-shell benchmark, and local Windows compatibility report. `pnpm perf:release-memory` samples the release `komorebi.exe` accountless idle shell and requires `pnpm tauri build --no-bundle` first. Reports are written under ignored `test-results/perf/` and `test-results/compat/`.
 
 If Chromium browser binaries are missing on a fresh machine, install them with:
 
