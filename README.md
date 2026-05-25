@@ -32,6 +32,8 @@ Reference: https://v2.tauri.app/start/prerequisites/
 
 ## Security Model
 
+The user-facing zero-telemetry privacy statement is [PRIVACY.md](PRIVACY.md). It states what is stored locally, what network calls happen, what Komorebi never collects, how diagnostics work, how account/cache removal behaves, and that the current local mail cache is plaintext rather than encrypted.
+
 The accepted credential architecture is documented in [docs/architecture/credential-model.md](docs/architecture/credential-model.md). Komorebi uses Windows Credential Manager/DPAPI for account secrets. Plaintext passwords and tokens are forbidden in SQLite, Tauri Store, browser storage, logs, diagnostics, and frontend state.
 
 Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft account setup is OAuth2/XOAUTH2-only through a backend-owned loopback authorization flow; React supplies only account metadata plus OAuth client ID and never receives codes or tokens. Generic password/app-password setup is limited to compatible generic IMAP/SMTP providers. Generic setup testing now performs backend-owned IMAP LOGIN plus SMTP AUTH over TLS or STARTTLS before account metadata is persisted; background sync starts only for active configured accounts and live provider smoke tests remain opt-in.

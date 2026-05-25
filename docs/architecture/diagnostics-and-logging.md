@@ -8,6 +8,8 @@ Komorebi has a backend-owned local diagnostics subsystem in `src-tauri/src/diagn
 
 The diagnostics UI lives in `src/settings/AccountSignatureSettings.tsx` and is wired through `src/mail/shell/MailClientShell.tsx`, `src/mail/shell/mailShellDataSource.ts`, `src/App.tsx`, and the Tauri capability allowlist. The health view shows current cache/schema status, account/sync counts, retry/backoff history, provider/server categories, attachment storage health, and remediation steps. The export writes a redacted JSON bundle to a user-selected `.json` file with no overwrite.
 
+The user-facing privacy summary for diagnostics is [../../PRIVACY.md](../../PRIVACY.md). Keep it synchronized with this document whenever diagnostic logs, health output, export contents, or exclusions change.
+
 ## Log Rules
 
 Logs are local-only. There is no telemetry, upload, remote diagnostics endpoint, or automatic sharing.

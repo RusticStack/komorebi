@@ -70,6 +70,7 @@ Stop and ask before starting that work because it changes the product's storage 
 Keep this document synchronized with:
 
 - `README.md`
+- `PRIVACY.md`
 - `Project Komorebi - Email Client Plan.md`
 - `docs/architecture/schema.md`
 - `docs/architecture/draft-and-sent-persistence.md`
