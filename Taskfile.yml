@@ -1,0 +1,30 @@
+version: '3'
+
+tasks:
+  windows:build:
+    summary: Builds the Komorebi Windows executable.
+    cmds:
+      - npm install --prefix frontend
+      - wails3 generate bindings -ts
+      - npm run build --prefix frontend
+      - powershell -NoProfile -Command "New-Item -ItemType Directory -Force bin | Out-Null"
+      - go build -tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui" -o bin/Komorebi.exe
+
+  windows:run:
+    summary: Runs the built Komorebi Windows executable.
+    deps:
+      - windows:build
+    cmds:
+      - bin/Komorebi.exe
+
+  build:
+    summary: Builds the Komorebi Wails desktop executable.
+    cmds:
+      - task: windows:build
+
+  run:
+    summary: Runs the built Komorebi executable.
+    deps:
+      - build
+    cmds:
+      - bin/Komorebi.exe

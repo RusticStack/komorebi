@@ -1,0 +1,748 @@
+{
+  "app": {
+    "brandSubtitle": "Correio pessoal",
+    "scope": {
+      "allAccounts": "Todas as contas",
+      "local": "Local"
+    },
+    "sections": {
+      "accounts": "Contas",
+      "app": "Aplicacao",
+      "folders": "Pastas",
+      "mailboxes": "Caixas de correio",
+      "messages": "Mensagens",
+      "selectedMessage": "Mensagem selecionada"
+    },
+    "titlebar": {
+      "close": "Fechar janela",
+      "maximize": "Maximizar janela",
+      "minimize": "Minimizar janela",
+      "subtitle": "Correio com luz suave",
+      "windowControls": "Controlos da janela"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Cancelar",
+      "close": "Fechar",
+      "retry": "Tentar novamente",
+      "save": "Guardar"
+    },
+    "status": {
+      "errorState": "Estado de erro",
+      "localCache": "Cache local"
+    },
+    "relativeDate": {
+      "todayWithTime": "Hoje, {{time}}",
+      "tomorrowWithTime": "Amanha, {{time}}",
+      "yesterdayWithTime": "Ontem, {{time}}"
+    },
+    "units": {
+      "bytes": {
+        "byte": "B",
+        "gigabyte": "GB",
+        "kilobyte": "KB",
+        "megabyte": "MB"
+      }
+    }
+  },
+  "mail": {
+    "account": {
+      "actions": {
+        "details": "Detalhes",
+        "reconnect": "Religar"
+      },
+      "add": "Adicionar conta",
+      "aria": "Conta {{label}}, {{email}}, {{unread}} por ler, {{status}}",
+      "detailsAria": "Detalhes de sincronizacao",
+      "lastSync": "Ultima sincronizacao: {{time}}",
+      "lastSyncNever": "nunca",
+      "status": {
+        "connected": "ligada",
+        "error": "erro",
+        "idle": "em espera",
+        "offline": "offline",
+        "reconnect-needed": "reautenticacao necessaria",
+        "syncing": "a sincronizar"
+      },
+      "statusDrawer": {
+        "aria": "Estado da conta",
+        "detailAria": "Detalhe do estado de sincronizacao",
+        "errorMessage": "A sincronizacao nao terminou. Reveja as definicoes da conta ou tente depois de verificar a ligacao.",
+        "eyebrow": "Estado da conta",
+        "genericReconnectHint": "Introduza a palavra-passe ou palavra-passe de aplicacao de substituicao para religar esta conta IMAP/SMTP generica.",
+        "idleMessage": "Esta conta esta ligada e aguarda o proximo ciclo de sincronizacao.",
+        "lastStatusUpdate": "Ultima atualizacao de estado",
+        "lastSuccessfulSync": "Ultima sincronizacao com sucesso",
+        "oauthReconnectHint": "Religar abre a pagina de inicio de sessao do fornecedor no navegador.",
+        "offlineMessage": "Esta conta esta offline. Verifique a rede ou as definicoes da conta.",
+        "reconnectHeading": "Religar conta",
+        "reconnectNeededMessage": "E necessaria reautenticacao antes de a sincronizacao continuar.",
+        "reconnectStarted": "Religacao concluida. A sincronizacao de correio vai reiniciar para esta conta.",
+        "reconnecting": "A religar",
+        "secretRequired": "Introduza o segredo de substituicao antes de religar.",
+        "status": "Estado",
+        "statusUpdateUnavailable": "nao reportado",
+        "syncingMessage": "Esta conta esta a sincronizar agora."
+      }
+    },
+    "attachments": {
+      "actionsLabel": "Acoes de anexo",
+      "attachmentFallback": "Anexo",
+      "closePreview": "Fechar pre-visualizacao",
+      "download": "Transferir",
+      "downloadError": "A transferencia do anexo falhou.",
+      "downloadNamed": "Transferir {{filename}}",
+      "downloadStarted": "Transferencia preparada para {{filename}}.",
+      "downloadTitle": "Transferir este anexo.",
+      "downloadUnavailable": "Transferir {{filename}} indisponivel",
+      "downloadUnavailableTitle": "A transferencia de anexos esta indisponivel aqui.",
+      "heading": "Anexos",
+      "preview": "Pre-visualizar",
+      "previewError": "A pre-visualizacao do anexo falhou.",
+      "previewEyebrow": "Pre-visualizacao de anexo",
+      "previewHeading": "Pre-visualizacao de anexo",
+      "previewNamed": "Pre-visualizar {{filename}}",
+      "previewTitle": "Pre-visualizar este anexo.",
+      "previewUnsupportedTitle": "So anexos de texto simples e imagens raster podem ser pre-visualizados.",
+      "previewUnavailable": "Pre-visualizacao de {{filename}} indisponivel",
+      "previewUnavailableTitle": "A pre-visualizacao de anexos esta indisponivel aqui.",
+      "save": "Guardar",
+      "saveError": "Guardar o anexo falhou.",
+      "saveNamed": "Guardar {{filename}}",
+      "saveSuccess": "{{filename}} guardado em {{destination}}.",
+      "saveTitle": "Guardar este anexo.",
+      "saveUnavailable": "Guardar {{filename}} indisponivel",
+      "saveUnavailableTitle": "Guardar anexos esta indisponivel aqui.",
+      "working": "A trabalhar no anexo",
+      "disposition": {
+        "attachment": "anexo",
+        "inline": "inline"
+      }
+    },
+    "folders": {
+      "allMail": "Todo o correio",
+      "aria": "Pasta {{name}}, {{unread}} por ler, {{total}} mensagens",
+      "rootAria": "Pasta {{name}}, {{unread}} por ler",
+      "unifiedInbox": "Caixa de entrada unificada"
+    },
+    "messages": {
+      "aria": "{{readState}}{{flagged}} mensagem de {{sender}}, {{subject}}, {{receivedAt}}{{location}}",
+      "flagged": "Com estrela",
+      "flaggedAria": ", com estrela",
+      "location": "{{account}} / {{folder}}",
+      "noSubject": "(sem assunto)",
+      "read": "Lida",
+      "unread": "Por ler",
+      "unknownSender": "Remetente desconhecido"
+    },
+    "pagination": {
+      "complete_one": "{{formattedCount}} mensagem carregada",
+      "complete_other": "{{formattedCount}} mensagens carregadas",
+      "error": "Nao foi possivel carregar mais mensagens.",
+      "loading": "A carregar mais mensagens."
+    },
+    "reader": {
+      "actions": {
+        "label": "Acoes da mensagem",
+        "archive": "Arquivar",
+        "archiveTitle": "Mover esta mensagem para a pasta de arquivo da conta.",
+        "archiveUnavailable": "Arquivo indisponivel",
+        "archiveUnavailableTitle": "O arquivo esta indisponivel para esta mensagem.",
+        "delete": "Eliminar",
+        "deleteTitle": "Mover esta mensagem para o Lixo apos confirmacao.",
+        "deleteUnavailable": "Eliminacao indisponivel",
+        "deleteUnavailableTitle": "Eliminar requer uma pasta de Lixo nesta conta.",
+        "expunge": "Expurgar",
+        "expungeTitle": "Remover permanentemente mensagens ja marcadas como eliminadas nesta pasta.",
+        "expungeUnavailable": "Expurgar indisponivel",
+        "expungeUnavailableTitle": "Expurgar esta indisponivel para esta pasta.",
+        "forward": "Reencaminhar",
+        "forwardTitle": "Abrir esta mensagem como rascunho de reencaminhamento seguro.",
+        "forwardWithAttachments": "Reencaminhar anexos",
+        "forwardWithAttachmentsTitle": "Reencaminhar esta mensagem com os anexos guardados.",
+        "forwardWithAttachmentsUnavailable": "Reencaminhar anexos indisponivel",
+        "forwardWithAttachmentsUnavailableTitle": "Reencaminhar anexos requer ficheiros de anexo guardados.",
+        "forwardUnavailable": "Reencaminhamento indisponivel",
+        "forwardUnavailableTitle": "Adicione ou ligue uma conta antes de reencaminhar correio.",
+        "loadRemote": "Carregar conteudo remoto",
+        "loadRemoteAllowedMessage": "Conteudo remoto permitido para esta mensagem",
+        "loadRemoteAllowedMessageTitle": "O carregamento de imagens remotas esta permitido para esta mensagem.",
+        "loadRemoteAllowedSender": "Conteudo remoto permitido para este remetente",
+        "loadRemoteAllowedSenderTitle": "O carregamento de imagens remotas esta permitido para este remetente nesta conta.",
+        "loadRemoteNoContent": "Sem conteudo remoto para carregar",
+        "loadRemoteNoContentTitle": "Esta mensagem nao inclui recursos remotos bloqueados.",
+        "loadRemoteTitle": "Escolha se pretende carregar imagens remotas para esta mensagem ou remetente.",
+        "loadRemoteUnavailable": "Carregar conteudo remoto indisponivel; os recursos remotos estao bloqueados por defeito",
+        "loadRemoteUnavailableTitle": "Os recursos remotos ficam bloqueados.",
+        "markRead": "Marcar como lida",
+        "markReadUnavailable": "Marcar como lida indisponivel",
+        "markUnread": "Marcar como por ler",
+        "markUnreadUnavailable": "Marcar como por ler indisponivel",
+        "moveLabel": "Mover mensagem para pasta",
+        "movePlaceholder": "Mover para...",
+        "readStateTitle": "Atualizar o estado de leitura desta mensagem no servidor de correio.",
+        "readStateUnavailableTitle": "As alteracoes de leitura estao indisponiveis para esta mensagem.",
+        "reply": "Responder",
+        "replyAll": "Responder a todos",
+        "replyAllTitle": "Abrir um rascunho de resposta a todos com destinatarios desta mensagem.",
+        "replyAllUnavailable": "Responder a todos indisponivel",
+        "replyAllUnavailableTitle": "Adicione ou ligue uma conta antes de responder a todos os destinatarios.",
+        "replyTitle": "Abrir um rascunho de resposta para esta mensagem.",
+        "replyUnavailable": "Resposta indisponivel",
+        "replyUnavailableTitle": "Adicione ou ligue uma conta antes de responder."
+      },
+      "empty": {
+        "accountSetupRequired": "Configuracao de conta necessaria",
+        "body": "As mensagens aparecem aqui depois de concluir a configuracao da conta e a sincronizacao.",
+        "bodyWithMessages": "Selecione uma mensagem da lista para a ler.",
+        "heading": "Nenhuma mensagem selecionada",
+        "label": "Nenhuma mensagem selecionada"
+      },
+      "error": {
+        "body": "Resolva o erro da cache antes de abrir mensagens.",
+        "heading": "Vista de mensagem indisponivel",
+        "label": "Erro do leitor"
+      },
+      "eyebrow": "Leitor",
+      "loading": {
+        "body": "A cache local esta a ser preparada.",
+        "heading": "A carregar vista da mensagem",
+        "label": "Leitor a carregar",
+        "status": "A carregar cache local"
+      },
+      "remoteContent": {
+        "actionsAria": "Opcoes de preferencia de conteudo remoto",
+        "allowMessage": "Permitir esta mensagem",
+        "allowSender": "Permitir sempre este remetente",
+        "allowSenderTitle": "Permitir imagens remotas validadas deste remetente nesta conta.",
+        "allowSenderUnavailableTitle": "Esta mensagem nao tem um endereco de remetente utilizavel.",
+        "allowedMessageStatus": "Conteudo remoto permitido para esta mensagem",
+        "allowedSenderStatus": "Conteudo remoto permitido para este remetente",
+        "body": "Imagens remotas podem revelar quando e onde o correio e aberto.",
+        "error": "Nao foi possivel guardar a preferencia de conteudo remoto.",
+        "heading": "Conteudo remoto",
+        "loading": "A guardar preferencia remota",
+        "panelAria": "Preferencia de conteudo remoto"
+      },
+      "links": {
+        "error": "Nao foi possivel abrir a ligacao externa.",
+        "opened": "Ligacao externa aberta.",
+        "opening": "A abrir ligacao externa.",
+        "unavailable": "A abertura de ligacoes externas esta indisponivel."
+      },
+      "mailActions": {
+        "confirm": {
+          "delete-to-trash": {
+            "aria": "Confirmar eliminacao",
+            "body": "Eliminar move esta mensagem para o Lixo e pode ser anulado enquanto a mensagem permanecer la.",
+            "confirm": "Mover para o Lixo",
+            "heading": "Mover mensagem para o Lixo?"
+          },
+          "expunge-deleted": {
+            "aria": "Confirmar expurgo",
+            "body": "Expurgar remove permanentemente mensagens ja marcadas como eliminadas nesta pasta. Isto nao pode ser anulado.",
+            "confirm": "Expurgar",
+            "heading": "Expurgar permanentemente mensagens eliminadas?"
+          }
+        },
+        "error": "A acao de correio falhou.",
+        "running": {
+          "archive": "A arquivar mensagem.",
+          "delete-to-trash": "A mover mensagem para o Lixo.",
+          "expunge-deleted": "A expurgar mensagens eliminadas.",
+          "mark-read": "A atualizar estado de leitura.",
+          "move": "A mover mensagem."
+        },
+        "statusAria": "Estado da acao de correio",
+        "success": {
+          "archive": "Mensagem arquivada.",
+          "deleteToTrash": "Mensagem movida para o Lixo.",
+          "expunge": "{{count}} mensagens eliminadas expurgadas.",
+          "markRead": "Mensagem marcada como lida.",
+          "markUnread": "Mensagem marcada como por ler.",
+          "move": "Mensagem movida."
+        },
+        "undo": "Anular",
+        "unavailable": "As acoes de correio estao indisponiveis."
+      },
+      "remoteBlocked": "Conteudo remoto bloqueado por defeito",
+      "routing": {
+        "forwardAttachmentError": "Nao foi possivel preparar os anexos reencaminhados.",
+        "forwardAttachmentUnavailable": "Reencaminhar anexos esta indisponivel aqui.",
+        "stagingAttachments": "A preparar anexos reencaminhados."
+      },
+      "selectedEyebrow": "Mensagem selecionada"
+    },
+    "search": {
+      "error": {
+        "body": "Nao foi possivel concluir a consulta FTS local.",
+        "heading": "Pesquisa indisponivel",
+        "label": "Erro de pesquisa"
+      },
+      "indexUnavailable": {
+        "body": "O indice FTS local esta em falta ou ainda nao esta pronto.",
+        "heading": "Indice de pesquisa indisponivel",
+        "label": "Indice de pesquisa indisponivel"
+      },
+      "label": "Pesquisar correio",
+      "loading": {
+        "body": "A procurar assunto, remetente e corpo nas contas ativas.",
+        "heading": "A pesquisar o indice local",
+        "label": "A pesquisar mensagens"
+      },
+      "noMatches": {
+        "body": "A pesquisa nao encontrou mensagens locais no ambito selecionado.",
+        "heading": "Sem resultados",
+        "label": "Sem resultados de pesquisa"
+      },
+      "placeholder": "Remetente, assunto ou corpo",
+      "filters": {
+        "aria": "Filtros de pesquisa ativos",
+        "body": "Corpo: {{value}}",
+        "from": "De: {{value}}",
+        "hasAttachment": "Tem anexos",
+        "is": {
+          "flagged": "Sinalizada",
+          "read": "Lida",
+          "unread": "Por ler"
+        },
+        "subject": "Assunto: {{value}}"
+      },
+      "filtersAria": "Filtros de pesquisa ativos",
+      "recent": {
+        "clear": "Limpar recentes",
+        "label": "Recentes"
+      },
+      "saved": {
+        "label": "Guardadas",
+        "remove": "Remover pesquisa guardada",
+        "removeCurrent": "Remover pesquisa guardada",
+        "saveCurrent": "Guardar pesquisa"
+      },
+      "status": {
+        "loading": "A pesquisar o indice local",
+        "result_one": "{{formattedCount}} resultado",
+        "result_other": "{{formattedCount}} resultados",
+        "unavailable": "Indice de pesquisa indisponivel"
+      },
+      "toolsAria": "Filtros de pesquisa e pesquisas guardadas"
+    },
+    "onboarding": {
+      "body": "Ligue Gmail, Outlook ou outra conta de correio.",
+      "eyebrow": "Configuracao tranquila",
+      "heading": "Traga o seu correio para um espaco calmo",
+      "label": "Configuracao de conta",
+      "secondary": "O Komorebi pede detalhes do servidor so quando forem necessarios."
+    },
+    "states": {
+      "accountsError": "Lista de contas indisponivel",
+      "accountsLoading": "A carregar contas",
+      "emptyFolder": {
+        "body": "Esta pasta ainda nao tem correio local.",
+        "heading": "Sem mensagens",
+        "label": "Pasta vazia"
+      },
+      "emptyInbox": {
+        "body": "Adicione uma conta para sincronizar pastas e mensagens para a cache local.",
+        "heading": "Nenhum correio carregado",
+        "label": "Caixa de entrada vazia"
+      },
+      "foldersEmpty": "As pastas aparecem depois de adicionar uma conta.",
+      "foldersError": "Lista de pastas indisponivel",
+      "foldersLoading": "A carregar pastas",
+      "messagesError": {
+        "body": "Nao foi possivel abrir a cache local de mensagens.",
+        "heading": "Correio indisponivel",
+        "label": "Erro de mensagem"
+      },
+      "messagesLoading": {
+        "body": "A ler a cache local.",
+        "heading": "A carregar correio",
+        "label": "Mensagens a carregar"
+      },
+      "noAccounts": "Nenhuma conta configurada."
+    },
+    "unreadCount_one": "{{formattedCount}} por ler",
+    "unreadCount_other": "{{formattedCount}} por ler",
+    "unifiedToggle": "Caixa unificada"
+  },
+  "composer": {
+    "actions": {
+      "applyLink": "Aplicar ligacao",
+      "attach": "Anexar",
+      "compose": "Compor",
+      "discard": "Descartar",
+      "inlineImage": "Imagem inline",
+      "insertSignature": "Inserir assinatura",
+      "remove": "Remover",
+      "removeLink": "Remover ligacao",
+      "saveDraft": "Guardar rascunho",
+      "send": "Enviar"
+    },
+    "aria": {
+      "attachmentPicker": "Seletor de anexo",
+      "attachments": "Anexos do compositor",
+      "body": "Corpo da mensagem",
+      "composer": "Compositor",
+      "formattingControls": "Controlos de formatacao",
+      "inlineImagePicker": "Seletor de imagem inline",
+      "unavailable": "Compositor indisponivel"
+    },
+    "attachments": {
+      "disposition": {
+        "attachment": "anexo",
+        "inline": "inline"
+      }
+    },
+    "drafts": {
+      "aria": "Rascunhos locais",
+      "attachmentCount_one": "{{formattedCount}} anexo",
+      "attachmentCount_other": "{{formattedCount}} anexos",
+      "button": "Rascunhos",
+      "buttonAria": "Rascunhos, {{formattedCount}} guardados localmente",
+      "empty": "Sem rascunhos locais guardados.",
+      "error": "Nao foi possivel carregar os rascunhos.",
+      "eyebrow": "Compositor",
+      "heading": "Rascunhos locais",
+      "loading": "A carregar rascunhos",
+      "noRecipients": "Sem destinatarios",
+      "noSubject": "Sem assunto",
+      "openAria": "Abrir rascunho: {{subject}}",
+      "recipientSummary_one": "{{first}} e mais {{count}}",
+      "recipientSummary_other": "{{first}} e mais {{count}}"
+    },
+    "autocomplete": {
+      "duplicateSkipped": "Destinatario duplicado ignorado: {{address}} em {{fieldLabel}} ja aparece em {{firstFieldLabel}}."
+    },
+    "empty": {
+      "body": "Adicione e ligue uma conta antes de compor correio.",
+      "heading": "Nenhuma conta disponivel"
+    },
+    "errors": {
+      "attachmentCouldNotStage": "Nao foi possivel preparar {{filename}}.",
+      "bodyRequired": "Adicione um corpo de mensagem.",
+      "draftCouldNotDiscard": "Nao foi possivel descartar o rascunho.",
+      "draftCouldNotSave": "Nao foi possivel guardar o rascunho.",
+      "draftSaveUnavailable": "Guardar rascunhos esta indisponivel aqui.",
+      "invalidAddress": "{{fieldLabel}}: {{value}} nao e um endereco de email valido.",
+      "linkUnsafe": "O URL da ligacao deve ser http, https ou mailto sem credenciais embutidas.",
+      "recipientRequired": "Adicione pelo menos um destinatario.",
+      "sendFailed": "Nao foi possivel enviar a mensagem. O rascunho continua guardado.",
+      "sendingUnavailable": "O envio esta indisponivel aqui.",
+      "stageUnavailable": "Nao e possivel adicionar este anexo aqui.",
+      "unknownAttachment": "Anexo",
+      "accountRequired": "Escolha uma conta de envio."
+    },
+    "fields": {
+      "account": "Conta",
+      "bcc": "BCC",
+      "cc": "CC",
+      "from": "De",
+      "linkUrl": "URL da ligacao",
+      "subject": "Assunto",
+      "to": "Para"
+    },
+    "format": {
+      "alignCenter": "Alinhar ao centro",
+      "alignLeft": "Alinhar a esquerda",
+      "alignRight": "Alinhar a direita",
+      "alignmentLabel": "Alinhamento de texto",
+      "blockquote": "Citacao",
+      "bold": "Negrito",
+      "bulletedList": "Lista com marcadores",
+      "codeBlock": "Bloco de codigo",
+      "default": "Predefinido",
+      "fontFamily": "Tipo de letra",
+      "fontFamilies": {
+        "arial": "Arial",
+        "georgia": "Georgia",
+        "mono": "Mono",
+        "system": "Sistema",
+        "times": "Times"
+      },
+      "fontSize": "Tamanho",
+      "highlight": "Realce",
+      "highlightColors": {
+        "honey": "Mel",
+        "sage": "Salvia",
+        "terracotta": "Terracota"
+      },
+      "inlineCode": "Codigo inline",
+      "italic": "Italico",
+      "none": "Nenhum",
+      "numberedList": "Lista numerada",
+      "strikethrough": "Rasurado",
+      "table": {
+        "addColumn": "Adicionar coluna",
+        "addRow": "Adicionar linha",
+        "controlsLabel": "Controlos de tabela",
+        "delete": "Eliminar tabela",
+        "insert": "Inserir tabela"
+      },
+      "textColor": "Cor do texto",
+      "textColors": {
+        "blue": "Azul",
+        "charcoal": "Carvao",
+        "sage": "Salvia",
+        "terracotta": "Terracota"
+      }
+    },
+    "heading": "Nova mensagem",
+    "routing": {
+      "cc": "Cc",
+      "date": "Data",
+      "forwardHeader": "Mensagem reencaminhada",
+      "from": "De",
+      "replyIntro": "Em {{date}}, {{sender}} escreveu:",
+      "subject": "Assunto",
+      "to": "Para"
+    },
+    "status": {
+      "draftFailed": "Falha ao guardar rascunho",
+      "draftNotSaved": "Rascunho nao guardado",
+      "draftSaved": "Rascunho guardado",
+      "localOnlyDraft": "Os rascunhos ficam apenas neste dispositivo ate serem enviados ou descartados.",
+      "needsAttention": "O compositor precisa de atencao",
+      "savingDraft": "A guardar rascunho",
+      "sending": "A enviar mensagem",
+      "sent": "Mensagem enviada"
+    },
+    "sendProgress": {
+      "account-resolved": "Conta resolvida",
+      "attachment-streamed": "Anexos transmitidos",
+      "auth-resolved": "Autenticacao resolvida",
+      "draft-finalized": "Rascunho finalizado",
+      "draft-prepared": "Rascunho preparado",
+      "mime-composed": "MIME composto",
+      "sent-state-recorded": "Estado de envio registado",
+      "smtp-accepted": "SMTP aceite"
+    }
+  },
+  "settings": {
+    "actions": {
+      "clear": "Limpar",
+      "saveSignature": "Guardar assinatura"
+    },
+    "accounts": {
+      "actions": {
+        "add": "Adicionar conta",
+        "detect": "Continuar",
+        "detecting": "A verificar",
+        "manual": "Definicoes do servidor",
+        "oauth": "Iniciar sessao",
+        "reauth": "Reautenticar",
+        "remove": "Remover conta",
+        "review": "Rever configuracao",
+        "saveSettings": "Guardar definicoes",
+        "status": "Ver estado",
+        "test": "Testar configuracao"
+      },
+      "auth": {
+        "app_password": "Palavra-passe de aplicacao",
+        "manual_password": "Palavra-passe manual",
+        "oauth2": "OAuth2"
+      },
+      "credential": {
+        "missing": "credencial em falta",
+        "present": "credencial presente"
+      },
+      "compatibility": {
+        "generic": "Use IMAP/SMTP apenas quando o fornecedor o suporta. Gmail e Microsoft usam OAuth."
+      },
+      "discovery": {
+        "domain-autoconfig": "Definicoes encontradas",
+        "known-provider": "Definicoes encontradas",
+        "major-provider": "Pronto para iniciar sessao",
+        "manual": "Introduza as definicoes",
+        "thunderbird-ispdb": "Definicoes encontradas",
+        "well-known-autoconfig": "Definicoes encontradas"
+      },
+      "errors": {
+        "createUnavailable": "A configuracao de conta esta indisponivel aqui.",
+        "oauthReauthUnavailable": "O inicio de sessao no navegador esta indisponivel aqui.",
+        "oauthSetupUnavailable": "O inicio de sessao no navegador esta indisponivel aqui.",
+        "oauthTestUnavailable": "A configuracao OAuth e concluida pelo fluxo do navegador.",
+        "reauthUnavailable": "A reautenticacao esta indisponivel para esta conta.",
+        "removeUnavailable": "A remocao de conta esta indisponivel para esta conta.",
+        "settingsUnavailable": "A persistencia das definicoes da conta esta indisponivel para esta conta.",
+        "statusUnavailable": "O estado de autenticacao esta indisponivel para esta conta.",
+        "testUnavailable": "O teste de ligacao esta indisponivel aqui."
+      },
+      "fields": {
+        "accountDisplayName": "Nome apresentado da conta",
+        "authKind": "Autenticacao",
+        "deleteLocalCache": "Eliminar cache local desta conta",
+        "displayEmail": "Endereco de email",
+        "displayName": "Nome apresentado",
+        "includeInUnifiedInbox": "Incluir na caixa de entrada unificada",
+        "imapHost": "Host IMAP",
+        "imapPort": "Porta IMAP",
+        "imapSecurity": "Seguranca IMAP",
+        "oauthClientId": "ID de cliente OAuth",
+        "passwordSecret": "Palavra-passe ou palavra-passe de aplicacao",
+        "provider": "Fornecedor",
+        "reauthSecret": "Segredo de substituicao",
+        "smtpHost": "Host SMTP",
+        "smtpPort": "Porta SMTP",
+        "smtpSecurity": "Seguranca SMTP",
+        "username": "Nome de utilizador"
+      },
+      "heading": "Contas",
+      "notices": {
+        "connectionReady": "Inicio de sessao IMAP e SMTP validado.",
+        "created": "{{email}} foi adicionada.",
+        "detected": "{{provider}} esta pronto. {{source}}.",
+        "manualNeeded": "Introduza as definicoes indicadas pelo seu fornecedor.",
+        "reauthed": "As credenciais da conta foram substituidas.",
+        "removed": "A conta foi removida. {{cache}} {{revocation}}",
+        "settingsSaved": "As definicoes da conta foram guardadas.",
+        "testReady": "Configuracao validada."
+      },
+      "providers": {
+        "generic_imap_smtp": "IMAP/SMTP generico",
+        "gmail": "Gmail",
+        "microsoft": "Microsoft"
+      },
+      "sections": {
+        "authentication": "Autenticacao",
+        "incoming": "Correio recebido",
+        "outgoing": "Correio enviado",
+        "preferences": "Preferencias",
+        "selected": "Conta selecionada"
+      },
+      "wizard": {
+        "copy": "Comece pelo email. Os detalhes do servidor so aparecem quando forem necessarios.",
+        "eyebrow": "Configuracao de conta",
+        "heading": "Adicionar conta de correio",
+        "steps": {
+          "connection": "Ligacao",
+          "finish": "Concluir",
+          "identity": "Identidade"
+        }
+      },
+      "removal": {
+        "cacheDeleted": "A cache local foi eliminada.",
+        "cacheRetained": "A cache local foi mantida sem segredos.",
+        "confirm": "Compreendo que isto remove credenciais e para a sincronizacao desta conta.",
+        "copy": "A remocao para a sincronizacao, remove o acesso de inicio de sessao e aplica a escolha de cache abaixo.",
+        "deleteCache": "Eliminar cache local",
+        "deleteCacheHelp": "Remove linhas de cache da conta e tenta remover anexos recebidos guardados para esta conta.",
+        "heading": "Remocao e limpeza da cache",
+        "retainCache": "Manter cache local",
+        "retainCacheHelp": "Mantem mensagens em cache neste dispositivo, mas remove segredos e marca a conta como removida.",
+        "revocation": {
+          "failed": "A revogacao do token no fornecedor falhou; a limpeza local foi concluida.",
+          "no-refresh-token-present": "Nao havia token de atualizacao do fornecedor para revogar.",
+          "not-applicable": "Nao foi necessaria revogacao de token no fornecedor.",
+          "revoked": "O token de atualizacao do fornecedor foi revogado.",
+          "unsupported": "A revogacao de token no fornecedor nao e suportada; a limpeza local foi concluida."
+        }
+      },
+      "security": {
+        "none": "Nenhuma",
+        "starttls": "STARTTLS",
+        "tls": "TLS"
+      },
+      "statusSummary": "Estado de autenticacao: {{status}}; {{credential}}."
+    },
+    "language": {
+      "en": "Ingles",
+      "heading": "Idioma",
+      "label": "Preferencia de idioma",
+      "loadError": "Nao foi possivel carregar a preferencia de idioma.",
+      "loading": "A carregar preferencia de idioma.",
+      "ptPT": "Portugues (Portugal)",
+      "saved": "Preferencia de idioma guardada.",
+      "saving": "A guardar preferencia de idioma.",
+      "system": "Predefinicao do sistema",
+      "unavailable": "As definicoes de idioma estao indisponiveis aqui."
+    },
+    "diagnostics": {
+      "copy": "Exporta estado local, migracoes, novas tentativas e falhas de comandos com redacao. Credenciais, tokens, corpos de mensagem, assuntos privados e bytes de anexos ficam excluidos.",
+      "export": "Exportar diagnosticos",
+      "exported": "Diagnosticos exportados para {{filename}} com {{count}} entradas de registo.",
+      "exporting": "A exportar diagnosticos",
+      "heading": "Diagnosticos",
+      "health": {
+        "accounts": "Contas",
+        "attachmentChecked": "{{checked}} ficheiros guardados verificados",
+        "attachmentIssueBreakdown": "{{missing}} em falta, {{unreadable}} ilegivel, {{invalid}} caminho invalido, {{size}} tamanho divergente, {{hash}} hash divergente",
+        "attachmentIssues": "Problemas de anexos",
+        "attachmentStored": "{{stored}} anexos guardados de {{metadata}} linhas de metadados",
+        "attachments": "Armazenamento de anexos",
+        "cache": "Cache local",
+        "categories": "Categorias de fornecedor e servidor",
+        "category": {
+          "attachment-storage": "Armazenamento de anexos",
+          "authentication": "Autenticacao",
+          "ipc-command": "Falha de comando",
+          "local-cache": "Cache local",
+          "network": "Rede",
+          "provider-server": "Fornecedor ou servidor",
+          "unknown": "Desconhecido"
+        },
+        "event": "{{time}} - {{level}} - {{category}} - {{component}}/{{event}}; estado {{state}}; acao {{action}}; codigo {{code}}",
+        "generated": "Atualizado {{time}}.",
+        "heading": "Saude",
+        "level": {
+          "error": "erro",
+          "info": "info",
+          "warn": "aviso"
+        },
+        "loading": "A atualizar",
+        "logIssues": "Problemas de registo",
+        "messages": "Mensagens",
+        "migration": {
+          "current": "Esquema {{current}} esta atual",
+          "missing": "A cache ainda nao foi criada",
+          "needs-migration": "Esquema {{current}} precisa de migracao para {{latest}}",
+          "newer-than-app": "Esquema {{current}} e mais recente do que esta app",
+          "unavailable": "Estado do esquema indisponivel"
+        },
+        "noLogCategories": "Sem eventos de registo classificados.",
+        "noRecentEvents": "Sem eventos de saude recentes.",
+        "notAvailable": "n/d",
+        "recentEvents": "Historico de novas tentativas e erros",
+        "refresh": "Atualizar saude",
+        "remediation": "Remediacao",
+        "remediationSteps": {
+          "attachment-storage-issues": "Use guardar/descarregar anexo novamente apos a proxima sincronizacao; exporte diagnosticos se os ficheiros continuarem em falta ou corrompidos.",
+          "cache-missing": "Abra a app uma vez com o perfil normal para criar a cache local.",
+          "command-failures": "Repita a acao na interface; exporte diagnosticos se o mesmo comando continuar a falhar.",
+          "healthy": "Nao e necessaria remediacao.",
+          "reconnect-accounts": "Volte a ligar as contas afetadas nas Definicoes.",
+          "retries-active": "Aguarde pela janela de backoff atual ou volte a ligar a conta se as tentativas continuarem.",
+          "schema-needs-migration": "Reinicie a app para executar migracoes antes de usar a caixa de correio.",
+          "schema-newer-than-app": "Atualize a app antes de abrir este perfil novamente.",
+          "schema-unavailable": "Feche a app e verifique se outro processo bloqueou ou corrompeu a cache local.",
+          "sync-errors": "Veja o painel de estado da conta e volte a ligar ou repita a conta afetada."
+        },
+        "retries": "Novas tentativas",
+        "status": {
+          "attention": "Requer atencao",
+          "error": "Acao necessaria",
+          "healthy": "Saudavel"
+        },
+        "unavailable": "O estado de saude esta indisponivel aqui.",
+        "warningErrorCount": "{{warnings}} avisos, {{errors}} erros"
+      },
+      "includeSynthetic": "Incluir fixtures sinteticos",
+      "unavailable": "A exportacao de diagnosticos esta indisponivel aqui."
+    },
+    "aria": {
+      "panel": "Definicoes",
+      "preview": "Pre-visualizacao da assinatura"
+    },
+    "fields": {
+      "account": "Conta",
+      "signatureHtml": "HTML da assinatura"
+    },
+    "heading": "Assinaturas",
+    "section": "Definicoes"
+  },
+  "safeEmail": {
+    "emptyBody": "Sem corpo de mensagem.",
+    "remoteContentBlocked": "Conteudo remoto bloqueado"
+  }
+}

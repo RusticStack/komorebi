@@ -1,189 +1,77 @@
 # Komorebi
 
-Komorebi is a privacy-first Windows 10/11 desktop email client built with Tauri v2, React, TypeScript, Vite, and Rust.
+Privacy-first, local-first Windows desktop email client.
 
-The current implementation is an executable, state-driven mail shell with custom Windows 11-style chrome and no seeded mailbox data. In Tauri runtime it can create, reauthenticate, remove, and read local account metadata through typed commands, read account, folder, unread-count, snapshot, and paged message navigation data from the local SQLite cache, preview/save/download stored reader attachments through typed backend validation, route reply/reply-all/forward drafts with thread metadata and optional forwarded attachment staging, run app-managed live IMAP sync workers for configured accounts, send through configured SMTP accounts from the typed composer command, reopen active local drafts, upload pending Microsoft/generic Sent copies through IMAP APPEND after confirmed SMTP acceptance, show redacted diagnostics health status, and export a redacted local diagnostics bundle. Composer drafts are local-only until sent or discarded; provider Drafts-folder sync is intentionally deferred. Provider setup, stack alignment, Windows-native UI direction, performance, and compatibility posture are documented, but the app still needs opt-in live IMAP/provider smoke coverage, external attachment open/extract decisions, and P7 release packaging before production mail-provider or installer claims.
+This branch is a Wails v3 + Go + SolidJS remake of the earlier Tauri v2 reference implementation. The old implementation is retained under `legacy/tauri-v2/` for reference while the active source lives at the repository root, `internal/`, and `frontend/`.
 
-## Toolchain
+## Current Stack
 
-Use the pinned versions below for local development:
+- Desktop shell: Wails v3 alpha on Windows/WebView2
+- Backend: Go, Wails services, `modernc.org/sqlite`, Windows Credential Manager through `wincred`
+- Frontend: SolidJS, TypeScript, Vite, Tailwind CSS v4, Ark UI, TanStack Solid Router/Query/Virtual
+- Local cache: SQLite database under the user's config directory
 
-- Node.js `24.16.0`, pinned in `.node-version` and `package.json`.
-- pnpm `10.33.2`, pinned in `package.json` via `packageManager`.
-- Rust `1.95.0` for `x86_64-pc-windows-msvc`, pinned in `rust-toolchain.toml`.
-- Cargo lockfile: `src-tauri/Cargo.lock`.
-- pnpm lockfile: `pnpm-lock.yaml`.
-
-If `pnpm` is not available but Node is installed, install the pinned package manager:
+## Quick Start
 
 ```powershell
-npm install -g pnpm@10.33.2
+cd frontend
+npm install
+npm run check
+npm run build
+cd ..
+
+wails3 generate bindings -ts
+go test ./...
+wails3 build
 ```
 
-## Windows Prerequisites
+`wails3 build` writes `bin/Komorebi.exe`. The first cache load creates a local SQLite database under the user's config directory and seeds a local demo account so the shell can be exercised without real mailbox data.
 
-Tauri development on Windows requires Microsoft C++ Build Tools and Microsoft Edge WebView2.
+## Verification
 
-Install the Visual Studio Build Tools with the `Desktop development with C++` workload. Keep the Rust host toolchain on the MSVC target, `x86_64-pc-windows-msvc`, because this project pins and verifies that target.
-
-WebView2 is the rendering engine used by Tauri on Windows. It is normally present on Windows 10 version 1803 and later, and on Windows 11. If a supported machine is missing WebView2, install the Microsoft Edge WebView2 Evergreen Runtime before running the app. Release packaging still needs a dedicated verification pass before public distribution.
-
-References:
-
-- https://v2.tauri.app/start/prerequisites/
-- https://developer.microsoft.com/microsoft-edge/webview2/
-- https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution
-
-## Security Model
-
-The user-facing zero-telemetry privacy statement is [PRIVACY.md](PRIVACY.md). It states what is stored locally, what network calls happen, what Komorebi never collects, how diagnostics work, how account/cache removal behaves, the current unsupported backup/export/import posture, and that the current local mail cache is plaintext rather than encrypted.
-
-The accepted credential architecture is documented in [docs/architecture/credential-model.md](docs/architecture/credential-model.md). Komorebi uses Windows Credential Manager/DPAPI for account secrets. Plaintext passwords and tokens are forbidden in SQLite, Tauri Store, browser storage, logs, diagnostics, and frontend state.
-
-Provider authentication policy is documented in [docs/architecture/provider-auth.md](docs/architecture/provider-auth.md). Gmail and Microsoft account setup is OAuth2/XOAUTH2-only through a backend-owned loopback authorization flow; React supplies only account metadata plus OAuth client ID and never receives codes or tokens. The settings UI presents account setup as a guided wizard with local email-domain detection for Gmail/Microsoft OAuth routing, reviewed generic IMAP/SMTP presets, and unknown-domain common-host fallback for user review. Generic password/app-password setup is limited to compatible generic IMAP/SMTP providers. Generic setup testing now performs backend-owned IMAP LOGIN plus SMTP AUTH over TLS or STARTTLS before account metadata is persisted; background sync starts only for active configured accounts and live provider smoke tests remain opt-in.
-
-Human provider setup requirements are documented in [docs/provider-setup.md](docs/provider-setup.md). It covers Gmail OAuth/XOAUTH2, Microsoft OAuth/XOAUTH2, generic IMAP/SMTP TLS/STARTTLS expectations, unsupported password fallbacks for major providers, and the opt-in live SMTP smoke surface.
-
-Token refresh, reconnect-needed state, provider revocation, and account-removal cleanup are documented in [docs/architecture/token-lifecycle.md](docs/architecture/token-lifecycle.md). React receives redacted auth status only; token refresh and revocation handling stay in Rust.
-
-Tauri capability policy is documented in [docs/architecture/tauri-capabilities.md](docs/architecture/tauri-capabilities.md). The main webview currently grants only reviewed custom-window chrome permissions, listen-only sync status events, and feature-specific mail-shell, UI preference, remote-content preference, typed mail-action, external-link opening, reader-attachment, composer, account-management, OAuth loopback, and diagnostics export/health command permissions: `core:event:allow-listen`, `core:event:allow-unlisten`, `core:window:allow-start-dragging`, `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-close`, `allow-load-mail-shell`, `allow-load-message-page`, `allow-search-mail`, `allow-allow-remote-content`, `allow-get-ui-preferences`, `allow-update-ui-preferences`, `allow-perform-mail-action`, `allow-open-external-link`, `allow-preview-attachment`, `allow-save-attachment`, `allow-download-attachment`, `allow-autosave-composer-draft`, `allow-discard-composer-draft`, `allow-stage-composer-attachment`, `allow-stage-forwarded-attachments`, `allow-send-composer-email`, `allow-list-recent-recipients`, `allow-list-composer-drafts`, `allow-create-account`, `allow-reauth-account`, `allow-remove-account`, `allow-update-account-settings`, `allow-test-account-connection`, `allow-get-account-auth-status`, `allow-start-oauth-account-setup`, `allow-start-oauth-account-reauth`, `allow-export-diagnostics-bundle`, and `allow-get-diagnostics-health`. SQL, filesystem, opener plugin, shell/process, HTTP, frontend dialog, frontend event emit, and unreviewed custom-command access are denied unless a future feature adds a scoped capability and test coverage. Rust initializes the dialog plugin only for backend-owned native save dialogs such as `save_attachment` and `export_diagnostics_bundle`.
-
-The desktop shell also uses a reviewed Tauri CSP. Production script execution is local-only, connect sources are limited to local app/Tauri IPC, object/frame/worker/form surfaces are blocked, and the only current content allowances are inline CSS for rich editor/email styles, `data:`/`blob:` images for staged inline composer images, and HTTPS image loading after the remote-content preference workflow explicitly allows a message or sender.
-
-IPC and mutation boundaries are documented in [docs/architecture/ipc-and-mutation-boundaries.md](docs/architecture/ipc-and-mutation-boundaries.md). Server-affecting actions, credential access, attachment writes, destructive deletes, migrations, and sync cache mutation stay in typed Rust commands or internal Rust workers. Frontend SQL is disabled until a read-only policy is implemented and tested.
-
-Frontend mail-shell behavior is documented in [docs/architecture/frontend-mail-shell.md](docs/architecture/frontend-mail-shell.md), and the Windows-native visual direction is documented in [docs/architecture/windows-native-ui.md](docs/architecture/windows-native-ui.md). The React shell now has custom titlebar chrome, local-cache account/folder/message loading, incremental page loading for large folders, safe attachment metadata projection, FTS-backed search with Rust-parsed advanced syntax (`from:`, `subject:`, `body:`, `has:attachment`, `is:read|unread|flagged`), debounce/cancellation/no-index states, safe text-node highlights, local-only saved/recent search controls, unified inbox scoping with persisted per-account opt-out, unread counts from sync state, background sync status projection with last-successful-sync detail, listen-only status event refresh, provider-specific reconnect drawer, virtualized message rows for large folders, keyboard navigation, screen-reader labels, sanitized message detail rendering, remote-resource blocking by default, typed remote-content preferences for a message or sender, typed external link opening for sanitized `http`/`https`/`mailto` links, typed mail actions for mark-read/unread, move, archive, delete-to-trash, and expunge with confirmation/undo/retry UI, typed attachment preview/save/download controls, reply/reply-all/forward composer routing with optional forwarded attachments, reader focus, a TipTap composer with tested rich formatting, duplicate handling, keyboard recent-recipient autocomplete, local-only draft retention copy, Drafts drawer reload/reopen UI, settings drawer account setup wizard/reauth/removal/OAuth loopback/settings persistence flows, loading/empty/error states, and selection preservation across compatible navigation changes. External attachment open/extract remain future work.
-
-Local diagnostics are documented in [docs/architecture/diagnostics-and-logging.md](docs/architecture/diagnostics-and-logging.md). Komorebi writes local structured NDJSON logs under app data with redaction for secrets, tokens, message bodies, private subjects, and addresses where practical. The settings drawer shows a redacted health view for cache/migration status, retry/backoff history, provider/server categories, attachment storage health, and remediation steps. It can also export a redacted JSON diagnostic bundle through a backend-owned save dialog; exports include status/count data and redacted logs, never credentials, tokens, raw message bodies, attachment bytes, private subjects, raw provider responses, or app-data paths. Synthetic fixtures are included only when explicitly requested.
-
-Backup/export/import posture is documented in [docs/architecture/backup-export-import.md](docs/architecture/backup-export-import.md). Komorebi currently has no mailbox backup, full local-cache export, account/settings export, restore, or import feature. The diagnostics export is not a backup and intentionally excludes real mailbox content, attachment bytes, credentials, tokens, local cache files, and app-data paths. Manual app-data copying is outside the supported workflow and the local mail cache is currently unencrypted plaintext.
-
-Stack alignment is documented in [docs/architecture/stack-alignment.md](docs/architecture/stack-alignment.md). The implemented frontend uses plain CSS and typed Tauri data-source helpers, not Tailwind or React Query. The implemented live IMAP adapter is the current blocking `native-tls` protocol adapter, not `async-imap`.
-
-Performance and compatibility posture is documented in [docs/architecture/performance-and-compatibility.md](docs/architecture/performance-and-compatibility.md). Numeric claims must come from the checked-in measurement commands or a later reviewed harness. The original plan's sub-50MB and instantaneous-search wording is not a production claim until measured in the relevant release scenario.
-
-Localization uses `i18next` and `react-i18next` with English (`en`) and Portuguese (`pt-PT`) resources. First launch detects `navigator.languages`/`navigator.language`, maps Portuguese locales to `pt-PT`, and falls back to English only when no local override exists. The settings drawer can persist a local language override through typed Rust commands backed by the SQLite `settings` key `ui:language`; resetting to system default deletes that key. Message timestamps use localized today/yesterday/tomorrow wording when close to the current day and absolute `Intl` output otherwise. Counts, search-result status text, attachment sizes, and missing sender/attachment fallback labels format through the active locale.
-
-SQLite schema and migrations are documented in [docs/architecture/schema.md](docs/architecture/schema.md). The migrations define settings, accounts, folders, preserved folder attributes, messages, attachments, remote-content preferences, templates, template versions, FTS5 message search, MIME parser-warning storage, primary/foreign keys, uniqueness rules, indexes, timestamps, and schema-version tracking.
-
-IMAP sync state-machine behavior is documented in [docs/architecture/sync-state-machine.md](docs/architecture/sync-state-machine.md). The Rust backend now has a provider-agnostic sync engine, folder IDLE worker with polling fallback, server flag/folder semantics normalization, SQLite cache integration tested against fake IMAP fixtures, a blocking `native-tls` live IMAP adapter for TLS/STARTTLS, LOGIN/XOAUTH2, UID search/fetch, STORE, EXPUNGE, IDLE, Sent-folder Message-ID search, literal APPEND, reconnect, cancellation, timeouts, and redacted errors, plus app-managed background sync orchestration for configured accounts with pending Sent upload, redacted status rows, last-successful-sync timestamps, and backend-owned status events. Opt-in live-provider smoke tests and any future Tokio/`async-imap` migration remain future work.
-
-Inbound MIME normalization is documented in [docs/architecture/mime-normalization.md](docs/architecture/mime-normalization.md). Raw message bytes are parsed in Rust with `mail-parser` into decoded message fields, stable attachment metadata records, storage-safe attachment bytes, and parser-warning JSON. Live IMAP sync now feeds fetched RFC822/RFC5322 bytes through this boundary and persists message bodies, safe attachment files, attachment metadata, warning JSON, and FTS-visible content to SQLite. Reader preview/save/download commands revalidate stored source paths, hashes, size, and sniffed MIME before returning bytes or writing selected files.
-
-SMTP send behavior is documented in [docs/architecture/smtp-send.md](docs/architecture/smtp-send.md). The Rust backend resolves account-specific SMTP metadata/auth, loads stored OAuth client configuration for Gmail/Microsoft token refresh, composes outbound MIME with `lettre`, preserves sanitized rich composer HTML, inserts sanitized account signatures, emits validated reply `In-Reply-To`/`References` headers, streams attachment sources through backend-owned paths, records local send receipts only after SMTP acceptance, and retains temporary RFC822 payloads only for provider policies that require later IMAP Sent upload. The TipTap composer calls the typed `send_composer_email` wrapper; active drafts are not uploaded to provider Drafts folders.
-
-Draft and Sent persistence is documented in [docs/architecture/draft-and-sent-persistence.md](docs/architecture/draft-and-sent-persistence.md). The Rust backend stores active drafts locally, reloads active drafts through `list_composer_drafts`, intentionally clears discarded or sent draft content, stages outbound composer attachments under backend-generated app-data paths, converts a source draft after confirmed SMTP acceptance, updates local-only recent-recipient autocomplete rows, records provider-aware Sent-copy state, and uploads pending Microsoft/generic Sent copies through backend IMAP APPEND while avoiding Gmail duplicate copies. The composer tells users drafts stay local to this device until sent or discarded.
-
-Account signatures are documented in [docs/architecture/account-signatures.md](docs/architecture/account-signatures.md). Per-account signatures are stored as sanitized account metadata, edited through the React settings component, saved through the typed `update_account_settings` command with display name and local preferences, inserted through managed composer markers, and applied again by the SMTP MIME boundary.
-
-Local cache encryption posture is documented in [docs/architecture/local-cache-encryption.md](docs/architecture/local-cache-encryption.md). The current local mail cache is unencrypted: cached message bodies, active draft content, pending Sent APPEND payloads, FTS index terms, and attachment files are stored locally as plaintext. Account secrets remain separate and are stored through Windows Credential Manager.
-
-IPC input validation is documented in [docs/architecture/ipc-validation.md](docs/architecture/ipc-validation.md). Future commands must reject arbitrary paths, raw SQL, unchecked URLs, unsanitized HTML, unbounded payloads, and unknown or unowned account/folder/message/attachment IDs before side effects.
-
-Safe email rendering is documented in [docs/architecture/message-rendering.md](docs/architecture/message-rendering.md). Untrusted email HTML is sanitized through a single React boundary, remote resources are blocked by default, links are rewritten for typed backend opening with explicit user intent, and plain-text fallback is preserved.
-
-Attachment safety is documented in [docs/architecture/attachment-safety.md](docs/architecture/attachment-safety.md). Attachment storage paths are app-generated in Rust, sender filenames are display-only, path traversal is rejected, size/type limits are enforced, previews are opt-in and type-checked, and auto-open is forbidden.
-
-Destructive mail action semantics are documented in [docs/architecture/destructive-mail-actions.md](docs/architecture/destructive-mail-actions.md). Move, archive, delete-to-trash, mark-read, and expunge behavior is exposed through typed Rust commands, confirmation-aware, reversible where possible, backed by live IMAP mutation mapping, and tested with fake stores, local protocol fixtures, frontend tests, and browser E2E fixtures. Delete defaults to move-to-trash; direct hard delete is not exposed.
-
-## Setup
+Current source checks:
 
 ```powershell
-pnpm install
+cd frontend
+npm install
+npm run check
+npm run build
+npm audit
+cd ..
+
+go test ./...
+go build ./...
+wails3 generate bindings -ts
+wails3 build
 ```
 
-## Development
+Browser smoke checks should cover the Vite shell at `http://127.0.0.1:34115` for both desktop and narrow widths. Generated outputs such as `frontend/dist`, `frontend/node_modules`, `bin`, and `test-results` are disposable.
 
-Run the Vite frontend:
+## Implemented
 
-```powershell
-pnpm dev
-```
+- Wails desktop bootstrap with a frameless Windows-style shell.
+- SQLite migrations for accounts, folders, messages, FTS, drafts, attachments, and account server settings.
+- Seeded local demo account/messages/draft for accountless development.
+- SolidJS three-pane mail shell with sidebar, search, virtualized message list, reader, drafts drawer, and composer dialog.
+- Local SQLite operations for shell load, message paging, FTS search, mark-read, draft save/list/delete, and local sent-message creation.
+- Windows Credential Manager wrapper for account secrets.
+- Basic IMAP and SMTP integration scaffolding.
+- Wails TypeScript binding generation.
+- Basic Go tests for migrations, seed data, and local mail service behavior.
 
-Run the Tauri desktop shell:
+## Important Limits
 
-```powershell
-pnpm tauri dev
-```
+Komorebi is not production-complete yet.
 
-Build the frontend:
+- Live IMAP sync is still simplified and not validated against real providers.
+- SMTP send has hard-coded/simplified provider behavior and needs provider-specific transport/auth handling before real use.
+- OAuth, diagnostics export, i18n, safe rich email rendering, remote-content consent, destructive server mail actions, installer signing, and release validation are not implemented in the Wails remake.
+- The local mail cache is plaintext. Credentials must remain in Windows Credential Manager only.
+- Do not test against real mailboxes or credentials unless explicitly authorized for that exact operation.
 
-```powershell
-pnpm build
-```
+## Philosophy
 
-Validate Tauri configuration without producing installers:
-
-```powershell
-pnpm tauri build --no-bundle
-```
-
-Run the full root check suite:
-
-```powershell
-pnpm check
-```
-
-Run individual root checks:
-
-```powershell
-pnpm fmt:check
-pnpm lint
-pnpm test
-pnpm build
-```
-
-The root scripts fan out to frontend and Rust checks:
-
-```powershell
-pnpm lint:frontend
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-pnpm test:frontend
-cargo test --manifest-path src-tauri/Cargo.toml --all-features
-cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
-```
-
-Run the Playwright fixture smoke test:
-
-```powershell
-pnpm test:e2e
-```
-
-Run the local mail-shell performance benchmark:
-
-```powershell
-pnpm perf:mail-shell
-```
-
-The benchmark launches the test-only `/e2e/` Vite entry with a generated 10,000-message mailbox and representative attachment metadata. It reports browser heap usage, plain search latency, advanced `subject:` search latency, and virtualized list interaction timings in the Playwright output and attached JSON report under ignored `test-results/perf/`.
-
-Run the P10 performance and compatibility reports:
-
-```powershell
-pnpm build
-pnpm tauri build --no-bundle
-pnpm perf:all
-pnpm perf:release-memory
-```
-
-`pnpm perf:all` runs the bundle-size report, backend SQLite/FTS/sync/attachment benchmarks, browser mail-shell benchmark, and local Windows compatibility report. `pnpm perf:release-memory` samples the release `komorebi.exe` accountless idle shell and requires `pnpm tauri build --no-bundle` first. Reports are written under ignored `test-results/perf/` and `test-results/compat/`.
-
-If Chromium browser binaries are missing on a fresh machine, install them with:
-
-```powershell
-pnpm exec playwright install chromium
-```
-
-## Opt-In Live SMTP Smoke
-
-The ignored Rust live SMTP smoke test sends one message through a user-provided test account and deletes its temporary credential entry afterward. It never runs in normal `cargo test` or `pnpm check`.
-
-Generic IMAP/SMTP requires `KOMOREBI_LIVE_SMTP_SMOKE=1`, `KOMOREBI_LIVE_SMTP_PROVIDER=generic_imap_smtp`, `KOMOREBI_LIVE_SMTP_FROM`, `KOMOREBI_LIVE_SMTP_TO`, `KOMOREBI_LIVE_SMTP_SECRET`, IMAP host/port/security, and SMTP host/port/security. Gmail/Microsoft require `KOMOREBI_LIVE_SMTP_PROVIDER=gmail` or `microsoft`, `KOMOREBI_LIVE_SMTP_REFRESH_TOKEN`, `KOMOREBI_LIVE_SMTP_OAUTH_CLIENT_ID`, and `KOMOREBI_LIVE_SMTP_OAUTH_REDIRECT_URI`.
-
-```powershell
-cargo test --manifest-path src-tauri/Cargo.toml --test live_smtp_smoke -- --ignored --nocapture
-```
-
-## Generated Outputs
-
-Do not commit generated dependency, build, or runtime outputs such as `node_modules/`, `dist/`, `src-tauri/target/`, `src-tauri/gen/`, local app-data directories, disposable SQLite databases, or diagnostics logs.
+- Local-first, zero telemetry, zero ads.
+- Correct mail semantics and data safety outrank UI polish.
+- Drafts are local-only until send behavior is fully provider-safe.
+- The first screen should remain the working mail client, not a landing page.
