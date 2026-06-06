@@ -16,9 +16,15 @@ const targetPrefix = "Komorebi/"
 
 // CredentialData is the structured blob we store (supports OAuth refresh + expiry).
 type CredentialData struct {
-	Secret   string    `json:"secret"` // password or refresh_token
-	Expiry   time.Time `json:"expiry,omitempty"`
-	Username string    `json:"username,omitempty"`
+	Secret        string    `json:"secret"` // legacy password field for generic providers
+	Expiry        time.Time `json:"expiry,omitempty"`
+	Username      string    `json:"username,omitempty"`
+	AuthMode      string    `json:"authMode,omitempty"`
+	ProviderKind  string    `json:"providerKind,omitempty"`
+	AccessToken   string    `json:"accessToken,omitempty"`
+	RefreshToken  string    `json:"refreshToken,omitempty"`
+	TokenEndpoint string    `json:"tokenEndpoint,omitempty"`
+	ClientID      string    `json:"clientId,omitempty"`
 }
 
 // Save stores credential data securely.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -41,25 +42,142 @@ func Open(appDataDir string) (*sql.DB, error) {
 }
 
 func applyMigrations(db *sql.DB) error {
-	// Very small embedded migration set for the remake (real, not stub)
-	migrations := []string{
-		"001_core_schema.sql",
-		"002_drafts.sql",
-		"003_attachments.sql",
-		"004_account_server_settings.sql",
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at INTEGER NOT NULL DEFAULT (unixepoch())
+		)
+	`); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	for _, name := range migrations {
-		content, err := migrationsFS.ReadFile("migrations/" + name)
+	migrations := []struct {
+		version int
+		name    string
+		apply   func(*sql.Tx) error
+	}{
+		{version: 1, name: "001_core_schema.sql"},
+		{version: 2, name: "002_drafts.sql"},
+		{version: 3, name: "003_attachments.sql"},
+		{version: 4, name: "004_account_server_settings.sql", apply: applyAccountServerSettingsMigration},
+		{version: 5, name: "005_sync_state.sql"},
+		{version: 6, name: "006_sync_preferences.sql"},
+	}
+
+	for _, migration := range migrations {
+		applied, err := migrationApplied(db, migration.version)
 		if err != nil {
-			// If file doesn't exist yet, skip (we'll create it below)
+			return err
+		}
+		if applied {
 			continue
 		}
-		if _, err := db.Exec(string(content)); err != nil {
-			return fmt.Errorf("migration %s: %w", name, err)
+
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+
+		if migration.apply != nil {
+			err = migration.apply(tx)
+		} else {
+			err = execEmbeddedMigration(tx, migration.name)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migration %s: %w", migration.name, err)
+		}
+
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, unixepoch())`, migration.version); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("record migration %s: %w", migration.name, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", migration.name, err)
 		}
 	}
 	return nil
+}
+
+func migrationApplied(db *sql.DB, version int) (bool, error) {
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, version).Scan(&count); err != nil {
+		return false, fmt.Errorf("check migration %d: %w", version, err)
+	}
+	return count > 0, nil
+}
+
+func execEmbeddedMigration(tx *sql.Tx, name string) error {
+	content, err := migrationsFS.ReadFile("migrations/" + name)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(string(content))
+	return err
+}
+
+func applyAccountServerSettingsMigration(tx *sql.Tx) error {
+	if err := ensureColumn(tx, "accounts", "imap_security", "TEXT DEFAULT 'tls'"); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "accounts", "smtp_security", "TEXT DEFAULT 'starttls'"); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email)`)
+	return err
+}
+
+func ensureColumn(tx *sql.Tx, tableName, columnName, definition string) error {
+	columns, err := tableColumns(tx, tableName)
+	if err != nil {
+		return err
+	}
+	if columns[columnName] {
+		return nil
+	}
+	if !safeIdentifier(tableName) || !safeIdentifier(columnName) {
+		return fmt.Errorf("unsafe schema identifier")
+	}
+	_, err = tx.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, tableName, columnName, definition))
+	return err
+}
+
+func tableColumns(tx *sql.Tx, tableName string) (map[string]bool, error) {
+	if !safeIdentifier(tableName) {
+		return nil, fmt.Errorf("unsafe table name")
+	}
+	rows, err := tx.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
+}
+
+func safeIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r == '_' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return !strings.HasPrefix(value, "sqlite_")
 }
 
 // EnsureSeedAccount creates a local demo account with folders if none exists.

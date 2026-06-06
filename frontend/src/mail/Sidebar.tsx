@@ -1,69 +1,92 @@
-import { createResource, For, Show } from 'solid-js'
-import { FolderView } from '../types/mail'
-import { useWails } from '../lib/wails'
+import { For, Show } from 'solid-js'
+import { AccountView, BackgroundSyncStatus, FolderView } from '../types/mail'
+import { t } from '../i18n'
 
 interface Props {
+  accounts: AccountView[]
   folders: FolderView[]
   currentFolder: string
+  language: string
   onSelect: (id: string) => void
   onRefresh: () => void
+  onOpenSetup: () => void
+  onSyncAccount: (id: string) => void
+  syncStatuses: BackgroundSyncStatus[]
+  onStartAutoSync: (id: string) => void
+  onStopAutoSync: (id: string) => void
 }
 
 export function Sidebar(props: Props) {
-  const wails = useWails()
-  const [accounts] = createResource(() => wails.ListAccounts())
+  const syncStatusFor = (accountId: string) => props.syncStatuses.find((item) => item.accountId === accountId)
 
   return (
-    <div class="mail-sidebar w-56 bg-[#EDE8E1] border-r border-[#D9D4CC] flex flex-col">
-      <div class="p-3 text-xs uppercase tracking-widest text-[#8A8680] font-medium">
-        Accounts (real)
+    <aside class="mail-sidebar">
+      <div class="sidebar-section-header">
+        <span>{t(props.language, 'accounts')}</span>
+        <button class="icon-button" title={t(props.language, 'addAccount')} onClick={props.onOpenSetup}>+</button>
       </div>
-      <div class="px-2 text-xs">
-        <For each={accounts() || []}>
-          {(acc) => (
-            <div class="px-2 py-1 cursor-pointer hover:bg-[#F7F5F2]" onClick={() => window.location.reload()}>
-              {acc.displayName || acc.email}
-            </div>
-          )}
+
+      <div class="account-list">
+        <For each={props.accounts}>
+          {(account) => {
+            const syncStatus = () => syncStatusFor(account.id)
+            return (
+              <div class="account-row">
+                <div class="account-main">
+                  <span class="account-name">{account.displayName || account.email}</span>
+                  <span class={`account-safety ${account.safety}`}>{account.authMode}</span>
+                  <Show when={syncStatus()?.lastError}>
+                    <span class="account-sync-error">{syncStatus()?.lastError}</span>
+                  </Show>
+                  <Show when={syncStatus()?.running && syncStatus()?.lastRun}>
+                    <span class="account-sync-note">{t(props.language, 'lastSync')} {new Date((syncStatus()?.lastRun ?? 0) * 1000).toLocaleTimeString()}</span>
+                  </Show>
+                </div>
+                <Show when={account.provider !== 'local'}>
+                  <div class="account-actions">
+                    <button class="ghost-button" onClick={() => props.onSyncAccount(account.id)}>
+                      {t(props.language, 'sync')}
+                    </button>
+                    <Show
+                      when={syncStatus()?.running}
+                      fallback={
+                        <button class="ghost-button" onClick={() => props.onStartAutoSync(account.id)}>
+                          {t(props.language, 'autoSync')}
+                        </button>
+                      }
+                    >
+                      <button class="ghost-button active" onClick={() => props.onStopAutoSync(account.id)}>
+                        {t(props.language, 'stopSync')}
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+            )
+          }}
         </For>
       </div>
 
-      <div class="p-3 text-xs uppercase tracking-widest text-[#8A8680] font-medium flex justify-between items-center">
-        <span>Folders</span>
-        <button onClick={props.onRefresh} class="text-[#5C6B5E] hover:text-[#8B5E3C]">↻</button>
+      <div class="sidebar-section-header">
+        <span>{t(props.language, 'folders')}</span>
+        <button class="icon-button" title="Refresh" onClick={props.onRefresh}>↻</button>
       </div>
 
-      <div class="px-2 py-1 text-sm">
+      <nav class="folder-list">
         <For each={props.folders}>
           {(folder) => (
-            <div
+            <button
               class={`folder-item ${props.currentFolder === folder.id ? 'active' : ''}`}
               onClick={() => props.onSelect(folder.id)}
             >
               <span>{folder.displayName || folder.name}</span>
               <Show when={folder.unreadCount > 0}>
-                <span class="text-xs px-1.5 py-px rounded bg-[#8B5E3C] text-white">{folder.unreadCount}</span>
+                <span class="folder-count">{folder.unreadCount}</span>
               </Show>
-            </div>
+            </button>
           )}
         </For>
-      </div>
-
-      <div class="mt-auto p-3 text-[10px] text-[#8A8680] border-t border-[#D9D4CC]">
-        Real SQLite cache<br />
-        <button class="underline mr-2" onClick={async () => {
-          const email = prompt('Email for new real account?')
-          if (email) {
-            const pw = prompt('Password (stored ONLY in Windows Credential Manager via wincred)')
-            await (window as any).wails?.AddAccount?.(email, email.split('@')[0], 'generic', pw || '')
-            window.location.reload()
-          }
-        }}>Add real account</button>
-        <button class="underline" onClick={async () => {
-          await (window as any).wails?.SyncAccount?.('demo-local')
-          window.location.reload()
-        }}>Sync Now (real IMAP)</button>
-      </div>
-    </div>
+      </nav>
+    </aside>
   )
 }

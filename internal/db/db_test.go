@@ -3,11 +3,11 @@ package db
 import "testing"
 
 func TestOpenAppliesMigrationsAndSeedsLocalCache(t *testing.T) {
-	database, err := Open(t.TempDir())
+	dir := t.TempDir()
+	database, err := Open(dir)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer database.Close()
 
 	if err := EnsureSeedAccount(database); err != nil {
 		t.Fatalf("EnsureSeedAccount() error = %v", err)
@@ -50,5 +50,29 @@ func TestOpenAppliesMigrationsAndSeedsLocalCache(t *testing.T) {
 		if !columns[name] {
 			t.Fatalf("accounts missing column %q", name)
 		}
+	}
+	if _, err := database.Exec(`
+		INSERT INTO sync_state (account_id, folder_name, uid_validity, last_uid, highest_modseq)
+		VALUES ('demo-local', 'INBOX', 1, 2, 3)
+	`); err != nil {
+		t.Fatalf("insert sync_state: %v", err)
+	}
+
+	if err := database.Close(); err != nil {
+		t.Fatalf("close first database: %v", err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open() after migrations error = %v", err)
+	}
+	defer reopened.Close()
+
+	var applied int
+	if err := reopened.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if applied != 6 {
+		t.Fatalf("applied migrations = %d, want 6", applied)
 	}
 }

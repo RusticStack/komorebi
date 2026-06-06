@@ -1,7 +1,9 @@
 import { createSignal } from 'solid-js'
+import { t } from '../i18n'
 
 interface Props {
   onSearch: (query: string) => void
+  language: string
 }
 
 export function SearchBar(props: Props) {
@@ -20,11 +22,11 @@ export function SearchBar(props: Props) {
   }
 
   return (
-    <div class="p-3 border-b border-[#D9D4CC] bg-[#F1EDE7]">
+    <div class="search-shell">
       <input
         type="text"
         class="search-input"
-        placeholder="Search real local cache (FTS5)..."
+        placeholder={t(props.language, 'search')}
         value={value()}
         onInput={handleInput}
       />

@@ -1,20 +1,23 @@
 import { createVirtualizer } from '@tanstack/solid-virtual'
-import { For, Show, createSignal, createEffect, onCleanup, onMount } from 'solid-js'
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 import { MessageRow } from '../types/mail'
 import { useWails } from '../lib/wails'
 import { formatRelativeDate } from '../lib/format'
+import { t } from '../i18n'
 
 interface Props {
   messages: MessageRow[]
   selectedId: string | null
   onSelect: (id: string) => void
-  total: number
   currentFolder: string
-  onMessagesAppended: (newMessages: MessageRow[]) => void
+  hasMore: boolean
+  onMessagesAppended: (newMessages: MessageRow[], hasMore: boolean) => void
+  language: string
 }
 
 export function MessageList(props: Props) {
   let containerRef: HTMLDivElement | undefined
+  let lastFolder = props.currentFolder
   const wails = useWails()
   const [isLoadingMore, setIsLoadingMore] = createSignal(false)
   const [cursor, setCursor] = createSignal(0)
@@ -22,29 +25,43 @@ export function MessageList(props: Props) {
   const virtualizer = createVirtualizer({
     count: props.messages.length,
     getScrollElement: () => containerRef ?? null,
-    estimateSize: () => 58,
+    estimateSize: () => 66,
     overscan: 10,
   })
 
-  // Real infinite scroll using the Go LoadMessagePage binding
+  createEffect(() => {
+    if (props.currentFolder !== lastFolder) {
+      lastFolder = props.currentFolder
+      setCursor(props.messages.length)
+      containerRef?.scrollTo({ top: 0 })
+    }
+  })
+
+  createEffect(() => {
+    if (cursor() === 0 && props.messages.length > 0) {
+      setCursor(props.messages.length)
+    }
+  })
+
   const loadMore = async () => {
-    if (isLoadingMore() || props.messages.length >= props.total) return
+    if (isLoadingMore() || !props.hasMore) return
 
     setIsLoadingMore(true)
     try {
-      const result = await wails.LoadMessagePage(props.currentFolder, cursor(), 60)
+      const result = await wails.LoadMessagePage({ folderId: props.currentFolder, cursor: cursor(), limit: 60 })
       if (result?.messages?.length) {
-        props.onMessagesAppended(result.messages)
+        props.onMessagesAppended(result.messages, result.hasMore)
         setCursor(result.nextCursor || (cursor() + result.messages.length))
+      } else {
+        props.onMessagesAppended([], false)
       }
     } catch (e) {
-      console.error('Failed to load more real messages', e)
+      console.error('Failed to load messages', e)
     } finally {
       setIsLoadingMore(false)
     }
   }
 
-  // Trigger loadMore when user scrolls near the bottom of the virtual list
   createEffect(() => {
     const el = containerRef
     if (!el) return
@@ -60,7 +77,6 @@ export function MessageList(props: Props) {
     onCleanup(() => el.removeEventListener('scroll', handler))
   })
 
-  // Real keyboard navigation (arrows + enter)
   onMount(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (!props.messages.length) return
@@ -73,9 +89,6 @@ export function MessageList(props: Props) {
         const prev = Math.max(currentIdx - 1, 0)
         props.onSelect(props.messages[prev].id)
         e.preventDefault()
-      } else if (e.key === 'Enter' && props.selectedId) {
-        // Could trigger reader focus or reply in future
-        e.preventDefault()
       }
     }
     window.addEventListener('keydown', handleKey)
@@ -83,7 +96,7 @@ export function MessageList(props: Props) {
   })
 
   return (
-    <div ref={containerRef} class="message-list h-full overflow-auto">
+    <div ref={containerRef} class="message-list">
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
@@ -98,18 +111,16 @@ export function MessageList(props: Props) {
 
             return (
               <div
-                class={`message-row absolute left-0 right-0 ${props.selectedId === msg.id ? 'selected' : ''} ${!msg.isRead ? 'unread' : ''}`}
+                class={`message-row ${props.selectedId === msg.id ? 'selected' : ''} ${!msg.isRead ? 'unread' : ''}`}
                 style={{ top: `${virtualItem.start}px`, height: `${virtualItem.size}px` }}
                 onClick={() => props.onSelect(msg.id)}
               >
-                <div class="flex justify-between text-sm">
-                  <div class="font-medium truncate pr-3">{msg.senderName || msg.senderEmail}</div>
-                  <div class="text-xs text-[#8A8680] shrink-0">
-                    {formatRelativeDate(msg.dateReceived)}
-                  </div>
+                <div class="message-row-top">
+                  <div class="message-sender">{msg.senderName || msg.senderEmail}</div>
+                  <div class="message-date">{formatRelativeDate(msg.dateReceived)}</div>
                 </div>
-                <div class="subject text-[13px] truncate">{msg.subject}</div>
-                <div class="text-xs text-[#8A8680] line-clamp-1 mt-0.5">{msg.snippet}</div>
+                <div class="message-subject">{msg.subject}</div>
+                <div class="message-snippet">{msg.snippet}</div>
               </div>
             )
           }}
@@ -117,11 +128,11 @@ export function MessageList(props: Props) {
       </div>
 
       <Show when={isLoadingMore()}>
-        <div class="p-3 text-center text-xs text-[#8A8680]">Loading more from real SQLite…</div>
+        <div class="list-status">Loading...</div>
       </Show>
 
       <Show when={props.messages.length === 0}>
-        <div class="p-8 text-center text-[#8A8680] text-sm">No messages in this real local folder yet</div>
+        <div class="empty-state">{t(props.language, 'emptyFolder')}</div>
       </Show>
     </div>
   )

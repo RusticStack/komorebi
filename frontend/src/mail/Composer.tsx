@@ -1,12 +1,15 @@
 import { createSignal, onCleanup } from 'solid-js'
 import { Dialog } from '@ark-ui/solid/dialog'
 import { useWails } from '../lib/wails'
+import { t } from '../i18n'
 
 interface Props {
+  accountId?: string
   draftId?: string
   initialSubject?: string
   initialTo?: string
   initialBody?: string
+  language: string
   onClose: () => void
   onSaved: () => void
 }
@@ -22,6 +25,7 @@ export function Composer(props: Props) {
   let saveTimer: number
 
   const draftId = props.draftId || 'draft-' + Date.now()
+  const accountId = () => props.accountId || 'demo-local'
 
   // Real autosave to SQLite
   const scheduleAutosave = () => {
@@ -30,7 +34,7 @@ export function Composer(props: Props) {
       try {
         await wails.SaveDraft({
           id: draftId,
-          accountId: 'demo-local',
+          accountId: accountId(),
           subject: subject(),
           to: JSON.stringify([to()]),
           bodyHtml: body(),
@@ -71,7 +75,7 @@ export function Composer(props: Props) {
     try {
       await wails.SaveDraft({
         id: draftId,
-        accountId: 'demo-local',
+        accountId: accountId(),
         subject: subject(),
         to: JSON.stringify([to()]),
         bodyHtml: body(),
@@ -97,52 +101,47 @@ export function Composer(props: Props) {
     <Dialog.Root open={true} onOpenChange={(e) => !e.open && props.onClose()}>
       <Dialog.Backdrop class="fixed inset-0 bg-black/40 z-[100]" />
       <Dialog.Positioner class="fixed inset-0 flex items-center justify-center z-[101]">
-        <Dialog.Content class="bg-white w-[820px] max-h-[85vh] rounded-xl shadow-2xl flex flex-col border border-[#D9D4CC]">
-        {/* Header */}
-        <div class="flex items-center justify-between px-5 py-3 border-b">
-          <div class="font-semibold">New Message (real local draft)</div>
-          <div class="flex gap-2">
-            <button onClick={handleDiscard} class="px-4 py-1.5 text-sm rounded hover:bg-red-50 text-red-600">Discard</button>
-            <button onClick={handleSend} class="px-6 py-1.5 text-sm rounded bg-[#5C6B5E] text-white hover:bg-[#8B5E3C]">Send (local)</button>
-            <button onClick={props.onClose} class="px-3 text-xl leading-none">×</button>
+        <Dialog.Content class="composer-dialog">
+        <div class="composer-header">
+          <div class="font-semibold">{t(props.language, 'newDraft')}</div>
+          <div class="composer-actions">
+            <button onClick={handleDiscard} class="danger-button">{t(props.language, 'discard')}</button>
+            <button onClick={handleSend} class="primary-button">{t(props.language, 'sendLocal')}</button>
+            <button onClick={props.onClose} class="icon-button">×</button>
           </div>
         </div>
 
-        <div class="p-4 space-y-3">
+        <div class="composer-body">
           <input
-            class="w-full border border-[#D9D4CC] rounded px-3 py-2 text-sm"
-            placeholder="To"
+            class="form-input"
+            placeholder={t(props.language, 'to')}
             value={to()}
             onInput={handleToChange}
           />
           <input
-            class="w-full border border-[#D9D4CC] rounded px-3 py-2 text-sm font-medium"
-            placeholder="Subject"
+            class="form-input subject-input"
+            placeholder={t(props.language, 'subject')}
             value={subject()}
             onInput={handleSubjectChange}
           />
 
-          {/* Real rich editing toolbar */}
-          <div class="flex gap-1 border-b pb-2">
-            <button onClick={() => exec('bold')} class="px-2 py-1 text-sm hover:bg-[#F7F5F2] rounded font-bold">B</button>
-            <button onClick={() => exec('italic')} class="px-2 py-1 text-sm hover:bg-[#F7F5F2] rounded italic">I</button>
-            <button onClick={() => exec('insertUnorderedList')} class="px-2 py-1 text-sm hover:bg-[#F7F5F2] rounded">• List</button>
-            <button onClick={() => exec('insertOrderedList')} class="px-2 py-1 text-sm hover:bg-[#F7F5F2] rounded">1. List</button>
+          <div class="composer-toolbar">
+            <button onClick={() => exec('bold')} class="tool-button font-bold" title="Bold">B</button>
+            <button onClick={() => exec('italic')} class="tool-button italic" title="Italic">I</button>
+            <button onClick={() => exec('insertUnorderedList')} class="tool-button" title="Bulleted list">•</button>
+            <button onClick={() => exec('insertOrderedList')} class="tool-button" title="Numbered list">1</button>
           </div>
 
-          {/* Real contenteditable composer body */}
           <div
             ref={editorRef}
             contentEditable
-            class="min-h-[280px] border border-[#D9D4CC] rounded p-4 text-sm focus:outline-none prose prose-sm max-w-none"
+            class="composer-editor"
             innerHTML={body()}
             onInput={handleInput}
           />
         </div>
 
-        <div class="text-[10px] px-5 py-2 text-[#8A8680] border-t">
-          Drafts are saved in real time to local SQLite. Full rich formatting + attachments + real SMTP coming in next slices.
-        </div>
+        <div class="composer-footer">Autosaved locally</div>
         </Dialog.Content>
       </Dialog.Positioner>
     </Dialog.Root>

@@ -13,8 +13,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
     e.preventDefault()
-    // Focus search (can be enhanced)
-    const search = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement
+    const search = document.querySelector('.search-input') as HTMLInputElement
     search?.focus()
   }
 })
