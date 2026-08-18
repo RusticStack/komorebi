@@ -9,8 +9,10 @@
 //! view state.
 
 use crate::ai::{self, Ai, AiConfig, Category};
-use crate::db::{Account, AccountDraft, Attachment, Database, Folder, MessageDetail, MessageRow};
+use crate::db::{Account, Attachment, Database, Folder, MessageDetail, MessageRow};
 use crate::mail;
+use crate::mail::discovery::DiscoveredSettings;
+use crate::mail::types::{ProviderKind, Security, ServerSettings};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Entity, ExternalPaths, FocusHandle, Focusable, Hsla,
@@ -26,8 +28,8 @@ use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenu, PopupMe
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, Theme, ThemeMode, TitleBar,
-    h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, Theme,
+    ThemeMode, TitleBar, h_flex, v_flex,
 };
 
 const CONTEXT: &str = "Komorebi";
@@ -76,6 +78,36 @@ enum Panel {
 enum ReplyMode {
     Reply,
     Note,
+}
+
+/// Connection security selection for manual account setup.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetupSecurity {
+    Tls,
+    StartTls,
+}
+
+impl SetupSecurity {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SetupSecurity::Tls => "tls",
+            SetupSecurity::StartTls => "starttls",
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            SetupSecurity::Tls => "TLS",
+            SetupSecurity::StartTls => "STARTTLS",
+        }
+    }
+
+    fn security(&self) -> Security {
+        match self {
+            SetupSecurity::Tls => Security::Tls,
+            SetupSecurity::StartTls => Security::StartTls,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -241,7 +273,23 @@ pub struct App {
     // Account setup state.
     setup_email: Entity<InputState>,
     setup_name: Entity<InputState>,
+    setup_password: Entity<InputState>,
+    setup_imap_host: Entity<InputState>,
+    setup_imap_port: Entity<InputState>,
+    setup_smtp_host: Entity<InputState>,
+    setup_smtp_port: Entity<InputState>,
+    setup_imap_security: SetupSecurity,
+    setup_smtp_security: SetupSecurity,
+    setup_client_id: Entity<InputState>,
+    setup_client_secret: Entity<InputState>,
+    setup_redirect_uri: Entity<InputState>,
+    setup_discovered: Option<DiscoveredSettings>,
+    setup_busy: bool,
     setup_status: Option<String>,
+
+    // Sync state.
+    sync_status: Option<String>,
+    syncing: bool,
 
     // AI state.
     ai: Ai,
@@ -312,6 +360,23 @@ impl App {
         let setup_email = cx.new(|cx| InputState::new(window, cx).placeholder("Email address"));
         let setup_name =
             cx.new(|cx| InputState::new(window, cx).placeholder("Display name (optional)"));
+        let setup_password = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Password (stored in Credential Manager)")
+        });
+        let setup_imap_host = cx
+            .new(|cx| InputState::new(window, cx).placeholder("IMAP host (e.g. mail.example.com)"));
+        let setup_imap_port = cx.new(|cx| InputState::new(window, cx).placeholder("993"));
+        let setup_smtp_host = cx
+            .new(|cx| InputState::new(window, cx).placeholder("SMTP host (e.g. mail.example.com)"));
+        let setup_smtp_port = cx.new(|cx| InputState::new(window, cx).placeholder("587"));
+        let setup_client_id =
+            cx.new(|cx| InputState::new(window, cx).placeholder("OAuth client id"));
+        let setup_client_secret =
+            cx.new(|cx| InputState::new(window, cx).placeholder("OAuth client secret"));
+        let setup_redirect_uri = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Redirect URI (default http://127.0.0.1:8765/callback)")
+        });
         let ai_model = cx.new(|cx| InputState::new(window, cx).placeholder("Model"));
         let ai_base_url =
             cx.new(|cx| InputState::new(window, cx).placeholder("Base URL (with /v1)"));
@@ -357,7 +422,21 @@ impl App {
             composer_drag_over: false,
             setup_email,
             setup_name,
+            setup_password,
+            setup_imap_host,
+            setup_imap_port,
+            setup_smtp_host,
+            setup_smtp_port,
+            setup_imap_security: SetupSecurity::Tls,
+            setup_smtp_security: SetupSecurity::StartTls,
+            setup_client_id,
+            setup_client_secret,
+            setup_redirect_uri,
+            setup_discovered: None,
+            setup_busy: false,
             setup_status: None,
+            sync_status: None,
+            syncing: false,
             ai,
             ai_config,
             ai_model,
@@ -812,7 +891,7 @@ impl App {
     // ---------------------------------------------------------------------
     // Inline reply composer
     // ---------------------------------------------------------------------
-    fn send_reply(&mut self, cx: &mut Context<Self>) -> bool {
+    fn send_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let body = self.reply_input.read(cx).value().to_string();
         if body.trim().is_empty() {
             self.set_toast("Write a reply first.", cx);
@@ -829,27 +908,48 @@ impl App {
                 .collect()
         };
         let subject = self.reply_subject.clone();
-        let saved_attachments = std::mem::take(&mut self.composer_attachments);
-        let result = self.do_send(&to, &subject, &body);
-        self.composer_attachments = saved_attachments;
-        match result {
-            Ok(()) => {
-                self.set_toast("Reply sent ✓", cx);
-                self.reply_input.update(cx, |s, _cx| {
-                    // clear via editor command is not available here; rely on
-                    // caller to reset value with a window where available.
-                    let _ = s;
-                });
-                self.reply_to = String::new();
-                self.reply_subject = String::new();
-                self.ai_reply_draft = None;
-                true
-            }
-            Err(e) => {
-                self.set_toast(&format!("Send failed: {e}"), cx);
-                false
-            }
-        }
+        let attachments: Vec<mail::smtp::Attachment> = self
+            .composer_attachments
+            .iter()
+            .map(|a| mail::smtp::Attachment {
+                filename: a.name.clone(),
+                content_type: mail::smtp::guess_content_type(&a.name).to_string(),
+                data: a.data.clone(),
+            })
+            .collect();
+        let account = self.accounts.first().cloned();
+
+        // Clear the reply composer optimistically; the send owns its copies.
+        self.reply_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.composer_attachments.clear();
+        self.reply_to = String::new();
+        self.reply_subject = String::new();
+        self.ai_reply_draft = None;
+        cx.notify();
+
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match account.as_ref() {
+                        Some(a) => perform_send(&db, a, &to, &subject, &body, &attachments),
+                        None => Ok(()),
+                    }
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                match result {
+                    Ok(()) => this.set_toast("Reply sent ✓", cx),
+                    Err(e) => this.set_toast(&format!("Send failed: {e}"), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        true
     }
 
     fn run_ai_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1317,6 +1417,23 @@ impl App {
                             cx.update_entity(&entity, |this, cx| {
                                 this.new_message(window, cx);
                             });
+                        }
+                    }),
+            )
+            .child(
+                Button::new("sidebar-sync")
+                    .label(if self.syncing { "Syncing…" } else { "Sync" })
+                    .icon(IconName::Globe)
+                    .ghost()
+                    .w_full()
+                    .h_7()
+                    .justify_start()
+                    .disabled(self.syncing)
+                    .tooltip("Sync all accounts")
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _, cx| {
+                            cx.update_entity(&entity, |this, cx| this.sync_now(cx));
                         }
                     }),
             )
@@ -2493,18 +2610,9 @@ impl App {
                                     .on_click({
                                         let entity = entity.clone();
                                         move |_, window, cx| {
-                                            let mut ok = false;
                                             cx.update_entity(&entity, |this, cx| {
-                                                ok = this.send_reply(cx);
+                                                let _ = this.send_reply(window, cx);
                                             });
-                                            if ok {
-                                                cx.update_entity(&entity, |this, cx| {
-                                                    this.reply_input.update(cx, |s, cx| {
-                                                        s.set_value("", window, cx)
-                                                    });
-                                                    cx.notify();
-                                                });
-                                            }
                                         }
                                     }),
                             ),
@@ -3287,19 +3395,10 @@ impl App {
                             .primary()
                             .on_click({
                                 let entity = entity.clone();
-                                let to = to_input.clone();
-                                let subj = subject_input.clone();
-                                let body = body_input.clone();
                                 move |_, window, cx| {
-                                    let mut ok = false;
                                     cx.update_entity(&entity, |this, cx| {
-                                        ok = this.send_composed(cx);
+                                        let _ = this.send_composed(window, cx);
                                     });
-                                    if ok {
-                                        to.update(cx, |s, cx| s.set_value("", window, cx));
-                                        subj.update(cx, |s, cx| s.set_value("", window, cx));
-                                        body.update(cx, |s, cx| s.set_value("", window, cx));
-                                    }
                                 }
                             }),
                     )
@@ -3376,7 +3475,7 @@ impl App {
         chips
     }
 
-    fn send_composed(&mut self, cx: &mut Context<Self>) -> bool {
+    fn send_composed(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let to_raw = self.to_input.read(cx).value().to_string();
         let subject = self.subject_input.read(cx).value().to_string();
         let body = self.body_input.read(cx).value().to_string();
@@ -3394,22 +3493,6 @@ impl App {
             return false;
         }
 
-        match self.do_send(&to, &subject, &body) {
-            Ok(()) => {
-                self.compose_status = Some("Sent ✓".to_string());
-                self.composer_attachments.clear();
-                cx.notify();
-                true
-            }
-            Err(e) => {
-                self.compose_status = Some(format!("Send failed: {e}"));
-                cx.notify();
-                false
-            }
-        }
-    }
-
-    fn do_send(&mut self, to: &[String], subject: &str, body: &str) -> anyhow::Result<()> {
         let attachments: Vec<mail::smtp::Attachment> = self
             .composer_attachments
             .iter()
@@ -3419,60 +3502,206 @@ impl App {
                 data: a.data.clone(),
             })
             .collect();
-
         let account = self.accounts.first().cloned();
-        if let Some(account) = account {
-            if account.smtp_host.is_some() {
-                mail::send_message(&self.db, &account, to, &[], subject, body, &attachments)?;
-            } else {
-                let sent = self
-                    .db
-                    .list_folders(&account.id)?
-                    .into_iter()
-                    .find(|f| f.special_use.as_deref() == Some("sent"));
-                let sent =
-                    sent.or_else(|| self.db.list_folders(&account.id).ok()?.into_iter().next());
-                if let Some(sent) = sent {
-                    let now = chrono::Utc::now().timestamp();
-                    let message_id = self.db.insert_message(&crate::db::MessageDraft {
-                        account_id: account.id.clone(),
-                        folder_id: sent.id.clone(),
-                        subject: Some(subject.to_string()),
-                        sender_email: Some(account.email.clone()),
-                        to_addresses: serde_json::to_string(to).ok(),
-                        date_received: Some(now),
-                        is_read: true,
-                        body_text: Some(body.to_string()),
-                        snippet: Some(mail::mime::make_snippet(body)),
-                        has_attachments: !attachments.is_empty(),
-                        ..Default::default()
-                    })?;
-                    for attachment in &attachments {
-                        self.db.insert_attachment(
-                            &message_id,
-                            &attachment.filename,
-                            Some(&attachment.content_type),
-                            &attachment.data,
-                        )?;
+
+        // Clear the composer optimistically; the send owns its copies.
+        self.to_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.subject_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.body_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.composer_attachments.clear();
+        self.compose_status = Some("Sending…".to_string());
+        cx.notify();
+
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match account.as_ref() {
+                        Some(a) => perform_send(&db, a, &to, &subject, &body, &attachments),
+                        None => Ok(()),
                     }
-                }
-            }
-        }
-        Ok(())
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                this.compose_status = Some(match result {
+                    Ok(()) => "Sent ✓".to_string(),
+                    Err(e) => format!("Send failed: {e}"),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+        true
     }
 
     // ---------------------------------------------------------------------
     // Accounts
     // ---------------------------------------------------------------------
+    /// Two-toggle TLS/STARTTLS picker for manual server settings.
+    fn security_buttons(&self, entity: Entity<Self>, is_imap: bool) -> AnyElement {
+        let current = if is_imap {
+            self.setup_imap_security
+        } else {
+            self.setup_smtp_security
+        };
+        let mut row = h_flex().gap_1();
+        for sec in [SetupSecurity::Tls, SetupSecurity::StartTls] {
+            let selected = current == sec;
+            let entity = entity.clone();
+            row = row.child(
+                Button::new(SharedString::from(format!(
+                    "{}sec-{}",
+                    if is_imap { "imap" } else { "smtp" },
+                    sec.as_str()
+                )))
+                .label(SharedString::from(sec.label()))
+                .when(selected, |b| b.primary())
+                .when(!selected, |b| b.outline())
+                .xsmall()
+                .on_click(move |_, _, cx| {
+                    cx.update_entity(&entity, move |this, cx| {
+                        if is_imap {
+                            this.setup_imap_security = sec;
+                        } else {
+                            this.setup_smtp_security = sec;
+                        }
+                        cx.notify();
+                    });
+                }),
+            );
+        }
+        row.into_any_element()
+    }
+
+    /// Read-only summary of a successful autodiscovery result.
+    fn discovered_summary(&self, cx: &mut Context<Self>, d: &DiscoveredSettings) -> AnyElement {
+        let imap = d
+            .imap
+            .as_ref()
+            .map(|s| format!("{}:{} ({})", s.host, s.port, s.security.as_str()))
+            .unwrap_or_else(|| " - ".to_string());
+        let smtp = d
+            .smtp
+            .as_ref()
+            .map(|s| format!("{}:{} ({})", s.host, s.port, s.security.as_str()))
+            .unwrap_or_else(|| " - ".to_string());
+        v_flex()
+            .gap_1()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().muted)
+            .p_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .child(SharedString::from(format!(
+                        "{} · {}% confidence",
+                        d.provider_label, d.confidence
+                    ))),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!("IMAP {imap} · SMTP {smtp}"))),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!("Auth: {}", d.auth_mode))),
+            )
+            .children(d.warnings.iter().map(|w| {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().warning)
+                    .child(SharedString::from(w.clone()))
+            }))
+            .into_any_element()
+    }
+
     fn accounts_panel(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let entity = cx.entity();
         let status = self.setup_status.clone();
         let accounts = self.accounts.clone();
         let setup_email = self.setup_email.clone();
         let setup_name = self.setup_name.clone();
+        let setup_password = self.setup_password.clone();
+        let setup_imap_host = self.setup_imap_host.clone();
+        let setup_imap_port = self.setup_imap_port.clone();
+        let setup_smtp_host = self.setup_smtp_host.clone();
+        let setup_smtp_port = self.setup_smtp_port.clone();
+        let setup_client_id = self.setup_client_id.clone();
+        let setup_client_secret = self.setup_client_secret.clone();
+        let setup_redirect_uri = self.setup_redirect_uri.clone();
+        let discovered = self.setup_discovered.clone();
+        let busy = self.setup_busy;
+        let syncing = self.syncing;
+        let sync_status = self.sync_status.clone();
         let ai_model = self.ai_model.clone();
         let ai_base_url = self.ai_base_url.clone();
         let current_provider = self.ai_config.provider.clone();
+        let oauth = discovered
+            .as_ref()
+            .map(|d| d.auth_mode == "oauth")
+            .unwrap_or(false);
+
+        let add_or_authorize: AnyElement = if oauth {
+            v_flex()
+                .gap_2()
+                .child(Label::new("OAuth client id").text_xs())
+                .child(Input::new(&setup_client_id))
+                .child(Label::new("OAuth client secret").text_xs())
+                .child(Input::new(&setup_client_secret))
+                .child(Label::new("Redirect URI").text_xs())
+                .child(Input::new(&setup_redirect_uri))
+                .child(
+                    Button::new("authorize-oauth")
+                        .label(if busy {
+                            "Authorizing…"
+                        } else {
+                            "Authorize & add account"
+                        })
+                        .icon(IconName::Globe)
+                        .primary()
+                        .disabled(busy)
+                        .on_click({
+                            let entity = entity.clone();
+                            move |_, _, cx| {
+                                cx.update_entity(&entity, |this, cx| this.authorize_oauth(cx));
+                            }
+                        }),
+                )
+                .into_any_element()
+        } else {
+            Button::new("add-account")
+                .label("Add account")
+                .icon(IconName::Plus)
+                .primary()
+                .on_click({
+                    let entity = entity.clone();
+                    let email = setup_email.clone();
+                    let name = setup_name.clone();
+                    move |_, window, cx| {
+                        let mut ok = false;
+                        cx.update_entity(&entity, |this, cx| {
+                            ok = this.add_account(cx);
+                        });
+                        if ok {
+                            email.update(cx, |s, cx| s.set_value("", window, cx));
+                            name.update(cx, |s, cx| s.set_value("", window, cx));
+                        }
+                    }
+                })
+                .into_any_element()
+        };
 
         let mut providers = v_flex().id("ai-providers").gap_1();
         for preset in ai::providers::presets() {
@@ -3527,33 +3756,44 @@ impl App {
                         "Self-hosted first: Mailcow, Zimbra, Poste.io, or any IMAP/SMTP server. Gmail and Microsoft 365 are supported through OAuth.",
                     ),
             )
+            .child(div().text_lg().font_semibold().child("Add account"))
+            .child(Input::new(&setup_email))
+            .child(Input::new(&setup_name))
             .child(
-                v_flex()
-                    .gap_2()
-                    .child(Input::new(&setup_email))
-                    .child(Input::new(&setup_name))
-                    .child(
-                        Button::new("add-account")
-                            .label("Add self-hosted account")
-                            .icon(IconName::Plus)
-                            .primary()
-                            .on_click({
-                                let entity = entity.clone();
-                                let email = setup_email.clone();
-                                let name = setup_name.clone();
-                                move |_, window, cx| {
-                                    let mut ok = false;
-                                    cx.update_entity(&entity, |this, cx| {
-                                        ok = this.add_account(cx);
-                                    });
-                                    if ok {
-                                        email.update(cx, |s, cx| s.set_value("", window, cx));
-                                        name.update(cx, |s, cx| s.set_value("", window, cx));
-                                    }
-                                }
-                            }),
-                    ),
+                Button::new("discover")
+                    .label(if busy { "Discovering…" } else { "Discover settings" })
+                    .icon(IconName::Search)
+                    .outline()
+                    .disabled(busy)
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _, cx| {
+                            cx.update_entity(&entity, |this, cx| this.discover_settings(cx));
+                        }
+                    }),
             )
+            .children(discovered.as_ref().map(|d| self.discovered_summary(cx, d)))
+            .child(Label::new("Password").text_xs())
+            .child(Input::new(&setup_password))
+            .child(
+                Label::new("Manual server settings (used when discovery finds nothing)")
+                    .text_xs(),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Input::new(&setup_imap_host).flex_1())
+                    .child(Input::new(&setup_imap_port).w(px(96.0))),
+            )
+            .child(self.security_buttons(entity.clone(), true))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(Input::new(&setup_smtp_host).flex_1())
+                    .child(Input::new(&setup_smtp_port).w(px(96.0))),
+            )
+            .child(self.security_buttons(entity.clone(), false))
+            .child(add_or_authorize)
             .children(status.map(|s| {
                 div()
                     .text_sm()
@@ -3561,6 +3801,31 @@ impl App {
                     .child(SharedString::from(s))
             }))
             .child(div().h_2())
+            .child(div().text_lg().font_semibold().child("Sync"))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("sync")
+                            .label(if syncing { "Syncing…" } else { "Sync all accounts" })
+                            .icon(IconName::Globe)
+                            .primary()
+                            .disabled(syncing)
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    cx.update_entity(&entity, |this, cx| this.sync_now(cx));
+                                }
+                            }),
+                    )
+                    .children(sync_status.map(|s| {
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(SharedString::from(s))
+                    })),
+            )
             .child(self.account_rows(cx, entity.clone(), accounts))
             .child(div().h_4())
             .child(div().text_lg().font_semibold().child("AI provider"))
@@ -3655,23 +3920,62 @@ impl App {
             cx.notify();
             return false;
         }
-        let draft = AccountDraft {
-            email: email.trim().to_string(),
-            display_name: if name.trim().is_empty() {
-                None
-            } else {
-                Some(name.trim().to_string())
-            },
-            provider_kind: "custom".to_string(),
-            auth_mode: "password".to_string(),
-            ..Default::default()
+        let email = email.trim().to_string();
+        let display_name = if name.trim().is_empty() {
+            None
+        } else {
+            Some(name.trim().to_string())
         };
-        match self.db.insert_account(&draft) {
+
+        // Prefer discovered settings; otherwise read the manual fields.
+        let discovered = self.setup_discovered.clone();
+        let (kind, auth_mode, imap, smtp) = match &discovered {
+            Some(d) => (
+                ProviderKind::from_str(&d.provider_kind),
+                d.auth_mode.clone(),
+                d.imap.clone(),
+                d.smtp.clone(),
+            ),
+            None => (
+                ProviderKind::Custom,
+                "password".to_string(),
+                self.manual_imap(cx),
+                self.manual_smtp(cx),
+            ),
+        };
+
+        if auth_mode == "oauth" {
+            self.setup_status = Some(
+                "This account needs OAuth - fill in the client credentials and click Authorize."
+                    .to_string(),
+            );
+            cx.notify();
+            return false;
+        }
+
+        let password = self.setup_password.read(cx).value().to_string();
+        if password.trim().is_empty() {
+            self.setup_status = Some("Enter the mailbox password.".to_string());
+            cx.notify();
+            return false;
+        }
+
+        match mail::create_password_account(
+            &self.db,
+            &email,
+            display_name.as_deref(),
+            kind,
+            imap.as_ref(),
+            smtp.as_ref(),
+            None,
+            password.trim(),
+        ) {
             Ok(acc) => {
                 self.setup_status = Some(format!(
-                    "Added {} - configure server settings to sync.",
+                    "Added {} - use Sync in the sidebar to fetch mail.",
                     acc.email
                 ));
+                self.setup_discovered = None;
                 self.refresh_accounts();
                 self.refresh_folders();
                 cx.notify();
@@ -3683,6 +3987,232 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Read manual IMAP settings from the setup inputs (None if host is blank).
+    fn manual_imap(&self, cx: &mut Context<Self>) -> Option<ServerSettings> {
+        let host = self.setup_imap_host.read(cx).value().to_string();
+        if host.trim().is_empty() {
+            return None;
+        }
+        let port = self.setup_imap_port.read(cx).value().to_string();
+        Some(ServerSettings {
+            host: host.trim().to_string(),
+            port: port.trim().parse().unwrap_or(993),
+            security: self.setup_imap_security.security(),
+        })
+    }
+
+    /// Read manual SMTP settings from the setup inputs (None if host is blank).
+    fn manual_smtp(&self, cx: &mut Context<Self>) -> Option<ServerSettings> {
+        let host = self.setup_smtp_host.read(cx).value().to_string();
+        if host.trim().is_empty() {
+            return None;
+        }
+        let port = self.setup_smtp_port.read(cx).value().to_string();
+        Some(ServerSettings {
+            host: host.trim().to_string(),
+            port: port.trim().parse().unwrap_or(587),
+            security: self.setup_smtp_security.security(),
+        })
+    }
+
+    /// Run standards-based autodiscovery for the entered email address,
+    /// off the UI thread, and store the result for the add/authorize buttons.
+    fn discover_settings(&mut self, cx: &mut Context<Self>) {
+        let email = self.setup_email.read(cx).value().to_string();
+        if email.trim().is_empty() || !email.contains('@') {
+            self.setup_status = Some("Enter a valid email address.".to_string());
+            cx.notify();
+            return;
+        }
+        let email = email.trim().to_string();
+        self.setup_busy = true;
+        self.setup_discovered = None;
+        self.setup_status = Some("Discovering server settings…".to_string());
+        cx.notify();
+
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { mail::discover_account(&email) })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                this.setup_busy = false;
+                match result {
+                    Ok(d) => {
+                        this.setup_status = Some(format!(
+                            "Discovered via {} (confidence {}%) - review and add.",
+                            d.source, d.confidence
+                        ));
+                        this.setup_discovered = Some(d);
+                    }
+                    Err(e) => {
+                        this.setup_status = Some(format!(
+                            "Discovery failed: {e} - enter server settings manually."
+                        ));
+                        this.setup_discovered = None;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Run the OAuth PKCE browser flow for a discovered Gmail/Microsoft account.
+    fn authorize_oauth(&mut self, cx: &mut Context<Self>) {
+        let email = self.setup_email.read(cx).value().to_string();
+        let name = self.setup_name.read(cx).value().to_string();
+        if email.trim().is_empty() || !email.contains('@') {
+            self.setup_status = Some("Enter a valid email address.".to_string());
+            cx.notify();
+            return;
+        }
+        let Some(discovered) = self.setup_discovered.clone() else {
+            self.setup_status =
+                Some("Run discovery first to detect the OAuth provider.".to_string());
+            cx.notify();
+            return;
+        };
+        if discovered.auth_mode != "oauth" {
+            self.setup_status = Some("This account uses password auth, not OAuth.".to_string());
+            cx.notify();
+            return;
+        }
+
+        let client_id = self.setup_client_id.read(cx).value().to_string();
+        let client_secret = self.setup_client_secret.read(cx).value().to_string();
+        let redirect = self.setup_redirect_uri.read(cx).value().to_string();
+        if client_id.trim().is_empty() {
+            self.setup_status = Some("Enter your OAuth client id.".to_string());
+            cx.notify();
+            return;
+        }
+        let redirect = if redirect.trim().is_empty() {
+            "http://127.0.0.1:8765/callback".to_string()
+        } else {
+            redirect.trim().to_string()
+        };
+        let email = email.trim().to_string();
+        let display_name = if name.trim().is_empty() {
+            None
+        } else {
+            Some(name.trim().to_string())
+        };
+        let kind = ProviderKind::from_str(&discovered.provider_kind);
+        let imap = discovered.imap.clone();
+        let smtp = discovered.smtp.clone();
+
+        self.setup_busy = true;
+        self.setup_status = Some("Opening your browser for authorization…".to_string());
+        cx.notify();
+
+        let db = self.db.clone();
+        let entity = cx.entity();
+        let client_id = client_id.trim().to_string();
+        let client_secret = client_secret.trim().to_string();
+        cx.spawn(async move |_weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    mail::create_oauth_account(
+                        &db,
+                        &email,
+                        display_name.as_deref(),
+                        kind,
+                        &client_id,
+                        &client_secret,
+                        &redirect,
+                        imap.as_ref(),
+                        smtp.as_ref(),
+                        None,
+                    )
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                this.setup_busy = false;
+                match result {
+                    Ok(acc) => {
+                        this.setup_status = Some(format!(
+                            "Authorized {} - use Sync to fetch mail.",
+                            acc.email
+                        ));
+                        this.setup_discovered = None;
+                        this.refresh_accounts();
+                        this.refresh_folders();
+                    }
+                    Err(e) => this.setup_status = Some(format!("Authorization failed: {e}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Sync every non-demo account off the UI thread, with visible status.
+    fn sync_now(&mut self, cx: &mut Context<Self>) {
+        if self.syncing {
+            return;
+        }
+        let targets: Vec<Account> = self
+            .accounts
+            .iter()
+            .filter(|a| a.provider_kind != "local")
+            .cloned()
+            .collect();
+        if targets.is_empty() {
+            self.set_toast(
+                "Add a real account first (the demo account cannot sync).",
+                cx,
+            );
+            return;
+        }
+        self.syncing = true;
+        self.sync_status = Some("Syncing…".to_string());
+        cx.notify();
+
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut summary = mail::SyncSummary::default();
+                    for account in &targets {
+                        match mail::sync_account(&db, account) {
+                            Ok(s) => {
+                                summary.fetched += s.fetched;
+                                summary.folders += s.folders;
+                                summary.errors.extend(s.errors);
+                            }
+                            Err(e) => summary.errors.push(format!("{}: {e}", account.email)),
+                        }
+                    }
+                    summary
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                this.syncing = false;
+                this.sync_status = Some(if result.errors.is_empty() {
+                    format!(
+                        "Synced {} message(s) across {} folder(s).",
+                        result.fetched, result.folders
+                    )
+                } else {
+                    format!(
+                        "Synced {} message(s); {} error(s).",
+                        result.fetched,
+                        result.errors.len()
+                    )
+                });
+                this.refresh_folders();
+                this.reload_messages();
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn save_ai_config(&mut self, cx: &mut Context<Self>) {
@@ -3813,6 +4343,53 @@ impl Render for App {
             .child(self.titlebar(cx))
             .child(body)
     }
+}
+
+/// Send one message through the account's SMTP server, or record a local
+/// sent copy for accounts without SMTP settings (the local demo account).
+/// Runs off the UI thread.
+fn perform_send(
+    db: &Database,
+    account: &Account,
+    to: &[String],
+    subject: &str,
+    body: &str,
+    attachments: &[mail::smtp::Attachment],
+) -> anyhow::Result<()> {
+    if account.smtp_host.is_some() {
+        return mail::send_message(db, account, to, &[], subject, body, attachments);
+    }
+    // Local-only sent copy (no SMTP server configured).
+    let sent = db
+        .list_folders(&account.id)?
+        .into_iter()
+        .find(|f| f.special_use.as_deref() == Some("sent"))
+        .or_else(|| db.list_folders(&account.id).ok()?.into_iter().next());
+    if let Some(sent) = sent {
+        let now = chrono::Utc::now().timestamp();
+        let message_id = db.insert_message(&crate::db::MessageDraft {
+            account_id: account.id.clone(),
+            folder_id: sent.id.clone(),
+            subject: Some(subject.to_string()),
+            sender_email: Some(account.email.clone()),
+            to_addresses: serde_json::to_string(to).ok(),
+            date_received: Some(now),
+            is_read: true,
+            body_text: Some(body.to_string()),
+            snippet: Some(mail::mime::make_snippet(body)),
+            has_attachments: !attachments.is_empty(),
+            ..Default::default()
+        })?;
+        for attachment in attachments {
+            db.insert_attachment(
+                &message_id,
+                &attachment.filename,
+                Some(&attachment.content_type),
+                &attachment.data,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Run one AI action and persist the result to the cache.

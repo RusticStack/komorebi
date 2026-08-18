@@ -8,10 +8,11 @@ pub mod providers;
 pub mod smtp;
 pub mod types;
 
-use crate::db::{Account, Database, MessageDraft};
+use crate::db::{Account, AccountDraft, Database, MessageDraft};
 use crate::secrets;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
+use std::time::Duration;
 
 /// Fetch a fresh access token for an OAuth account, refreshing if needed.
 /// Tokens are read from and written back to the OS credential store.
@@ -98,6 +99,24 @@ pub fn sync_folder(
     let mut conn = imap::ImapConnection::open(settings, &settings.host, auth, folder_name)?;
     let uid_validity = conn.mailbox.uid_validity;
     let fetched = conn.fetch_new(since, Some(500))?;
+    let count = cache_fetched_messages(db, account, folder_id, uid_validity, &fetched)?;
+    let total = conn.mailbox.exists as i64;
+    let unread = conn.mailbox.unseen.map(|u| (u as i64).max(0)).unwrap_or(0);
+    db.set_folder_counts(folder_id, unread, total)?;
+    Ok(count)
+}
+
+/// Ingest already-fetched messages into the local cache (deduped by IMAP UID).
+///
+/// Split out of [`sync_folder`] so the cache-ingest path is testable with
+/// synthetic fetches and no live server.
+pub fn cache_fetched_messages(
+    db: &Database,
+    account: &Account,
+    folder_id: &str,
+    uid_validity: Option<u32>,
+    fetched: &[imap::RawFetch],
+) -> Result<usize> {
     let mut count = 0;
     for fetch in fetched {
         let uid = fetch.uid;
@@ -131,9 +150,6 @@ pub fn sync_folder(
         }
         count += 1;
     }
-    let total = conn.mailbox.exists as i64;
-    let unread = conn.mailbox.unseen.map(|u| (u as i64).max(0)).unwrap_or(0);
-    db.set_folder_counts(folder_id, unread, total)?;
     Ok(count)
 }
 
@@ -196,6 +212,135 @@ pub fn send_message(
         }
     }
     Ok(())
+}
+
+/// Discover IMAP/SMTP settings for an address using the real autoconfig HTTP
+/// fetch and the system DNS resolver (autoconfig XML → RFC 6186 SRV → presets).
+pub fn discover_account(email: &str) -> Result<discovery::DiscoveredSettings> {
+    let fetch = |url: &str| -> Result<String> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .context("building autodiscovery HTTP client")?;
+        let resp = client
+            .get(url)
+            .send()
+            .with_context(|| format!("autodiscovery request failed: {url}"))?;
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        if !status.is_success() {
+            return Err(anyhow!("autodiscovery endpoint returned {status}"));
+        }
+        Ok(text)
+    };
+    discovery::discover(email, &fetch, &discovery::srv_records)
+}
+
+/// Create a password-authenticated account, validate provider policy, and
+/// store the password in the OS credential store.
+#[allow(clippy::too_many_arguments)]
+pub fn create_password_account(
+    db: &Database,
+    email: &str,
+    display_name: Option<&str>,
+    provider_kind: types::ProviderKind,
+    imap: Option<&types::ServerSettings>,
+    smtp: Option<&types::ServerSettings>,
+    username: Option<&str>,
+    password: &str,
+) -> Result<Account> {
+    providers::validate_provider_policy(provider_kind, types::AuthMode::Password, imap, smtp)?;
+    let account = db.insert_account(&account_draft(
+        email,
+        display_name,
+        provider_kind,
+        types::AuthMode::Password,
+        imap,
+        smtp,
+        username,
+    ))?;
+    secrets::set(&secrets::key::account_password(&account.id), password)?;
+    Ok(account)
+}
+
+/// Run the OAuth PKCE browser flow for an OAuth provider, create the account,
+/// and persist the tokens (and client settings) for later refresh.
+#[allow(clippy::too_many_arguments)]
+pub fn create_oauth_account(
+    db: &Database,
+    email: &str,
+    display_name: Option<&str>,
+    provider_kind: types::ProviderKind,
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: &str,
+    imap: Option<&types::ServerSettings>,
+    smtp: Option<&types::ServerSettings>,
+    username: Option<&str>,
+) -> Result<Account> {
+    providers::validate_provider_policy(provider_kind, types::AuthMode::OAuth, imap, smtp)?;
+    let config =
+        oauth::OAuthConfig::for_kind(provider_kind, client_id, client_secret, redirect_uri)?;
+    let session = oauth::start(&config)?;
+    open::that(&session.auth_url).context("opening the authorization URL in your browser")?;
+    let code = oauth::wait_for_code(&session.redirect_uri, Duration::from_secs(300))?;
+    let tokens = oauth::exchange(&config, &code, &session.verifier)?;
+
+    let account = db.insert_account(&account_draft(
+        email,
+        display_name,
+        provider_kind,
+        types::AuthMode::OAuth,
+        imap,
+        smtp,
+        username,
+    ))?;
+
+    secrets::set(
+        &secrets::key::account_oauth_refresh(&account.id),
+        tokens.refresh_token.as_deref().unwrap_or_default(),
+    )?;
+    secrets::set(
+        &secrets::key::account_oauth_access(&account.id),
+        &tokens.access_token,
+    )?;
+    db.set_setting(
+        &format!("oauth.expires_at.{}", account.id),
+        &(Utc::now().timestamp() + tokens.expires_in).to_string(),
+    )?;
+    // Client settings needed by build_imap_auth / build_smtp_auth for refresh.
+    db.set_setting(&format!("oauth.client_id.{}", account.id), client_id)?;
+    db.set_setting(
+        &format!("oauth.client_secret.{}", account.id),
+        client_secret,
+    )?;
+    db.set_setting(&format!("oauth.redirect_uri.{}", account.id), redirect_uri)?;
+    Ok(account)
+}
+
+/// Build the account draft shared by password and OAuth creation paths.
+fn account_draft(
+    email: &str,
+    display_name: Option<&str>,
+    provider_kind: types::ProviderKind,
+    auth_mode: types::AuthMode,
+    imap: Option<&types::ServerSettings>,
+    smtp: Option<&types::ServerSettings>,
+    username: Option<&str>,
+) -> AccountDraft {
+    AccountDraft {
+        email: email.to_string(),
+        display_name: display_name.map(str::to_string),
+        provider_kind: provider_kind.as_str().to_string(),
+        auth_mode: auth_mode.as_str().to_string(),
+        username: username.map(str::to_string),
+        imap_host: imap.map(|s| s.host.clone()),
+        imap_port: imap.map(|s| s.port as i64),
+        imap_security: imap.map(|s| s.security.as_str().to_string()),
+        smtp_host: smtp.map(|s| s.host.clone()),
+        smtp_port: smtp.map(|s| s.port as i64),
+        smtp_security: smtp.map(|s| s.security.as_str().to_string()),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -549,5 +694,103 @@ mod tests {
         // No secret stored → clear error, never a panic.
         let err = build_imap_auth(&db, &account).unwrap_err();
         assert!(err.to_string().contains("no password stored"));
+    }
+
+    /// A minimal RFC822 message with one attachment, used to exercise the
+    /// cache-ingest path without a live IMAP server.
+    const FETCH_BODY: &[u8] = b"From: Jane Doe <jane@example.com>\r\nTo: me@example.org\r\nSubject: Sync ingest\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBody from a live fetch.\r\n--B\r\nContent-Type: text/plain; name=\"notes.txt\"\r\nContent-Disposition: attachment; filename=\"notes.txt\"\r\n\r\nfile bytes\r\n--B--\r\n";
+
+    #[test]
+    fn cache_fetched_messages_ingests_and_dedupes() {
+        let db = Database::in_memory().unwrap();
+        let account = db
+            .insert_account(&AccountDraft {
+                email: "me@example.org".into(),
+                provider_kind: "custom".into(),
+                auth_mode: "password".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let folder = db
+            .upsert_folder(&account.id, "INBOX", None, Some("inbox"), None)
+            .unwrap();
+
+        let fetched = [imap::RawFetch {
+            uid: 7,
+            body: FETCH_BODY.to_vec(),
+            seen: false,
+            flagged: true,
+        }];
+        let inserted =
+            cache_fetched_messages(&db, &account, &folder.id, Some(42), &fetched).unwrap();
+        assert_eq!(inserted, 1);
+
+        let rows = db.list_messages(&folder.id, 10, 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subject.as_deref(), Some("Sync ingest"));
+        assert_eq!(rows[0].sender_email.as_deref(), Some("jane@example.com"));
+        assert!(!rows[0].is_read);
+        assert!(rows[0].is_flagged);
+
+        let attachments = db.list_attachments(&rows[0].id).unwrap();
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].display_name, "notes.txt");
+        assert_eq!(
+            db.get_attachment_data(&attachments[0].id).unwrap().unwrap(),
+            b"file bytes"
+        );
+
+        // Re-ingesting the same UID is a no-op.
+        let again = cache_fetched_messages(&db, &account, &folder.id, Some(42), &fetched).unwrap();
+        assert_eq!(again, 0);
+        assert_eq!(db.list_messages(&folder.id, 10, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn account_draft_maps_server_settings() {
+        let draft = account_draft(
+            "me@example.org",
+            Some("Me"),
+            types::ProviderKind::Custom,
+            types::AuthMode::Password,
+            Some(&types::ServerSettings {
+                host: "imap.example.org".into(),
+                port: 993,
+                security: types::Security::Tls,
+            }),
+            Some(&types::ServerSettings {
+                host: "smtp.example.org".into(),
+                port: 587,
+                security: types::Security::StartTls,
+            }),
+            None,
+        );
+        assert_eq!(draft.email, "me@example.org");
+        assert_eq!(draft.provider_kind, "custom");
+        assert_eq!(draft.auth_mode, "password");
+        assert_eq!(draft.imap_host.as_deref(), Some("imap.example.org"));
+        assert_eq!(draft.imap_security.as_deref(), Some("tls"));
+        assert_eq!(draft.smtp_host.as_deref(), Some("smtp.example.org"));
+        assert_eq!(draft.smtp_security.as_deref(), Some("starttls"));
+    }
+
+    #[test]
+    fn password_account_policy_refuses_gmail() {
+        // Policy check runs before any secret is written, so this can be
+        // tested with an in-memory DB and no keyring.
+        let db = Database::in_memory().unwrap();
+        let gmail = providers::preset(types::ProviderKind::Gmail).unwrap();
+        let err = create_password_account(
+            &db,
+            "me@gmail.com",
+            None,
+            types::ProviderKind::Gmail,
+            gmail.imap.as_ref(),
+            gmail.smtp.as_ref(),
+            None,
+            "secret",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("OAuth"));
     }
 }
