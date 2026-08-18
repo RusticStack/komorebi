@@ -1,59 +1,51 @@
-# TODO.md - Komorebi Wails Remake Readiness Ledger
+# TODO.md - Komorebi GPUI Remake Readiness Ledger
 
-Last refresh: 2026-06-06
+Last refresh: 2026-08-17
 
 ## Current State
 
-The active app is the Wails v3 + Go + SolidJS remake on `main`. The previous Tauri v2 + Rust + React implementation has been moved to `legacy/tauri-v2/` as a reference.
+The active app is the GPUI + Rust remake at the repository root (`Cargo.toml`, `src/`). The previous Wails v3 + Go + SolidJS implementation is reference-only under `legacy/wails-v3/`; the older Tauri v2 implementation is under `legacy/tauri-v2/`.
 
-The remake is now buildable and has a small test baseline, but it is not production-complete. Treat README feature claims and future roadmap items as source only when they match the active Wails/Go/Solid code.
+The remake builds, runs, and has a small test baseline, but it is not production-complete. Treat README feature claims and future roadmap items as source only when they match the active GPUI/Rust code.
 
-## Verified On 2026-06-06
+## Verified On 2026-08-17
 
-- `npm install` in `frontend`
-- `npm run check` in `frontend`
-- `npm run build` in `frontend`
-- `npm audit` in `frontend`
-- `go test ./...`
-- `go build ./...`
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/GenerateBindings.ps1`
-- `wails3 build`
-- Browser DOM smoke at 1280x720: title, shell, account/sidebar/list/reader regions, account setup panel, discovery fallback candidate, and no horizontal overflow
-- Browser DOM smoke at 390x760: account setup panel fits viewport, reader pane hides at the narrow breakpoint, and no horizontal overflow
+- `cargo check --all-targets`
+- `cargo test` (42 passed, 1 ignored)
+- `cargo build`
 
-## Implemented In The Remake
+## Implemented In The GPUI Remake
 
-- Wails v3 app bootstrap with a frameless main window.
-- Go service boundary exposed to the Wails frontend.
-- Pure-Go SQLite cache with embedded migrations.
-- Local demo account/folders/messages/draft seeding for accountless shell development.
-- SolidJS mail shell with account setup, diagnostics, language/density controls, sidebar, search, virtualized message list, safe reader, drafts drawer, and composer dialog.
-- Local cache operations for shell load, paging, search, read-state mutation, sanitized message detail loading, draft save/list/delete, local sent-message creation, account list/add/remove, attachment staging, generic TLS IMAP sample sync, background sync start/stop/status, and account-specific SMTP send.
-- Windows Credential Manager wrapper for generic passwords and OAuth token payloads.
-- Provider policy enforcement: Gmail/Microsoft password setup is refused, generic IMAP/SMTP requires encrypted settings, SMTP uses account-specific settings, and encrypted IMAP supports password, OAUTHBEARER, and XOAUTH2 auth.
-- Account autodiscovery uses Thunderbird-style autoconfig XML and RFC 6186 DNS SRV for custom domains. MX is diagnostic only; provider-specific MX templates are not used.
-- OAuth PKCE start/complete flow for Gmail/Microsoft account creation, with localhost callback capture and manual authorization-code fallback.
-- Generic account setup validates IMAP and SMTP authentication before credentials are stored.
-- Incremental IMAP metadata sync stores UIDVALIDITY, last UID, and highest modseq in SQLite, with persisted background sync preferences and start/stop/status controls exposed to the sidebar.
-- Strict Wails request objects and backend validation for provider, account, message, search, attachment, rendering, preference, sync, and send inputs.
-- Safe HTML sanitization for stored drafts and rendered messages, with remote content stripped by default and explicit message/sender consent for safe remote images.
-- Attachment staging, listing, safe text/image preview, fixed-folder save, and local cache deletion.
-- Redacted diagnostics health/export surface and English/pt-PT UI strings.
-- Windows signing and release artifact validation scripts.
-- Wails binding generation under `frontend/bindings` through `scripts/GenerateBindings.ps1`, which works around a Windows rename failure in direct frontend output.
-- Go tests for migrations/reopen, seed data, shell loading, search, read-state mutation, draft persistence, local sent-message creation, unsafe account rejection, OAuth PKCE and localhost callback completion, OAuth SASL fake-server auth, discovery, pre-save account validation, fake IMAP incremental sync, background sync, fake SMTP send, attachment workflow, diagnostics export, remote-content consent, and HTML sanitization.
-- Real-provider validation is a manual QA path through the in-app account wizard with explicit test accounts only; automated tests use fake servers and must not use real mailbox data.
-- Minimal Wails Taskfile so `wails3 build` produces `bin/Komorebi.exe`.
+- Native GPUI app bootstrap with a titled main window.
+- Rust crate split into `db`, `mail`, `ai`, `secrets`, and `ui` modules.
+- SQLite cache through `rusqlite` with embedded migrations (accounts, folders, messages + FTS, drafts, attachments, settings, AI fields and AI action ledger).
+- Local demo account/folders/messages seeding for accountless shell development.
+- GPUI mail shell with a folder sidebar, message list, reader, composer, account management, and an AI assistant panel.
+- Local cache operations for shell load, paging, FTS search, read-state mutation, draft save/list/delete, local sent-message creation, and account list/add/remove.
+- Windows Credential Manager wrapper (`keyring`) for account passwords, OAuth tokens, and AI API keys.
+- Provider policy enforcement: Gmail/Microsoft password setup is refused, generic IMAP/SMTP requires encrypted settings, and SMTP uses account-specific settings.
+- Standards-based account autodiscovery: Thunderbird-style autoconfig XML and RFC 6186 DNS SRV for custom domains.
+- OAuth PKCE start/complete flow for Gmail/Microsoft, with a loopback callback capture.
+- Encrypted IMAP adapter (`imap` crate): password and XOAUTH2 auth, folder listing with special-use attributes, incremental UID sync, and flag updates.
+- SMTP sending via `lettre` with TLS/STARTTLS and password/XOAUTH2 auth.
+- MIME parsing via `mail-parser`.
+- AI-first module: OpenAI-compatible chat client, local-first provider presets (Ollama, vLLM, Unsloth), prompt templates (summarize, draft reply, polish, triage), and persistence of results into the cache.
+- Rust tests for migrations/reopen, seed data, local mail behavior, provider policy, OAuth PKCE and loopback callback, discovery, MIME, plaintext-refusal for IMAP/SMTP, AI config/client/prompts, and AI action persistence. Mail protocol tests use fake servers and must not use real mailbox data.
 
 ## Active Gaps
 
-- Add OAuth SASL fake-server coverage.
-- Run and record the documented real-provider manual smoke matrix in `docs/REAL_PROVIDER_SMOKE.md` with explicit test accounts entered through the account wizard.
-- Add destructive server mail actions only after provider-specific semantics are reviewed.
+- Real-provider validation: run a manual smoke matrix with explicit test accounts only (not automated).
+- Add destructive server mail actions (move, delete, expunge, Sent-folder APPEND) only after provider-specific semantics are reviewed.
 - Finish provider-safe sent-copy strategy across providers.
-- Add installer packaging and clean-machine validation for signed Wails output.
-- Add frontend unit tests and E2E/browser screenshot harnesses for shell, composer, search, drafts, and responsive layout.
-- Review whether generated `frontend/bindings` should be committed or regenerated in CI for every build.
+- Wire account autodiscovery and OAuth into the GPUI account setup flow end-to-end.
+- Add safe HTML rendering for the reader (no remote content by default) and a remote-content consent path.
+- Add attachment staging, preview, and safe save.
+- Add diagnostics health/export with redaction.
+- Add i18n (English + pt-PT was the previous baseline).
+- Add installer packaging, code signing, and clean-machine validation.
+- Add UI/E2E coverage (layout, composer, search, drafts, responsive) and screenshot verification.
+- Add OAuth SASL fake-server coverage for IMAP and SMTP.
+- Add local AI model health checks (e.g. an Ollama `/api/tags` reachability check) and streaming.
 
 ## Deferred
 
@@ -61,4 +53,4 @@ The remake is now buildable and has a small test baseline, but it is not product
 - Provider Drafts-folder sync.
 - External attachment auto-open or archive extraction.
 - Non-Windows targets.
-- Cloud sync, analytics, AI features, or hosted services.
+- Cloud sync, analytics, telemetry, or hosted services.
