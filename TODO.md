@@ -4,7 +4,7 @@ Last refresh: 2026-08-17
 
 ## Current State
 
-The active app is the GPUI + Rust remake at the repository root (`Cargo.toml`, `src/`). The previous Wails v3 + Go + SolidJS implementation is reference-only under `legacy/wails-v3/`; the older Tauri v2 implementation is under `legacy/tauri-v2/`.
+The app is the GPUI + Rust client at the repository root (`Cargo.toml`, `src/`). The earlier Tauri v2 and Wails v3 prototypes have been removed.
 
 The remake builds, runs, and has a small test baseline, but it is not production-complete. Treat README feature claims and future roadmap items as source only when they match the active GPUI/Rust code.
 

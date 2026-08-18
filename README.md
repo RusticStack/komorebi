@@ -4,7 +4,7 @@ Privacy-first, AI-first, local-first Windows desktop email client built on Zed G
 
 Komorebi is a native desktop mail client focused on self-hosted and custom-hosting mail (Mailcow, Zimbra, Poste.io, and any generic IMAP/SMTP server). Gmail and Microsoft 365 are supported through OAuth. AI features default to local models (Ollama, vLLM, Unsloth) and also work with any OpenAI-compatible API.
 
-This branch is the GPUI + Rust remake. The previous Wails v3 + Go + SolidJS implementation is retained under `legacy/wails-v3/` for reference; the even older Tauri v2 implementation is under `legacy/tauri-v2/`.
+Komorebi is a single native GPUI + Rust application; the earlier Tauri v2 and Wails v3 prototypes have been removed.
 
 ## Current Stack
 
