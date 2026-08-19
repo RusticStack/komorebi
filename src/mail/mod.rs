@@ -143,6 +143,10 @@ pub fn cache_fetched_messages(
             body_html: parsed.body_html,
             size_bytes: Some(fetch.body.len() as i64),
             has_attachments: !parsed.attachments.is_empty(),
+            rfc_message_id: parsed.message_id,
+            in_reply_to: parsed.in_reply_to,
+            references_header: parsed.references,
+            thread_id: None,
         };
         let id = db.insert_message(&row)?;
         for att in parsed.attachments {
@@ -471,7 +475,12 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
     let has_rich = existing
         .iter()
         .any(|m| m.subject.as_deref() == Some("Re: Partnership Proposal"));
-    if has_rich {
+    // Re-seed older demo databases that predate threaded conversations.
+    let sent_existing = db.list_messages(&sent.id, 1000, 0)?;
+    let has_thread_roots = sent_existing
+        .iter()
+        .any(|m| m.subject.as_deref() == Some("Partnership Proposal"));
+    if has_rich && has_thread_roots {
         return Ok(());
     }
     for folder in [&inbox, &sent, &drafts, &archive, &trash] {
@@ -488,14 +497,49 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
         unread: bool,
         seconds_ago: i64,
         attachments: &'a [(&'a str, &'a str)],
+        message_id: &'a str,
+        in_reply_to: Option<&'a str>,
     }
 
     let now = Utc::now().timestamp();
+
+    // Sent roots so the demo has real multi-message conversations.
+    db.insert_message(&MessageDraft {
+        account_id: account.id.clone(),
+        folder_id: sent.id.clone(),
+        rfc_message_id: Some("partnership-root@komorebi.mail".into()),
+        subject: Some("Partnership Proposal".into()),
+        sender_email: Some(account.email.clone()),
+        body_text: Some(
+            "Hi Isabella, please find the partnership proposal attached. I'd welcome your feedback on scope and timeline."
+                .into(),
+        ),
+        date_received: Some(now - 2 * 3600),
+        is_read: true,
+        ..Default::default()
+    })?;
+    db.insert_message(&MessageDraft {
+        account_id: account.id.clone(),
+        folder_id: sent.id.clone(),
+        rfc_message_id: Some("landing-root@komorebi.mail".into()),
+        subject: Some("Feedback on Landing Page".into()),
+        sender_email: Some(account.email.clone()),
+        body_text: Some(
+            "Hi Ava, here's the latest landing page. Keen to hear your thoughts on the palette and hero."
+                .into(),
+        ),
+        date_received: Some(now - (2 * 86400 + 3600)),
+        is_read: true,
+        ..Default::default()
+    })?;
+
     let samples: [DemoMsg; 9] = [
         DemoMsg {
             sender_name: "Isabella Martinez",
             sender_email: "isabella.martinez@company.com",
             subject: "Re: Partnership Proposal",
+            message_id: "isabella-partnership@company.com",
+            in_reply_to: Some("partnership-root@komorebi.mail"),
             body: "Hi Haruto,\n\nThanks for the detailed proposal. I'm excited about the potential partnership with Komorebi.\n\nA few questions before we move forward:\n\n\u{2022} Can you share more about the integration timeline?\n\u{2022} What kind of support will be provided during onboarding?\n\u{2022} Are there any case studies from similar implementations?\n\nLooking forward to your thoughts!\n\nBest regards,\nIsabella",
             label: "Clients",
             flagged: true,
@@ -513,6 +557,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Sophia Bennett",
             sender_email: "sophia.bennett@company.com",
             subject: "Q2 Roadmap Alignment",
+            message_id: "sophia-q2@company.com",
+            in_reply_to: None,
             body: "Hey team, please find the latest Q2 roadmap attached. I'd love your input before we lock the timeline on Friday.",
             label: "Work",
             flagged: false,
@@ -524,6 +570,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Liam O'Connor",
             sender_email: "liam.oconnor@company.com",
             subject: "Design System Update",
+            message_id: "liam-design@company.com",
+            in_reply_to: None,
             body: "We've updated the component library with the new Japandi tokens - softer borders, warmer neutrals, and a calmer focus ring.",
             label: "Work",
             flagged: false,
@@ -535,6 +583,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Noah Williams",
             sender_email: "noah.williams@company.com",
             subject: "User Research Insights",
+            message_id: "noah-research@company.com",
+            in_reply_to: None,
             body: "Here are the key takeaways from this week's interviews. Most people want email to feel quieter, not gamified.",
             label: "Product",
             flagged: false,
@@ -546,6 +596,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Emma Johnson",
             sender_email: "emma.johnson@company.com",
             subject: "Meeting Notes - May 20",
+            message_id: "emma-notes@company.com",
+            in_reply_to: None,
             body: "Thanks everyone for joining. Notes and action items are below - please review and flag anything I missed.",
             label: "Work",
             flagged: false,
@@ -557,6 +609,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Olivia Davis",
             sender_email: "olivia.davis@company.com",
             subject: "Invoice INV-00234",
+            message_id: "olivia-invoice@company.com",
+            in_reply_to: None,
             body: "Please find attached the invoice for the March engagement. Let me know if you need any changes before payment.",
             label: "Finance",
             flagged: false,
@@ -568,6 +622,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Ava Thompson",
             sender_email: "ava.thompson@company.com",
             subject: "Re: Feedback on Landing Page",
+            message_id: "ava-landing@company.com",
+            in_reply_to: Some("landing-root@komorebi.mail"),
             body: "The latest version looks great! The softer palette reads much calmer. One small nit on the hero spacing.",
             label: "Design",
             flagged: false,
@@ -579,6 +635,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "William Anderson",
             sender_email: "william.anderson@company.com",
             subject: "Offsite Agenda",
+            message_id: "william-offsite@company.com",
+            in_reply_to: None,
             body: "Sharing the agenda for our spring offsite. Tuesday is all-hands, Wednesday is breakout workshops.",
             label: "Work",
             flagged: true,
@@ -590,6 +648,8 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             sender_name: "Mia Garcia",
             sender_email: "mia.garcia@company.com",
             subject: "Project Aurora Brief",
+            message_id: "mia-aurora@company.com",
+            in_reply_to: None,
             body: "Attached is the project brief for Aurora. The scope and success criteria are on pages 4-6.",
             label: "Product",
             flagged: false,
@@ -614,6 +674,9 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
             is_read: !m.unread,
             is_flagged: m.flagged,
             has_attachments: !m.attachments.is_empty(),
+            rfc_message_id: Some(m.message_id.into()),
+            in_reply_to: m.in_reply_to.map(str::to_string),
+            references_header: m.in_reply_to.map(str::to_string),
             ..Default::default()
         })?;
         if m.unread {
@@ -629,10 +692,13 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
     db.insert_message(&MessageDraft {
         account_id: account.id.clone(),
         folder_id: sent.id.clone(),
+        rfc_message_id: Some("haruto-q2-reply@komorebi.mail".into()),
+        in_reply_to: Some("sophia-q2@company.com".into()),
+        references_header: Some("sophia-q2@company.com".into()),
         subject: Some("Re: Q2 Roadmap Alignment".into()),
         sender_email: Some(account.email.clone()),
         body_text: Some("Thanks Sophia - reviewed the roadmap and left a few comments. The timeline works for me.".into()),
-        date_received: Some(now - 3600),
+        date_received: Some(now - 20 * 60),
         is_read: true,
         ..Default::default()
     })?;
@@ -647,7 +713,7 @@ pub fn seed_local_demo(db: &Database) -> Result<()> {
     })?;
 
     db.set_folder_counts(&inbox.id, unread, 9)?;
-    db.set_folder_counts(&sent.id, 0, 1)?;
+    db.set_folder_counts(&sent.id, 0, 3)?;
     db.set_folder_counts(&drafts.id, 0, 1)?;
     Ok(())
 }
@@ -677,6 +743,34 @@ mod tests {
             inbox
                 .iter()
                 .any(|f| f.special_use.as_deref() == Some("inbox"))
+        );
+    }
+
+    #[test]
+    fn demo_seed_creates_threads() {
+        let db = Database::in_memory().unwrap();
+        seed_local_demo(&db).unwrap();
+        let account = db.list_accounts().unwrap().remove(0);
+        let inbox = db
+            .list_folders(&account.id)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.special_use.as_deref() == Some("inbox"))
+            .unwrap();
+        let reply = db
+            .list_messages(&inbox.id, 1000, 0)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.subject.as_deref() == Some("Re: Partnership Proposal"))
+            .unwrap();
+        let detail = db.get_message_detail(&reply.id).unwrap().unwrap();
+        let tid = detail.thread_id.clone().unwrap();
+        let thread = db.list_thread_messages(&tid).unwrap();
+        assert_eq!(thread.len(), 2);
+        assert_eq!(thread[0].subject.as_deref(), Some("Partnership Proposal"));
+        assert_eq!(
+            thread[1].subject.as_deref(),
+            Some("Re: Partnership Proposal")
         );
     }
 
