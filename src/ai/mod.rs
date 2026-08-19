@@ -98,6 +98,20 @@ impl Ai {
         )
     }
 
+    /// Summarize an entire conversation (already formatted as per-message
+    /// blocks with sender + body).
+    pub fn summarize_thread(&self, thread: &str) -> Result<String> {
+        self.config.validate()?;
+        let (system, user) = prompts::summarize_thread(thread);
+        client::complete(
+            &self.config.base_url,
+            &self.config.model,
+            &system,
+            &user,
+            self.api_key.as_deref(),
+        )
+    }
+
     /// Draft a reply to an email.
     pub fn draft_reply(
         &self,

@@ -16,6 +16,14 @@ pub fn summarize(sender: Option<&str>, subject: Option<&str>, body: &str) -> (St
     (system, user)
 }
 
+/// Build a summarize prompt for an entire conversation (already formatted as
+/// per-message blocks with sender + body).
+pub fn summarize_thread(thread: &str) -> (String, String) {
+    let system = "You are Komorebi's private email assistant. Summarize the conversation below in 3-5 concise sentences. Preserve key facts, dates, decisions, people involved, open questions, and any requested action. Reply with plain text only and no preamble.".to_string();
+    let user = thread.trim().to_string();
+    (system, user)
+}
+
 /// Build a draft-reply prompt. `tone` is freeform guidance (e.g. "friendly",
 /// "brief and formal").
 pub fn draft_reply(
@@ -92,9 +100,18 @@ mod tests {
     }
 
     #[test]
+    fn summarize_thread_uses_whole_conversation() {
+        let (system, user) = summarize_thread("From: A\nbody one\n\nFrom: B\nbody two");
+        assert!(system.contains("conversation"));
+        assert!(user.contains("From: A"));
+        assert!(user.contains("From: B"));
+    }
+
+    #[test]
     fn polish_returns_only_improved_draft() {
         let (system, user) = polish("Helo team,\nmeeting moved", "professional");
         assert!(system.contains("no preamble"));
+        assert!(system.contains("professional"));
         assert!(user.contains("Helo team"));
     }
 }

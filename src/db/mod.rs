@@ -138,6 +138,32 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_ai_actions_message ON ai_actions(message_id);
     "#,
     ),
+    (
+        3,
+        r#"
+        CREATE TABLE IF NOT EXISTS reminders (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            label TEXT,
+            due_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(due_at);
+        CREATE INDEX IF NOT EXISTS idx_reminders_account ON reminders(account_id);
+    "#,
+    ),
+    (
+        4,
+        r#"
+        ALTER TABLE messages ADD COLUMN in_reply_to TEXT;
+        ALTER TABLE messages ADD COLUMN references_header TEXT;
+        ALTER TABLE messages ADD COLUMN thread_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_rfc_id ON messages(rfc_message_id);
+    "#,
+    ),
 ];
 
 /// Thread-safe handle to the local cache. Clone the `Arc` to share it with
@@ -557,6 +583,10 @@ pub struct MessageDetail {
     pub ai_category: Option<String>,
     pub ai_summary: Option<String>,
     pub has_attachments: bool,
+    pub rfc_message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references_header: Option<String>,
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -579,19 +609,36 @@ pub struct MessageDraft {
     pub body_html: Option<String>,
     pub size_bytes: Option<i64>,
     pub has_attachments: bool,
+    pub rfc_message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references_header: Option<String>,
+    pub thread_id: Option<String>,
 }
 
 impl Database {
     #[allow(clippy::too_many_arguments)]
     pub fn insert_message(&self, m: &MessageDraft) -> Result<String> {
         let id = Uuid::new_v4().to_string();
+        // Resolve threading lazily so callers only supply the raw
+        // Message-ID / In-Reply-To / References headers.
+        let thread_id = match &m.thread_id {
+            Some(tid) => Some(tid.clone()),
+            None => self.resolve_thread_id(
+                m.rfc_message_id.as_deref(),
+                m.in_reply_to.as_deref(),
+                m.references_header.as_deref(),
+            )?,
+        };
+        // Store Message-IDs normalized (angle brackets stripped) so thread
+        // resolution can match them against In-Reply-To/References values.
+        let rfc_message_id = m.rfc_message_id.as_deref().map(normalize_message_id);
         let conn = self.conn();
         conn.execute(
             "INSERT INTO messages (id, account_id, folder_id, imap_uid, uid_validity, subject,
                 sender_name, sender_email, to_addresses, cc_addresses, bcc_addresses,
                 date_received, is_read, is_flagged, snippet, body_text, body_html, size_bytes,
-                has_attachments)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+                has_attachments, rfc_message_id, in_reply_to, references_header, thread_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
              ON CONFLICT(id) DO NOTHING",
             params![
                 id,
@@ -613,6 +660,10 @@ impl Database {
                 m.body_html,
                 m.size_bytes,
                 m.has_attachments as i64,
+                rfc_message_id,
+                m.in_reply_to,
+                m.references_header,
+                thread_id,
             ],
         )?;
         Ok(id)
@@ -699,36 +750,59 @@ impl Database {
 
     pub fn get_message_detail(&self, id: &str) -> Result<Option<MessageDetail>> {
         let conn = self.conn();
-        conn.query_row(
-            "SELECT id, account_id, folder_id, imap_uid, subject, sender_name, sender_email,
-                    to_addresses, cc_addresses, date_received, is_read, is_flagged, body_text,
-                    snippet, ai_category, ai_summary, has_attachments
-             FROM messages WHERE id=?1",
-            [id],
-            |r| {
-                Ok(MessageDetail {
-                    id: r.get(0)?,
-                    account_id: r.get(1)?,
-                    folder_id: r.get(2)?,
-                    imap_uid: r.get(3)?,
-                    subject: r.get(4)?,
-                    sender_name: r.get(5)?,
-                    sender_email: r.get(6)?,
-                    to_addresses: r.get(7)?,
-                    cc_addresses: r.get(8)?,
-                    date_received: r.get(9)?,
-                    is_read: r.get(10)?,
-                    is_flagged: r.get(11)?,
-                    body_text: r.get(12)?,
-                    snippet: r.get(13)?,
-                    ai_category: r.get(14)?,
-                    ai_summary: r.get(15)?,
-                    has_attachments: r.get(16)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
+        let sql = format!("SELECT {DETAIL_COLUMNS} FROM messages WHERE id=?1");
+        conn.query_row(&sql, [id], row_to_detail)
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// All messages in the same conversation, oldest first.
+    pub fn list_thread_messages(&self, thread_id: &str) -> Result<Vec<MessageDetail>> {
+        let conn = self.conn();
+        let sql = format!(
+            "SELECT {DETAIL_COLUMNS} FROM messages WHERE thread_id=?1
+             ORDER BY date_received ASC, created_at ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([thread_id], row_to_detail)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Resolve the conversation id for an incoming message by matching its
+    /// In-Reply-To/References against already-cached Message-IDs. Returns None
+    /// when the message has no usable identifiers (it stands alone).
+    pub fn resolve_thread_id(
+        &self,
+        message_id: Option<&str>,
+        in_reply_to: Option<&str>,
+        references: Option<&str>,
+    ) -> Result<Option<String>> {
+        let conn = self.conn();
+        let mut candidates: Vec<String> = Vec::new();
+        if let Some(irt) = in_reply_to {
+            candidates.push(normalize_message_id(irt));
+        }
+        if let Some(refs) = references {
+            candidates.extend(parse_references(refs));
+        }
+        for c in candidates {
+            if c.is_empty() {
+                continue;
+            }
+            let found: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT id, thread_id FROM messages WHERE rfc_message_id=?1 LIMIT 1",
+                    [&c],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((_id, tid)) = found {
+                return Ok(Some(tid.unwrap_or(c)));
+            }
+        }
+        Ok(message_id
+            .map(normalize_message_id)
+            .filter(|s| !s.is_empty()))
     }
 
     pub fn mark_read(&self, id: &str, read: bool) -> Result<()> {
@@ -817,6 +891,57 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
         snippet: row.get(8)?,
         ai_category: row.get(9)?,
     })
+}
+
+/// Columns selected for a full [`MessageDetail`], in `row_to_detail` order.
+const DETAIL_COLUMNS: &str =
+    "id, account_id, folder_id, imap_uid, subject, sender_name, sender_email,
+    to_addresses, cc_addresses, date_received, is_read, is_flagged, body_text,
+    snippet, ai_category, ai_summary, has_attachments, rfc_message_id, in_reply_to,
+    references_header, thread_id";
+
+fn row_to_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDetail> {
+    Ok(MessageDetail {
+        id: row.get(0)?,
+        account_id: row.get(1)?,
+        folder_id: row.get(2)?,
+        imap_uid: row.get(3)?,
+        subject: row.get(4)?,
+        sender_name: row.get(5)?,
+        sender_email: row.get(6)?,
+        to_addresses: row.get(7)?,
+        cc_addresses: row.get(8)?,
+        date_received: row.get(9)?,
+        is_read: row.get(10)?,
+        is_flagged: row.get(11)?,
+        body_text: row.get(12)?,
+        snippet: row.get(13)?,
+        ai_category: row.get(14)?,
+        ai_summary: row.get(15)?,
+        has_attachments: row.get(16)?,
+        rfc_message_id: row.get(17)?,
+        in_reply_to: row.get(18)?,
+        references_header: row.get(19)?,
+        thread_id: row.get(20)?,
+    })
+}
+
+/// Strip angle brackets and surrounding whitespace from a Message-ID.
+fn normalize_message_id(id: &str) -> String {
+    id.trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim()
+        .to_string()
+}
+
+/// Split a References header into normalized Message-IDs.
+fn parse_references(references: &str) -> Vec<String> {
+    references
+        .split_whitespace()
+        .map(normalize_message_id)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,6 +1153,128 @@ impl Database {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Reminders (snooze + follow-up)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Reminder {
+    pub id: String,
+    pub account_id: String,
+    pub message_id: String,
+    pub kind: String,
+    pub label: Option<String>,
+    pub due_at: i64,
+    pub created_at: i64,
+}
+
+impl Database {
+    /// Create or replace the single reminder for a message (one snooze or
+    /// follow-up at a time; scheduling a new one overwrites the previous).
+    pub fn upsert_reminder(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        kind: &str,
+        label: Option<&str>,
+        due_at: i64,
+    ) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO reminders (id, account_id, message_id, kind, label, due_at)
+             VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(message_id) DO UPDATE SET
+                kind=excluded.kind,
+                label=excluded.label,
+                due_at=excluded.due_at,
+                created_at=unixepoch()",
+            params![
+                Uuid::new_v4().to_string(),
+                account_id,
+                message_id,
+                kind,
+                label,
+                due_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_reminder(&self, message_id: &str) -> Result<()> {
+        let conn = self.conn();
+        conn.execute("DELETE FROM reminders WHERE message_id=?1", [message_id])?;
+        Ok(())
+    }
+
+    pub fn get_reminder(&self, message_id: &str) -> Result<Option<Reminder>> {
+        let conn = self.conn();
+        conn.query_row(
+            "SELECT id, account_id, message_id, kind, label, due_at, created_at
+             FROM reminders WHERE message_id=?1",
+            [message_id],
+            |r| {
+                Ok(Reminder {
+                    id: r.get(0)?,
+                    account_id: r.get(1)?,
+                    message_id: r.get(2)?,
+                    kind: r.get(3)?,
+                    label: r.get(4)?,
+                    due_at: r.get(5)?,
+                    created_at: r.get(6)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// All reminders that are still pending (due in the future).
+    pub fn list_active_reminders(&self, now: i64) -> Result<Vec<Reminder>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, message_id, kind, label, due_at, created_at
+             FROM reminders WHERE due_at > ?1 ORDER BY due_at ASC",
+        )?;
+        let rows = stmt.query_map([now], |r| {
+            Ok(Reminder {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                message_id: r.get(2)?,
+                kind: r.get(3)?,
+                label: r.get(4)?,
+                due_at: r.get(5)?,
+                created_at: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Messages currently snoozed (hidden from the inbox until due).
+    pub fn list_snoozed_messages(&self, now: i64) -> Result<Vec<MessageRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.folder_id, m.subject, m.sender_name, m.sender_email, m.date_received,
+                    m.is_read, m.is_flagged, m.snippet, m.ai_category
+             FROM reminders r JOIN messages m ON m.id = r.message_id
+             WHERE r.kind='snooze' AND r.due_at > ?1
+             ORDER BY r.due_at ASC",
+        )?;
+        let rows = stmt.query_map([now], row_to_message)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Lazily release snoozes whose due time has passed (the message returns
+    /// to the inbox on the next reload). Returns the number removed.
+    pub fn delete_expired_snoozes(&self, now: i64) -> Result<usize> {
+        let conn = self.conn();
+        let n = conn.execute(
+            "DELETE FROM reminders WHERE kind='snooze' AND due_at <= ?1",
+            [now],
+        )?;
+        Ok(n)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1037,11 +1284,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cache.db");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 2);
+        assert_eq!(db.schema_version().unwrap(), 4);
 
         // Reopen applies nothing new.
         let db2 = Database::open(&path).unwrap();
-        assert_eq!(db2.schema_version().unwrap(), 2);
+        assert_eq!(db2.schema_version().unwrap(), 4);
     }
 
     #[test]
@@ -1257,5 +1504,127 @@ mod tests {
         .unwrap();
         db.delete_folder(&custom.id).unwrap();
         assert!(db.get_folder(&custom.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn reminders_snooze_and_followup() {
+        let db = Database::in_memory().unwrap();
+        let acc = db
+            .insert_account(&AccountDraft {
+                email: "a@b.test".into(),
+                provider_kind: "custom".into(),
+                auth_mode: "password".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let inbox = db
+            .upsert_folder(&acc.id, "INBOX", None, Some("inbox"), None)
+            .unwrap();
+        let msg = db
+            .insert_message(&MessageDraft {
+                account_id: acc.id.clone(),
+                folder_id: inbox.id.clone(),
+                subject: Some("Hi".into()),
+                date_received: Some(1_700_000_000),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let now = 1_700_000_000;
+        db.upsert_reminder(&acc.id, &msg, "snooze", Some("tomorrow"), now + 86_400)
+            .unwrap();
+        assert_eq!(db.get_reminder(&msg).unwrap().unwrap().kind, "snooze");
+        assert_eq!(db.list_snoozed_messages(now).unwrap().len(), 1);
+
+        // Scheduling a follow-up overwrites the snooze (one reminder per message).
+        db.upsert_reminder(&acc.id, &msg, "follow_up", Some("tomorrow"), now + 86_400)
+            .unwrap();
+        assert!(db.list_snoozed_messages(now).unwrap().is_empty());
+        assert_eq!(db.get_reminder(&msg).unwrap().unwrap().kind, "follow_up");
+
+        // An expired snooze is released lazily.
+        db.upsert_reminder(&acc.id, &msg, "snooze", Some("later"), now - 1)
+            .unwrap();
+        assert_eq!(db.delete_expired_snoozes(now).unwrap(), 1);
+        assert!(db.get_reminder(&msg).unwrap().is_none());
+
+        // Deleting a message cascades to its reminder.
+        db.upsert_reminder(&acc.id, &msg, "snooze", Some("later"), now + 10)
+            .unwrap();
+        db.delete_all_messages(&inbox.id).unwrap();
+        assert!(db.get_reminder(&msg).unwrap().is_none());
+    }
+
+    #[test]
+    fn threading_groups_replies_by_in_reply_to() {
+        let db = Database::in_memory().unwrap();
+        let acc = db
+            .insert_account(&AccountDraft {
+                email: "a@b.test".into(),
+                provider_kind: "custom".into(),
+                auth_mode: "password".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let inbox = db
+            .upsert_folder(&acc.id, "INBOX", None, Some("inbox"), None)
+            .unwrap();
+        let sent = db
+            .upsert_folder(&acc.id, "Sent", None, Some("sent"), None)
+            .unwrap();
+
+        // Root message (inserted first so the reply can resolve to it).
+        let root = db
+            .insert_message(&MessageDraft {
+                account_id: acc.id.clone(),
+                folder_id: sent.id.clone(),
+                rfc_message_id: Some("<root@example.com>".into()),
+                subject: Some("Hello".into()),
+                sender_email: Some("me@example.com".into()),
+                date_received: Some(1_700_000_000),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Reply in another folder references the root.
+        let reply = db
+            .insert_message(&MessageDraft {
+                account_id: acc.id.clone(),
+                folder_id: inbox.id.clone(),
+                rfc_message_id: Some("<reply@example.com>".into()),
+                in_reply_to: Some("<root@example.com>".into()),
+                references_header: Some("<root@example.com>".into()),
+                subject: Some("Re: Hello".into()),
+                sender_email: Some("jane@example.com".into()),
+                date_received: Some(1_700_000_100),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let root_detail = db.get_message_detail(&root).unwrap().unwrap();
+        let reply_detail = db.get_message_detail(&reply).unwrap().unwrap();
+        assert_eq!(root_detail.thread_id.as_deref(), Some("root@example.com"));
+        assert_eq!(root_detail.thread_id, reply_detail.thread_id);
+
+        let tid = root_detail.thread_id.clone().unwrap();
+        let thread = db.list_thread_messages(&tid).unwrap();
+        assert_eq!(thread.len(), 2);
+        assert_eq!(thread[0].id, root);
+        assert_eq!(thread[1].id, reply);
+
+        // A message with no identifiers stands alone.
+        let solo = db
+            .insert_message(&MessageDraft {
+                account_id: acc.id.clone(),
+                folder_id: inbox.id.clone(),
+                subject: Some("No ids".into()),
+                date_received: Some(1_700_000_200),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            db.get_message_detail(&solo).unwrap().unwrap().thread_id,
+            None
+        );
     }
 }

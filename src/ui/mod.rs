@@ -9,7 +9,7 @@
 //! view state.
 
 use crate::ai::{self, Ai, AiConfig, Category};
-use crate::db::{Account, Attachment, Database, Folder, MessageDetail, MessageRow};
+use crate::db::{Account, Attachment, Database, Folder, MessageDetail, MessageRow, Reminder};
 use crate::mail;
 use crate::mail::discovery::DiscoveredSettings;
 use crate::mail::types::{ProviderKind, Security, ServerSettings};
@@ -31,6 +31,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, Theme,
     ThemeMode, TitleBar, h_flex, v_flex,
 };
+use std::path::{Path, PathBuf};
 
 const CONTEXT: &str = "Komorebi";
 /// Sentinel ids for the virtual views in the sidebar (not real DB folders).
@@ -116,6 +117,7 @@ enum AiKind {
     DraftReply,
     Polish,
     Triage,
+    FollowUp,
 }
 
 impl AiKind {
@@ -125,6 +127,7 @@ impl AiKind {
             AiKind::DraftReply => "draft_reply",
             AiKind::Polish => "polish",
             AiKind::Triage => "triage",
+            AiKind::FollowUp => "follow_up",
         }
     }
 }
@@ -164,6 +167,27 @@ struct PendingAttachment {
     name: String,
     size_bytes: i64,
     data: Vec<u8>,
+}
+
+/// Enough to undo the last snooze/follow-up action: restore the previous
+/// reminder (if any) or clear the one we just scheduled.
+struct UndoReminder {
+    message_id: String,
+    previous: Option<Reminder>,
+}
+
+/// Quick snooze choices: label + seconds from now.
+const SNOOZE_OPTIONS: &[(&str, i64)] = &[
+    ("Later today", 4 * 3600),
+    ("Tomorrow", 24 * 3600),
+    ("In 3 days", 3 * 24 * 3600),
+    ("Next week", 7 * 24 * 3600),
+];
+
+/// An attachment written to disk for in-app image preview.
+struct AttachmentPreview {
+    name: String,
+    path: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +339,11 @@ pub struct App {
     drag_over_folder_id: Option<String>,
     focused_tab: usize,
     toast: Option<String>,
+    undo: Option<UndoReminder>,
+    reminder_ids: Vec<String>,
+    preview: Option<AttachmentPreview>,
+    thread_messages: Vec<MessageDetail>,
+    expanded_ids: Vec<String>,
 
     // Inline reply composer.
     reply_input: Entity<InputState>,
@@ -344,6 +373,14 @@ impl App {
 
         let ai = Ai::load(&db).unwrap_or_else(|_| Ai::load(&db).expect("ollama default must load"));
         let ai_config = ai.config().clone();
+
+        // Persisted AI tone preference (falls back to Professional).
+        let ai_tone = db
+            .get_setting("ai.tone")
+            .ok()
+            .flatten()
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| "Professional".to_string());
 
         let to_input = cx.new(|cx| InputState::new(window, cx).placeholder("To (comma separated)"));
         let subject_input = cx.new(|cx| InputState::new(window, cx).placeholder("Subject"));
@@ -444,7 +481,7 @@ impl App {
             ai_output: None,
             ai_error: None,
             ai_busy: false,
-            ai_tone: "Professional".to_string(),
+            ai_tone,
             ai_reply_draft: None,
             search_input,
             search_query: String::new(),
@@ -456,6 +493,11 @@ impl App {
             drag_over_folder_id: None,
             focused_tab: 0,
             toast: None,
+            undo: None,
+            reminder_ids: Vec::new(),
+            preview: None,
+            thread_messages: Vec::new(),
+            expanded_ids: Vec::new(),
             reply_input,
             reply_open: false,
             reply_mode: ReplyMode::Reply,
@@ -503,9 +545,26 @@ impl App {
     }
 
     fn reload_messages(&mut self) {
+        let now = chrono::Utc::now().timestamp();
+        let _ = self.db.delete_expired_snoozes(now);
+
+        let active = self.db.list_active_reminders(now).unwrap_or_default();
+        self.reminder_ids = active.iter().map(|r| r.message_id.clone()).collect();
+        let snoozed_ids: Vec<String> = active
+            .iter()
+            .filter(|r| r.kind == "snooze")
+            .map(|r| r.message_id.clone())
+            .collect();
+        let inbox_id = self
+            .folders
+            .iter()
+            .find(|f| f.special_use.as_deref() == Some("inbox"))
+            .map(|f| f.id.clone());
+
         self.messages = match self.selected_folder_id.as_deref() {
             Some(PRIORITY) => self.db.list_flagged_messages(500, 0).unwrap_or_default(),
-            Some(SNOOZED) | Some(VIEW_MENTIONS) => Vec::new(),
+            Some(SNOOZED) => self.db.list_snoozed_messages(now).unwrap_or_default(),
+            Some(VIEW_MENTIONS) => Vec::new(),
             Some(id) if id.starts_with(LABEL_PREFIX) => {
                 let label = &id[LABEL_PREFIX.len()..];
                 self.account_messages()
@@ -536,6 +595,13 @@ impl App {
             None => Vec::new(),
         };
 
+        // Snoozed messages leave the inbox and return when due.
+        if self.search_query.trim().is_empty()
+            && self.selected_folder_id.as_deref() == inbox_id.as_deref()
+        {
+            self.messages.retain(|m| !snoozed_ids.contains(&m.id));
+        }
+
         // Focused vs Other: Focused surfaces unread first, Other surfaces read.
         if self.focused_tab == 0 {
             self.messages.sort_by(|a, b| {
@@ -554,6 +620,21 @@ impl App {
 
     fn open_message(&mut self, id: &str) {
         self.selected_message = self.db.get_message_detail(id).unwrap_or(None);
+        if let Some(preview) = self.preview.take() {
+            let _ = std::fs::remove_file(&preview.path);
+        }
+        self.thread_messages = match &self.selected_message {
+            Some(m) => match &m.thread_id {
+                Some(tid) => self.db.list_thread_messages(tid).unwrap_or_default(),
+                None => vec![m.clone()],
+            },
+            None => Vec::new(),
+        };
+        self.expanded_ids = self
+            .selected_message
+            .as_ref()
+            .map(|m| vec![m.id.clone()])
+            .unwrap_or_default();
         if self.selected_message.is_some() {
             let _ = self.db.mark_read(id, true);
         }
@@ -693,16 +774,71 @@ impl App {
         self.delete_message(&id, cx);
     }
 
-    fn snooze_selected(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_message_id().map(str::to_string) else {
+    /// Snooze the selected message until `due_at`, hiding it from the inbox.
+    fn snooze_message(&mut self, id: &str, label: &str, due_at: i64, cx: &mut Context<Self>) {
+        let Some(detail) = self.db.get_message_detail(id).ok().flatten() else {
             return;
         };
-        let _ = self.db.mark_read(&id, true);
-        if self.selected_message_id() == Some(id.as_str()) {
-            self.selected_message = self.db.get_message_detail(&id).ok().flatten();
-        }
+        let previous = self.db.get_reminder(id).ok().flatten();
+        let _ = self.db.mark_read(id, true);
+        let _ = self
+            .db
+            .upsert_reminder(&detail.account_id, id, "snooze", Some(label), due_at);
+        self.undo = Some(UndoReminder {
+            message_id: id.to_string(),
+            previous,
+        });
         self.reload_messages();
-        self.set_toast("Snoozed until tomorrow · undo", cx);
+        self.set_toast(&format!("Snoozed until {label}"), cx);
+        cx.notify();
+    }
+
+    /// Schedule a follow-up reminder (defaults to tomorrow) on the selected message.
+    fn schedule_followup(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected_message_id().map(str::to_string) else {
+            self.set_toast("Select a message to schedule a follow-up.", cx);
+            return;
+        };
+        let Some(detail) = self.db.get_message_detail(&id).ok().flatten() else {
+            return;
+        };
+        let previous = self.db.get_reminder(&id).ok().flatten();
+        let due_at = chrono::Utc::now().timestamp() + 24 * 3600;
+        let _ = self.db.upsert_reminder(
+            &detail.account_id,
+            &id,
+            "follow_up",
+            Some("tomorrow"),
+            due_at,
+        );
+        self.undo = Some(UndoReminder {
+            message_id: id.clone(),
+            previous,
+        });
+        self.reload_messages();
+        self.set_toast("Follow-up scheduled for tomorrow", cx);
+        cx.notify();
+    }
+
+    /// Undo the last snooze/follow-up action, restoring the prior reminder.
+    fn undo_last(&mut self, cx: &mut Context<Self>) {
+        let Some(undo) = self.undo.take() else {
+            return;
+        };
+        if let Some(prev) = &undo.previous {
+            let _ = self.db.upsert_reminder(
+                &prev.account_id,
+                &prev.message_id,
+                &prev.kind,
+                prev.label.as_deref(),
+                prev.due_at,
+            );
+        } else {
+            let _ = self.db.delete_reminder(&undo.message_id);
+        }
+        self.toast = Some("Undone".to_string());
+        self.reload_messages();
+        cx.notify();
     }
 
     fn move_selected_to_folder(
@@ -975,6 +1111,7 @@ impl App {
         let account_id = msg.account_id.clone();
         let ai = self.ai.clone();
         let db = self.db.clone();
+        let tone = self.ai_tone.clone();
         let entity = cx.entity();
 
         cx.spawn(async move |_weak, cx| {
@@ -990,6 +1127,7 @@ impl App {
                         sender.as_deref(),
                         subj.as_deref(),
                         &body,
+                        &tone,
                     )
                 })
                 .await;
@@ -2028,6 +2166,16 @@ impl App {
                                     .gap_1()
                                     .items_center()
                                     .children(star_marker(flagged, cx))
+                                    .children(if self.reminder_ids.contains(&msg.id) {
+                                        Some(
+                                            Icon::new(IconName::Calendar)
+                                                .size_3p5()
+                                                .text_color(cx.theme().warning)
+                                                .into_any_element(),
+                                        )
+                                    } else {
+                                        None
+                                    })
                                     .child(
                                         div()
                                             .text_xs()
@@ -2118,154 +2266,115 @@ impl App {
         }
         let msg = self.selected_message.clone().expect("checked above");
 
-        let sender = msg
-            .sender_name
-            .clone()
-            .unwrap_or_else(|| msg.sender_email.clone().unwrap_or_default());
-        let sender_email = msg.sender_email.clone().unwrap_or_default();
         let subject = msg
             .subject
             .clone()
             .unwrap_or_else(|| "(no subject)".to_string());
-        let body = msg.body_text.clone().unwrap_or_default();
-        let date = format_full_date(msg.date_received);
-        let to = msg.to_addresses.clone().unwrap_or_default();
         let flagged = msg.is_flagged;
-        let unread = !msg.is_read;
         let category = msg.ai_category.clone();
         let message_id = msg.id.clone();
         let toast = self.toast.clone();
+        let reminder = self.db.get_reminder(&message_id).ok().flatten();
+        let has_undo = self.undo.is_some();
+        let mut tags = category_tags(cx, category.as_deref(), flagged);
+        if let Some(r) = &reminder {
+            let label = r.label.clone().unwrap_or_default();
+            let text = match r.kind.as_str() {
+                "snooze" => format!("Snoozed until {label}"),
+                _ => format!("Follow up · {label}"),
+            };
+            tags.push(reminder_tag(cx, &text));
+        }
 
-        let scroll =
-            v_flex()
-                .id("reader-scroll")
-                .flex_1()
-                .w_full()
-                .overflow_y_scroll()
-                .p_4()
-                .child(
-                    v_flex()
-                        .gap_4()
-                        .child(
-                            // Subject + tags + star.
-                            h_flex()
-                                .w_full()
-                                .gap_3()
-                                .items_center()
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .gap_1()
-                                        .child(
-                                            div()
-                                                .text_2xl()
-                                                .font_semibold()
-                                                .child(SharedString::from(subject)),
-                                        )
-                                        .child(h_flex().gap_1().items_center().children(
-                                            category_tags(cx, category.as_deref(), flagged),
-                                        )),
-                                )
-                                .child(
-                                    Icon::new(if flagged {
-                                        IconName::Star
-                                    } else {
-                                        IconName::StarOff
-                                    })
-                                    .size_4()
-                                    .text_color(if flagged {
-                                        cx.theme().primary
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    }),
-                                ),
-                        )
-                        .child(
-                            // Sender header.
-                            h_flex()
-                                .w_full()
-                                .gap_2()
-                                .items_center()
-                                .child(Avatar::new().name(SharedString::from(sender.clone())))
-                                .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .gap_0p5()
-                                        .child(
-                                            h_flex()
-                                                .gap_2()
-                                                .items_baseline()
-                                                .child(
-                                                    div()
-                                                        .font_semibold()
-                                                        .child(SharedString::from(sender)),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_sm()
-                                                        .text_color(cx.theme().muted_foreground)
-                                                        .child(SharedString::from(recipient_line(
-                                                            &to,
-                                                            &sender_email,
-                                                        ))),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(SharedString::from(date)),
-                                        ),
-                                )
-                                .child(h_flex().gap_1().children(if unread {
-                                    Some(
-                                        Badge::new()
-                                            .color(cx.theme().primary)
-                                            .child("Unread")
-                                            .into_any_element(),
+        let scroll = v_flex()
+            .id("reader-scroll")
+            .flex_1()
+            .w_full()
+            .overflow_y_scroll()
+            .p_4()
+            .child(
+                v_flex()
+                    .gap_4()
+                    .child(
+                        // Subject + tags + star.
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .items_center()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_2xl()
+                                            .font_semibold()
+                                            .child(SharedString::from(subject)),
                                     )
+                                    .child(h_flex().gap_1().items_center().children(tags)),
+                            )
+                            .child(
+                                Icon::new(if flagged {
+                                    IconName::Star
                                 } else {
-                                    None
-                                })),
+                                    IconName::StarOff
+                                })
+                                .size_4()
+                                .text_color(if flagged {
+                                    cx.theme().primary
+                                } else {
+                                    cx.theme().muted_foreground
+                                }),
+                            ),
+                    )
+                    .child(self.conversation_view(cx, entity.clone()))
+                    .child(self.attachments_section(cx, entity.clone(), &message_id))
+                    .children(self.preview_section(cx, entity.clone()))
+                    .child(self.quick_actions(cx, entity.clone()))
+                    .child(self.inline_composer(cx, entity.clone()))
+                    .children(toast.map(|t| {
+                        let mut row = h_flex()
+                            .w_full()
+                            .p_2()
+                            .rounded_md()
+                            .bg(cx.theme().muted)
+                            .gap_2()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(SharedString::from(t)),
+                            );
+                        if has_undo {
+                            row = row.child(
+                                Button::new("toast-undo").label("Undo").small().on_click({
+                                    let entity = entity.clone();
+                                    move |_, _, cx| {
+                                        cx.update_entity(&entity, |this, cx| {
+                                            this.undo_last(cx);
+                                        });
+                                    }
+                                }),
+                            );
+                        }
+                        row.child(
+                            Button::new("toast-dismiss")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .xsmall()
+                                .on_click({
+                                    let entity = entity.clone();
+                                    move |_, _, cx| {
+                                        cx.update_entity(&entity, |this, cx| {
+                                            this.toast = None;
+                                            cx.notify();
+                                        });
+                                    }
+                                }),
                         )
-                        .child(
-                            // Body.
-                            render_body(&body),
-                        )
-                        .child(self.attachments_section(cx, &message_id))
-                        .child(self.quick_actions(cx, entity.clone()))
-                        .child(self.inline_composer(cx, entity.clone()))
-                        .children(toast.map(|t| {
-                            h_flex()
-                                .w_full()
-                                .p_2()
-                                .rounded_md()
-                                .bg(cx.theme().muted)
-                                .gap_2()
-                                .justify_between()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(SharedString::from(t)),
-                                )
-                                .child(
-                                    Button::new("toast-dismiss")
-                                        .icon(IconName::Close)
-                                        .ghost()
-                                        .xsmall()
-                                        .on_click({
-                                            let entity = entity.clone();
-                                            move |_, _, cx| {
-                                                cx.update_entity(&entity, |this, cx| {
-                                                    this.toast = None;
-                                                    cx.notify();
-                                                });
-                                            }
-                                        }),
-                                )
-                        })),
-                );
+                    })),
+            );
 
         div()
             .id("reader")
@@ -2274,6 +2383,198 @@ impl App {
             .flex_col()
             .child(self.reader_toolbar(cx, entity, flagged))
             .child(scroll)
+    }
+
+    // ---------------------------------------------------------------------
+    // Conversation (thread) rendering
+    // ---------------------------------------------------------------------
+    fn conversation_view(&self, cx: &mut Context<Self>, entity: Entity<Self>) -> AnyElement {
+        if self.thread_messages.len() > 1 {
+            self.thread_view(cx, entity)
+        } else {
+            self.single_message_view(cx)
+        }
+    }
+
+    fn single_message_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(msg) = self.selected_message.as_ref() else {
+            return div().into_any_element();
+        };
+        let sender = msg
+            .sender_name
+            .clone()
+            .unwrap_or_else(|| msg.sender_email.clone().unwrap_or_default());
+        let sender_email = msg.sender_email.clone().unwrap_or_default();
+        let date = format_full_date(msg.date_received);
+        let to = msg.to_addresses.clone().unwrap_or_default();
+        let unread = !msg.is_read;
+        let body = msg.body_text.clone().unwrap_or_default();
+
+        v_flex()
+            .gap_4()
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(Avatar::new().name(SharedString::from(sender.clone())))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_0p5()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_baseline()
+                                    .child(div().font_semibold().child(SharedString::from(sender)))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(SharedString::from(recipient_line(
+                                                &to,
+                                                &sender_email,
+                                            ))),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(SharedString::from(date)),
+                            ),
+                    )
+                    .child(h_flex().gap_1().children(if unread {
+                        Some(
+                            Badge::new()
+                                .color(cx.theme().primary)
+                                .child("Unread")
+                                .into_any_element(),
+                        )
+                    } else {
+                        None
+                    })),
+            )
+            .child(render_body(&body))
+            .into_any_element()
+    }
+
+    fn thread_view(&self, cx: &mut Context<Self>, entity: Entity<Self>) -> AnyElement {
+        let count = self.thread_messages.len();
+        v_flex()
+            .id("thread-view")
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!(
+                        "{count} messages in this conversation"
+                    ))),
+            )
+            .children(
+                self.thread_messages
+                    .iter()
+                    .map(|m| self.thread_message_card(cx, entity.clone(), m))
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element()
+    }
+
+    fn thread_message_card(
+        &self,
+        cx: &mut Context<Self>,
+        entity: Entity<Self>,
+        msg: &MessageDetail,
+    ) -> AnyElement {
+        let expanded = self.expanded_ids.contains(&msg.id);
+        let sender = msg
+            .sender_name
+            .clone()
+            .unwrap_or_else(|| msg.sender_email.clone().unwrap_or_default());
+        let date = format_full_date(msg.date_received);
+        let body = msg.body_text.clone().unwrap_or_default();
+
+        v_flex()
+            .id(SharedString::from(format!("thread-msg-{}", msg.id)))
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .child(
+                h_flex()
+                    .id(SharedString::from(format!("thread-head-{}", msg.id)))
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .gap_2()
+                    .items_center()
+                    .cursor_pointer()
+                    .on_click({
+                        let entity = entity.clone();
+                        let id = msg.id.clone();
+                        move |_, _, cx| {
+                            let id = id.clone();
+                            cx.update_entity(&entity, move |this, cx| {
+                                this.toggle_thread_message(&id, cx);
+                            });
+                        }
+                    })
+                    .child(
+                        Avatar::new()
+                            .name(SharedString::from(sender.clone()))
+                            .small(),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .child(SharedString::from(sender)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(SharedString::from(date)),
+                            ),
+                    )
+                    .child(
+                        Icon::new(if expanded {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .size_3p5()
+                        .text_color(cx.theme().muted_foreground),
+                    ),
+            )
+            .children(if expanded {
+                Some(
+                    v_flex()
+                        .px_3()
+                        .pb_2()
+                        .child(render_body(&body))
+                        .into_any_element(),
+                )
+            } else {
+                None
+            })
+            .into_any_element()
+    }
+
+    fn toggle_thread_message(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.expanded_ids.contains(&id.to_string()) {
+            self.expanded_ids.retain(|x| x != id);
+        } else {
+            self.expanded_ids.push(id.to_string());
+        }
+        cx.notify();
     }
 
     fn reader_toolbar(
@@ -2350,10 +2651,34 @@ impl App {
                     .icon(IconName::Calendar)
                     .ghost()
                     .tooltip("Snooze")
-                    .on_click({
+                    .dropdown_menu({
                         let entity = entity.clone();
-                        move |_, _, cx| {
-                            cx.update_entity(&entity, |this, cx| this.snooze_selected(cx));
+                        move |menu, _, _| {
+                            let mut m = menu;
+                            for (label, secs) in SNOOZE_OPTIONS {
+                                m = m.item(
+                                    PopupMenuItem::new(SharedString::from(*label)).on_click({
+                                        let entity = entity.clone();
+                                        move |_, _, cx| {
+                                            let label = *label;
+                                            let secs = *secs;
+                                            cx.update_entity(&entity, move |this, cx| {
+                                                if let Some(id) =
+                                                    this.selected_message_id().map(str::to_string)
+                                                {
+                                                    this.snooze_message(
+                                                        &id,
+                                                        label,
+                                                        chrono::Utc::now().timestamp() + secs,
+                                                        cx,
+                                                    );
+                                                }
+                                            });
+                                        }
+                                    }),
+                                );
+                            }
+                            m
                         }
                     }),
             )
@@ -2679,11 +3004,193 @@ impl App {
             .child(format_button("📅", "Schedule"))
     }
 
-    fn attachments_section(&self, cx: &mut Context<Self>, message_id: &str) -> AnyElement {
+    // ---------------------------------------------------------------------
+    // Attachment actions
+    // ---------------------------------------------------------------------
+    fn download_attachment(&mut self, att: Attachment, cx: &mut Context<Self>) {
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result: anyhow::Result<PathBuf> = cx
+                .background_executor()
+                .spawn(async move {
+                    let data = load_attachment_data(&db, &att)?;
+                    let dir = dirs::download_dir()
+                        .filter(|d| d.is_dir())
+                        .unwrap_or_else(std::env::temp_dir);
+                    write_blob(&dir, &att.display_name, &data)
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                match result {
+                    Ok(path) => this.set_toast(&format!("Saved {}", path.display()), cx),
+                    Err(e) => this.set_toast(&format!("Download failed: {e}"), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn download_all_attachments(&mut self, atts: Vec<Attachment>, cx: &mut Context<Self>) {
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result: anyhow::Result<usize> = cx
+                .background_executor()
+                .spawn(async move {
+                    let dir = dirs::download_dir()
+                        .filter(|d| d.is_dir())
+                        .unwrap_or_else(std::env::temp_dir);
+                    let mut saved = 0usize;
+                    for att in &atts {
+                        if let Some(data) = db.get_attachment_data(&att.id)? {
+                            write_blob(&dir, &att.display_name, &data)?;
+                            saved += 1;
+                        }
+                    }
+                    Ok(saved)
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                match result {
+                    Ok(n) => this.set_toast(&format!("Saved {n} attachment(s)."), cx),
+                    Err(e) => this.set_toast(&format!("Download failed: {e}"), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Write the blob to a temp file and hand it to the OS default handler.
+    /// This is also the safe path for PDFs (no in-app untrusted rendering).
+    fn open_attachment(&mut self, att: Attachment, cx: &mut Context<Self>) {
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result: anyhow::Result<()> = cx
+                .background_executor()
+                .spawn(async move {
+                    let data = load_attachment_data(&db, &att)?;
+                    let path = write_blob(&std::env::temp_dir(), &att.display_name, &data)?;
+                    open::that(&path)?;
+                    Ok(())
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                if let Err(e) = result {
+                    this.set_toast(&format!("Could not open attachment: {e}"), cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Preview an image in-app, or open PDFs/other files in the OS viewer.
+    fn preview_attachment(&mut self, att: Attachment, cx: &mut Context<Self>) {
+        if is_image_name(&att.display_name) {
+            let db = self.db.clone();
+            let entity = cx.entity();
+            cx.spawn(async move |_weak, cx| {
+                let result: anyhow::Result<(String, PathBuf)> = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let data = load_attachment_data(&db, &att)?;
+                        let path = write_blob(&std::env::temp_dir(), &att.display_name, &data)?;
+                        Ok((att.display_name.clone(), path))
+                    })
+                    .await;
+                let _ = entity.update(cx, move |this, cx| {
+                    match result {
+                        Ok((name, path)) => {
+                            this.preview = Some(AttachmentPreview { name, path });
+                        }
+                        Err(e) => this.set_toast(&format!("Preview failed: {e}"), cx),
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        } else {
+            if is_pdf_name(&att.display_name) {
+                self.set_toast("PDF opens in your system viewer.", cx);
+            }
+            self.open_attachment(att, cx);
+        }
+    }
+
+    fn close_preview(&mut self, cx: &mut Context<Self>) {
+        if let Some(preview) = self.preview.take() {
+            let _ = std::fs::remove_file(&preview.path);
+        }
+        cx.notify();
+    }
+
+    fn preview_section(&self, cx: &mut Context<Self>, entity: Entity<Self>) -> Option<AnyElement> {
+        let preview = self.preview.as_ref()?;
+        let name = preview.name.clone();
+        let path = preview.path.clone();
+        Some(
+            v_flex()
+                .id("attachment-preview")
+                .gap_2()
+                .rounded_lg()
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().muted)
+                .p_2()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .justify_between()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_medium()
+                                .child(SharedString::from(name)),
+                        )
+                        .child(
+                            Button::new("close-preview")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .xsmall()
+                                .tooltip("Close preview")
+                                .on_click({
+                                    let entity = entity.clone();
+                                    move |_, _, cx| {
+                                        cx.update_entity(&entity, |this, cx| {
+                                            this.close_preview(cx);
+                                        });
+                                    }
+                                }),
+                        ),
+                )
+                .child(
+                    gpui::img(path)
+                        .object_fit(gpui::ObjectFit::ScaleDown)
+                        .w_full()
+                        .max_h(px(320.0))
+                        .rounded_md()
+                        .bg(cx.theme().background),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn attachments_section(
+        &self,
+        cx: &mut Context<Self>,
+        entity: Entity<Self>,
+        message_id: &str,
+    ) -> AnyElement {
         let atts = self.db.list_attachments(message_id).unwrap_or_default();
         if atts.is_empty() {
             return div().into_any_element();
         }
+        let all = atts.clone();
         v_flex()
             .id("attachments")
             .gap_2()
@@ -2712,23 +3219,43 @@ impl App {
                                 .icon(IconName::ArrowDown)
                                 .ghost()
                                 .small()
-                                .tooltip("Download all"),
+                                .tooltip("Download all")
+                                .on_click({
+                                    let entity = entity.clone();
+                                    let all = all.clone();
+                                    move |_, _, cx| {
+                                        let all = all.clone();
+                                        cx.update_entity(&entity, move |this, cx| {
+                                            this.download_all_attachments(all, cx);
+                                        });
+                                    }
+                                }),
                         ),
                     ),
             )
             .child(
                 h_flex().gap_2().flex_wrap().children(
                     atts.iter()
-                        .map(|att| self.attachment_card(cx, att))
+                        .map(|att| self.attachment_card(cx, entity.clone(), att))
                         .collect::<Vec<_>>(),
                 ),
             )
             .into_any_element()
     }
 
-    fn attachment_card(&self, cx: &mut Context<Self>, att: &Attachment) -> AnyElement {
+    fn attachment_card(
+        &self,
+        cx: &mut Context<Self>,
+        entity: Entity<Self>,
+        att: &Attachment,
+    ) -> AnyElement {
         let (color, short) = file_type_style(&att.display_name);
         let fg = cx.theme().muted_foreground;
+        let preview_label = if is_image_name(&att.display_name) {
+            "Preview image"
+        } else {
+            "Preview in system viewer"
+        };
         h_flex()
             .gap_2()
             .p_2()
@@ -2758,6 +3285,7 @@ impl App {
                 v_flex()
                     .gap_0p5()
                     .min_w_0()
+                    .flex_1()
                     .child(
                         div()
                             .text_sm()
@@ -2772,11 +3300,59 @@ impl App {
                     ),
             )
             .child(
-                Button::new(SharedString::from(format!("download-{}", att.id)))
-                    .icon(IconName::ArrowDown)
-                    .ghost()
-                    .xsmall()
-                    .tooltip("Download"),
+                h_flex()
+                    .gap_0()
+                    .child(
+                        Button::new(SharedString::from(format!("preview-{}", att.id)))
+                            .icon(IconName::Eye)
+                            .ghost()
+                            .xsmall()
+                            .tooltip(preview_label)
+                            .on_click({
+                                let entity = entity.clone();
+                                let att = att.clone();
+                                move |_, _, cx| {
+                                    let att = att.clone();
+                                    cx.update_entity(&entity, move |this, cx| {
+                                        this.preview_attachment(att, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("download-{}", att.id)))
+                            .icon(IconName::ArrowDown)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("Download")
+                            .on_click({
+                                let entity = entity.clone();
+                                let att = att.clone();
+                                move |_, _, cx| {
+                                    let att = att.clone();
+                                    cx.update_entity(&entity, move |this, cx| {
+                                        this.download_attachment(att, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("open-{}", att.id)))
+                            .icon(IconName::ExternalLink)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("Open in system viewer")
+                            .on_click({
+                                let entity = entity.clone();
+                                let att = att.clone();
+                                move |_, _, cx| {
+                                    let att = att.clone();
+                                    cx.update_entity(&entity, move |this, cx| {
+                                        this.open_attachment(att, cx);
+                                    });
+                                }
+                            }),
+                    ),
             )
             .into_any_element()
     }
@@ -2967,7 +3543,7 @@ impl App {
                         IconName::Calendar,
                         "Schedule follow-up",
                         "Set a reminder to follow up",
-                        AiKind::Summarize,
+                        AiKind::FollowUp,
                     )),
             )
             .child(self.section_header(cx, "AI Insights"))
@@ -3142,12 +3718,11 @@ impl App {
                     AiKind::Summarize => this.run_ai(cx, AiKind::Summarize),
                     AiKind::DraftReply => this.run_ai_reply(window, cx),
                     AiKind::Polish => this.run_ai(cx, AiKind::Polish),
+                    AiKind::FollowUp => this.schedule_followup(cx),
                     AiKind::Triage => {
                         let _ = title;
                         if title == "Detect action items" {
                             this.run_detect_actions(cx);
-                        } else if title == "Schedule follow-up" {
-                            this.set_toast("Follow-up scheduling is on the roadmap.", cx);
                         } else {
                             this.run_ai(cx, AiKind::Triage);
                         }
@@ -3218,6 +3793,7 @@ impl App {
                                                 move |_, _, cx| {
                                                     let t = t.to_string();
                                                     cx.update_entity(&entity, move |this, cx| {
+                                                        let _ = this.db.set_setting("ai.tone", &t);
                                                         this.ai_tone = t;
                                                         cx.notify();
                                                     });
@@ -3257,11 +3833,18 @@ impl App {
         };
         let sender = msg.sender_name.clone();
         let subject = msg.subject.clone();
-        let body = msg.body_text.clone().unwrap_or_default();
+        // Summarize covers the whole conversation; other actions use the
+        // selected message body only.
+        let body = if matches!(kind, AiKind::Summarize) {
+            format_thread_text(&self.thread_messages)
+        } else {
+            msg.body_text.clone().unwrap_or_default()
+        };
         let message_id = msg.id.clone();
         let account_id = msg.account_id.clone();
         let ai = self.ai.clone();
         let db = self.db.clone();
+        let tone = self.ai_tone.clone();
         let entity = cx.entity();
 
         self.ai_busy = true;
@@ -3282,6 +3865,7 @@ impl App {
                         sender.as_deref(),
                         subject.as_deref(),
                         &body,
+                        &tone,
                     )
                 })
                 .await;
@@ -4403,18 +4987,20 @@ fn perform_ai(
     sender: Option<&str>,
     subject: Option<&str>,
     body: &str,
+    tone: &str,
 ) -> anyhow::Result<String> {
     let (output, category) = match kind {
         AiKind::Summarize => {
-            let text = ai.summarize(sender, subject, body)?;
+            // `body` is the pre-formatted conversation text for summarize.
+            let text = ai.summarize_thread(body)?;
             (text, None)
         }
         AiKind::DraftReply => {
-            let text = ai.draft_reply(sender, subject, body, "friendly and concise")?;
+            let text = ai.draft_reply(sender, subject, body, tone)?;
             (text, None)
         }
         AiKind::Polish => {
-            let text = ai.polish(body, "clear and professional")?;
+            let text = ai.polish(body, tone)?;
             (text, None)
         }
         AiKind::Triage => {
@@ -4422,6 +5008,7 @@ fn perform_ai(
             let category = Category::parse(&word).unwrap_or(Category::Updates);
             (format!("Category: {}", category.label()), Some(category))
         }
+        AiKind::FollowUp => anyhow::bail!("follow-up is scheduled locally, not via an AI call"),
     };
 
     ai::record_and_apply(
@@ -4499,6 +5086,30 @@ fn category_tags(cx: &mut Context<App>, category: Option<&str>, flagged: bool) -
     tags
 }
 
+/// A calendar tag for an active snooze or follow-up reminder.
+fn reminder_tag(cx: &mut Context<App>, label: &str) -> AnyElement {
+    h_flex()
+        .flex_none()
+        .gap_1()
+        .px_1p5()
+        .py_0p5()
+        .rounded_full()
+        .bg(cx.theme().muted)
+        .items_center()
+        .child(
+            Icon::new(IconName::Calendar)
+                .size_3p5()
+                .text_color(cx.theme().warning),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().warning)
+                .child(SharedString::from(label.to_string())),
+        )
+        .into_any_element()
+}
+
 fn file_type_style(name: &str) -> (Hsla, &'static str) {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
@@ -4519,6 +5130,27 @@ fn recipient_line(to_json: &str, sender_email: &str) -> String {
         Some(r) => format!("to {r}"),
         None => "to me".to_string(),
     }
+}
+
+/// Format a whole conversation as per-message blocks for the AI summarize
+/// action (sender + subject + body per message, oldest first).
+fn format_thread_text(messages: &[MessageDetail]) -> String {
+    messages
+        .iter()
+        .map(|m| {
+            let sender = m
+                .sender_name
+                .clone()
+                .unwrap_or_else(|| m.sender_email.clone().unwrap_or_default());
+            let subject = m
+                .subject
+                .clone()
+                .unwrap_or_else(|| "(no subject)".to_string());
+            let body = m.body_text.clone().unwrap_or_default();
+            format!("From: {sender}\nSubject: {subject}\n\n{}", body.trim())
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
 }
 
 /// Render plain text as line-separated blocks (the demo bodies use `\n\n`).
@@ -4677,6 +5309,93 @@ fn star_marker(flagged: bool, cx: &mut Context<App>) -> Option<AnyElement> {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Attachment file helpers
+// ---------------------------------------------------------------------------
+
+fn load_attachment_data(db: &Database, att: &Attachment) -> anyhow::Result<Vec<u8>> {
+    db.get_attachment_data(&att.id)?
+        .ok_or_else(|| anyhow::anyhow!("attachment data missing for {}", att.display_name))
+}
+
+/// Sanitize a filename so it can be safely written to disk (no path
+/// separators, control characters, or Windows-invalid characters).
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim().trim_matches('.').to_string();
+    if cleaned.is_empty() {
+        "attachment".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Find a non-colliding path in `dir` for `name`, appending " (n)" when needed.
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    let name = sanitize_filename(name);
+    let candidate = dir.join(&name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) => (stem.to_string(), format!(".{ext}")),
+        None => (name.clone(), String::new()),
+    };
+    for i in 1.. {
+        let candidate = dir.join(format!("{stem} ({i}){ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+/// Write raw bytes to `dir` under a safe, collision-free filename.
+fn write_blob(dir: &Path, name: &str, data: &[u8]) -> anyhow::Result<PathBuf> {
+    let path = unique_path(dir, name);
+    std::fs::write(&path, data)?;
+    Ok(path)
+}
+
+fn is_image_name(name: &str) -> bool {
+    matches!(
+        name.rsplit('.')
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some(
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "bmp"
+                | "ico"
+                | "svg"
+                | "avif"
+                | "tif"
+                | "tiff"
+        )
+    )
+}
+
+fn is_pdf_name(name: &str) -> bool {
+    name.rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        == Some("pdf")
+}
+
 /// Open the on-disk cache, falling back to an in-memory database if the config
 /// directory or file is unavailable.
 fn open_database() -> Database {
@@ -4687,4 +5406,35 @@ fn open_database() -> Database {
         }
     }
     Database::in_memory().expect("in-memory database must open")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_filename_strips_dangerous_chars() {
+        assert_eq!(sanitize_filename("plain.txt"), "plain.txt");
+        assert_eq!(sanitize_filename("../../etc/passwd"), "_.._etc_passwd");
+        assert_eq!(sanitize_filename("a<b>:c|d?e*"), "a_b__c_d_e_");
+        assert_eq!(sanitize_filename("..."), "attachment");
+    }
+
+    #[test]
+    fn unique_path_appends_suffix_on_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.txt"), b"x").unwrap();
+        let p = unique_path(dir.path(), "note.txt");
+        assert_eq!(p.file_name().unwrap().to_str().unwrap(), "note (1).txt");
+        assert!(!p.exists());
+    }
+
+    #[test]
+    fn file_kind_detection() {
+        assert!(is_image_name("photo.PNG"));
+        assert!(is_image_name("gif.gif"));
+        assert!(is_pdf_name("invoice.pdf"));
+        assert!(!is_pdf_name("photo.png"));
+        assert!(!is_image_name("notes.txt"));
+    }
 }

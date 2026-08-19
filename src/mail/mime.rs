@@ -2,7 +2,7 @@
 
 use super::types::{ParsedAttachment, ParsedMessage};
 use anyhow::{Result, anyhow};
-use mail_parser::{Address, MessageParser, MessagePart, MimeHeaders};
+use mail_parser::{Address, HeaderValue, MessageParser, MessagePart, MimeHeaders};
 
 /// Parse raw RFC822 bytes into a [`ParsedMessage`].
 pub fn parse(raw: &[u8]) -> Result<ParsedMessage> {
@@ -24,6 +24,17 @@ pub fn parse(raw: &[u8]) -> Result<ParsedMessage> {
     }
     out.to = address_list(msg.to());
     out.cc = address_list(msg.cc());
+
+    // Threading headers: Message-ID, In-Reply-To, References.
+    out.message_id = msg.message_id().map(str::to_string);
+    let in_reply_to = msg.in_reply_to();
+    if !in_reply_to.is_empty() {
+        out.in_reply_to = header_text(in_reply_to);
+    }
+    let references = msg.references();
+    if !references.is_empty() {
+        out.references = header_text(references);
+    }
 
     // Prefer the plain-text body; fall back to HTML stripped of tags.
     if let Some(text) = msg.body_text(0) {
@@ -59,6 +70,22 @@ pub fn parse(raw: &[u8]) -> Result<ParsedMessage> {
     }
 
     Ok(out)
+}
+
+/// Join all Message-ID values in a header (In-Reply-To / References may
+/// contain one or many ids), falling back to the raw text form.
+fn header_text(value: &HeaderValue<'_>) -> Option<String> {
+    if let Some(list) = value.as_text_list()
+        && !list.is_empty()
+    {
+        return Some(
+            list.iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+    value.as_text().map(str::to_string)
 }
 
 fn part_body(part: &MessagePart<'_>) -> Option<Vec<u8>> {
@@ -251,6 +278,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_threading_headers() {
+        let raw = b"From: Jane <jane@example.com>\r\nTo: me@example.org\r\nSubject: Re: hi\r\nMessage-ID: <msg-2@example.com>\r\nIn-Reply-To: <msg-1@example.com>\r\nReferences: <msg-0@example.com> <msg-1@example.com>\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nReply body.\r\n";
+        let parsed = parse(raw).unwrap();
+        assert_eq!(parsed.message_id.as_deref(), Some("msg-2@example.com"));
+        assert_eq!(parsed.in_reply_to.as_deref(), Some("msg-1@example.com"));
+        assert_eq!(
+            parsed.references.as_deref(),
+            Some("msg-0@example.com msg-1@example.com")
+        );
+    }
+
+    #[test]
     fn strips_html_and_entities() {
         let text = strip_html(
             "<div><p>Hello &amp; <b>world</b></p><br><script>alert(1)</script><p>Done</p></div>",
@@ -283,8 +322,7 @@ mod tests {
         let subject = parsed
             .header_values("Subject")
             .next()
-            .map(|h| h.as_text())
-            .flatten();
+            .and_then(|h| h.as_text());
         assert_eq!(subject, Some("Hello 🦀"));
         let ct = parsed.content_type().unwrap();
         assert_eq!(ct.c_type.as_ref(), "multipart");
