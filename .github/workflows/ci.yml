@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Komorebi is a Windows-native GPUI app: rust-toolchain.toml pins the
+    # x86_64-pc-windows-msvc target and gpui's Linux backend needs system
+    # libraries (libxkbcommon, wayland, xcb) that bare ubuntu runners lack.
+    # windows-latest ships the MSVC toolchain + Windows SDK, so this is where
+    # the crate actually builds and the exact commands below pass.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins 1.95.0 with rustfmt + clippy; the
+      # dtolnay action ignores that file, so pass the pieces explicitly.
+      - name: Install Rust (1.95.0, pinned in rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo check
+        run: cargo check --all-targets
+
+      - name: cargo test
+        run: cargo test
+
+      - name: cargo build
+        run: cargo build
+
+      # Plain clippy (no -D warnings): the crate currently has 18 pre-existing
+      # warnings in db/mail/ai. Enforce -D warnings once those are cleaned up.
+      - name: cargo clippy
+        run: cargo clippy --all-targets
+
+      - name: cargo fmt
+        run: cargo fmt --check
