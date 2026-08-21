@@ -156,13 +156,13 @@ pub fn validate_provider_policy(
         );
     }
     for (label, settings) in [("IMAP", imap), ("SMTP", smtp)] {
-        if let Some(s) = settings {
-            if s.security == Security::None {
-                bail!(
-                    "{label} for {} requires an encrypted connection (TLS or STARTTLS).",
-                    kind.label()
-                );
-            }
+        if let Some(s) = settings
+            && s.security == Security::None
+        {
+            bail!(
+                "{label} for {} requires an encrypted connection (TLS or STARTTLS).",
+                kind.label()
+            );
         }
     }
     Ok(())

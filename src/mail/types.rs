@@ -34,7 +34,7 @@ impl ProviderKind {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_or_default(s: &str) -> Self {
         match s {
             "mailcow" => Self::Mailcow,
             "zimbra" => Self::Zimbra,
@@ -77,7 +77,7 @@ impl AuthMode {
             Self::OAuth => "oauth",
         }
     }
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_or_default(s: &str) -> Self {
         if s == "oauth" {
             Self::OAuth
         } else {
@@ -102,7 +102,7 @@ impl Security {
             Self::Tls => "tls",
         }
     }
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_or_default(s: &str) -> Self {
         match s {
             "starttls" => Self::StartTls,
             "tls" => Self::Tls,
