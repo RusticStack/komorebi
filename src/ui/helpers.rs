@@ -11,6 +11,20 @@ use gpui::{AnyElement, Context, Hsla, IntoElement, ParentElement, SharedString, 
 use gpui_component::{ActiveTheme as _, Icon, IconName, StyledExt as _, h_flex, v_flex};
 use std::path::{Path, PathBuf};
 
+/// Color for a user label from its stored hex (`"6b9bd6"`, `"#6b9bd6"`),
+/// falling back to the name-based palette when unset/malformed.
+pub fn stored_label_color(hex: Option<&str>, fallback: &str) -> Hsla {
+    if let Some(hex) = hex {
+        let t = hex.trim().trim_start_matches('#');
+        if t.len() == 6
+            && let Ok(v) = u32::from_str_radix(t, 16)
+        {
+            return komorebi_hex(v);
+        }
+    }
+    label_color(fallback)
+}
+
 // ---------------------------------------------------------------------------
 // Badge / tag helpers
 // ---------------------------------------------------------------------------

@@ -114,9 +114,9 @@ impl App {
                 i18n::t("sidebar.trash", self.locale),
                 IconName::Delete,
             ))
-            .child(self.section_header_with_add(cx, entity.clone(), "Labels"))
+            .child(self.section_header_with_add(cx, entity.clone(), "Labels", true))
             .child(self.labels_list(cx, entity.clone()))
-            .child(self.section_header_with_add(cx, entity.clone(), "Views"))
+            .child(self.section_header_with_add(cx, entity.clone(), "Views", false))
             .child(self.nav_item(
                 cx,
                 entity.clone(),
@@ -187,8 +187,9 @@ impl App {
     pub(crate) fn section_header_with_add(
         &self,
         cx: &mut Context<Self>,
-        _entity: Entity<Self>,
+        entity: Entity<Self>,
         title: &'static str,
+        addable: bool,
     ) -> impl IntoElement + use<> {
         h_flex()
             .px_2()
@@ -205,7 +206,15 @@ impl App {
                     .icon(IconName::Plus)
                     .ghost()
                     .xsmall()
-                    .tooltip(SharedString::from(format!("Add {title}"))),
+                    .tooltip(SharedString::from(format!("Add {title}")))
+                    .when(addable, |b| {
+                        b.on_click({
+                            let entity = entity.clone();
+                            move |_, _, cx| {
+                                cx.update_entity(&entity, |this, cx| this.toggle_labels_adding(cx));
+                            }
+                        })
+                    }),
             )
     }
 
@@ -247,29 +256,119 @@ impl App {
         entity: Entity<Self>,
     ) -> impl IntoElement + use<> {
         let mut list = v_flex().gap_1();
-        for (name, color) in LABELS {
-            let target = format!("{LABEL_PREFIX}{name}");
-            list = list.child(self.label_row(cx, entity.clone(), name, *color, target));
+        if self.labels.is_empty() && !self.labels_adding {
+            list = list.child(
+                div()
+                    .px_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No labels yet"),
+            );
+        }
+        for label in &self.labels {
+            let target = format!("{LABEL_PREFIX}{}", label.id);
+            list = list.child(self.label_row(cx, entity.clone(), label, target));
+        }
+        if self.labels_adding {
+            list = list.child(self.label_add_row(entity.clone()));
         }
         list
+    }
+
+    /// Inline composer row shown while adding a label.
+    fn label_add_row(&self, entity: Entity<Self>) -> AnyElement {
+        h_flex()
+            .px_2()
+            .py_1()
+            .gap_1()
+            .items_center()
+            .child(Input::new(&self.label_input))
+            .child(
+                Button::new("confirm-add-label")
+                    .icon(IconName::Check)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Create label")
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, window, cx| {
+                            cx.update_entity(&entity, |this, cx| {
+                                this.create_label_from_input(window, cx);
+                            });
+                        }
+                    }),
+            )
+            .child(
+                Button::new("cancel-add-label")
+                    .icon(IconName::Close)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Cancel")
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _, cx| {
+                            cx.update_entity(&entity, |this, cx| this.toggle_labels_adding(cx));
+                        }
+                    }),
+            )
+            .into_any_element()
     }
 
     fn label_row(
         &self,
         cx: &mut Context<Self>,
         entity: Entity<Self>,
-        label: &'static str,
-        color: u32,
+        label: &DbLabel,
         target: String,
     ) -> AnyElement {
+        let renaming = self.renaming_label.as_deref() == Some(label.id.as_str());
+        if renaming {
+            return h_flex()
+                .px_2()
+                .py_1()
+                .gap_1()
+                .items_center()
+                .child(Input::new(&self.label_input))
+                .child(
+                    Button::new("confirm-rename-label")
+                        .icon(IconName::Check)
+                        .ghost()
+                        .xsmall()
+                        .tooltip("Rename")
+                        .on_click({
+                            let entity = entity.clone();
+                            move |_, window, cx| {
+                                cx.update_entity(&entity, |this, cx| {
+                                    this.commit_rename_label(window, cx);
+                                });
+                            }
+                        }),
+                )
+                .child(
+                    Button::new("cancel-rename-label")
+                        .icon(IconName::Close)
+                        .ghost()
+                        .xsmall()
+                        .tooltip("Cancel")
+                        .on_click({
+                            let entity = entity.clone();
+                            move |_, _, cx| {
+                                cx.update_entity(&entity, |this, cx| this.cancel_rename_label(cx));
+                            }
+                        }),
+                )
+                .into_any_element();
+        }
+
         let selected = self.selected_folder_id.as_deref() == Some(target.as_str());
         let selected_bg = cx.theme().sidebar_accent;
         let selected_fg = cx.theme().sidebar_accent_foreground;
         let hover_bg = cx.theme().muted;
-        let dot = komorebi_hex(color);
+        let dot = stored_label_color(label.color.as_deref(), &label.name);
+        let name = label.name.clone();
 
         h_flex()
-            .id(SharedString::from(format!("label-{label}")))
+            .id(SharedString::from(format!("label-{}", label.id)))
             .w_full()
             .px_2()
             .py_1()
@@ -287,7 +386,7 @@ impl App {
                     .bg(dot)
                     .flex_none(),
             )
-            .child(SharedString::from(label))
+            .child(SharedString::from(name))
             .child(div().flex_1())
             .on_click({
                 let entity = entity.clone();
@@ -303,6 +402,7 @@ impl App {
                     });
                 }
             })
+            .context_menu(self.label_context_menu(entity, label.clone()))
             .into_any_element()
     }
 

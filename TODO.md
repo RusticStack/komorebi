@@ -51,7 +51,7 @@ restore-on-failure. It is not yet production-complete.
 
 ### 1.3 Local storage & model
 - ✅ Threads/conversations (migration v4).
-- ✅ User labels (migration v5): CRUD + apply/remove/query. Sidebar labels still hardcoded (data-driven wiring is the remaining step).
+- ✅ **User labels are data-driven.** The sidebar Labels section reads the `labels` table: create via the "+" inline composer (auto-assigned palette color), rename/delete via right-click menu, apply/remove via a per-message context-menu submenu, and selecting a label lists its messages (`list_messages_by_label`). The old hardcoded Work/Design/Personal/Finance/Travel views are gone (AI triage categories still render as pills on messages).
 - ✅ Reminders/snooze + follow-up (migration v3).
 - ❌ No rules/automation table.
 - ❌ No contacts/participants model.
@@ -178,9 +178,7 @@ restore-on-failure. It is not yet production-complete.
 ## Prioritized next-up
 
 ### P0 - complete the foundations
-1. Make the sidebar labels data-driven from the `labels` table (CRUD UI + apply
-   to messages), replacing the hardcoded Work/Design/Personal/Finance/Travel.
-2. Replay the offline outbox to the server on reconnect (IMAP STORE/MOVE),
+1. Replay the offline outbox to the server on reconnect (IMAP STORE/MOVE),
    surfacing conflicts.
 3. Encrypt the local cache at rest (SQLCipher or OS DPAPI on `cache.db`).
 
