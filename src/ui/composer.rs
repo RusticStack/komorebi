@@ -1,5 +1,6 @@
 //! Full-page compose panel: fields, attachments, send pipeline glue.
 
+use super::send::perform_send;
 use super::*;
 
 impl App {
