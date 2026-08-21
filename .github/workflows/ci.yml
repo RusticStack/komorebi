@@ -39,8 +39,10 @@ jobs:
       - name: cargo build
         run: cargo build
 
-      # Plain clippy (no -D warnings): the crate currently has 18 pre-existing
-      # warnings in db/mail/ai. Enforce -D warnings once those are cleaned up.
+      # Clippy is clean in src/; the only remaining warning is a third-party
+      # future-incompat notice from imap-proto (transitive via the imap crate),
+      # which is not actionable here. Keep -D warnings off only because of that
+      # transitive notice.
       - name: cargo clippy
         run: cargo clippy --all-targets
 

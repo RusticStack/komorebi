@@ -24,6 +24,7 @@ Komorebi stores secrets only in Windows Credential Manager through the `keyring`
 
 - Generic provider passwords or app passwords.
 - OAuth refresh tokens (and transient access tokens) for Gmail and Microsoft.
+- OAuth client secrets for Gmail/Microsoft app registrations.
 - AI API keys for hosted AI providers.
 
 Komorebi must not store passwords, app passwords, refresh tokens, access tokens, OAuth authorization codes, authorization headers, AI API keys, or credential blobs in SQLite, logs, diagnostics exports, screenshots, or UI state.

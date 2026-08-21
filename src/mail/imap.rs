@@ -136,7 +136,7 @@ impl ImapConnection {
             out.push(FolderInfo {
                 name: name.name().to_string(),
                 delimiter: name.delimiter().map(|d| d.to_string()),
-                special_use: special_use(&name),
+                special_use: special_use(name),
             });
         }
         session.logout().ok();
@@ -265,8 +265,8 @@ impl RawFetch {
         Self {
             uid: fetch.uid.unwrap_or(0),
             body: fetch.body().unwrap_or_default().to_vec(),
-            seen: flags.iter().any(|f| *f == Flag::Seen),
-            flagged: flags.iter().any(|f| *f == Flag::Flagged),
+            seen: flags.contains(&Flag::Seen),
+            flagged: flags.contains(&Flag::Flagged),
         }
     }
 }

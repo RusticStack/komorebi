@@ -1,6 +1,7 @@
 //! Mail protocols: providers, autodiscovery, OAuth, IMAP, SMTP, MIME.
 
 pub mod discovery;
+pub mod html;
 pub mod imap;
 pub mod mime;
 pub mod oauth;
@@ -26,21 +27,19 @@ pub fn oauth_access_token(
     let refresh = secrets::get(&secrets::key::account_oauth_refresh(&account.id))?
         .ok_or_else(|| anyhow!("no OAuth refresh token stored for {}", account.email))?;
     let config = oauth::OAuthConfig::for_kind(
-        providers::ProviderKind::from_str(&account.provider_kind),
+        providers::ProviderKind::parse_or_default(&account.provider_kind),
         client_id,
         client_secret,
         redirect_uri,
     )?;
 
     // Use the cached access token if it is still valid.
-    if let Some(cached) = secrets::get(&secrets::key::account_oauth_access(&account.id))? {
-        if let Some(expires) = db.get_setting(&format!("oauth.expires_at.{}", account.id))? {
-            if let Ok(exp) = expires.parse::<i64>() {
-                if Utc::now().timestamp() < exp - 60 {
-                    return Ok(cached);
-                }
-            }
-        }
+    if let Some(cached) = secrets::get(&secrets::key::account_oauth_access(&account.id))?
+        && let Some(expires) = db.get_setting(&format!("oauth.expires_at.{}", account.id))?
+        && let Ok(exp) = expires.parse::<i64>()
+        && Utc::now().timestamp() < exp - 60
+    {
+        return Ok(cached);
     }
 
     let refreshed = oauth::refresh(&config, &refresh)?;
@@ -313,9 +312,12 @@ pub fn create_oauth_account(
         &(Utc::now().timestamp() + tokens.expires_in).to_string(),
     )?;
     // Client settings needed by build_imap_auth / build_smtp_auth for refresh.
+    // The client_id and redirect_uri are non-secret app registration values and
+    // stay in settings; the client_secret is a credential and lives only in the
+    // OS credential store, never in SQLite.
     db.set_setting(&format!("oauth.client_id.{}", account.id), client_id)?;
-    db.set_setting(
-        &format!("oauth.client_secret.{}", account.id),
+    secrets::set(
+        &secrets::key::account_oauth_client_secret(&account.id),
         client_secret,
     )?;
     db.set_setting(&format!("oauth.redirect_uri.{}", account.id), redirect_uri)?;
@@ -361,7 +363,9 @@ fn imap_settings(account: &Account) -> Result<types::ServerSettings> {
             .clone()
             .ok_or_else(|| anyhow!("account {} has no IMAP host", account.email))?,
         port: account.imap_port.unwrap_or(993) as u16,
-        security: types::Security::from_str(account.imap_security.as_deref().unwrap_or("tls")),
+        security: types::Security::parse_or_default(
+            account.imap_security.as_deref().unwrap_or("tls"),
+        ),
     })
 }
 
@@ -372,7 +376,9 @@ fn smtp_settings(account: &Account) -> Result<types::ServerSettings> {
             .clone()
             .ok_or_else(|| anyhow!("account {} has no SMTP host", account.email))?,
         port: account.smtp_port.unwrap_or(587) as u16,
-        security: types::Security::from_str(account.smtp_security.as_deref().unwrap_or("starttls")),
+        security: types::Security::parse_or_default(
+            account.smtp_security.as_deref().unwrap_or("starttls"),
+        ),
     })
 }
 
@@ -386,9 +392,9 @@ fn build_imap_auth(db: &Database, account: &Account) -> Result<imap::Auth> {
             let client_id = db
                 .get_setting(&format!("oauth.client_id.{}", account.id))?
                 .ok_or_else(|| anyhow!("missing OAuth client id for {}", account.email))?;
-            let client_secret = db
-                .get_setting(&format!("oauth.client_secret.{}", account.id))?
-                .unwrap_or_default();
+            let client_secret =
+                secrets::get(&secrets::key::account_oauth_client_secret(&account.id))?
+                    .unwrap_or_default();
             let redirect_uri = db
                 .get_setting(&format!("oauth.redirect_uri.{}", account.id))?
                 .unwrap_or_else(|| "http://127.0.0.1:8765/callback".into());
@@ -416,9 +422,9 @@ fn build_smtp_auth(db: &Database, account: &Account) -> Result<smtp::SmtpAuth> {
             let client_id = db
                 .get_setting(&format!("oauth.client_id.{}", account.id))?
                 .ok_or_else(|| anyhow!("missing OAuth client id for {}", account.email))?;
-            let client_secret = db
-                .get_setting(&format!("oauth.client_secret.{}", account.id))?
-                .unwrap_or_default();
+            let client_secret =
+                secrets::get(&secrets::key::account_oauth_client_secret(&account.id))?
+                    .unwrap_or_default();
             let redirect_uri = db
                 .get_setting(&format!("oauth.redirect_uri.{}", account.id))?
                 .unwrap_or_else(|| "http://127.0.0.1:8765/callback".into());

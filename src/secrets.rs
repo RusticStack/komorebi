@@ -19,6 +19,9 @@ pub mod key {
     pub fn account_oauth_access(account_id: &str) -> String {
         format!("account:{account_id}:oauth_access")
     }
+    pub fn account_oauth_client_secret(account_id: &str) -> String {
+        format!("account:{account_id}:oauth_client_secret")
+    }
     pub fn ai_api_key(provider_id: &str) -> String {
         format!("ai:{provider_id}:api_key")
     }

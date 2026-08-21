@@ -16,11 +16,11 @@ pub fn parse(raw: &[u8]) -> Result<ParsedMessage> {
         ..Default::default()
     };
 
-    if let Some(from) = msg.from() {
-        if let Some(addr) = first_addr(from) {
-            out.sender_name = addr.name.as_deref().map(|s| s.to_string());
-            out.sender_email = addr.address.as_deref().map(|s| s.to_string());
-        }
+    if let Some(from) = msg.from()
+        && let Some(addr) = first_addr(from)
+    {
+        out.sender_name = addr.name.as_deref().map(|s| s.to_string());
+        out.sender_email = addr.address.as_deref().map(|s| s.to_string());
     }
     out.to = address_list(msg.to());
     out.cc = address_list(msg.cc());
@@ -49,23 +49,23 @@ pub fn parse(raw: &[u8]) -> Result<ParsedMessage> {
     }
 
     for i in 0..msg.attachment_count() {
-        if let Some(part) = msg.attachment(i as u32) {
-            if let Some(body) = part_body(part) {
-                out.attachments.push(ParsedAttachment {
-                    display_name: part
-                        .attachment_name()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("attachment-{i}")),
-                    mime: part.content_type().map(|ct| {
-                        format!(
-                            "{}/{}",
-                            ct.c_type,
-                            ct.c_subtype.as_deref().unwrap_or_default()
-                        )
-                    }),
-                    data: body,
-                });
-            }
+        if let Some(part) = msg.attachment(i as u32)
+            && let Some(body) = part_body(part)
+        {
+            out.attachments.push(ParsedAttachment {
+                display_name: part
+                    .attachment_name()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("attachment-{i}")),
+                mime: part.content_type().map(|ct| {
+                    format!(
+                        "{}/{}",
+                        ct.c_type,
+                        ct.c_subtype.as_deref().unwrap_or_default()
+                    )
+                }),
+                data: body,
+            });
         }
     }
 

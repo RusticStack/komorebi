@@ -6,7 +6,7 @@
 
 /// Build a summarize prompt: 2-3 sentences, preserve facts and action items.
 pub fn summarize(sender: Option<&str>, subject: Option<&str>, body: &str) -> (String, String) {
-    let system = "You are Komorebi's private email assistant. Summarize the email below in 2-3 concise sentences. Preserve key facts, dates, decisions, and any requested action. Reply with plain text only and no preamble.".to_string();
+    let system = "You are Komorebi's private email assistant. Summarize the email below in 2-3 concise sentences. Preserve key facts, dates, decisions, and any requested action. If you are uncertain about a fact, say so explicitly instead of inventing details. Reply with plain text only and no preamble.".to_string();
     let user = format!(
         "From: {}\nSubject: {}\n\n{}",
         sender.unwrap_or("(unknown sender)"),
@@ -19,7 +19,7 @@ pub fn summarize(sender: Option<&str>, subject: Option<&str>, body: &str) -> (St
 /// Build a summarize prompt for an entire conversation (already formatted as
 /// per-message blocks with sender + body).
 pub fn summarize_thread(thread: &str) -> (String, String) {
-    let system = "You are Komorebi's private email assistant. Summarize the conversation below in 3-5 concise sentences. Preserve key facts, dates, decisions, people involved, open questions, and any requested action. Reply with plain text only and no preamble.".to_string();
+    let system = "You are Komorebi's private email assistant. Summarize the conversation below in 3-5 concise sentences. Preserve key facts, dates, decisions, people involved, open questions, and any requested action. If you are uncertain about a fact, say so explicitly instead of inventing details. Reply with plain text only and no preamble.".to_string();
     let user = thread.trim().to_string();
     (system, user)
 }
@@ -33,7 +33,7 @@ pub fn draft_reply(
     tone: &str,
 ) -> (String, String) {
     let system = format!(
-        "You are Komorebi's private email assistant. Draft a reply to the email below. Tone: {}. Write only the reply body: no subject line, no greeting line that duplicates the recipient's name is required, and no signature block. Plain text only.",
+        "You are Komorebi's private email assistant. Draft a reply to the email below. Tone: {}. Write only the reply body: no subject line, no greeting line that duplicates the recipient's name is required, and no signature block. If you are uncertain about a fact, say so explicitly instead of inventing details. Plain text only.",
         tone.trim()
     );
     let user = format!(
@@ -48,7 +48,7 @@ pub fn draft_reply(
 /// Build a polish prompt for a draft the user wrote.
 pub fn polish(draft: &str, tone: &str) -> (String, String) {
     let system = format!(
-        "You are Komorebi's private email assistant. Improve the draft below for clarity and correctness while preserving its meaning and the user's voice. Tone: {}. Return only the improved draft, with no preamble or explanation.",
+        "You are Komorebi's private email assistant. Improve the draft below for clarity and correctness while preserving its meaning and the user's voice. Tone: {}. If you are uncertain about a fact, say so explicitly instead of inventing details. Return only the improved draft, with no preamble or explanation.",
         tone.trim()
     );
     let user = format!("Draft:\n\n{}", draft.trim());
@@ -57,7 +57,25 @@ pub fn polish(draft: &str, tone: &str) -> (String, String) {
 
 /// Build a triage prompt: classify into exactly one category.
 pub fn triage(sender: Option<&str>, subject: Option<&str>, body: &str) -> (String, String) {
-    let system = "You are Komorebi's private email assistant. Classify the email below into exactly one category: work, personal, finance, newsletters, or updates. Reply with only the single lowercase word and nothing else.".to_string();
+    let system = "You are Komorebi's private email assistant. Classify the email below into exactly one category: work, personal, finance, newsletters, or updates. If you are uncertain about a fact, say so explicitly instead of inventing details. Reply with only the single lowercase word and nothing else.".to_string();
+    let user = format!(
+        "From: {}\nSubject: {}\n\n{}",
+        sender.unwrap_or("(unknown sender)"),
+        subject.unwrap_or("(no subject)"),
+        body.trim()
+    );
+    (system, user)
+}
+
+/// Build an action-item extraction prompt. The model is asked to return ONLY a
+/// JSON array of action items (or `[]` when there are none), with optional
+/// owner and due fields. Includes the uncertainty instruction.
+pub fn extract_action_items(
+    sender: Option<&str>,
+    subject: Option<&str>,
+    body: &str,
+) -> (String, String) {
+    let system = "You are Komorebi's private email assistant. Extract action items from the email below. Return ONLY a JSON array - no prose, no markdown fences. Each element must be an object of the shape {\"task\": string, \"owner\": string|null, \"due\": string|null}. If there are no action items, return []. If you are uncertain about a fact, say so explicitly instead of inventing details; in particular, omit owner or due when the email does not state them rather than guessing.".to_string();
     let user = format!(
         "From: {}\nSubject: {}\n\n{}",
         sender.unwrap_or("(unknown sender)"),
@@ -113,5 +131,37 @@ mod tests {
         assert!(system.contains("no preamble"));
         assert!(system.contains("professional"));
         assert!(user.contains("Helo team"));
+    }
+
+    #[test]
+    fn all_prompts_include_uncertainty_instruction() {
+        let needle =
+            "If you are uncertain about a fact, say so explicitly instead of inventing details";
+        let (s_summarize, _) = summarize(None, None, "body");
+        let (s_thread, _) = summarize_thread("thread");
+        let (s_draft, _) = draft_reply(None, None, "body", "brief");
+        let (s_polish, _) = polish("draft", "professional");
+        let (s_triage, _) = triage(None, None, "body");
+        let (s_actions, _) = extract_action_items(None, None, "body");
+        assert!(s_summarize.contains(needle));
+        assert!(s_thread.contains(needle));
+        assert!(s_draft.contains(needle));
+        assert!(s_polish.contains(needle));
+        assert!(s_triage.contains(needle));
+        assert!(s_actions.contains(needle));
+    }
+
+    #[test]
+    fn extract_action_items_prompt_asks_for_json_array() {
+        let (system, user) = extract_action_items(
+            Some("Pat"),
+            Some("Kickoff"),
+            "Please send the deck by Friday.",
+        );
+        assert!(system.contains("JSON array"));
+        assert!(system.contains("[]"));
+        assert!(user.contains("From: Pat"));
+        assert!(user.contains("Subject: Kickoff"));
+        assert!(user.contains("Please send the deck by Friday."));
     }
 }

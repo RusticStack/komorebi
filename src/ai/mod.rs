@@ -4,6 +4,7 @@
 //! Configuration (provider, base URL, model) is stored in SQLite settings;
 //! API keys live only in the OS credential store (`crate::secrets`).
 
+pub mod actions;
 pub mod client;
 pub mod prompts;
 pub mod providers;
@@ -76,8 +77,32 @@ impl Ai {
         Ok(Self { config, api_key })
     }
 
+    /// Construct a session directly from a config and an optional API key.
+    ///
+    /// Primarily for tests that pin a fake base URL without touching SQLite or
+    /// the OS credential store.
+    pub fn from_config(config: AiConfig, api_key: Option<String>) -> Self {
+        Self { config, api_key }
+    }
+
     pub fn config(&self) -> &AiConfig {
         &self.config
+    }
+
+    /// Base URL for the configured provider (including the `/v1` prefix).
+    pub fn base_url(&self) -> &str {
+        &self.config.base_url
+    }
+
+    /// Configured model name.
+    pub fn model(&self) -> &str {
+        &self.config.model
+    }
+
+    /// API key (when present), for bearer auth. May be `None` for local
+    /// servers.
+    pub fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
     }
 
     /// Summarize an email into 2-3 sentences.

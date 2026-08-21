@@ -164,6 +164,44 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_messages_rfc_id ON messages(rfc_message_id);
     "#,
     ),
+    (
+        5,
+        r#"
+        CREATE TABLE IF NOT EXISTS labels (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            color TEXT,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            UNIQUE(account_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_labels_account ON labels(account_id);
+
+        CREATE TABLE IF NOT EXISTS message_labels (
+            message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+            PRIMARY KEY (message_id, label_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_message_labels_label ON message_labels(label_id);
+    "#,
+    ),
+    (
+        6,
+        r#"
+        CREATE TABLE IF NOT EXISTS outbox (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            uid INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            target_folder TEXT,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            applied_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_outbox_account ON outbox(account_id);
+        CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(applied_at);
+    "#,
+    ),
 ];
 
 /// Thread-safe handle to the local cache. Clone the `Arc` to share it with
@@ -201,7 +239,7 @@ impl Database {
     }
 
     pub fn migrate(&self) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("cache mutex poisoned");
         let tx = conn.transaction()?;
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -216,12 +254,12 @@ impl Database {
     }
 
     pub fn schema_version(&self) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("cache mutex poisoned");
         Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
     }
 
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap()
+        self.conn.lock().expect("cache mutex poisoned")
     }
 }
 
@@ -243,6 +281,7 @@ pub struct Account {
     pub smtp_host: Option<String>,
     pub smtp_port: Option<i64>,
     pub smtp_security: Option<String>,
+    pub signature_html: Option<String>,
     pub created_at: i64,
     pub updated_at: Option<i64>,
 }
@@ -279,6 +318,7 @@ impl Database {
             smtp_host: draft.smtp_host.clone(),
             smtp_port: draft.smtp_port,
             smtp_security: draft.smtp_security.clone(),
+            signature_html: None,
             created_at: now,
             updated_at: None,
         };
@@ -311,7 +351,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, email, display_name, provider_kind, auth_mode, username,
                     imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security,
-                    created_at, updated_at
+                    signature_html, created_at, updated_at
              FROM accounts ORDER BY created_at",
         )?;
         let rows = stmt.query_map([], row_to_account)?;
@@ -323,7 +363,7 @@ impl Database {
         conn.query_row(
             "SELECT id, email, display_name, provider_kind, auth_mode, username,
                     imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security,
-                    created_at, updated_at
+                    signature_html, created_at, updated_at
              FROM accounts WHERE id = ?1",
             [id],
             row_to_account,
@@ -332,40 +372,26 @@ impl Database {
         .map_err(Into::into)
     }
 
+    /// Persist the per-account signature (stored as plain text in
+    /// `signature_html`; it is inserted verbatim into composed bodies).
+    pub fn update_account_signature(&self, id: &str, signature: &str) -> Result<()> {
+        let conn = self.conn();
+        let sig: Option<String> = if signature.trim().is_empty() {
+            None
+        } else {
+            Some(signature.to_string())
+        };
+        conn.execute(
+            "UPDATE accounts SET signature_html = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![id, sig, chrono::Utc::now().timestamp()],
+        )?;
+        Ok(())
+    }
+
     /// Delete an account and cascade its folders/messages/drafts/attachments.
     pub fn delete_account(&self, id: &str) -> Result<()> {
         let conn = self.conn();
         conn.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
-        Ok(())
-    }
-
-    pub fn update_account_server(
-        &self,
-        id: &str,
-        username: Option<&str>,
-        imap_host: Option<&str>,
-        imap_port: Option<i64>,
-        imap_security: Option<&str>,
-        smtp_host: Option<&str>,
-        smtp_port: Option<i64>,
-        smtp_security: Option<&str>,
-    ) -> Result<()> {
-        let conn = self.conn();
-        conn.execute(
-            "UPDATE accounts SET username=?2, imap_host=?3, imap_port=?4, imap_security=?5,
-                smtp_host=?6, smtp_port=?7, smtp_security=?8, updated_at=unixepoch()
-             WHERE id=?1",
-            params![
-                id,
-                username,
-                imap_host,
-                imap_port,
-                imap_security,
-                smtp_host,
-                smtp_port,
-                smtp_security
-            ],
-        )?;
         Ok(())
     }
 }
@@ -384,8 +410,9 @@ fn row_to_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
         smtp_host: row.get(9)?,
         smtp_port: row.get(10)?,
         smtp_security: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        signature_html: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 
@@ -579,6 +606,7 @@ pub struct MessageDetail {
     pub is_read: bool,
     pub is_flagged: bool,
     pub body_text: Option<String>,
+    pub body_html: Option<String>,
     pub snippet: Option<String>,
     pub ai_category: Option<String>,
     pub ai_summary: Option<String>,
@@ -897,8 +925,8 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
 const DETAIL_COLUMNS: &str =
     "id, account_id, folder_id, imap_uid, subject, sender_name, sender_email,
     to_addresses, cc_addresses, date_received, is_read, is_flagged, body_text,
-    snippet, ai_category, ai_summary, has_attachments, rfc_message_id, in_reply_to,
-    references_header, thread_id";
+    body_html, snippet, ai_category, ai_summary, has_attachments, rfc_message_id,
+    in_reply_to, references_header, thread_id";
 
 fn row_to_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDetail> {
     Ok(MessageDetail {
@@ -915,14 +943,15 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageDetail> {
         is_read: row.get(10)?,
         is_flagged: row.get(11)?,
         body_text: row.get(12)?,
-        snippet: row.get(13)?,
-        ai_category: row.get(14)?,
-        ai_summary: row.get(15)?,
-        has_attachments: row.get(16)?,
-        rfc_message_id: row.get(17)?,
-        in_reply_to: row.get(18)?,
-        references_header: row.get(19)?,
-        thread_id: row.get(20)?,
+        body_html: row.get(13)?,
+        snippet: row.get(14)?,
+        ai_category: row.get(15)?,
+        ai_summary: row.get(16)?,
+        has_attachments: row.get(17)?,
+        rfc_message_id: row.get(18)?,
+        in_reply_to: row.get(19)?,
+        references_header: row.get(20)?,
+        thread_id: row.get(21)?,
     })
 }
 
@@ -1003,6 +1032,28 @@ impl Database {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Update an existing draft's content and bump its timestamp.
+    pub fn update_draft(
+        &self,
+        id: &str,
+        subject: Option<&str>,
+        to_addresses: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "UPDATE drafts SET subject=?2, to_addresses=?3, body=?4, updated_at=?5 WHERE id=?1",
+            params![
+                id,
+                subject,
+                to_addresses,
+                body,
+                chrono::Utc::now().timestamp()
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn delete_draft(&self, id: &str) -> Result<()> {
@@ -1273,6 +1324,212 @@ impl Database {
         )?;
         Ok(n)
     }
+
+    // -----------------------------------------------------------------------
+    // Labels (user labels, separate from the AI `ai_category` triage field)
+    // -----------------------------------------------------------------------
+
+    pub fn insert_label(&self, account_id: &str, name: &str, color: Option<&str>) -> Result<Label> {
+        let id = Uuid::new_v4().to_string();
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO labels (id, account_id, name, color) VALUES (?1, ?2, ?3, ?4)",
+            params![id, account_id, name, color],
+        )?;
+        Ok(Label {
+            id,
+            account_id: account_id.to_string(),
+            name: name.to_string(),
+            color: color.map(String::from),
+            created_at: chrono::Utc::now().timestamp(),
+        })
+    }
+
+    pub fn list_labels(&self, account_id: &str) -> Result<Vec<Label>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, name, color, created_at
+             FROM labels WHERE account_id=?1 ORDER BY name",
+        )?;
+        let rows = stmt.query_map([account_id], |r| {
+            Ok(Label {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                name: r.get(2)?,
+                color: r.get(3)?,
+                created_at: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn delete_label(&self, id: &str) -> Result<()> {
+        let conn = self.conn();
+        conn.execute("DELETE FROM labels WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    pub fn rename_label(&self, id: &str, new_name: &str) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "UPDATE labels SET name=?2 WHERE id=?1",
+            params![id, new_name],
+        )?;
+        Ok(())
+    }
+
+    /// Apply a label to a message (idempotent - safe to call repeatedly).
+    pub fn apply_label(&self, message_id: &str, label_id: &str) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT OR IGNORE INTO message_labels (message_id, label_id) VALUES (?1, ?2)",
+            [message_id, label_id],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a label from a message (idempotent).
+    pub fn remove_label(&self, message_id: &str, label_id: &str) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "DELETE FROM message_labels WHERE message_id=?1 AND label_id=?2",
+            [message_id, label_id],
+        )?;
+        Ok(())
+    }
+
+    /// List the labels applied to a message.
+    pub fn list_message_labels(&self, message_id: &str) -> Result<Vec<Label>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT l.id, l.account_id, l.name, l.color, l.created_at
+             FROM labels l
+             JOIN message_labels ml ON ml.label_id = l.id
+             WHERE ml.message_id=?1 ORDER BY l.name",
+        )?;
+        let rows = stmt.query_map([message_id], |r| {
+            Ok(Label {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                name: r.get(2)?,
+                color: r.get(3)?,
+                created_at: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// List messages that carry a given label.
+    pub fn list_messages_by_label(&self, label_id: &str, limit: i64) -> Result<Vec<MessageRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.folder_id, m.subject, m.sender_name, m.sender_email, m.date_received,
+                    m.is_read, m.is_flagged, m.snippet, m.ai_category
+             FROM messages m
+             JOIN message_labels ml ON ml.message_id = m.id
+             WHERE ml.label_id=?1
+             ORDER BY m.date_received DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![label_id, limit], row_to_message)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    // -----------------------------------------------------------------------
+    // Outbox - offline mutation queue for server reconciliation
+    // -----------------------------------------------------------------------
+
+    /// Enqueue a server-side mutation for later reconciliation. `uid` is the
+    /// message's IMAP UID; `kind` is the action ("move", "delete", "flag",
+    /// "unflag", "mark_read", "mark_unread"); `target_folder` is the remote
+    /// folder name for moves.
+    pub fn enqueue_mutation(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        uid: u32,
+        kind: &str,
+        target_folder: Option<&str>,
+    ) -> Result<String> {
+        let id = Uuid::new_v4().to_string();
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO outbox (id, account_id, message_id, uid, kind, target_folder)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, account_id, message_id, uid, kind, target_folder],
+        )?;
+        Ok(id)
+    }
+
+    /// All mutations not yet applied to the server (oldest first).
+    pub fn list_pending_mutations(&self) -> Result<Vec<OutboxEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, message_id, uid, kind, target_folder, created_at
+             FROM outbox WHERE applied_at IS NULL ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(OutboxEntry {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                message_id: r.get(2)?,
+                uid: r.get(3)?,
+                kind: r.get(4)?,
+                target_folder: r.get(5)?,
+                created_at: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Mark a mutation as reconciled with the server.
+    pub fn mark_mutation_applied(&self, id: &str) -> Result<()> {
+        let conn = self.conn();
+        conn.execute("UPDATE outbox SET applied_at=unixepoch() WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    /// Remove all mutations older than `before` that have been applied (housekeeping).
+    pub fn purge_applied_mutations(&self, before: i64) -> Result<usize> {
+        let conn = self.conn();
+        let n = conn.execute(
+            "DELETE FROM outbox WHERE applied_at IS NOT NULL AND applied_at < ?1",
+            [before],
+        )?;
+        Ok(n)
+    }
+
+    /// Count of pending (unreconciled) mutations, for the sync-state UI.
+    pub fn pending_mutation_count(&self) -> Result<i64> {
+        let conn = self.conn();
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM outbox WHERE applied_at IS NULL",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+}
+
+/// A user-created label (distinct from the AI triage `ai_category` field).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Label {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub color: Option<String>,
+    pub created_at: i64,
+}
+
+/// One entry in the offline mutation outbox (a server-side action awaiting
+/// reconciliation).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutboxEntry {
+    pub id: String,
+    pub account_id: String,
+    pub message_id: String,
+    pub uid: u32,
+    pub kind: String,
+    pub target_folder: Option<String>,
+    pub created_at: i64,
 }
 
 #[cfg(test)]
@@ -1284,11 +1541,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cache.db");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 4);
+        assert_eq!(db.schema_version().unwrap(), 6);
 
         // Reopen applies nothing new.
         let db2 = Database::open(&path).unwrap();
-        assert_eq!(db2.schema_version().unwrap(), 4);
+        assert_eq!(db2.schema_version().unwrap(), 6);
     }
 
     #[test]
@@ -1626,5 +1883,114 @@ mod tests {
             db.get_message_detail(&solo).unwrap().unwrap().thread_id,
             None
         );
+    }
+
+    #[test]
+    fn labels_crud_and_apply() {
+        let db = Database::in_memory().unwrap();
+        let acc = db
+            .insert_account(&AccountDraft {
+                email: "a@b.test".into(),
+                provider_kind: "custom".into(),
+                auth_mode: "password".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let folder = db
+            .upsert_folder(&acc.id, "INBOX", None, Some("inbox"), None)
+            .unwrap();
+        let msg = db
+            .insert_message(&MessageDraft {
+                account_id: acc.id.clone(),
+                folder_id: folder.id.clone(),
+                subject: Some("hello".into()),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Create + list
+        let work = db.insert_label(&acc.id, "Work", Some("#6b9bd6")).unwrap();
+        let personal = db.insert_label(&acc.id, "Personal", None).unwrap();
+        let labels = db.list_labels(&acc.id).unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].name, "Personal"); // alphabetical
+        assert_eq!(labels[1].name, "Work");
+        assert_eq!(work.color.as_deref(), Some("#6b9bd6"));
+
+        // Rename
+        db.rename_label(&personal.id, "Home").unwrap();
+        assert_eq!(db.list_labels(&acc.id).unwrap()[0].name, "Home");
+
+        // Apply + list-message-labels + list-messages-by-label
+        db.apply_label(&msg, &work.id).unwrap();
+        db.apply_label(&msg, &work.id).unwrap(); // idempotent
+        let msg_labels = db.list_message_labels(&msg).unwrap();
+        assert_eq!(msg_labels.len(), 1);
+        assert_eq!(msg_labels[0].name, "Work");
+        let labeled = db.list_messages_by_label(&work.id, 100).unwrap();
+        assert_eq!(labeled.len(), 1);
+        assert_eq!(labeled[0].id, msg);
+
+        // Remove
+        db.remove_label(&msg, &work.id).unwrap();
+        db.remove_label(&msg, &work.id).unwrap(); // idempotent
+        assert!(db.list_message_labels(&msg).unwrap().is_empty());
+
+        // Delete label cascades the join rows
+        db.delete_label(&work.id).unwrap();
+        assert_eq!(db.list_labels(&acc.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn outbox_enqueue_list_and_reconcile() {
+        let db = Database::in_memory().unwrap();
+        let acc = db
+            .insert_account(&AccountDraft {
+                email: "a@b.test".into(),
+                provider_kind: "custom".into(),
+                auth_mode: "password".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let folder = db
+            .upsert_folder(&acc.id, "INBOX", None, Some("inbox"), None)
+            .unwrap();
+        let msg = db
+            .insert_message(&MessageDraft {
+                account_id: acc.id.clone(),
+                folder_id: folder.id.clone(),
+                imap_uid: Some(42),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Enqueue two mutations
+        db.enqueue_mutation(&acc.id, &msg, 42, "move", Some("Archive"))
+            .unwrap();
+        db.enqueue_mutation(&acc.id, &msg, 42, "mark_read", None)
+            .unwrap();
+        assert_eq!(db.pending_mutation_count().unwrap(), 2);
+
+        let pending = db.list_pending_mutations().unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].kind, "move");
+        assert_eq!(pending[0].target_folder.as_deref(), Some("Archive"));
+        assert_eq!(pending[1].kind, "mark_read");
+
+        // Reconcile one
+        db.mark_mutation_applied(&pending[0].id).unwrap();
+        assert_eq!(db.pending_mutation_count().unwrap(), 1);
+
+        // Purge applied (use a future timestamp so the applied_at < before)
+        db.purge_applied_mutations(chrono::Utc::now().timestamp() + 3600)
+            .unwrap();
+        assert_eq!(db.pending_mutation_count().unwrap(), 1);
+
+        // Reconcile the rest and purge all
+        db.mark_mutation_applied(&pending[1].id).unwrap();
+        assert_eq!(db.pending_mutation_count().unwrap(), 0);
+        db.purge_applied_mutations(chrono::Utc::now().timestamp() + 3600)
+            .unwrap();
+        assert!(db.list_pending_mutations().unwrap().is_empty());
     }
 }
