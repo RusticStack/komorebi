@@ -1,5 +1,6 @@
 //! AI sidebar: insights, action cards, tone selection, AI job runners.
 
+use super::send::perform_ai;
 use super::*;
 
 impl App {
