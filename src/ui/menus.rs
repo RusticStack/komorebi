@@ -28,6 +28,12 @@ impl App {
             })
             .collect();
 
+        let label_entries: Vec<(String, String)> = self
+            .labels
+            .iter()
+            .map(|l| (l.id.clone(), l.name.clone()))
+            .collect();
+
         move |menu, window, cx| {
             let menu = menu
                 .item(
@@ -158,6 +164,36 @@ impl App {
                         m
                     }
                 });
+
+            let menu = if label_entries.is_empty() {
+                menu
+            } else {
+                menu.submenu_with_icon(None, "Labels", window, cx, {
+                    let entries = label_entries.clone();
+                    let entity = entity.clone();
+                    let message_id = message_id.clone();
+                    move |submenu, _window, _cx| {
+                        let mut m = submenu;
+                        for (lid, lname) in &entries {
+                            m = m.item(
+                                PopupMenuItem::new(SharedString::from(lname.clone())).on_click({
+                                    let entity = entity.clone();
+                                    let mid = message_id.clone();
+                                    let id = lid.clone();
+                                    move |_, _, cx| {
+                                        let mid = mid.clone();
+                                        let lid = id.clone();
+                                        cx.update_entity(&entity, move |this, cx| {
+                                            this.toggle_message_label(&mid, &lid, cx);
+                                        });
+                                    }
+                                }),
+                            );
+                        }
+                        m
+                    }
+                })
+            };
 
             menu.separator().item(
                 PopupMenuItem::new("Delete")
@@ -290,6 +326,43 @@ impl App {
                         }),
                 )
             }
+        }
+    }
+
+    /// Right-click menu for a user label row in the sidebar.
+    pub(crate) fn label_context_menu(
+        &self,
+        entity: Entity<Self>,
+        label: DbLabel,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let label_id = label.id.clone();
+
+        move |menu, _window, _cx| {
+            menu.item(PopupMenuItem::new("Rename").on_click({
+                let entity = entity.clone();
+                let id = label_id.clone();
+                move |_, window, cx| {
+                    let id = id.clone();
+                    cx.update_entity(&entity, move |this, cx| {
+                        this.start_rename_label(&id, window, cx);
+                    });
+                }
+            }))
+            .separator()
+            .item(
+                PopupMenuItem::new("Delete")
+                    .icon(IconName::Delete)
+                    .on_click({
+                        let entity = entity.clone();
+                        let id = label_id.clone();
+                        move |_, _, cx| {
+                            let id = id.clone();
+                            cx.update_entity(&entity, move |this, cx| {
+                                this.delete_label_by_id(&id, cx);
+                            });
+                        }
+                    }),
+            )
         }
     }
 

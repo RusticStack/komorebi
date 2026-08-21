@@ -9,7 +9,9 @@
 //! view state.
 
 use crate::ai::{self, Ai, AiConfig, Category};
-use crate::db::{Account, Attachment, Database, Folder, MessageDetail, MessageRow, Reminder};
+use crate::db::{
+    Account, Attachment, Database, Folder, Label as DbLabel, MessageDetail, MessageRow, Reminder,
+};
 use crate::i18n;
 use crate::mail;
 use crate::mail::discovery::DiscoveredSettings;
@@ -64,7 +66,7 @@ use helpers::{
     category_tags, file_type_style, format_bytes, format_full_date, format_list_date,
     format_relative_long, format_thread_text, insight_row, is_image_name, is_pdf_name, label_badge,
     load_attachment_data, open_database, recipient_line, reminder_tag, render_message_body,
-    star_marker, unread_guard, write_blob,
+    star_marker, stored_label_color, unread_guard, write_blob,
 };
 
 actions!(
@@ -111,6 +113,12 @@ pub struct App {
     // Per-account signature editor (Accounts panel).
     signature_input: Entity<InputState>,
     signature_account_id: Option<String>,
+
+    // User labels (data-driven sidebar).
+    labels: Vec<DbLabel>,
+    labels_adding: bool,
+    renaming_label: Option<String>,
+    label_input: Entity<InputState>,
 
     // Draft autosave state.
     draft_id: Option<String>,
@@ -263,6 +271,7 @@ impl App {
                 .multi_line(true)
                 .placeholder("Write your signature…")
         });
+        let label_input = cx.new(|cx| InputState::new(window, cx).placeholder("New label"));
         let setup_email = cx.new(|cx| InputState::new(window, cx).placeholder("Email address"));
         let setup_name =
             cx.new(|cx| InputState::new(window, cx).placeholder("Display name (optional)"));
@@ -393,6 +402,10 @@ impl App {
             reply_subject: String::new(),
             signature_input,
             signature_account_id: None,
+            labels: Vec::new(),
+            labels_adding: false,
+            renaming_label: None,
+            label_input,
             draft_id: None,
             draft_dirty: false,
             _subscriptions: subscriptions,
@@ -415,6 +428,16 @@ impl App {
     // ---------------------------------------------------------------------
     fn refresh_accounts(&mut self) {
         self.accounts = self.db.list_accounts().unwrap_or_default();
+        self.refresh_labels();
+    }
+
+    /// Reload user labels for the active account.
+    pub(crate) fn refresh_labels(&mut self) {
+        self.labels = self
+            .accounts
+            .first()
+            .map(|a| self.db.list_labels(&a.id).unwrap_or_default())
+            .unwrap_or_default();
     }
 
     fn refresh_folders(&mut self) {
@@ -463,13 +486,10 @@ impl App {
             Some(PRIORITY) => self.db.list_flagged_messages(500, 0).unwrap_or_default(),
             Some(SNOOZED) => self.db.list_snoozed_messages(now).unwrap_or_default(),
             Some(VIEW_MENTIONS) => Vec::new(),
-            Some(id) if id.starts_with(LABEL_PREFIX) => {
-                let label = &id[LABEL_PREFIX.len()..];
-                self.account_messages()
-                    .into_iter()
-                    .filter(|m| m.ai_category.as_deref() == Some(label))
-                    .collect()
-            }
+            Some(id) if id.starts_with(LABEL_PREFIX) => self
+                .db
+                .list_messages_by_label(&id[LABEL_PREFIX.len()..], 500)
+                .unwrap_or_default(),
             Some(VIEW_UNREAD) => self
                 .account_messages()
                 .into_iter()
@@ -614,7 +634,12 @@ impl App {
             Some(VIEW_UNREAD) => "Unread".to_string(),
             Some(VIEW_ATTACHMENTS) => "Has attachments".to_string(),
             Some(VIEW_MENTIONS) => "Mentions".to_string(),
-            Some(id) if id.starts_with(LABEL_PREFIX) => id[LABEL_PREFIX.len()..].to_string(),
+            Some(id) if id.starts_with(LABEL_PREFIX) => self
+                .labels
+                .iter()
+                .find(|l| l.id == id[LABEL_PREFIX.len()..])
+                .map(|l| l.name.clone())
+                .unwrap_or_else(|| "Label".to_string()),
             Some(id) => self
                 .folders
                 .iter()

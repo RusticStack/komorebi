@@ -11,15 +11,6 @@ pub(crate) const VIEW_UNREAD: &str = "view:unread";
 pub(crate) const VIEW_ATTACHMENTS: &str = "view:attachments";
 pub(crate) const VIEW_MENTIONS: &str = "view:mentions";
 
-/// Sidebar labels and their accent color (Japandi muted palette).
-pub(crate) const LABELS: &[(&str, u32)] = &[
-    ("Work", 0x6b9bd6),
-    ("Design", 0xa58bd6),
-    ("Personal", 0xa8c256),
-    ("Finance", 0xd68b4e),
-    ("Travel", 0xd66b5e),
-];
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Panel {
     Mail,

@@ -446,4 +446,120 @@ impl App {
     // ---------------------------------------------------------------------
     // Context menus
     // ---------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------
+    // User labels
+    // ---------------------------------------------------------------------
+
+    pub(crate) fn toggle_labels_adding(&mut self, cx: &mut Context<Self>) {
+        self.labels_adding = !self.labels_adding;
+        cx.notify();
+    }
+
+    /// Create a label from the inline sidebar input; color auto-assigned.
+    pub(crate) fn create_label_from_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.label_input.read(cx).value().trim().to_string();
+        if name.is_empty() {
+            self.set_toast("Give the label a name.", cx);
+            return;
+        }
+        let Some(account) = self.accounts.first() else {
+            self.set_toast("Add an account first.", cx);
+            return;
+        };
+        const PALETTE: [&str; 5] = ["6b9bd6", "a58bd6", "a8c256", "d68b4e", "d66b5e"];
+        let color = PALETTE[self.labels.len() % PALETTE.len()];
+        match self.db.insert_label(&account.id, &name, Some(color)) {
+            Ok(_) => self.set_toast(&format!("Label \"{name}\" added"), cx),
+            Err(e) => {
+                log::error!("failed to create label: {e}");
+                self.set_toast("Could not create the label.", cx);
+            }
+        }
+        self.label_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.labels_adding = false;
+        self.refresh_labels();
+        cx.notify();
+    }
+
+    pub(crate) fn delete_label_by_id(&mut self, id: &str, cx: &mut Context<Self>) {
+        let _ = self.db.delete_label(id);
+        if self.selected_folder_id.as_deref() == Some(format!("{LABEL_PREFIX}{id}").as_str()) {
+            self.selected_folder_id = None;
+            self.selected_message = None;
+            self.reload_messages();
+        }
+        self.refresh_labels();
+        self.set_toast("Label deleted", cx);
+    }
+
+    pub(crate) fn cancel_rename_label(&mut self, cx: &mut Context<Self>) {
+        self.renaming_label = None;
+        cx.notify();
+    }
+
+    pub(crate) fn start_rename_label(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(name) = self
+            .labels
+            .iter()
+            .find(|l| l.id == id)
+            .map(|l| l.name.clone())
+        else {
+            return;
+        };
+        self.renaming_label = Some(id.to_string());
+        self.label_input
+            .update(cx, |s, cx| s.set_value(name, window, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn commit_rename_label(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.renaming_label.clone() else {
+            return;
+        };
+        let name = self.label_input.read(cx).value().trim().to_string();
+        if !name.is_empty() {
+            let _ = self.db.rename_label(&id, &name);
+            self.refresh_labels();
+        }
+        self.label_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.renaming_label = None;
+        let _ = window;
+        cx.notify();
+    }
+
+    /// Apply a user label when absent, remove it when present.
+    pub(crate) fn toggle_message_label(
+        &mut self,
+        message_id: &str,
+        label_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let applied = self
+            .db
+            .list_message_labels(message_id)
+            .map(|ls| ls.iter().any(|l| l.id == label_id))
+            .unwrap_or(false);
+        let result = if applied {
+            self.db.remove_label(message_id, label_id)
+        } else {
+            self.db.apply_label(message_id, label_id)
+        };
+        if let Err(e) = result {
+            log::error!("failed to toggle label: {e}");
+            return;
+        }
+        if self.selected_folder_id.as_deref() == Some(format!("{LABEL_PREFIX}{label_id}").as_str())
+        {
+            self.reload_messages();
+        }
+        cx.notify();
+    }
 }
