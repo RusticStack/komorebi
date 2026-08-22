@@ -9,7 +9,7 @@ pub mod providers;
 pub mod smtp;
 pub mod types;
 
-use crate::db::{Account, AccountDraft, Database, MessageDraft};
+use crate::db::{Account, AccountDraft, Database, MessageDraft, OutboxEntry};
 use crate::secrets;
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
@@ -349,11 +349,116 @@ fn account_draft(
     }
 }
 
+/// Result of an outbox replay pass for one account.
+#[derive(Debug, Default)]
+pub struct ReplaySummary {
+    pub applied: usize,
+    pub conflicts: Vec<String>,
+}
+
+/// Apply every pending offline mutation for `account` to the IMAP server.
+///
+/// Mutations are grouped by source mailbox so each group shares one
+/// connection. Applied entries are marked as reconciled; failures stay
+/// pending and are reported as conflicts (retried on the next sync).
+pub fn replay_outbox(db: &Database, account: &Account) -> ReplaySummary {
+    let mut summary = ReplaySummary::default();
+    let entries: Vec<OutboxEntry> = match db.list_pending_mutations() {
+        Ok(list) => list
+            .into_iter()
+            .filter(|e| e.account_id == account.id)
+            .collect(),
+        Err(e) => {
+            summary.conflicts.push(format!("outbox read failed: {e}"));
+            return summary;
+        }
+    };
+    if entries.is_empty() {
+        return summary;
+    }
+
+    let settings = match imap_settings(account) {
+        Ok(s) => s,
+        Err(e) => {
+            summary.conflicts.push(format!("{}: {e}", account.email));
+            return summary;
+        }
+    };
+    let auth = match build_imap_auth(db, account) {
+        Ok(a) => a,
+        Err(e) => {
+            summary.conflicts.push(format!("{}: {e}", account.email));
+            return summary;
+        }
+    };
+
+    // Group pending mutations by source mailbox (remote folder name).
+    let mut groups: std::collections::BTreeMap<String, Vec<OutboxEntry>> =
+        std::collections::BTreeMap::new();
+    for entry in entries {
+        let source = entry
+            .source_folder
+            .clone()
+            .or_else(|| db.folder_name_of_message(&entry.message_id).ok().flatten());
+        match source {
+            Some(name) => groups.entry(name).or_default().push(entry),
+            None => {
+                // The cached message is gone (removed on another device);
+                // the mutation has nothing left to act on.
+                let _ = db.mark_mutation_applied(&entry.id);
+                summary
+                    .conflicts
+                    .push("skipped: message no longer cached".to_string());
+            }
+        }
+    }
+
+    for (folder, ops) in groups {
+        let mut conn = match imap::ImapConnection::open(&settings, &settings.host, &auth, &folder) {
+            Ok(c) => c,
+            Err(e) => {
+                // Leave everything pending; retried on the next sync.
+                summary
+                    .conflicts
+                    .push(format!("offline ({folder}), will retry: {e}"));
+                continue;
+            }
+        };
+        for op in ops {
+            let result = match op.kind.as_str() {
+                "move" => match op.target_folder.as_deref() {
+                    Some(dest) => conn
+                        .copy_message(op.uid, dest)
+                        .and_then(|_| conn.delete_message(op.uid)),
+                    None => Err(anyhow::anyhow!("move mutation missing target folder")),
+                },
+                "delete" => conn.delete_message(op.uid),
+                "flag" => conn.set_flagged(op.uid, true),
+                "unflag" => conn.set_flagged(op.uid, false),
+                "mark_read" => conn.set_seen(op.uid, true),
+                "mark_unread" => conn.set_seen(op.uid, false),
+                other => Err(anyhow::anyhow!("unknown mutation kind '{other}'")),
+            };
+            match result {
+                Ok(()) => {
+                    let _ = db.mark_mutation_applied(&op.id);
+                    summary.applied += 1;
+                }
+                Err(e) => summary.conflicts.push(format!("{}: {e}", op.kind)),
+            }
+        }
+        conn.logout();
+    }
+    summary
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SyncSummary {
     pub fetched: usize,
     pub folders: usize,
     pub errors: Vec<String>,
+    pub replayed: usize,
+    pub conflicts: usize,
 }
 
 fn imap_settings(account: &Account) -> Result<types::ServerSettings> {

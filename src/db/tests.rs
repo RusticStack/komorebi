@@ -7,11 +7,11 @@ fn migrations_apply_and_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cache.db");
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 6);
+    assert_eq!(db.schema_version().unwrap(), 7);
 
     // Reopen applies nothing new.
     let db2 = Database::open(&path).unwrap();
-    assert_eq!(db2.schema_version().unwrap(), 6);
+    assert_eq!(db2.schema_version().unwrap(), 7);
 }
 
 #[test]
@@ -431,9 +431,9 @@ fn outbox_enqueue_list_and_reconcile() {
         .unwrap();
 
     // Enqueue two mutations
-    db.enqueue_mutation(&acc.id, &msg, 42, "move", Some("Archive"))
+    db.enqueue_mutation(&acc.id, &msg, 42, "move", Some("INBOX"), Some("Archive"))
         .unwrap();
-    db.enqueue_mutation(&acc.id, &msg, 42, "mark_read", None)
+    db.enqueue_mutation(&acc.id, &msg, 42, "mark_read", Some("INBOX"), None)
         .unwrap();
     assert_eq!(db.pending_mutation_count().unwrap(), 2);
 

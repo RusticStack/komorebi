@@ -401,3 +401,18 @@ fn parse_references(references: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .collect()
 }
+
+impl Database {
+    /// The cached folder a message currently lives in (by folder id).
+    pub fn folder_name_of_message(&self, message_id: &str) -> Result<Option<String>> {
+        let conn = self.conn();
+        conn.query_row(
+            "SELECT f.name FROM messages m JOIN folders f ON f.id = m.folder_id
+             WHERE m.id = ?1",
+            [message_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+}

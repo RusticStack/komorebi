@@ -9,22 +9,24 @@ impl Database {
 
     /// Enqueue a server-side mutation for later reconciliation. `uid` is the
     /// message's IMAP UID; `kind` is the action ("move", "delete", "flag",
-    /// "unflag", "mark_read", "mark_unread"); `target_folder` is the remote
-    /// folder name for moves.
+    /// "unflag", "mark_read", "mark_unread"); `source_folder`/`target_folder`
+    /// are remote folder names (the mailbox to operate in, and where a moved
+    /// message lands).
     pub fn enqueue_mutation(
         &self,
         account_id: &str,
         message_id: &str,
         uid: u32,
         kind: &str,
+        source_folder: Option<&str>,
         target_folder: Option<&str>,
     ) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let conn = self.conn();
         conn.execute(
-            "INSERT INTO outbox (id, account_id, message_id, uid, kind, target_folder)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, account_id, message_id, uid, kind, target_folder],
+            "INSERT INTO outbox (id, account_id, message_id, uid, kind, source_folder, target_folder)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, account_id, message_id, uid, kind, source_folder, target_folder],
         )?;
         Ok(id)
     }
@@ -33,7 +35,7 @@ impl Database {
     pub fn list_pending_mutations(&self) -> Result<Vec<OutboxEntry>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, account_id, message_id, uid, kind, target_folder, created_at
+            "SELECT id, account_id, message_id, uid, kind, source_folder, target_folder, created_at
              FROM outbox WHERE applied_at IS NULL ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -43,8 +45,9 @@ impl Database {
                 message_id: r.get(2)?,
                 uid: r.get(3)?,
                 kind: r.get(4)?,
-                target_folder: r.get(5)?,
-                created_at: r.get(6)?,
+                source_folder: r.get(5)?,
+                target_folder: r.get(6)?,
+                created_at: r.get(7)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -86,6 +89,7 @@ pub struct OutboxEntry {
     pub message_id: String,
     pub uid: u32,
     pub kind: String,
+    pub source_folder: Option<String>,
     pub target_folder: Option<String>,
     pub created_at: i64,
 }

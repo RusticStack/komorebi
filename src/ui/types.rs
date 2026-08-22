@@ -139,3 +139,14 @@ pub(crate) struct AttachmentPreview {
     pub(crate) name: String,
     pub(crate) path: PathBuf,
 }
+
+/// A composed message staged for sending, held briefly so the user can undo.
+#[derive(Clone)]
+pub(crate) struct PendingSend {
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub bcc: Vec<String>,
+    pub subject: String,
+    pub body: String,
+    pub attachments: Vec<mail::smtp::Attachment>,
+}

@@ -81,6 +81,10 @@ actions!(
         ArchiveMessage,
         StarMessage,
         ReplyMessage,
+        ReplyAllMessage,
+        SnoozeSelected,
+        UndoLastAction,
+        EscapeView,
         ForwardMessage,
         ToggleTheme,
     ]
@@ -98,6 +102,9 @@ pub struct App {
     messages: Vec<MessageRow>,
     selected_message: Option<MessageDetail>,
     panel: Panel,
+
+    // Undo-send staging (brief delay between Send click and SMTP).
+    pending_send: Option<PendingSend>,
 
     // New-message composer state.
     to_input: Entity<InputState>,
@@ -189,6 +196,8 @@ pub struct App {
 
     // Inline reply composer.
     reply_input: Entity<InputState>,
+    note_input: Entity<InputState>,
+    note_saved: bool,
     reply_open: bool,
     reply_mode: ReplyMode,
     reply_to: String,
@@ -208,6 +217,10 @@ impl App {
             KeyBinding::new("a", ArchiveMessage, Some(CONTEXT)),
             KeyBinding::new("s", StarMessage, Some(CONTEXT)),
             KeyBinding::new("r", ReplyMessage, Some(CONTEXT)),
+            KeyBinding::new("shift-r", ReplyAllMessage, Some(CONTEXT)),
+            KeyBinding::new("ctrl-s", SnoozeSelected, Some(CONTEXT)),
+            KeyBinding::new("ctrl-z", UndoLastAction, Some(CONTEXT)),
+            KeyBinding::new("escape", EscapeView, Some(CONTEXT)),
             KeyBinding::new("f", ForwardMessage, Some(CONTEXT)),
         ]);
 
@@ -264,7 +277,12 @@ impl App {
         let reply_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
-                .placeholder("Write your reply…")
+                .placeholder("Write your reply.")
+        });
+        let note_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .placeholder("Add an internal note…")
         });
         let signature_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -338,6 +356,7 @@ impl App {
             selected_folder_id: None,
             messages: Vec::new(),
             selected_message: None,
+            pending_send: None,
             panel: Panel::Mail,
             to_input,
             cc_input,
@@ -395,6 +414,8 @@ impl App {
             remote_content_banner: None,
             notify_config,
             reply_input,
+            note_input,
+            note_saved: false,
             reply_open: false,
             reply_mode: ReplyMode::Reply,
             reply_to: String::new(),
@@ -417,6 +438,9 @@ impl App {
         // First run with no accounts: land on the setup/onboarding panel.
         if this.accounts.is_empty() {
             this.panel = Panel::Accounts;
+        } else {
+            this.maybe_autosync(cx);
+            this.schedule_periodic_sync(cx);
         }
 
         apply_komorebi_theme(window, cx);
@@ -722,6 +746,31 @@ impl App {
     }
 
     /// Prefill the composer from the most recent saved draft, if any.
+    /// Silent auto-sync at launch (no toast when there is nothing to sync).
+    fn maybe_autosync(&mut self, cx: &mut Context<Self>) {
+        if self
+            .accounts
+            .iter()
+            .any(|a| a.provider_kind != "local" && a.imap_host.is_some())
+        {
+            self.sync_now(cx);
+        }
+    }
+
+    /// Periodic background sync every 15 minutes while the app runs.
+    fn schedule_periodic_sync(&mut self, cx: &mut Context<Self>) {
+        let entity = cx.entity();
+        cx.spawn(async move |_this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(15 * 60))
+                    .await;
+                let _ = entity.update(cx, |this, cx| this.sync_now(cx));
+            }
+        })
+        .detach();
+    }
+
     /// Opt-in demo mailbox for exploring the client before adding an account.
     pub(crate) fn seed_demo(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = mail::seed_local_demo(&self.db) {
@@ -844,6 +893,32 @@ impl Render for App {
             }))
             .on_action(cx.listener(|this, _: &ReplyMessage, window, cx| {
                 this.open_reply(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ReplyAllMessage, window, cx| {
+                if let Some(id) = this.selected_message_id().map(str::to_string) {
+                    this.reply_all_to(&id, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SnoozeSelected, _, cx| {
+                if let Some(id) = this.selected_message_id().map(str::to_string) {
+                    let due = chrono::Utc::now().timestamp() + 86400;
+                    this.snooze_message(&id, "Tomorrow", due, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &UndoLastAction, _, cx| {
+                this.undo_last(cx);
+            }))
+            .on_action(cx.listener(|this, _: &EscapeView, window, cx| {
+                if this.preview.is_some() {
+                    this.close_preview(cx);
+                } else if this.reply_open {
+                    this.clear_reply(window, cx);
+                    this.reply_open = false;
+                    cx.notify();
+                } else if this.selected_message.is_some() {
+                    this.selected_message = None;
+                    cx.notify();
+                }
             }))
             .on_action(cx.listener(|this, _: &ForwardMessage, window, cx| {
                 this.open_forward(window, cx);

@@ -635,6 +635,7 @@ impl App {
         entity: Entity<Self>,
     ) -> impl IntoElement + use<> {
         let reply_input = self.reply_input.clone();
+        let note_input = self.note_input.clone();
         let reply_to = self.reply_to.clone();
         let ai_draft = self.ai_reply_draft.clone();
         let mode = self.reply_mode;
@@ -657,10 +658,21 @@ impl App {
                     .selected_index(if mode == ReplyMode::Note { 1 } else { 0 })
                     .on_click({
                         let entity = entity.clone();
-                        move |idx, _, cx| {
+                        move |idx, window, cx| {
                             let idx = *idx;
                             cx.update_entity(&entity, move |this, cx| {
                                 this.reply_mode = if idx == 1 {
+                                    // First open of the Note tab loads any
+                                    // persisted note (without clobbering edits).
+                                    let empty = this.note_input.read(cx).value().is_empty();
+                                    if empty
+                                        && let Some(id) =
+                                            this.selected_message_id().map(str::to_string)
+                                        && let Ok(Some(note)) = this.db.get_note(&id)
+                                    {
+                                        this.note_input
+                                            .update(cx, |s, cx| s.set_value(note, window, cx));
+                                    }
                                     ReplyMode::Note
                                 } else {
                                     ReplyMode::Reply
@@ -692,7 +704,11 @@ impl App {
                             .min_h(px(96.0))
                             .rounded(RADIUS_SM)
                             .bg(cx.theme().input)
-                            .child(Input::new(&reply_input).border_0()),
+                            .child(if mode == ReplyMode::Note {
+                                Input::new(&note_input).border_0()
+                            } else {
+                                Input::new(&reply_input).border_0()
+                            }),
                     ),
             )
             .children(ai_draft.map(|text| self.ai_draft_bar(cx, entity.clone(), text)))
@@ -723,21 +739,45 @@ impl App {
                                         }
                                     }),
                             )
-                            .child(
-                                Button::new("send-reply")
-                                    .label("Send")
-                                    .icon(IconName::ArrowRight)
-                                    .primary()
-                                    .small()
-                                    .on_click({
-                                        let entity = entity.clone();
-                                        move |_, window, cx| {
-                                            cx.update_entity(&entity, |this, cx| {
-                                                let _ = this.send_reply(window, cx);
-                                            });
-                                        }
-                                    }),
-                            ),
+                            .children(if mode == ReplyMode::Note {
+                                vec![
+                                    Button::new("save-note")
+                                        .label(if self.note_saved {
+                                            "Note saved ✓"
+                                        } else {
+                                            "Save note"
+                                        })
+                                        .icon(IconName::Check)
+                                        .primary()
+                                        .small()
+                                        .on_click({
+                                            let entity = entity.clone();
+                                            move |_, _, cx| {
+                                                cx.update_entity(&entity, |this, cx| {
+                                                    this.save_internal_note(cx);
+                                                });
+                                            }
+                                        })
+                                        .into_any_element(),
+                                ]
+                            } else {
+                                vec![
+                                    Button::new("send-reply")
+                                        .label("Send")
+                                        .icon(IconName::ArrowRight)
+                                        .primary()
+                                        .small()
+                                        .on_click({
+                                            let entity = entity.clone();
+                                            move |_, window, cx| {
+                                                cx.update_entity(&entity, |this, cx| {
+                                                    let _ = this.send_reply(window, cx);
+                                                });
+                                            }
+                                        })
+                                        .into_any_element(),
+                                ]
+                            }),
                     ),
             )
     }

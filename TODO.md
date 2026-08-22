@@ -43,9 +43,14 @@ restore-on-failure. It is not yet production-complete.
 - ⚠️ No pause/reorder/resync/identity UI.
 
 ### 1.2 Sync engine
-- ✅ IMAP sync reachable from UI (`sync_now` → `sync_account` off-thread).
+- ✅ IMAP sync reachable from UI (`sync_now` → `sync_account` off-thread), plus
+  **auto-sync at launch and every 15 minutes** while the app runs.
 - ⚠️ Sync state visible but minimal (string status; no full state machine).
-- ✅ Offline mutation outbox (migration v6). Server-side replay is the remaining step.
+- ✅ **Offline mutation outbox fully wired (migrations v6+v7).** Move/archive/
+  delete/flag/read changes on remote accounts are queued with the message UID
+  and source mailbox; every sync runs `mail::replay_outbox` (COPY + \Deleted,
+  STORE flags) grouped per source folder, marks applied entries, defers
+  failures as conflicts, and reports "N pushed, M deferred" in the status.
 - ❌ No JMAP/Gmail API/Microsoft Graph connectors (optional per plan).
 - ✅ Encrypted-only posture, XOAUTH2, folder special-use, UID dedupe.
 
@@ -75,17 +80,24 @@ restore-on-failure. It is not yet production-complete.
   send fails, discardable.
 - ✅ **Per-account signatures**: editor in the Accounts panel
   (`db.update_account_signature`), appended to new messages.
-- ❌ Rich text; scheduled/undo send; inline images.
-- ⚠️ Internal note tab renders but has no persistence.
+- ✅ **Internal notes persist** (migration v7 `message_notes`): the Note tab
+  loads the stored note on first open and a Save button writes it (empty body
+  deletes). 
+- ✅ **Undo send**: clicking Send stages the message for a 5-second window with
+  an "Undo send" button that restores fields and attachments; after the window
+  it dispatches over SMTP (failure still re-saves a draft).
+- ❌ Rich text; scheduled send; inline images.
 
 ### 1.6 Search & command navigation
 - ⚠️ Text search only (FTS5); no structured filters or NL search.
 - ❌ Command palette.
-- ⚠️ Shortcuts bound but missing reply-all, snooze, undo, Esc, customization.
+- ✅ Shortcuts: reply-all (Shift+R), snooze-tomorrow (Ctrl+S), undo last
+  (Ctrl+Z), Esc closes preview → inline composer → selection. Customization
+  still missing.
 
 ### 1.7 Offline behavior
 - ✅ Read/search/compose/organize locally.
-- ✅ Offline mutation queue enqueued (replay wiring is the remaining step).
+- ✅ Offline mutation queue enqueued and replayed to the server after every sync.
 - ✅ AI summaries persist on-device.
 
 ### 1.8 Notifications
@@ -178,8 +190,7 @@ restore-on-failure. It is not yet production-complete.
 ## Prioritized next-up
 
 ### P0 - complete the foundations
-1. Replay the offline outbox to the server on reconnect (IMAP STORE/MOVE),
-   surfacing conflicts.
+1. Encrypt the local cache at rest (SQLCipher or OS DPAPI on `cache.db`).
 3. Encrypt the local cache at rest (SQLCipher or OS DPAPI on `cache.db`).
 
 ### P1 - complete the composer + sync
