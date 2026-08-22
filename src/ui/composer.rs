@@ -182,12 +182,33 @@ impl App {
                         }
                     })),
             )
-            .children(status.map(|s| {
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(s))
-            }))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .when(self.pending_send.is_some(), |row| {
+                        row.child(
+                            Button::new("undo-send")
+                                .label("Undo send")
+                                .outline()
+                                .small()
+                                .on_click({
+                                    let entity = entity.clone();
+                                    move |_, window, cx| {
+                                        cx.update_entity(&entity, |this, cx| {
+                                            this.undo_pending_send(window, cx);
+                                        });
+                                    }
+                                }),
+                        )
+                    })
+                    .children(status.map(|s| {
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(SharedString::from(s))
+                    })),
+            )
     }
 
     fn attachment_row(
@@ -297,23 +318,49 @@ impl App {
         self.body_input
             .update(cx, |s, cx| s.set_value("", window, cx));
         self.composer_attachments.clear();
-        self.compose_status = Some("Sending…".to_string());
+
+        // Stage the send for a few seconds so it can be undone.
+        self.pending_send = Some(PendingSend {
+            to: to.clone(),
+            cc: cc.clone(),
+            bcc: bcc.clone(),
+            subject: subject.clone(),
+            body: body.clone(),
+            attachments: attachments.clone(),
+        });
+        self.compose_status = Some("Sending… you can undo for 5 seconds.".to_string());
         cx.notify();
 
         let db = self.db.clone();
         let entity = cx.entity();
-        let account_id = account.as_ref().map(|a| a.id.clone());
-        let to_for_draft = to.join(", ");
-        let subject_for_draft = subject.clone();
-        let body_for_draft = body.clone();
         cx.spawn(async move |_weak, cx| {
+            // Undo-send window; a no-op when the user cancelled.
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(5))
+                .await;
+            let mut staged = None;
+            let _ = entity.update(cx, |this, _| staged = this.pending_send.take());
+            let Some(pending) = staged else {
+                return;
+            };
+            let account_id = account.as_ref().map(|a| a.id.clone());
+            let to_for_draft = pending.to.clone();
+            let subject_for_draft = pending.subject.clone();
+            let body_for_draft = pending.body.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     match account.as_ref() {
-                        Some(a) => {
-                            perform_send(&db, a, &to, &cc, &bcc, &subject, &body, &attachments)
-                        }
+                        Some(a) => perform_send(
+                            &db,
+                            a,
+                            &pending.to,
+                            &pending.cc,
+                            &pending.bcc,
+                            &pending.subject,
+                            &pending.body,
+                            &pending.attachments,
+                        ),
                         None => Ok(()),
                     }
                 })
@@ -326,7 +373,7 @@ impl App {
                         if let Ok(id) = this.db.save_draft(
                             account_id.as_deref().unwrap_or_default(),
                             Some(&subject_for_draft),
-                            Some(&to_for_draft),
+                            Some(&to_for_draft.join(", ")),
                             Some(&body_for_draft),
                         ) {
                             this.draft_id = Some(id);
@@ -339,6 +386,35 @@ impl App {
         })
         .detach();
         true
+    }
+
+    /// Cancel a staged send and restore its content into the composer.
+    pub(crate) fn undo_pending_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_send.take() else {
+            return;
+        };
+        self.to_input
+            .update(cx, |s, cx| s.set_value(pending.to.join(", "), window, cx));
+        self.cc_input
+            .update(cx, |s, cx| s.set_value(pending.cc.join(", "), window, cx));
+        self.bcc_input
+            .update(cx, |s, cx| s.set_value(pending.bcc.join(", "), window, cx));
+        self.subject_input
+            .update(cx, |s, cx| s.set_value(pending.subject, window, cx));
+        self.body_input
+            .update(cx, |s, cx| s.set_value(pending.body, window, cx));
+        self.composer_attachments = pending
+            .attachments
+            .into_iter()
+            .map(|a| PendingAttachment {
+                name: a.filename,
+                size_bytes: a.data.len() as i64,
+                data: a.data,
+            })
+            .collect();
+        self.compose_cc_bcc_open = true;
+        self.compose_status = Some("Send cancelled.".to_string());
+        cx.notify();
     }
 
     // ---------------------------------------------------------------------

@@ -202,6 +202,17 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(applied_at);
     "#,
     ),
+    (
+        7,
+        r#"
+        ALTER TABLE outbox ADD COLUMN source_folder TEXT;
+        CREATE TABLE IF NOT EXISTS message_notes (
+            message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+            body TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+    "#,
+    ),
 ];
 
 /// Thread-safe handle to the local cache. Clone the `Arc` to share it with

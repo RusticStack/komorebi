@@ -137,12 +137,39 @@ impl App {
     }
 
     /// Toggle the star flag on a specific message.
+    /// Queue a server-side mutation for later IMAP replay (remote accounts
+    /// only; demo/local messages never touch the outbox).
+    fn queue_mutation(&self, msg: &MessageDetail, kind: &str, dest: Option<&Folder>) {
+        let Some(account) = self.accounts.iter().find(|a| a.id == msg.account_id) else {
+            return;
+        };
+        if account.provider_kind == "local" || account.imap_host.is_none() {
+            return;
+        }
+        let Some(uid) = msg.imap_uid.and_then(|u| u32::try_from(u).ok()) else {
+            return;
+        };
+        let source = self
+            .folders
+            .iter()
+            .find(|f| f.id == msg.folder_id)
+            .map(|f| f.name.clone());
+        let _ = self.db.enqueue_mutation(
+            &msg.account_id,
+            &msg.id,
+            uid,
+            kind,
+            source.as_deref(),
+            dest.map(|f| f.name.as_str()),
+        );
+    }
     pub(crate) fn toggle_flag(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(msg) = self.db.get_message_detail(id).ok().flatten() else {
             return;
         };
         let new_flag = !msg.is_flagged;
         let _ = self.db.mark_flagged(id, new_flag);
+        self.queue_mutation(&msg, if new_flag { "flag" } else { "unflag" }, None);
         if self.selected_message_id() == Some(id) {
             self.selected_message = Some(MessageDetail {
                 is_flagged: new_flag,
@@ -154,6 +181,9 @@ impl App {
     }
 
     pub(crate) fn set_message_read(&mut self, id: &str, read: bool, cx: &mut Context<Self>) {
+        if let Ok(Some(msg)) = self.db.get_message_detail(id) {
+            self.queue_mutation(&msg, if read { "mark_read" } else { "mark_unread" }, None);
+        }
         let _ = self.db.mark_read(id, read);
         if self.selected_message_id() == Some(id) {
             self.selected_message = self.db.get_message_detail(id).ok().flatten();
@@ -163,12 +193,16 @@ impl App {
     }
 
     pub(crate) fn archive_message(&mut self, id: &str, cx: &mut Context<Self>) {
+        let detail = self.db.get_message_detail(id).ok().flatten();
         let target = self
             .folders
             .iter()
             .find(|f| f.special_use.as_deref() == Some("archive"));
         match target {
             Some(target) => {
+                if let Some(msg) = &detail {
+                    self.queue_mutation(msg, "move", Some(target));
+                }
                 let _ = self.db.move_message(id, &target.id);
             }
             None => {
@@ -183,12 +217,16 @@ impl App {
     }
 
     pub(crate) fn delete_message(&mut self, id: &str, cx: &mut Context<Self>) {
+        let detail = self.db.get_message_detail(id).ok().flatten();
         let target = self
             .folders
             .iter()
             .find(|f| f.special_use.as_deref() == Some("trash"));
         match target {
             Some(target) => {
+                if let Some(msg) = &detail {
+                    self.queue_mutation(msg, "move", Some(target));
+                }
                 let _ = self.db.move_message(id, &target.id);
             }
             None => {
@@ -208,6 +246,11 @@ impl App {
         folder_id: &str,
         cx: &mut Context<Self>,
     ) {
+        let detail = self.db.get_message_detail(message_id).ok().flatten();
+        let dest = self.folders.iter().find(|f| f.id == folder_id).cloned();
+        if let (Some(msg), Some(dest)) = (&detail, dest.as_ref()) {
+            self.queue_mutation(msg, "move", Some(dest));
+        }
         let _ = self.db.move_message(message_id, folder_id);
         if self.selected_message_id() == Some(message_id) {
             self.selected_message = None;
@@ -559,6 +602,26 @@ impl App {
         if self.selected_folder_id.as_deref() == Some(format!("{LABEL_PREFIX}{label_id}").as_str())
         {
             self.reload_messages();
+        }
+        cx.notify();
+    }
+
+    /// Persist the internal note for the selected message.
+    pub(crate) fn save_internal_note(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected_message_id().map(str::to_string) else {
+            self.set_toast("Open a message first.", cx);
+            return;
+        };
+        let body = self.note_input.read(cx).value().to_string();
+        match self.db.set_note(&id, &body) {
+            Ok(()) => {
+                self.note_saved = true;
+                self.set_toast("Note saved \u{2713}", cx);
+            }
+            Err(e) => {
+                log::error!("failed to save note: {e}");
+                self.set_toast("Could not save the note.", cx);
+            }
         }
         cx.notify();
     }

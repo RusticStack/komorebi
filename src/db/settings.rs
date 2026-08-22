@@ -32,4 +32,41 @@ impl Database {
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    // -----------------------------------------------------------------------
+    // Internal message notes
+    // -----------------------------------------------------------------------
+
+    /// The internal note attached to a message, if any.
+    pub fn get_note(&self, message_id: &str) -> Result<Option<String>> {
+        let conn = self.conn();
+        conn.query_row(
+            "SELECT body FROM message_notes WHERE message_id = ?1",
+            [message_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Create or replace the internal note for a message. An empty body
+    /// deletes the note.
+    pub fn set_note(&self, message_id: &str, body: &str) -> Result<()> {
+        let conn = self.conn();
+        if body.trim().is_empty() {
+            conn.execute(
+                "DELETE FROM message_notes WHERE message_id = ?1",
+                [message_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO message_notes (message_id, body, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(message_id) DO UPDATE SET body = excluded.body,
+                     updated_at = excluded.updated_at",
+                params![message_id, body, chrono::Utc::now().timestamp()],
+            )?;
+        }
+        Ok(())
+    }
 }

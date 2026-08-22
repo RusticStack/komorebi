@@ -2,8 +2,9 @@
 //!
 //! Supports TLS and STARTTLS, password login and XOAUTH2 SASL for OAuth
 //! providers, folder listing with special-use attributes, incremental UID
-//! sync, and flag updates. Provider-safe posture: no destructive mutations
-//! (expunge, move, delete) are exposed yet.
+//! sync, flag updates, and outbox replay primitives (COPY, \Deleted+EXPUNGE).
+//! Provider-safe posture: destructive mutations are only issued by the
+//! explicit outbox replay path.
 
 use super::types::{Security, ServerSettings};
 use anyhow::{Context, Result, anyhow};
@@ -192,6 +193,27 @@ impl ImapConnection {
         self.session
             .uid_store(uid.to_string(), format!("({op} (\\Flagged))"))
             .map_err(|e| anyhow!("IMAP STORE \\Flagged failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Copy a message to another mailbox by UID (server must support COPY).
+    pub fn copy_message(&mut self, uid: u32, dest: &str) -> Result<()> {
+        self.session
+            .uid_copy(uid.to_string(), dest)
+            .map_err(|e| anyhow!("IMAP COPY to {dest} failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Mark a message \Deleted and expunge the mailbox. Note: EXPUNGE also
+    /// purges any other messages another client flagged \Deleted in this
+    /// mailbox - the standard trade-off without UID EXPUNGE support.
+    pub fn delete_message(&mut self, uid: u32) -> Result<()> {
+        self.session
+            .uid_store(uid.to_string(), "(+FLAGS.SILENT (\\Deleted))")
+            .map_err(|e| anyhow!("IMAP STORE \\Deleted failed: {e}"))?;
+        self.session
+            .expunge()
+            .map_err(|e| anyhow!("IMAP EXPUNGE failed: {e}"))?;
         Ok(())
     }
 
