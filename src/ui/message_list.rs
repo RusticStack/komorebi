@@ -4,21 +4,29 @@ use super::*;
 
 impl App {
     // ---------------------------------------------------------------------
+
     // Message list
+
     // ---------------------------------------------------------------------
+
     pub(crate) fn mail_panel(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let list = self.message_list(cx).into_any_element();
+
         let reader = self.reader(cx).into_any_element();
+
         let list_width = self.list_width;
+
         let entity = cx.entity();
 
         h_resizable("mail")
             .on_resize({
                 let entity = entity.clone();
+
                 move |state, _, cx| {
                     if let Some(width) = state.read(cx).sizes().first().copied() {
                         cx.update_entity(&entity, |this, cx| {
                             this.list_width = width;
+
                             cx.notify();
                         });
                     }
@@ -35,8 +43,11 @@ impl App {
 
     pub(crate) fn message_list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let muted = cx.theme().muted_foreground;
+
         let item_count = self.messages.len();
+
         let search = self.search_input.clone();
+
         let entity = cx.entity();
 
         v_flex()
@@ -58,10 +69,11 @@ impl App {
                                 .bg(cx.theme().muted)
                                 .text_xs()
                                 .text_color(muted)
-                                .child("Ctrl K"),
+                                .child("/"),
                         ),
                 ),
             )
+            .children(self.nl_search_row(cx, entity.clone()))
             .child(
                 // Focused / Other tabs + filter.
                 h_flex()
@@ -78,11 +90,15 @@ impl App {
                             .selected_index(self.focused_tab)
                             .on_click({
                                 let entity = entity.clone();
+
                                 move |idx, _, cx| {
                                     let idx = *idx;
+
                                     cx.update_entity(&entity, move |this, cx| {
                                         this.focused_tab = idx;
+
                                         this.reload_messages();
+
                                         cx.notify();
                                     });
                                 }
@@ -122,7 +138,7 @@ impl App {
                             .items_center()
                             // Live sync status - users always know the state of their mail.
                             // users always know the state of their mail.
-                            .when(self.syncing, |d| {
+                            .when(self.sync_busy(), |d| {
                                 d.child(
                                     h_flex()
                                         .gap_1()
@@ -151,12 +167,15 @@ impl App {
                     item_count,
                     cx.processor(|this, range: std::ops::Range<usize>, _window, cx| {
                         let entity = cx.entity();
+
                         let mut items = Vec::with_capacity(range.len());
+
                         for ix in range {
                             if let Some(msg) = this.messages.get(ix) {
                                 items.push(this.message_row(msg, entity.clone(), cx));
                             }
                         }
+
                         items
                     }),
                 )
@@ -169,13 +188,20 @@ impl App {
     fn empty_list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let label = match self.selected_folder_id.as_deref() {
             Some(SNOOZED) => "Nothing snoozed. Snoozed conversations return here when due.",
+
             Some(VIEW_MENTIONS) => "No mentions found.",
+
             Some(VIEW_ATTACHMENTS) => "No messages with attachments.",
+
             Some(VIEW_UNREAD) => "You're all caught up.",
+
             Some(id) if id.starts_with(LABEL_PREFIX) => "No messages with this label yet.",
+
             _ => "No messages in this view.",
         };
+
         // Calm, centered empty state - Ma (negative space) as a feature.
+
         v_flex()
             .id("empty")
             .flex_1()
@@ -200,30 +226,45 @@ impl App {
 
     fn message_row(
         &self,
+
         msg: &MessageRow,
+
         entity: Entity<Self>,
+
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selected = self.selected_message_id() == Some(msg.id.as_str());
+
         let msg_id = msg.id.clone();
+
         let sender = msg
             .sender_name
             .clone()
             .unwrap_or_else(|| msg.sender_email.clone().unwrap_or_default());
+
         let subject = msg
             .subject
             .clone()
             .unwrap_or_else(|| "(no subject)".to_string());
+
         let snippet = msg.snippet.clone().unwrap_or_default();
+
         let date = format_list_date(msg.date_received);
+
         let unread = !msg.is_read;
+
         let flagged = msg.is_flagged;
+
         let label = msg.ai_category.clone();
 
         let border = cx.theme().border;
+
         let list_hover = cx.theme().list_hover;
+
         let list_active = cx.theme().list_active;
+
         let primary = cx.theme().primary;
+
         let muted = cx.theme().muted_foreground;
 
         h_flex()
@@ -336,11 +377,15 @@ impl App {
             )
             .on_click({
                 let entity = entity.clone();
+
                 let mid = msg_id.clone();
+
                 move |_, _, cx| {
                     let id = mid.clone();
+
                     cx.update_entity(&entity, move |this, cx| {
                         this.open_message(&id);
+
                         cx.notify();
                     });
                 }
@@ -357,5 +402,99 @@ impl App {
             )
             .context_menu(self.message_context_menu(entity, msg_id, msg.is_read, msg.is_flagged))
             .into_any_element()
+    }
+
+    /// "Ask AI" row under the search box when there is a query to translate.
+    fn nl_search_row(&self, _cx: &mut Context<Self>, entity: Entity<Self>) -> Option<AnyElement> {
+        if self.search_query.trim().len() < 3 {
+            return None;
+        }
+        Some(
+            h_flex()
+                .w_full()
+                .px_3()
+                .pb_1()
+                .child(
+                    Button::new("ask-ai-search")
+                        .label(if self.nl_busy {
+                            "Translating…"
+                        } else {
+                            "Ask AI for filters"
+                        })
+                        .ghost()
+                        .xsmall()
+                        .disabled(self.nl_busy)
+                        .on_click({
+                            let entity = entity.clone();
+                            move |_, _, cx| {
+                                cx.update_entity(&entity, |this, cx| this.run_nl_search(cx));
+                            }
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Translate the current search text into structured filters via the
+    /// configured AI endpoint, then apply them as the active search.
+    pub(crate) fn run_nl_search(&mut self, cx: &mut Context<Self>) {
+        if self.nl_busy || self.search_query.trim().len() < 3 {
+            return;
+        }
+        self.nl_busy = true;
+        cx.notify();
+
+        let base_url = self.ai_config.base_url.clone();
+        let model = self.ai_config.model.clone();
+        let provider = self.ai_config.provider.clone();
+        let db = self.db.clone();
+        let query = self.search_query.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_this, cx| {
+            const SYSTEM: &str = "Convert the user's mail search request into Komorebi \
+                 search tokens. Allowed tokens ONLY: from:<text>, subject:<text>, \
+                 is:unread, is:flagged, plus plain keywords. Output exactly one line \
+                 of space-separated tokens with no explanation.";
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let api_key = crate::ai::resolve_api_key(&db, &provider).ok().flatten();
+                    crate::ai::client::complete(
+                        &base_url,
+                        &model,
+                        SYSTEM,
+                        &query,
+                        api_key.as_deref(),
+                    )
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                this.nl_busy = false;
+                match result {
+                    Ok(raw) => {
+                        let tokens: Vec<&str> = raw
+                            .split_whitespace()
+                            .filter(|t| {
+                                t.starts_with("from:")
+                                    || t.starts_with("subject:")
+                                    || t.starts_with("is:")
+                                    || !t.contains(':')
+                            })
+                            .collect();
+                        let translated = tokens.join(" ");
+                        if translated.is_empty() {
+                            this.set_toast("The model returned no usable filters.", cx);
+                        } else {
+                            this.search_query = translated.clone();
+                            this.reload_messages();
+                            this.set_toast(&format!("Filters: {translated}"), cx);
+                        }
+                    }
+                    Err(e) => this.set_toast(&format!("AI search failed: {e}"), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }

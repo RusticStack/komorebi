@@ -150,3 +150,16 @@ pub(crate) struct PendingSend {
     pub body: String,
     pub attachments: Vec<mail::smtp::Attachment>,
 }
+
+/// Sync engine state machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SyncPhase {
+    /// No sync running; nothing noteworthy since launch.
+    Idle,
+    /// A sync pass is running right now.
+    Syncing,
+    /// Last sync finished successfully with a summary line.
+    Done(String),
+    /// Last sync finished with errors/failures worth surfacing.
+    Failed(String),
+}

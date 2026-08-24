@@ -7,11 +7,11 @@ fn migrations_apply_and_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cache.db");
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 7);
+    assert_eq!(db.schema_version().unwrap(), 9);
 
     // Reopen applies nothing new.
     let db2 = Database::open(&path).unwrap();
-    assert_eq!(db2.schema_version().unwrap(), 7);
+    assert_eq!(db2.schema_version().unwrap(), 9);
 }
 
 #[test]
@@ -458,4 +458,60 @@ fn outbox_enqueue_list_and_reconcile() {
     db.purge_applied_mutations(chrono::Utc::now().timestamp() + 3600)
         .unwrap();
     assert!(db.list_pending_mutations().unwrap().is_empty());
+}
+
+#[test]
+fn rules_evaluate_on_new_messages() {
+    let db = Database::in_memory().unwrap();
+    let acc = db
+        .insert_account(&AccountDraft {
+            email: "r@b.test".into(),
+            provider_kind: "custom".into(),
+            auth_mode: "password".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    let inbox = db
+        .upsert_folder(&acc.id, "INBOX", None, Some("inbox"), None)
+        .unwrap();
+    db.create_rule(
+        &acc.id,
+        "Newsletter",
+        "subject",
+        "newsletter",
+        "mark_read",
+        None,
+    )
+    .unwrap();
+    let id = db
+        .insert_message(&MessageDraft {
+            account_id: acc.id.clone(),
+            folder_id: inbox.id.clone(),
+            subject: Some("Weekly Newsletter".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let applied = db.apply_rules(&acc.id, std::slice::from_ref(&id)).unwrap();
+    assert_eq!(applied, 1);
+    assert!(db.get_message_detail(&id).unwrap().unwrap().is_read);
+}
+
+#[test]
+fn contacts_roundtrip_and_search() {
+    let db = Database::in_memory().unwrap();
+    let acc = db
+        .insert_account(&AccountDraft {
+            email: "c@b.test".into(),
+            provider_kind: "custom".into(),
+            auth_mode: "password".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    db.touch_contact(&acc.id, "ada@example.com", Some("Ada"));
+    db.touch_contact(&acc.id, "ada@example.com", None);
+    db.touch_contact(&acc.id, "bob@example.com", None);
+    let hits = db.search_contacts(&acc.id, "ada").unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].email, "ada@example.com");
+    assert_eq!(hits[0].count, 2);
 }

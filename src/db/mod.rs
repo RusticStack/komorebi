@@ -213,6 +213,40 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
     "#,
     ),
+    (
+        8,
+        r#"
+        ALTER TABLE drafts ADD COLUMN cc_addresses TEXT;
+        ALTER TABLE drafts ADD COLUMN bcc_addresses TEXT;
+        ALTER TABLE drafts ADD COLUMN send_at INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_drafts_send_at ON drafts(send_at);
+    "#,
+    ),
+    (
+        9,
+        r#"
+        CREATE TABLE IF NOT EXISTS rules (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            field TEXT NOT NULL,
+            value TEXT NOT NULL,
+            action TEXT NOT NULL,
+            action_arg TEXT,
+            position INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS contacts (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            email TEXT NOT NULL,
+            name TEXT,
+            count INTEGER NOT NULL DEFAULT 1,
+            last_seen INTEGER NOT NULL,
+            UNIQUE(account_id, email)
+        );
+    "#,
+    ),
 ];
 
 /// Thread-safe handle to the local cache. Clone the `Arc` to share it with
@@ -278,12 +312,14 @@ impl Database {
 // row types. Re-exported here so crate::db::{...} paths keep working.
 mod accounts;
 mod ai_ledger;
+mod contacts;
 mod drafts;
 mod folders;
 mod labels;
 mod messages;
 mod outbox;
 mod reminders;
+mod rules;
 mod settings;
 #[cfg(test)]
 mod tests;
@@ -296,3 +332,4 @@ pub use labels::Label;
 pub use messages::{MessageDetail, MessageDraft, MessageRow};
 pub use outbox::OutboxEntry;
 pub use reminders::Reminder;
+pub use rules::Rule;
