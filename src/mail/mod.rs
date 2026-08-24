@@ -98,11 +98,11 @@ pub fn sync_folder(
     let mut conn = imap::ImapConnection::open(settings, &settings.host, auth, folder_name)?;
     let uid_validity = conn.mailbox.uid_validity;
     let fetched = conn.fetch_new(since, Some(500))?;
-    let count = cache_fetched_messages(db, account, folder_id, uid_validity, &fetched)?;
+    let inserted = cache_fetched_messages(db, account, folder_id, uid_validity, &fetched)?;
     let total = conn.mailbox.exists as i64;
     let unread = conn.mailbox.unseen.map(|u| (u as i64).max(0)).unwrap_or(0);
     db.set_folder_counts(folder_id, unread, total)?;
-    Ok(count)
+    Ok(inserted)
 }
 
 /// Ingest already-fetched messages into the local cache (deduped by IMAP UID).
@@ -459,6 +459,10 @@ pub struct SyncSummary {
     pub errors: Vec<String>,
     pub replayed: usize,
     pub conflicts: usize,
+    /// Rule actions fired during this pass.
+    pub rules_applied: usize,
+    /// Locally-cached message ids inserted by this sync (for rules).
+    pub new_ids: Vec<String>,
 }
 
 fn imap_settings(account: &Account) -> Result<types::ServerSettings> {

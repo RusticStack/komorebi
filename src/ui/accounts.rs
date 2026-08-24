@@ -19,8 +19,8 @@ impl App {
         let setup_redirect_uri = self.setup_redirect_uri.clone();
         let discovered = self.setup_discovered.clone();
         let busy = self.setup_busy;
-        let syncing = self.syncing;
-        let sync_status = self.sync_status.clone();
+        let syncing = self.sync_busy();
+        let sync_status = self.sync_note();
         let oauth = discovered
             .as_ref()
             .map(|d| d.auth_mode == "oauth")
@@ -314,23 +314,90 @@ impl App {
                         ),
                 )
                 .child(
-                    Button::new(SharedString::from(format!("del-{acc_id}")))
-                        .label("Remove")
-                        .ghost()
-                        .danger()
-                        .on_click({
-                            let entity = entity.clone();
-                            move |_, _, cx| {
-                                let id = acc_id.clone();
-                                cx.update_entity(&entity, move |this, cx| {
-                                    let _ = this.db.delete_account(&id);
-                                    this.refresh_accounts();
-                                    this.refresh_folders();
-                                    this.selected_message = None;
-                                    this.select_first_folder();
-                                    cx.notify();
-                                });
-                            }
+                    h_flex()
+                        .gap_1()
+                        .child({
+                            let pid = acc_id.clone();
+                            let ent = entity.clone();
+                            Button::new(SharedString::from(format!("pause-{pid}")))
+                                .label(if self.account_paused(&acc_id) {
+                                    "Paused"
+                                } else {
+                                    "Pause"
+                                })
+                                .when(self.account_paused(&acc_id), |b| b.outline())
+                                .when(!self.account_paused(&acc_id), |b| b.ghost())
+                                .tooltip("Skip this account during sync")
+                                .on_click(move |_, _, cx| {
+                                    let id = pid.clone();
+                                    cx.update_entity(&ent, move |this, cx| {
+                                        this.toggle_account_paused(&id, cx);
+                                    });
+                                })
+                        })
+                        .child({
+                            let rid = acc_id.clone();
+                            let ent = entity.clone();
+                            Button::new(SharedString::from(format!("resync-{rid}")))
+                                .label("Resync")
+                                .ghost()
+                                .disabled(self.sync_busy())
+                                .tooltip("Sync only this account now")
+                                .on_click(move |_, _, cx| {
+                                    let id = rid.clone();
+                                    cx.update_entity(&ent, move |this, cx| {
+                                        this.sync_one(&id, cx);
+                                    });
+                                })
+                        })
+                        .child({
+                            let uid = acc_id.clone();
+                            let ent = entity.clone();
+                            Button::new(SharedString::from(format!("up-{uid}")))
+                                .icon(IconName::ArrowUp)
+                                .ghost()
+                                .xsmall()
+                                .tooltip("Move up")
+                                .on_click(move |_, _, cx| {
+                                    let id = uid.clone();
+                                    cx.update_entity(&ent, move |this, cx| {
+                                        this.move_account(&id, -1, cx);
+                                    });
+                                })
+                        })
+                        .child({
+                            let did = acc_id.clone();
+                            let ent = entity.clone();
+                            Button::new(SharedString::from(format!("down-{did}")))
+                                .icon(IconName::ArrowDown)
+                                .ghost()
+                                .xsmall()
+                                .tooltip("Move down")
+                                .on_click(move |_, _, cx| {
+                                    let id = did.clone();
+                                    cx.update_entity(&ent, move |this, cx| {
+                                        this.move_account(&id, 1, cx);
+                                    });
+                                })
+                        })
+                        .child({
+                            let del = acc_id.clone();
+                            let ent = entity.clone();
+                            Button::new(SharedString::from(format!("del-{del}")))
+                                .label("Remove")
+                                .ghost()
+                                .danger()
+                                .on_click(move |_, _, cx| {
+                                    let id = del.clone();
+                                    cx.update_entity(&ent, move |this, cx| {
+                                        let _ = this.db.delete_account(&id);
+                                        this.refresh_accounts();
+                                        this.refresh_folders();
+                                        this.selected_message = None;
+                                        this.select_first_folder();
+                                        cx.notify();
+                                    });
+                                })
                         }),
                 );
             list = list.child(row);
@@ -579,14 +646,78 @@ impl App {
     }
 
     /// Sync every non-demo account off the UI thread, with visible status.
+    /// Sync a single account now (per-account Resync button).
+    pub(crate) fn sync_one(&mut self, account_id: &str, cx: &mut Context<Self>) {
+        if self.sync_busy() {
+            return;
+        }
+        let Some(target) = self
+            .accounts
+            .iter()
+            .find(|a| a.id == account_id && a.provider_kind != "local")
+            .cloned()
+        else {
+            return;
+        };
+        self.sync_phase = SyncPhase::Syncing;
+        cx.notify();
+
+        let db = self.db.clone();
+        let entity = cx.entity();
+        cx.spawn(async move |_weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut summary = mail::SyncSummary::default();
+                    match mail::sync_account(&db, &target) {
+                        Ok(s) => {
+                            summary.fetched = s.fetched;
+                            summary.folders = s.folders;
+                            summary.errors.extend(s.errors);
+                        }
+                        Err(e) => summary.errors.push(format!("{e}")),
+                    }
+                    if !summary.new_ids.is_empty() {
+                        match db.apply_rules(&target.id, &summary.new_ids) {
+                            Ok(n) => summary.rules_applied = n,
+                            Err(e) => log::error!("rules failed: {e}"),
+                        }
+                    }
+                    let r = mail::replay_outbox(&db, &target);
+                    summary.replayed = r.applied;
+                    summary.conflicts = r.conflicts.len();
+                    summary
+                })
+                .await;
+            let _ = entity.update(cx, move |this, cx| {
+                this.sync_phase = if result.errors.is_empty() {
+                    SyncPhase::Done(format!(
+                        "Synced {} message(s) from {}.",
+                        result.fetched,
+                        if result.folders == 1 {
+                            "1 folder"
+                        } else {
+                            "folders"
+                        }
+                    ))
+                } else {
+                    SyncPhase::Failed(format!("{} error(s) during resync.", result.errors.len()))
+                };
+                this.refresh_folders();
+                this.reload_messages();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
     pub(crate) fn sync_now(&mut self, cx: &mut Context<Self>) {
-        if self.syncing {
+        if self.sync_busy() {
             return;
         }
         let targets: Vec<Account> = self
             .accounts
             .iter()
-            .filter(|a| a.provider_kind != "local")
+            .filter(|a| a.provider_kind != "local" && !self.account_paused(&a.id))
             .cloned()
             .collect();
         if targets.is_empty() {
@@ -596,8 +727,7 @@ impl App {
             );
             return;
         }
-        self.syncing = true;
-        self.sync_status = Some("Syncing…".to_string());
+        self.sync_phase = SyncPhase::Syncing;
         cx.notify();
 
         let db = self.db.clone();
@@ -613,27 +743,61 @@ impl App {
                                 summary.fetched += s.fetched;
                                 summary.folders += s.folders;
                                 summary.errors.extend(s.errors);
+                                if !s.new_ids.is_empty() {
+                                    match db.apply_rules(&account.id, &s.new_ids) {
+                                        Ok(n) => summary.rules_applied += n,
+                                        Err(e) => log::error!("rules failed: {e}"),
+                                    }
+                                }
                             }
                             Err(e) => summary.errors.push(format!("{}: {e}", account.email)),
                         }
                     }
+                    // Replay queued offline mutations against each server.
+                    let mut replayed = 0usize;
+                    let mut conflicts = 0usize;
+                    for account in &targets {
+                        let r = mail::replay_outbox(&db, account);
+                        replayed += r.applied;
+                        conflicts += r.conflicts.len();
+                    }
+                    let _ = db.purge_applied_mutations(chrono::Utc::now().timestamp() - 30 * 86400);
+                    summary.replayed = replayed;
+                    summary.conflicts = conflicts;
                     summary
                 })
                 .await;
             let _ = entity.update(cx, move |this, cx| {
-                this.syncing = false;
-                this.sync_status = Some(if result.errors.is_empty() {
+                let rules_note = if result.rules_applied > 0 {
+                    format!(" {} rule hit(s).", result.rules_applied)
+                } else {
+                    String::new()
+                };
+                let replay_note = if result.replayed > 0 || result.conflicts > 0 {
                     format!(
-                        "Synced {} message(s) across {} folder(s).",
+                        " {} change(s) pushed, {} deferred.",
+                        result.replayed, result.conflicts
+                    )
+                } else {
+                    String::new()
+                };
+                let status = if result.errors.is_empty() {
+                    format!(
+                        "Synced {} message(s) across {} folder(s).{replay_note}{rules_note}",
                         result.fetched, result.folders
                     )
                 } else {
                     format!(
-                        "Synced {} message(s); {} error(s).",
+                        "Synced {} message(s); {} error(s).{replay_note}",
                         result.fetched,
                         result.errors.len()
                     )
-                });
+                };
+                this.sync_phase = if result.errors.is_empty() && result.conflicts == 0 {
+                    SyncPhase::Done(status.clone())
+                } else {
+                    SyncPhase::Failed(status)
+                };
                 this.refresh_folders();
                 this.reload_messages();
                 // Fire a desktop notification when new mail arrives (if enabled).

@@ -12,7 +12,10 @@ pub struct Draft {
     pub account_id: String,
     pub subject: Option<String>,
     pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
+    pub bcc_addresses: Option<String>,
     pub body: Option<String>,
+    pub send_at: Option<i64>,
     pub updated_at: i64,
 }
 
@@ -47,8 +50,9 @@ impl Database {
     pub fn list_drafts(&self) -> Result<Vec<Draft>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, account_id, subject, to_addresses, body, updated_at
-             FROM drafts ORDER BY updated_at DESC",
+            "SELECT id, account_id, subject, to_addresses, cc_addresses, bcc_addresses,
+                    body, send_at, updated_at
+             FROM drafts WHERE send_at IS NULL ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(Draft {
@@ -56,8 +60,11 @@ impl Database {
                 account_id: r.get(1)?,
                 subject: r.get(2)?,
                 to_addresses: r.get(3)?,
-                body: r.get(4)?,
-                updated_at: r.get(5)?,
+                cc_addresses: r.get(4)?,
+                bcc_addresses: r.get(5)?,
+                body: r.get(6)?,
+                send_at: r.get(7)?,
+                updated_at: r.get(8)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -140,5 +147,66 @@ impl Database {
         let conn = self.conn();
         conn.execute("DELETE FROM attachments WHERE id=?1", [id])?;
         Ok(())
+    }
+    // -----------------------------------------------------------------------
+    // Scheduled send
+    // -----------------------------------------------------------------------
+
+    /// Queue a message for sending at `send_at` (stored as a draft row).
+    #[allow(clippy::too_many_arguments)]
+    pub fn schedule_draft(
+        &self,
+        account_id: &str,
+        subject: Option<&str>,
+        to_addresses: Option<&str>,
+        cc_addresses: Option<&str>,
+        bcc_addresses: Option<&str>,
+        body: Option<&str>,
+        send_at: i64,
+    ) -> Result<String> {
+        let conn = self.conn();
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO drafts (id, account_id, subject, to_addresses, cc_addresses,
+                 bcc_addresses, body, send_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                id,
+                account_id,
+                subject,
+                to_addresses,
+                cc_addresses,
+                bcc_addresses,
+                body,
+                send_at
+            ],
+        )?;
+        Ok(id)
+    }
+
+    /// Drafts whose scheduled time has passed (oldest first), excluding
+    /// normal drafts.
+    pub fn list_due_schedules(&self, now: i64) -> Result<Vec<Draft>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, subject, to_addresses, cc_addresses, bcc_addresses,
+                    body, send_at, updated_at
+             FROM drafts WHERE send_at IS NOT NULL AND send_at <= ?1
+             ORDER BY send_at ASC",
+        )?;
+        let rows = stmt.query_map(params![now], |r| {
+            Ok(Draft {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                subject: r.get(2)?,
+                to_addresses: r.get(3)?,
+                cc_addresses: r.get(4)?,
+                bcc_addresses: r.get(5)?,
+                body: r.get(6)?,
+                send_at: r.get(7)?,
+                updated_at: r.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }

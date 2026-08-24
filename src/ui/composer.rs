@@ -102,6 +102,7 @@ impl App {
                             ),
                     )
                     .child(Input::new(&to_input))
+                    .children(self.contact_suggestions(cx, entity.clone()))
                     .when(self.compose_cc_bcc_open, |col| {
                         col.child(Input::new(&cc_input))
                             .child(Input::new(&bcc_input))
@@ -170,6 +171,22 @@ impl App {
                                 }
                             }),
                     )
+                    .child({
+                        let sched_open = self.compose_sched_open;
+                        Button::new("toggle-schedule")
+                            .label("Schedule")
+                            .outline()
+                            .when(sched_open, |b| b.primary())
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    cx.update_entity(&entity, |this, cx| {
+                                        this.compose_sched_open = !this.compose_sched_open;
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                    })
                     .child(Button::new("cancel-compose").label("Discard").on_click({
                         let entity = entity.clone();
                         move |_, window, cx| {
@@ -182,6 +199,24 @@ impl App {
                         }
                     })),
             )
+            .children(self.compose_sched_open.then(|| {
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Send later (attachments are not included):"),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(self.schedule_option(entity.clone(), "In 1 hour", 3600))
+                            .child(self.schedule_option(entity.clone(), "Tomorrow 8 AM", 0))
+                            .child(self.schedule_option(entity.clone(), "Next week", 7 * 86400)),
+                    )
+                    .into_any_element()
+            }))
             .child(
                 h_flex()
                     .gap_2()
@@ -388,7 +423,148 @@ impl App {
         true
     }
 
-    /// Cancel a staged send and restore its content into the composer.
+    /// Send every message whose scheduled time has arrived.
+    pub(crate) fn dispatch_due_scheduled(&mut self, cx: &mut Context<Self>) {
+        let now = chrono::Utc::now().timestamp();
+        let Ok(due) = self.db.list_due_schedules(now) else {
+            return;
+        };
+        for draft in due {
+            let Some(account) = self
+                .accounts
+                .iter()
+                .find(|a| a.id == draft.account_id)
+                .cloned()
+            else {
+                continue;
+            };
+            let split = |v: Option<&String>| -> Vec<String> {
+                v.map(|s| {
+                    s.split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+            };
+            let to = split(draft.to_addresses.as_ref());
+            if to.is_empty() {
+                let _ = self.db.delete_draft(&draft.id);
+                continue;
+            }
+            let cc = split(draft.cc_addresses.as_ref());
+            let bcc = split(draft.bcc_addresses.as_ref());
+            let subject = draft.subject.clone().unwrap_or_default();
+            let body = draft.body.clone().unwrap_or_default();
+            let db = self.db.clone();
+            let db2 = db.clone();
+            cx.spawn(async move |_weak, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        perform_send(&db2, &account, &to, &cc, &bcc, &subject, &body, &[])
+                    })
+                    .await;
+                match result {
+                    Ok(()) => {
+                        let _ = db.delete_draft(&draft.id);
+                    }
+                    Err(e) => log::error!("scheduled send failed (kept for retry): {e}"),
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// One schedule preset button. "Tomorrow 8 AM" anchors to the next 08:00
+    /// in the local timezone; the others are offsets from now.
+    fn schedule_option(
+        &self,
+        entity: Entity<Self>,
+        label: &'static str,
+        offset_secs: i64,
+    ) -> impl IntoElement + use<> {
+        Button::new(SharedString::from(format!("sched-{label}")))
+            .label(label)
+            .outline()
+            .xsmall()
+            .on_click({
+                let entity = entity.clone();
+                move |_, window, cx| {
+                    let due = if offset_secs == 0 {
+                        let local_offset = chrono::Local::now().offset().local_minus_utc() as i64;
+                        let now = chrono::Utc::now().timestamp();
+                        let secs_to_next_8am =
+                            ((8 * 3600 - (now + local_offset) % 86400).rem_euclid(86400)).max(1);
+                        now + secs_to_next_8am
+                    } else {
+                        chrono::Utc::now().timestamp() + offset_secs
+                    };
+                    cx.update_entity(&entity, move |this, cx| {
+                        this.compose_sched_open = false;
+                        this.schedule_composed(due, window, cx);
+                    });
+                }
+            })
+    }
+    /// Queue the composed message to be sent at `due` (unix seconds).
+    pub(crate) fn schedule_composed(
+        &mut self,
+        due: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let to_raw = self.to_input.read(cx).value().to_string();
+        let cc_raw = self.cc_input.read(cx).value().to_string();
+        let bcc_raw = self.bcc_input.read(cx).value().to_string();
+        let subject = self.subject_input.read(cx).value().to_string();
+        let body = self.body_input.read(cx).value().to_string();
+
+        let parse_addresses = |raw: &str| -> String {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let to = parse_addresses(&to_raw);
+        if to.is_empty() {
+            self.compose_status = Some("Enter at least one recipient.".to_string());
+            cx.notify();
+            return;
+        }
+        let Some(account) = self.accounts.first() else {
+            self.set_toast("Add an account first.", cx);
+            return;
+        };
+        match self.db.schedule_draft(
+            &account.id,
+            Some(&subject),
+            Some(&to),
+            Some(&parse_addresses(&cc_raw)),
+            Some(&parse_addresses(&bcc_raw)),
+            Some(&body),
+            due,
+        ) {
+            Ok(_) => {
+                // The pending edit draft is consumed by scheduling.
+                if let Some(id) = self.draft_id.take() {
+                    let _ = self.db.delete_draft(&id);
+                }
+                self.clear_composer(window, cx);
+                self.panel = Panel::Mail;
+                self.set_toast("Message scheduled ✓", cx);
+            }
+            Err(e) => {
+                log::error!("failed to schedule: {e}");
+                self.compose_status = Some("Could not schedule the message.".to_string());
+            }
+        }
+        cx.notify();
+    }
+
+    /// Cancel a staged send and restore its content into the composer.    /// Cancel a staged send and restore its content into the composer.
     pub(crate) fn undo_pending_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pending) = self.pending_send.take() else {
             return;
@@ -507,5 +683,56 @@ impl App {
                     .child(SharedString::from(w.clone()))
             }))
             .into_any_element()
+    }
+
+    /// Up to 5 frequent-contact chips matching the recipient being typed.
+    fn contact_suggestions(&self, cx: &mut Context<Self>, entity: Entity<Self>) -> Vec<AnyElement> {
+        let raw = self.to_input.read(cx).value().to_string();
+        let segment = raw.rsplit(',').next().unwrap_or("").trim().to_lowercase();
+        if segment.len() < 2 {
+            return Vec::new();
+        }
+        let Some(account) = self.accounts.first() else {
+            return Vec::new();
+        };
+        let Ok(contacts) = self.db.search_contacts(&account.id, &segment) else {
+            return Vec::new();
+        };
+        contacts
+            .into_iter()
+            .map(|contact| {
+                let label = match &contact.name {
+                    Some(name) => format!("{name} <{}>", contact.email),
+                    None => contact.email.clone(),
+                };
+                let insert = contact.email.clone();
+                Button::new(SharedString::from(format!("contact-{}", contact.id)))
+                    .label(SharedString::from(label))
+                    .ghost()
+                    .xsmall()
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, window, cx| {
+                            let insert = insert.clone();
+                            cx.update_entity(&entity, move |this, cx| {
+                                let current = this.to_input.read(cx).value().to_string();
+                                let trimmed = current.trim_end().to_string();
+                                let base = match trimmed.rfind(',') {
+                                    Some(pos) => trimmed[..=pos].to_string(),
+                                    None => String::new(),
+                                };
+                                let next = if base.is_empty() {
+                                    format!("{insert}, ")
+                                } else {
+                                    format!("{base} {insert}, ")
+                                };
+                                this.to_input
+                                    .update(cx, |s, cx| s.set_value(next, window, cx));
+                            });
+                        }
+                    })
+                    .into_any_element()
+            })
+            .collect()
     }
 }

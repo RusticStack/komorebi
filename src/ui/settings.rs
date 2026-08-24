@@ -63,7 +63,17 @@ impl App {
                     .text_color(cx.theme().muted_foreground)
                     .child("Appended to new messages you write."),
             )
-            .child(self.signature_section(cx, entity.clone(), accounts))
+            .child(self.signature_section(cx, entity.clone(), accounts.clone()))
+            .child(div().h_4())
+            .child(div().w_full().h(px(1.0)).bg(cx.theme().border).mb_2())
+            .child(div().text_lg().font_semibold().child("Mail rules"))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Applied to newly synced messages, in order."),
+            )
+            .child(self.rules_section(cx, entity.clone(), accounts))
             .child(div().h_4())
             .child(div().w_full().h(px(1.0)).bg(cx.theme().border).mb_2())
             .child(div().text_lg().font_semibold().child("AI provider"))
@@ -369,5 +379,167 @@ impl App {
         }
         self.refresh_accounts();
         self.set_toast("Signature saved \u{2713}", cx);
+    }
+
+    /// Rule list + composer for the active account.
+    fn rules_section(
+        &self,
+        cx: &mut Context<Self>,
+        entity: Entity<Self>,
+        accounts: Vec<Account>,
+    ) -> AnyElement {
+        let Some(account) = accounts.first() else {
+            return div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child("Add an account to create rules.")
+                .into_any_element();
+        };
+        let rules = self.db.list_rules(&account.id).unwrap_or_default();
+        const ACTIONS: [&str; 3] = ["mark_read", "star", "archive"];
+        const ACTION_LABELS: [&str; 3] = ["Mark read", "Star", "Archive"];
+        let mut list = v_flex().gap_1();
+        if rules.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No rules yet."),
+            );
+        }
+        for rule in &rules {
+            let rid = rule.id.clone();
+            list = list.child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().text_sm().child(SharedString::from(format!(
+                        "When {} contains \"{}\" \u{2192} {}",
+                        rule.field,
+                        rule.value,
+                        match rule.action.as_str() {
+                            "star" => "star",
+                            "archive" => "archive",
+                            _ => "mark read",
+                        }
+                    ))))
+                    .child(div().flex_1())
+                    .child(
+                        Button::new(SharedString::from(format!("rule-del-{rid}")))
+                            .icon(IconName::Close)
+                            .ghost()
+                            .xsmall()
+                            .tooltip("Delete rule")
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    let id = rid.clone();
+                                    cx.update_entity(&entity, move |this, cx| {
+                                        let _ = this.db.delete_rule(&id);
+                                        this.set_toast("Rule deleted", cx);
+                                    });
+                                }
+                            }),
+                    ),
+            );
+        }
+
+        v_flex()
+            .gap_2()
+            .child(list)
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Button::new("rule-field-sender")
+                            .label("Sender")
+                            .xsmall()
+                            .when(self.rule_field_sender, |b| b.primary())
+                            .when(!self.rule_field_sender, |b| b.outline())
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    cx.update_entity(&entity, |this, cx| {
+                                        this.rule_field_sender = true;
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("rule-field-subject")
+                            .label("Subject")
+                            .xsmall()
+                            .when(self.rule_field_sender, |b| b.outline())
+                            .when(!self.rule_field_sender, |b| b.primary())
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    cx.update_entity(&entity, |this, cx| {
+                                        this.rule_field_sender = false;
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    )
+                    .child(Input::new(&self.rule_value_input).flex_1())
+                    .child(
+                        Button::new("rule-action-cycle")
+                            .label(SharedString::from(format!(
+                                "\u{2192} {}",
+                                ACTION_LABELS[self.rule_action_idx % ACTION_LABELS.len()]
+                            )))
+                            .outline()
+                            .xsmall()
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    cx.update_entity(&entity, |this, cx| {
+                                        this.rule_action_idx = (this.rule_action_idx + 1) % 3;
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .child(
+                Button::new("rule-add")
+                    .label("Add rule")
+                    .primary()
+                    .on_click({
+                        let entity = entity.clone();
+                        let aid = account.id.clone();
+                        move |_, window, cx| {
+                            let account_id = aid.clone();
+                            cx.update_entity(&entity, move |this, cx| {
+                                let value =
+                                    this.rule_value_input.read(cx).value().trim().to_string();
+                                if value.is_empty() {
+                                    this.set_toast("Give the rule something to match.", cx);
+                                    return;
+                                }
+                                let field = if this.rule_field_sender {
+                                    "sender"
+                                } else {
+                                    "subject"
+                                };
+                                let action = ACTIONS[this.rule_action_idx % ACTIONS.len()];
+                                let name = format!("When {field} contains \"{value}\"");
+                                let _ = this.db.create_rule(
+                                    &account_id,
+                                    &name,
+                                    field,
+                                    &value,
+                                    action,
+                                    None,
+                                );
+                                this.rule_value_input
+                                    .update(cx, |s, cx| s.set_value("", window, cx));
+                                this.set_toast("Rule added ✓", cx);
+                            });
+                        }
+                    }),
+            )
+            .into_any_element()
     }
 }

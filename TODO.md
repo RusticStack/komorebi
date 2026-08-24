@@ -40,12 +40,12 @@ restore-on-failure. It is not yet production-complete.
 - ✅ Server settings + password + OAuth + autodiscovery all wired off-thread.
 - ✅ **First-run onboarding**: zero accounts lands on a welcome/setup panel;
   the demo mailbox is now opt-in ("Explore with demo data").
-- ⚠️ No pause/reorder/resync/identity UI.
+- ✅ **Per-account pause/resync/reorder** in the Accounts panel (settings-key backed, no extra schema): Pause skips an account during sync-all/autosync, Resync syncs one account immediately, Up/Down reorder the sidebar. Identity = per-account signature (done).
 
 ### 1.2 Sync engine
 - ✅ IMAP sync reachable from UI (`sync_now` → `sync_account` off-thread), plus
   **auto-sync at launch and every 15 minutes** while the app runs.
-- ⚠️ Sync state visible but minimal (string status; no full state machine).
+- ✅ **Sync state machine** (`SyncPhase`: Idle/Syncing/Done/Failed) drives the sync button, list-header indicator, and status line.
 - ✅ **Offline mutation outbox fully wired (migrations v6+v7).** Move/archive/
   delete/flag/read changes on remote accounts are queued with the message UID
   and source mailbox; every sync runs `mail::replay_outbox` (COPY + \Deleted,
@@ -58,8 +58,8 @@ restore-on-failure. It is not yet production-complete.
 - ✅ Threads/conversations (migration v4).
 - ✅ **User labels are data-driven.** The sidebar Labels section reads the `labels` table: create via the "+" inline composer (auto-assigned palette color), rename/delete via right-click menu, apply/remove via a per-message context-menu submenu, and selecting a label lists its messages (`list_messages_by_label`). The old hardcoded Work/Design/Personal/Finance/Travel views are gone (AI triage categories still render as pills on messages).
 - ✅ Reminders/snooze + follow-up (migration v3).
-- ❌ No rules/automation table.
-- ❌ No contacts/participants model.
+- ✅ **Rules engine (migration v9)**: per-account rules ("when sender/subject contains X" → mark read / star / archive) with CRUD in Settings, evaluated off-thread against newly synced messages after every sync; status reports rule hits. 2 new tests.
+- ✅ **Contacts model + compose autocomplete (migration v9)**: senders/recipients harvested on ingest with frequency counts; typing 2+ chars in the To field shows top-5 frequent-contact chips that insert the address.
 
 ### 1.4 Reading a conversation
 - ✅ Attachment download/open/preview wired off-thread.
@@ -89,8 +89,8 @@ restore-on-failure. It is not yet production-complete.
 - ❌ Rich text; scheduled send; inline images.
 
 ### 1.6 Search & command navigation
-- ⚠️ Text search only (FTS5); no structured filters or NL search.
-- ❌ Command palette.
+- ✅ **Structured search operators**: `from:`, `subject:`, `is:unread`, `is:flagged` combine with free-text FTS. NL search still open (needs UX for model invocation).
+- ✅ **Command palette (Ctrl+K)**: filterable overlay with navigation targets, compose/sync/theme toggles; `/` focuses search. Arrow-key navigation still open.
 - ✅ Shortcuts: reply-all (Shift+R), snooze-tomorrow (Ctrl+S), undo last
   (Ctrl+Z), Esc closes preview → inline composer → selection. Customization
   still missing.

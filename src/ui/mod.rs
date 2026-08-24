@@ -7,7 +7,6 @@
 //! Japandi palette (warm charcoal surfaces, sand/beige accents). Blocking
 //! mail/AI work runs off the UI thread; the [`App`] entity owns all local
 //! view state.
-
 use crate::ai::{self, Ai, AiConfig, Category};
 use crate::db::{
     Account, Attachment, Database, Folder, Label as DbLabel, MessageDetail, MessageRow, Reminder,
@@ -36,11 +35,9 @@ use gpui_component::{
     ThemeMode, TitleBar, h_flex, v_flex,
 };
 use std::path::PathBuf;
-
 // Shared view-state types live in `types.rs`.
 mod types;
 use types::*;
-
 // Panel modules: each holds an `impl App` block for its surface.
 pub mod accounts;
 mod actions;
@@ -50,16 +47,15 @@ mod composer;
 mod drafts_ui;
 mod menus;
 mod message_list;
+mod palette;
 mod reader;
 mod send;
 mod settings;
 mod sidebar;
 mod titlebar;
-
 // Design tokens and theme live in `theme.rs`.
 pub mod theme;
 use theme::{RADIUS_LG, RADIUS_SM, apply_komorebi_theme, komorebi_hex};
-
 // Free rendering helpers live in `helpers.rs`.
 pub mod helpers;
 use helpers::{
@@ -68,12 +64,12 @@ use helpers::{
     load_attachment_data, open_database, recipient_line, reminder_tag, render_message_body,
     star_marker, stored_label_color, unread_guard, write_blob,
 };
-
 actions!(
     komorebi,
     [
         NewMessage,
         FocusSearch,
+        TogglePalette,
         ToggleSidebar,
         ToggleAiPanel,
         NextMessage,
@@ -89,11 +85,9 @@ actions!(
         ToggleTheme,
     ]
 );
-
 // ---------------------------------------------------------------------------
 // App state
 // ---------------------------------------------------------------------------
-
 pub struct App {
     db: Database,
     accounts: Vec<Account>,
@@ -102,10 +96,20 @@ pub struct App {
     messages: Vec<MessageRow>,
     selected_message: Option<MessageDetail>,
     panel: Panel,
-
     // Undo-send staging (brief delay between Send click and SMTP).
     pending_send: Option<PendingSend>,
+    compose_sched_open: bool,
+    // Natural-language search.
+    nl_busy: bool,
 
+    // Rule composer (settings).
+    rule_field_sender: bool,
+    rule_action_idx: usize,
+    rule_value_input: Entity<InputState>,
+
+    // Command palette (Ctrl+K).'
+    palette_open: bool,
+    palette_input: Entity<InputState>,
     // New-message composer state.
     to_input: Entity<InputState>,
     cc_input: Entity<InputState>,
@@ -116,21 +120,17 @@ pub struct App {
     compose_status: Option<String>,
     composer_attachments: Vec<PendingAttachment>,
     composer_drag_over: bool,
-
     // Per-account signature editor (Accounts panel).
     signature_input: Entity<InputState>,
     signature_account_id: Option<String>,
-
     // User labels (data-driven sidebar).
     labels: Vec<DbLabel>,
     labels_adding: bool,
     renaming_label: Option<String>,
     label_input: Entity<InputState>,
-
     // Draft autosave state.
     draft_id: Option<String>,
     draft_dirty: bool,
-
     // Account setup state.
     setup_email: Entity<InputState>,
     setup_name: Entity<InputState>,
@@ -147,11 +147,8 @@ pub struct App {
     setup_discovered: Option<DiscoveredSettings>,
     setup_busy: bool,
     setup_status: Option<String>,
-
     // Sync state.
-    sync_status: Option<String>,
-    syncing: bool,
-
+    sync_phase: SyncPhase,
     // AI state.
     ai: Ai,
     ai_config: AiConfig,
@@ -164,16 +161,13 @@ pub struct App {
     ai_reply_draft: Option<String>,
     ai_health: Option<String>,
     ai_health_busy: bool,
-
     // Locale (i18n).
     locale: i18n::Locale,
-
     // Search + navigation.
     search_input: Entity<InputState>,
     search_query: String,
     _subscriptions: Vec<Subscription>,
     focus_handle: FocusHandle,
-
     // Layout state.
     sidebar_visible: bool,
     ai_panel_visible: bool,
@@ -186,14 +180,11 @@ pub struct App {
     preview: Option<AttachmentPreview>,
     thread_messages: Vec<MessageDetail>,
     expanded_ids: Vec<String>,
-
     // Remote-content consent for the current message (privacy-first: off by default).
     allow_remote_content: bool,
     remote_content_banner: Option<bool>,
-
     // Desktop notifications config.
     notify_config: notify::NotificationConfig,
-
     // Inline reply composer.
     reply_input: Entity<InputState>,
     note_input: Entity<InputState>,
@@ -204,12 +195,12 @@ pub struct App {
     reply_cc: String,
     reply_subject: String,
 }
-
 impl App {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.bind_keys([
             KeyBinding::new("ctrl-n", NewMessage, Some(CONTEXT)),
-            KeyBinding::new("ctrl-k", FocusSearch, Some(CONTEXT)),
+            KeyBinding::new("ctrl-k", TogglePalette, Some(CONTEXT)),
+            KeyBinding::new("/", FocusSearch, Some(CONTEXT)),
             KeyBinding::new("ctrl-b", ToggleSidebar, Some(CONTEXT)),
             KeyBinding::new("ctrl-shift-t", ToggleTheme, Some(CONTEXT)),
             KeyBinding::new("j", NextMessage, Some(CONTEXT)),
@@ -223,14 +214,11 @@ impl App {
             KeyBinding::new("escape", EscapeView, Some(CONTEXT)),
             KeyBinding::new("f", ForwardMessage, Some(CONTEXT)),
         ]);
-
         let db = open_database();
         // First-run onboarding: real users start with an empty mailbox and are
         // routed to account setup; the demo mailbox is opt-in from there.
-
         let ai = Ai::load(&db).unwrap_or_else(|_| Ai::load(&db).expect("ollama default must load"));
         let ai_config = ai.config().clone();
-
         // Persisted AI tone preference (falls back to Professional).
         let ai_tone = db
             .get_setting("ai.tone")
@@ -238,7 +226,6 @@ impl App {
             .flatten()
             .filter(|t| !t.trim().is_empty())
             .unwrap_or_else(|| "Professional".to_string());
-
         let locale = db
             .get_setting("ui.locale")
             .ok()
@@ -253,7 +240,6 @@ impl App {
                 i18n::set_locale(loc);
                 loc
             });
-
         let notify_config = notify::NotificationConfig {
             enabled: db
                 .get_setting("notify.enabled")
@@ -263,7 +249,6 @@ impl App {
                 .unwrap_or(false),
             ..Default::default()
         };
-
         let to_input = cx.new(|cx| InputState::new(window, cx).placeholder("To (comma separated)"));
         let cc_input = cx.new(|cx| InputState::new(window, cx).placeholder("Cc (comma separated)"));
         let bcc_input =
@@ -289,6 +274,8 @@ impl App {
                 .multi_line(true)
                 .placeholder("Write your signature…")
         });
+        let palette_input = cx.new(|cx| InputState::new(window, cx).placeholder("Type a command…"));
+        let rule_value_input = cx.new(|cx| InputState::new(window, cx).placeholder("contains…"));
         let label_input = cx.new(|cx| InputState::new(window, cx).placeholder("New label"));
         let setup_email = cx.new(|cx| InputState::new(window, cx).placeholder("Email address"));
         let setup_name =
@@ -315,13 +302,11 @@ impl App {
             cx.new(|cx| InputState::new(window, cx).placeholder("Base URL (with /v1)"));
         let search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search mail, people, labels…"));
-
         // Pre-fill AI inputs from the loaded config.
         ai_model.update(cx, |s, cx| s.set_value(ai_config.model.clone(), window, cx));
         ai_base_url.update(cx, |s, cx| {
             s.set_value(ai_config.base_url.clone(), window, cx)
         });
-
         // Live search: update the message list as the user types.
         let search_subscription = cx.subscribe(&search_input, |this, _, event, cx| {
             if matches!(event, InputEvent::Change) {
@@ -330,9 +315,23 @@ impl App {
                 cx.notify();
             }
         });
-
         // Draft autosave: any compose-field edit schedules a debounced flush.
         let mut subscriptions = vec![search_subscription];
+        // Palette Enter runs the top matching command (window-free ones).
+        subscriptions.push(cx.subscribe(&palette_input, |this, _, event, cx| {
+            if let InputEvent::PressEnter { .. } = event {
+                let query = this.palette_input.read(cx).value().to_lowercase();
+                let items: Vec<&'static str> = this
+                    .palette_items()
+                    .into_iter()
+                    .filter(|l| l.to_lowercase().contains(&query))
+                    .collect();
+                // Enter skips commands that need a Window (mouse-only).
+                if let Some(item) = items.into_iter().find(|i| *i != "New message") {
+                    this.run_palette_item(item, None, cx);
+                }
+            }
+        }));
         for input in [&to_input, &subject_input, &body_input] {
             subscriptions.push(cx.subscribe(input, |this, _, event, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -340,7 +339,6 @@ impl App {
                 }
             }));
         }
-
         let focus_handle = cx.focus_handle();
         {
             let handle = focus_handle.clone();
@@ -348,7 +346,6 @@ impl App {
                 handle.focus(window);
             });
         }
-
         let mut this = Self {
             db,
             accounts: Vec::new(),
@@ -357,6 +354,13 @@ impl App {
             messages: Vec::new(),
             selected_message: None,
             pending_send: None,
+            compose_sched_open: false,
+            nl_busy: false,
+            rule_field_sender: true,
+            rule_action_idx: 0,
+            rule_value_input,
+            palette_open: false,
+            palette_input,
             panel: Panel::Mail,
             to_input,
             cc_input,
@@ -382,8 +386,7 @@ impl App {
             setup_discovered: None,
             setup_busy: false,
             setup_status: None,
-            sync_status: None,
-            syncing: false,
+            sync_phase: SyncPhase::Idle,
             ai,
             ai_config,
             ai_model,
@@ -441,12 +444,11 @@ impl App {
         } else {
             this.maybe_autosync(cx);
             this.schedule_periodic_sync(cx);
+            this.schedule_dispatch_loop(cx);
         }
-
         apply_komorebi_theme(window, cx);
         this
     }
-
     // ---------------------------------------------------------------------
     // Data helpers
     // ---------------------------------------------------------------------
@@ -454,7 +456,62 @@ impl App {
         self.accounts = self.db.list_accounts().unwrap_or_default();
         self.refresh_labels();
     }
-
+    /// Whether an account is paused (excluded from sync) - settings-key based.
+    pub(crate) fn account_paused(&self, id: &str) -> bool {
+        self.db
+            .get_setting(&format!("account:{id}.paused"))
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("1")
+    }
+    pub(crate) fn toggle_account_paused(&mut self, id: &str, cx: &mut Context<Self>) {
+        let key = format!("account:{id}.paused");
+        let now_paused = !self.account_paused(id);
+        let _ = self
+            .db
+            .set_setting(&key, if now_paused { "1" } else { "0" });
+        cx.notify();
+    }
+    /// Move an account up/down the sidebar order (settings-key based).
+    pub(crate) fn move_account(&mut self, id: &str, delta: i64, cx: &mut Context<Self>) {
+        let sort_key = |a: &Account| -> i64 {
+            self.db
+                .get_setting(&format!("account:{}.sort", a.id))
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(i64::MAX)
+        };
+        let mut ordered = self.accounts.clone();
+        ordered.sort_by_key(sort_key);
+        let Some(pos) = ordered.iter().position(|a| a.id == id) else {
+            return;
+        };
+        let target = pos as i64 + delta;
+        if target < 0 || target >= ordered.len() as i64 {
+            return;
+        }
+        ordered.swap(pos, target as usize);
+        for (i, account) in ordered.iter().enumerate() {
+            let _ = self
+                .db
+                .set_setting(&format!("account:{}.sort", account.id), &i.to_string());
+        }
+        self.refresh_accounts();
+        cx.notify();
+    }
+    /// Whether a sync pass is currently running.
+    pub(crate) fn sync_busy(&self) -> bool {
+        self.sync_phase == SyncPhase::Syncing
+    }
+    /// Human-readable line describing the last finished sync, if any.
+    pub(crate) fn sync_note(&self) -> Option<String> {
+        match &self.sync_phase {
+            SyncPhase::Done(msg) | SyncPhase::Failed(msg) => Some(msg.clone()),
+            _ => None,
+        }
+    }
     /// Reload user labels for the active account.
     pub(crate) fn refresh_labels(&mut self) {
         self.labels = self
@@ -463,7 +520,6 @@ impl App {
             .map(|a| self.db.list_labels(&a.id).unwrap_or_default())
             .unwrap_or_default();
     }
-
     fn refresh_folders(&mut self) {
         self.folders = self
             .accounts
@@ -471,14 +527,12 @@ impl App {
             .flat_map(|a| self.db.list_folders(&a.id).unwrap_or_default())
             .collect();
     }
-
     fn select_first_folder(&mut self) {
         if let Some(folder) = self.folders.first() {
             self.selected_folder_id = Some(folder.id.clone());
             self.reload_messages();
         }
     }
-
     fn account_messages(&self) -> Vec<MessageRow> {
         match self.accounts.first() {
             Some(a) => self
@@ -488,11 +542,9 @@ impl App {
             None => Vec::new(),
         }
     }
-
     fn reload_messages(&mut self) {
         let now = chrono::Utc::now().timestamp();
         let _ = self.db.delete_expired_snoozes(now);
-
         let active = self.db.list_active_reminders(now).unwrap_or_default();
         self.reminder_ids = active.iter().map(|r| r.message_id.clone()).collect();
         let snoozed_ids: Vec<String> = active
@@ -505,7 +557,6 @@ impl App {
             .iter()
             .find(|f| f.special_use.as_deref() == Some("inbox"))
             .map(|f| f.id.clone());
-
         self.messages = match self.selected_folder_id.as_deref() {
             Some(PRIORITY) => self.db.list_flagged_messages(500, 0).unwrap_or_default(),
             Some(SNOOZED) => self.db.list_snoozed_messages(now).unwrap_or_default(),
@@ -536,14 +587,12 @@ impl App {
             Some(id) => self.db.list_messages(id, 500, 0).unwrap_or_default(),
             None => Vec::new(),
         };
-
         // Snoozed messages leave the inbox and return when due.
         if self.search_query.trim().is_empty()
             && self.selected_folder_id.as_deref() == inbox_id.as_deref()
         {
             self.messages.retain(|m| !snoozed_ids.contains(&m.id));
         }
-
         // Focused vs Other: Focused surfaces unread first, Other surfaces read.
         if self.focused_tab == 0 {
             self.messages.sort_by(|a, b| {
@@ -559,7 +608,6 @@ impl App {
             });
         }
     }
-
     fn open_message(&mut self, id: &str) {
         self.selected_message = self.db.get_message_detail(id).unwrap_or(None);
         if let Some(preview) = self.preview.take() {
@@ -584,13 +632,11 @@ impl App {
             let _ = self.db.mark_read(id, true);
         }
     }
-
     /// Grant remote-content consent for the current message and re-render.
     fn allow_remote(&mut self, cx: &mut Context<Self>) {
         self.allow_remote_content = true;
         cx.notify();
     }
-
     /// The remote-content consent banner: shown when the current message has
     /// remote resources that are blocked. Privacy-first - never auto-loads.
     fn remote_content_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -650,7 +696,6 @@ impl App {
                 .into_any_element(),
         )
     }
-
     fn current_view_label(&self) -> String {
         match self.selected_folder_id.as_deref() {
             Some(PRIORITY) => "Priority".to_string(),
@@ -673,7 +718,6 @@ impl App {
             None => "Inbox".to_string(),
         }
     }
-
     fn folder_icon(folder: &Folder) -> IconName {
         match folder.special_use.as_deref() {
             Some("inbox") => IconName::Inbox,
@@ -685,11 +729,9 @@ impl App {
             _ => IconName::Folder,
         }
     }
-
     fn selected_message_id(&self) -> Option<&str> {
         self.selected_message.as_ref().map(|m| m.id.as_str())
     }
-
     fn select_relative(&mut self, delta: isize) {
         if self.messages.is_empty() {
             return;
@@ -706,7 +748,6 @@ impl App {
             self.open_message(&id);
         }
     }
-
     fn user_profile(&self) -> (String, String) {
         match self.accounts.first() {
             Some(a) if a.provider_kind != "local" => (
@@ -719,12 +760,10 @@ impl App {
             ),
         }
     }
-
     fn set_toast(&mut self, msg: &str, cx: &mut Context<Self>) {
         self.toast = Some(msg.to_string());
         cx.notify();
     }
-
     // ---------------------------------------------------------------------
     // Mail actions
     // ---------------------------------------------------------------------
@@ -744,7 +783,6 @@ impl App {
         self.panel = Panel::Compose;
         cx.notify();
     }
-
     /// Prefill the composer from the most recent saved draft, if any.
     /// Silent auto-sync at launch (no toast when there is nothing to sync).
     fn maybe_autosync(&mut self, cx: &mut Context<Self>) {
@@ -756,7 +794,19 @@ impl App {
             self.sync_now(cx);
         }
     }
-
+    /// Periodic dispatcher for scheduled sends (every 30 seconds).
+    fn schedule_dispatch_loop(&mut self, cx: &mut Context<Self>) {
+        let entity = cx.entity();
+        cx.spawn(async move |_this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(30))
+                    .await;
+                let _ = entity.update(cx, |this, cx| this.dispatch_due_scheduled(cx));
+            }
+        })
+        .detach();
+    }
     /// Periodic background sync every 15 minutes while the app runs.
     fn schedule_periodic_sync(&mut self, cx: &mut Context<Self>) {
         let entity = cx.entity();
@@ -770,7 +820,6 @@ impl App {
         })
         .detach();
     }
-
     /// Opt-in demo mailbox for exploring the client before adding an account.
     pub(crate) fn seed_demo(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = mail::seed_local_demo(&self.db) {
@@ -785,7 +834,6 @@ impl App {
         self.panel = Panel::Mail;
         self.set_toast("Demo mailbox loaded", cx);
     }
-
     /// The stored signature for `account_id` (or the first account).
     fn clear_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.compose_status = None;
@@ -803,7 +851,6 @@ impl App {
         self.body_input
             .update(cx, |s, cx| s.set_value("", window, cx));
     }
-
     fn clear_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reply_input
             .update(cx, |s, cx| s.set_value("", window, cx));
@@ -813,7 +860,6 @@ impl App {
         self.ai_reply_draft = None;
     }
 }
-
 impl Render for App {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let sidebar = self.sidebar(cx).into_any_element();
@@ -825,7 +871,6 @@ impl Render for App {
         let ai_sidebar = self.ai_sidebar(cx).into_any_element();
         let sidebar_visible = self.sidebar_visible;
         let ai_panel_visible = self.ai_panel_visible && self.panel == Panel::Mail;
-
         let mut body = h_resizable("main");
         if sidebar_visible {
             body = body.child(
@@ -844,9 +889,7 @@ impl Render for App {
                     .child(ai_sidebar),
             );
         }
-
         let entity = cx.entity();
-
         div()
             .id("app")
             .size_full()
@@ -920,6 +963,9 @@ impl Render for App {
                     cx.notify();
                 }
             }))
+            .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
+                this.toggle_palette(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ForwardMessage, window, cx| {
                 this.open_forward(window, cx);
             }))
@@ -947,5 +993,9 @@ impl Render for App {
             })
             .child(self.titlebar(cx))
             .child(body)
+            .children(
+                self.palette_open
+                    .then(|| self.palette_overlay(_window, cx).into_any_element()),
+            )
     }
 }

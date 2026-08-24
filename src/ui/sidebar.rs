@@ -4,15 +4,20 @@ use super::*;
 
 impl App {
     // ---------------------------------------------------------------------
+
     // Sidebar
+
     // ---------------------------------------------------------------------
+
     pub(crate) fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let entity = cx.entity();
+
         let priority_unread = self
             .db
             .list_flagged_messages(500, 0)
             .map(|m| m.len())
             .unwrap_or(0) as i64;
+
         let unread_view = self
             .account_messages()
             .into_iter()
@@ -40,6 +45,7 @@ impl App {
                     .tooltip("Compose a new message (Ctrl+N)")
                     .on_click({
                         let entity = entity.clone();
+
                         move |_, window, cx| {
                             cx.update_entity(&entity, |this, cx| {
                                 this.new_message(window, cx);
@@ -49,16 +55,21 @@ impl App {
             )
             .child(
                 Button::new("sidebar-sync")
-                    .label(if self.syncing { "Syncing…" } else { "Sync" })
+                    .label(if self.sync_busy() {
+                        "Syncing…"
+                    } else {
+                        "Sync"
+                    })
                     .icon(IconName::Globe)
                     .ghost()
                     .w_full()
                     .h_7()
                     .justify_start()
-                    .disabled(self.syncing)
+                    .disabled(self.sync_busy())
                     .tooltip("Sync all accounts")
                     .on_click({
                         let entity = entity.clone();
+
                         move |_, _, cx| {
                             cx.update_entity(&entity, |this, cx| this.sync_now(cx));
                         }
@@ -158,9 +169,11 @@ impl App {
                     .justify_start()
                     .on_click({
                         let entity = entity.clone();
+
                         move |_, _, cx| {
                             cx.update_entity(&entity, |this, cx| {
                                 this.panel = Panel::Accounts;
+
                                 cx.notify();
                             });
                         }
@@ -170,7 +183,9 @@ impl App {
 
     pub(crate) fn section_header(
         &self,
+
         cx: &mut Context<Self>,
+
         title: &'static str,
     ) -> impl IntoElement + use<> {
         h_flex()
@@ -186,9 +201,13 @@ impl App {
 
     pub(crate) fn section_header_with_add(
         &self,
+
         cx: &mut Context<Self>,
+
         entity: Entity<Self>,
+
         title: &'static str,
+
         addable: bool,
     ) -> impl IntoElement + use<> {
         h_flex()
@@ -210,6 +229,7 @@ impl App {
                     .when(addable, |b| {
                         b.on_click({
                             let entity = entity.clone();
+
                             move |_, _, cx| {
                                 cx.update_entity(&entity, |this, cx| this.toggle_labels_adding(cx));
                             }
@@ -220,10 +240,15 @@ impl App {
 
     fn mailbox_item(
         &self,
+
         cx: &mut Context<Self>,
+
         entity: Entity<Self>,
+
         special_use: &str,
+
         label: impl Into<SharedString>,
+
         icon: IconName,
     ) -> AnyElement {
         match self
@@ -234,7 +259,9 @@ impl App {
         {
             Some(folder) => {
                 let unread = folder.unread_count;
+
                 let id = folder.id.clone();
+
                 self.nav_item(
                     cx,
                     entity,
@@ -246,16 +273,20 @@ impl App {
                     Some(folder),
                 )
             }
+
             None => div().into_any_element(),
         }
     }
 
     fn labels_list(
         &self,
+
         cx: &mut Context<Self>,
+
         entity: Entity<Self>,
     ) -> impl IntoElement + use<> {
         let mut list = v_flex().gap_1();
+
         if self.labels.is_empty() && !self.labels_adding {
             list = list.child(
                 div()
@@ -265,13 +296,17 @@ impl App {
                     .child("No labels yet"),
             );
         }
+
         for label in &self.labels {
             let target = format!("{LABEL_PREFIX}{}", label.id);
+
             list = list.child(self.label_row(cx, entity.clone(), label, target));
         }
+
         if self.labels_adding {
             list = list.child(self.label_add_row(entity.clone()));
         }
+
         list
     }
 
@@ -291,6 +326,7 @@ impl App {
                     .tooltip("Create label")
                     .on_click({
                         let entity = entity.clone();
+
                         move |_, window, cx| {
                             cx.update_entity(&entity, |this, cx| {
                                 this.create_label_from_input(window, cx);
@@ -306,6 +342,7 @@ impl App {
                     .tooltip("Cancel")
                     .on_click({
                         let entity = entity.clone();
+
                         move |_, _, cx| {
                             cx.update_entity(&entity, |this, cx| this.toggle_labels_adding(cx));
                         }
@@ -316,12 +353,17 @@ impl App {
 
     fn label_row(
         &self,
+
         cx: &mut Context<Self>,
+
         entity: Entity<Self>,
+
         label: &DbLabel,
+
         target: String,
     ) -> AnyElement {
         let renaming = self.renaming_label.as_deref() == Some(label.id.as_str());
+
         if renaming {
             return h_flex()
                 .px_2()
@@ -337,6 +379,7 @@ impl App {
                         .tooltip("Rename")
                         .on_click({
                             let entity = entity.clone();
+
                             move |_, window, cx| {
                                 cx.update_entity(&entity, |this, cx| {
                                     this.commit_rename_label(window, cx);
@@ -352,6 +395,7 @@ impl App {
                         .tooltip("Cancel")
                         .on_click({
                             let entity = entity.clone();
+
                             move |_, _, cx| {
                                 cx.update_entity(&entity, |this, cx| this.cancel_rename_label(cx));
                             }
@@ -361,10 +405,15 @@ impl App {
         }
 
         let selected = self.selected_folder_id.as_deref() == Some(target.as_str());
+
         let selected_bg = cx.theme().sidebar_accent;
+
         let selected_fg = cx.theme().sidebar_accent_foreground;
+
         let hover_bg = cx.theme().muted;
+
         let dot = stored_label_color(label.color.as_deref(), &label.name);
+
         let name = label.name.clone();
 
         h_flex()
@@ -390,14 +439,21 @@ impl App {
             .child(div().flex_1())
             .on_click({
                 let entity = entity.clone();
+
                 let t = target.clone();
+
                 move |_, _, cx| {
                     let t = t.clone();
+
                     cx.update_entity(&entity, move |this, cx| {
                         this.selected_folder_id = Some(t);
+
                         this.selected_message = None;
+
                         this.search_query.clear();
+
                         this.reload_messages();
+
                         cx.notify();
                     });
                 }
@@ -409,20 +465,33 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     fn nav_item(
         &self,
+
         cx: &mut Context<Self>,
+
         entity: Entity<Self>,
+
         id: &str,
+
         target: String,
+
         icon: IconName,
+
         label: impl Into<SharedString>,
+
         unread: i64,
+
         context_folder: Option<Folder>,
     ) -> AnyElement {
         let selected = self.selected_folder_id.as_deref() == Some(target.as_str());
+
         let selected_bg = cx.theme().sidebar_accent;
+
         let selected_fg = cx.theme().sidebar_accent_foreground;
+
         let hover_bg = cx.theme().muted;
+
         let muted = cx.theme().muted_foreground;
+
         let label_owned: SharedString = label.into();
 
         let row = h_flex()
@@ -447,14 +516,21 @@ impl App {
             .children(unread_guard(unread, cx))
             .on_click({
                 let entity = entity.clone();
+
                 let t = target.clone();
+
                 move |_, _, cx| {
                     let t = t.clone();
+
                     cx.update_entity(&entity, move |this, cx| {
                         this.selected_folder_id = Some(t);
+
                         this.selected_message = None;
+
                         this.search_query.clear();
+
                         this.reload_messages();
+
                         cx.notify();
                     });
                 }
@@ -463,12 +539,17 @@ impl App {
         let row = match context_folder.as_ref() {
             Some(folder) => {
                 let fid_drop = folder.id.clone();
+
                 let fid_drag = folder.id.clone();
+
                 row.on_drop::<DragMessage>({
                     let entity = entity.clone();
+
                     move |drag, _, cx| {
                         let mid = drag.message_id.clone();
+
                         let fid = fid_drop.clone();
+
                         cx.update_entity(&entity, move |this, cx| {
                             this.move_selected_to_folder(&mid, &fid, cx);
                         });
@@ -476,15 +557,19 @@ impl App {
                 })
                 .on_drag_move::<DragMessage>({
                     let entity = entity.clone();
+
                     move |_, _, cx| {
                         let fid = fid_drag.clone();
+
                         cx.update_entity(&entity, move |this, cx| {
                             this.drag_over_folder_id = Some(fid);
+
                             cx.notify();
                         });
                     }
                 })
             }
+
             None => row,
         };
 
@@ -492,6 +577,7 @@ impl App {
             Some(folder) => row
                 .context_menu(self.folder_context_menu(entity, folder))
                 .into_any_element(),
+
             None => row.into_any_element(),
         }
     }
