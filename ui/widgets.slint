@@ -1,0 +1,339 @@
+import { Theme, Icons } from "theme.slint";
+
+export struct NavItem {
+    kind: int,        // 0 = all inboxes, 1 = account header, 2 = folder
+    id: int,          // folder id (kind 2) or account id (kind 1)
+    label: string,
+    icon: string,
+    unread: int,
+    depth: int,
+    expanded: bool,
+}
+
+export struct MailRow {
+    id: int,
+    sender: string,
+    subject: string,
+    preview: string,
+    date: string,
+    unread: bool,
+    flagged: bool,
+    attach: bool,
+    answered: bool,
+}
+
+export struct AttachmentRow {
+    index: int,
+    name: string,
+    size: string,
+}
+
+export struct AccountRow {
+    id: int,
+    email: string,
+    detail: string,
+}
+
+export struct FolderOption {
+    id: int,
+    label: string,
+}
+
+export component Icon inherits Text {
+    font-family: Theme.icon-font;
+    font-size: 16px;
+    color: Theme.text-2;
+    vertical-alignment: center;
+    horizontal-alignment: center;
+    accessible-role: none;
+}
+
+// Fluent "subtle" button: transparent until hovered. Icon and optional label.
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <string> tooltip;
+    in property <bool> enabled: true;
+    in property <color> icon-color: Theme.text-2;
+    in property <LayoutAlignment> alignment: center;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label != "" ? root.label : root.tooltip;
+    accessible-action-default => { root.clicked(); }
+
+    height: 32px;
+    min-width: 32px;
+    border-radius: Theme.radius;
+    background: !enabled ? transparent : ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: root.label == "" ? 0 : Theme.s2;
+        padding-right: root.label == "" ? 0 : Theme.s3;
+        spacing: Theme.s2;
+        alignment: root.alignment;
+        Icon {
+            text: root.icon;
+            color: root.enabled ? root.icon-color : Theme.text-disabled;
+            width: 20px;
+        }
+        if root.label != "": Text {
+            text: root.label;
+            font-size: Theme.body;
+            color: root.enabled ? Theme.text : Theme.text-disabled;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Accent-filled primary action ("New mail", "Send").
+export component AccentButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    height: 32px;
+    border-radius: Theme.radius;
+    background: !enabled ? Theme.stroke : ta.pressed ? Theme.accent.darker(0.2) : ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: root.label == "" ? 0 : Theme.s3;
+        padding-right: root.label == "" ? 0 : Theme.s4;
+        spacing: Theme.s2;
+        alignment: center;
+        if root.icon != "": Icon {
+            text: root.icon;
+            color: root.enabled ? Theme.on-accent : Theme.text-disabled;
+            width: 16px;
+        }
+        if root.label != "": Text {
+            text: root.label;
+            font-size: Theme.body;
+            font-weight: 600;
+            color: root.enabled ? Theme.on-accent : Theme.text-disabled;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component NavRow inherits Rectangle {
+    in property <NavItem> item;
+    in property <bool> selected;
+    // Icon-only rail for narrow windows.
+    in property <bool> compact;
+    callback clicked;
+
+    accessible-role: list-item;
+    accessible-label: item.label + (item.unread > 0 ? ", " + item.unread + " unread" : "");
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    height: item.kind == 1 ? (compact ? 9px : 36px) : (compact ? 40px : 32px);
+    border-radius: Theme.radius;
+    background: item.kind == 1 ? transparent : root.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    // Selection indicator pill (Fluent nav)
+    if root.selected && item.kind != 1: Rectangle {
+        x: 0;
+        width: 3px;
+        height: 16px;
+        border-radius: 1.5px;
+        background: Theme.accent;
+    }
+
+    if compact && item.kind == 1: Rectangle {
+        height: 1px;
+        x: Theme.s2;
+        width: parent.width - 2 * Theme.s2;
+        background: Theme.stroke-strong;
+    }
+    if compact && item.kind != 1: Icon {
+        text: item.icon;
+        color: item.unread > 0 ? Theme.accent-text : Theme.text-2;
+    }
+    if compact && item.kind != 1 && item.unread > 0: Rectangle {
+        x: parent.width - 14px;
+        y: 8px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.accent;
+    }
+    if !compact: HorizontalLayout {
+        padding-left: Theme.s3 + item.depth * 16px;
+        padding-right: Theme.s2;
+        spacing: Theme.s2;
+        Icon {
+            text: item.kind == 1 ? (item.expanded ? Icons.chevron-down : Icons.chevron-right) : item.icon;
+            font-size: item.kind == 1 ? 10px : 16px;
+            width: 20px;
+            color: item.kind == 1 ? Theme.text-3 : Theme.text-2;
+        }
+        Text {
+            text: item.label;
+            font-size: item.kind == 1 ? Theme.caption : Theme.body;
+            font-weight: item.kind == 1 || item.unread > 0 ? 600 : 400;
+            color: item.kind == 1 ? Theme.text-2 : Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if item.unread > 0 && !(item.kind == 1 && item.expanded): Text {
+            text: item.unread;
+            font-size: Theme.caption;
+            font-weight: 600;
+            color: Theme.accent-text;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component MailItem inherits Rectangle {
+    in property <MailRow> mail;
+    in property <bool> selected;
+    callback clicked;
+
+    accessible-role: list-item;
+    accessible-label: (mail.unread ? "Unread, " : "") + mail.sender + ", " + mail.subject + ", " + mail.date;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    height: 76px;
+    background: root.selected ? Theme.row-selected : ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    if mail.unread: Rectangle {
+        x: 0;
+        width: 3px;
+        background: Theme.accent;
+    }
+
+    VerticalLayout {
+        padding-left: Theme.s4;
+        padding-right: Theme.s4;
+        padding-top: Theme.s2 + 2px;
+        padding-bottom: Theme.s2 + 2px;
+        spacing: 1px;
+        HorizontalLayout {
+            spacing: Theme.s2;
+            Text {
+                text: mail.sender;
+                font-size: Theme.body;
+                font-weight: mail.unread ? 600 : 400;
+                color: Theme.text;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if mail.answered: Icon { text: Icons.reply; font-size: 12px; color: Theme.text-3; }
+            if mail.attach: Icon { text: Icons.attach; font-size: 12px; color: Theme.text-3; }
+            if mail.flagged: Icon { text: Icons.flag-filled; font-size: 12px; color: Theme.danger; }
+            Text {
+                text: mail.date;
+                font-size: Theme.caption;
+                color: mail.unread ? Theme.accent-text : Theme.text-3;
+                font-weight: mail.unread ? 600 : 400;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: mail.subject == "" ? "(no subject)" : mail.subject;
+            font-size: Theme.body;
+            font-weight: mail.unread ? 600 : 400;
+            color: mail.unread ? Theme.accent-text : Theme.text-2;
+            overflow: elide;
+        }
+        Text {
+            text: mail.preview;
+            font-size: Theme.caption + 1px;
+            color: Theme.text-3;
+            overflow: elide;
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        x: Theme.s4;
+        width: parent.width - 2 * Theme.s4;
+        background: Theme.stroke;
+    }
+}
+
+// Attachment chip: file name, size, and a single action.
+export component Chip inherits Rectangle {
+    in property <string> name;
+    in property <string> size;
+    in property <string> action-icon;
+    in property <string> action-label;
+    callback action;
+
+    height: 40px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.stroke-strong;
+    background: ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.action(); }
+    }
+    HorizontalLayout {
+        padding-left: Theme.s3;
+        padding-right: Theme.s1;
+        spacing: Theme.s2;
+        Icon { text: Icons.attach; width: 16px; }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.name;
+                font-size: Theme.caption + 1px;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: root.size;
+                font-size: Theme.caption - 1px;
+                color: Theme.text-3;
+            }
+        }
+        IconButton {
+            icon: root.action-icon;
+            tooltip: root.action-label;
+            width: 32px;
+            y: 4px;
+            clicked => { root.action(); }
+        }
+    }
+}
+
+export component FieldLabel inherits Text {
+    font-size: Theme.body;
+    color: Theme.text-3;
+    vertical-alignment: center;
+    width: 64px;
+}

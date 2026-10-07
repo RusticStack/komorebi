@@ -1,330 +1,394 @@
-//! MIME parsing via `mail-parser`.
+//! MIME parsing via `mail-parser`: header rows for the list, and readable
+//! bodies plus attachments for the reader.
 
-use super::types::{ParsedAttachment, ParsedMessage};
-use anyhow::{Result, anyhow};
-use mail_parser::{Address, HeaderValue, MessageParser, MessagePart, MimeHeaders};
+use super::html::html_to_text;
+use crate::db::NewHeader;
+use mail_parser::{Address, Message, MessageParser, MessagePart, MimeHeaders, PartType};
 
-/// Parse raw RFC822 bytes into a [`ParsedMessage`].
-pub fn parse(raw: &[u8]) -> Result<ParsedMessage> {
-    let msg = MessageParser::default()
-        .parse(raw)
-        .ok_or_else(|| anyhow!("could not parse message"))?;
+/// The header fields fetched during sync. Kept small so a first sync of a
+/// large folder is mostly envelope data.
+pub const HEADER_FIELDS: &str = "FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE";
 
-    let mut out = ParsedMessage {
-        subject: msg.subject().map(str::to_string),
-        date: msg.date().map(|d| d.to_timestamp()),
-        ..Default::default()
+/// Build a list row from the header bytes returned by
+/// `BODY.PEEK[HEADER.FIELDS (...)]`.
+pub fn parse_header(raw: &[u8]) -> NewHeader {
+    let mut h = NewHeader::default();
+    let Some(msg) = MessageParser::default().parse_headers(raw) else {
+        return h;
     };
+    h.subject = msg.subject().unwrap_or_default().trim().to_string();
+    if let Some((name, addr)) = msg.from().and_then(first_addr) {
+        h.from_name = name;
+        h.from_addr = addr;
+    }
+    h.to = addresses(msg.to());
+    h.cc = addresses(msg.cc());
+    h.date = msg.date().map(|d| d.to_timestamp()).unwrap_or(0);
+    h.msgid = msg.message_id().unwrap_or_default().to_string();
+    h.has_attach = msg.content_type().is_some_and(|ct| {
+        ct.ctype().eq_ignore_ascii_case("multipart")
+            && ct
+                .subtype()
+                .is_some_and(|s| s.eq_ignore_ascii_case("mixed"))
+    });
+    h
+}
 
-    if let Some(from) = msg.from()
-        && let Some(addr) = first_addr(from)
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttachmentInfo {
+    pub index: usize,
+    pub name: String,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Body {
+    pub text: String,
+    pub attachments: Vec<AttachmentInfo>,
+    /// Space-separated Message-IDs for the References header of a reply.
+    pub references: String,
+    /// Reply-To address, if the sender set one.
+    pub reply_to: String,
+}
+
+/// Parse a full RFC 822 message into readable text and attachment metadata.
+/// HTML-only messages are converted to text; nothing remote is ever loaded.
+pub fn parse_body(raw: &[u8]) -> Body {
+    let Some(msg) = MessageParser::default().parse(raw) else {
+        return Body {
+            text: String::from_utf8_lossy(raw).into_owned(),
+            ..Default::default()
+        };
+    };
+    let text = match (msg.text_body.first(), msg.html_body.first()) {
+        // Prefer a real text/plain part; mail-parser synthesizes text from
+        // HTML when only HTML exists, so check the part type.
+        (Some(&i), _) if matches!(msg.parts[i as usize].body, PartType::Text(_)) => {
+            tidy(&msg.body_text(0).unwrap_or_default())
+        }
+        (_, Some(_)) => tidy(&html_to_text(&msg.body_html(0).unwrap_or_default())),
+        _ => String::new(),
+    };
+    let attachments = listed(&msg)
+        .enumerate()
+        .map(|(index, part)| AttachmentInfo {
+            index,
+            name: attachment_name(part, index),
+            size: part.contents().len(),
+        })
+        .collect();
+    // References for a reply: the parent's References (or, failing that, its
+    // In-Reply-To), then the parent's own Message-ID (RFC 5322 3.6.4).
+    let mut references = String::new();
+    let parents = msg
+        .references()
+        .as_text_list()
+        .or_else(|| msg.in_reply_to().as_text_list());
+    for id in parents
+        .unwrap_or_default()
+        .iter()
+        .map(|s| s.as_ref())
+        .chain(msg.message_id())
     {
-        out.sender_name = addr.name.as_deref().map(|s| s.to_string());
-        out.sender_email = addr.address.as_deref().map(|s| s.to_string());
-    }
-    out.to = address_list(msg.to());
-    out.cc = address_list(msg.cc());
-
-    // Threading headers: Message-ID, In-Reply-To, References.
-    out.message_id = msg.message_id().map(str::to_string);
-    let in_reply_to = msg.in_reply_to();
-    if !in_reply_to.is_empty() {
-        out.in_reply_to = header_text(in_reply_to);
-    }
-    let references = msg.references();
-    if !references.is_empty() {
-        out.references = header_text(references);
-    }
-
-    // Prefer the plain-text body; fall back to HTML stripped of tags.
-    if let Some(text) = msg.body_text(0) {
-        let snippet = make_snippet(&text);
-        out.body_text = Some(text.into_owned());
-        out.snippet = Some(snippet);
-    } else if let Some(html) = msg.body_html(0) {
-        let text = strip_html(&html);
-        out.body_html = Some(html.into_owned());
-        out.body_text = Some(text.clone());
-        out.snippet = Some(make_snippet(&text));
-    }
-
-    for i in 0..msg.attachment_count() {
-        if let Some(part) = msg.attachment(i as u32)
-            && let Some(body) = part_body(part)
-        {
-            out.attachments.push(ParsedAttachment {
-                display_name: part
-                    .attachment_name()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("attachment-{i}")),
-                mime: part.content_type().map(|ct| {
-                    format!(
-                        "{}/{}",
-                        ct.c_type,
-                        ct.c_subtype.as_deref().unwrap_or_default()
-                    )
-                }),
-                data: body,
-            });
+        if !references.is_empty() {
+            references.push(' ');
         }
+        references.push('<');
+        references.push_str(id.trim_matches(['<', '>']));
+        references.push('>');
     }
-
-    Ok(out)
-}
-
-/// Join all Message-ID values in a header (In-Reply-To / References may
-/// contain one or many ids), falling back to the raw text form.
-fn header_text(value: &HeaderValue<'_>) -> Option<String> {
-    if let Some(list) = value.as_text_list()
-        && !list.is_empty()
-    {
-        return Some(
-            list.iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>()
-                .join(" "),
-        );
-    }
-    value.as_text().map(str::to_string)
-}
-
-fn part_body(part: &MessagePart<'_>) -> Option<Vec<u8>> {
-    match &part.body {
-        mail_parser::PartType::Binary(bytes) | mail_parser::PartType::InlineBinary(bytes) => {
-            Some(bytes.to_vec())
-        }
-        mail_parser::PartType::Text(text) | mail_parser::PartType::Html(text) => {
-            Some(text.as_bytes().to_vec())
-        }
-        _ => None,
+    let reply_to = msg
+        .reply_to()
+        .and_then(first_addr)
+        .map(|(_, addr)| addr)
+        .unwrap_or_default();
+    Body {
+        text,
+        attachments,
+        references,
+        reply_to,
     }
 }
 
-fn first_addr<'a>(address: &'a Address<'a>) -> Option<mail_parser::Addr<'a>> {
-    match address {
-        Address::List(list) => list.first().cloned(),
-        Address::Group(groups) => groups.first().and_then(|g| g.addresses.first().cloned()),
+/// Attachments shown to the user: everything mail-parser classifies as an
+/// attachment except inline images referenced from the HTML body (a
+/// Content-ID without a file name), unless explicitly marked as attachment.
+/// Every function numbering attachments goes through this filter, so the
+/// indices stay consistent.
+fn listed<'a>(msg: &'a Message<'a>) -> impl Iterator<Item = &'a MessagePart<'a>> {
+    msg.attachments().filter(|part| {
+        part.content_id().is_none()
+            || part.attachment_name().is_some()
+            || part
+                .content_disposition()
+                .is_some_and(|d| d.ctype().eq_ignore_ascii_case("attachment"))
+    })
+}
+
+/// File names and bytes of the attachments whose index satisfies `want`,
+/// from a single parse of the message.
+pub fn attachments(raw: &[u8], want: impl Fn(usize) -> bool) -> Vec<(String, Vec<u8>)> {
+    let Some(msg) = MessageParser::default().parse(raw) else {
+        return Vec::new();
+    };
+    listed(&msg)
+        .enumerate()
+        .filter(|(i, _)| want(*i))
+        .map(|(i, part)| (attachment_name(part, i), part.contents().to_vec()))
+        .collect()
+}
+
+/// File name and bytes of attachment `index` (as numbered by `parse_body`).
+pub fn attachment(raw: &[u8], index: usize) -> Option<(String, Vec<u8>)> {
+    attachments(raw, |i| i == index).pop()
+}
+
+fn attachment_name(part: &MessagePart, index: usize) -> String {
+    let name = part
+        .attachment_name()
+        .map(sanitize_filename)
+        .unwrap_or_default();
+    if name.is_empty() {
+        format!("attachment-{}", index + 1)
+    } else {
+        name
     }
 }
 
-fn address_list(address: Option<&Address<'_>>) -> Vec<String> {
-    let mut out = Vec::new();
-    match address {
-        Some(Address::List(list)) => {
-            for addr in list {
-                if let Some(a) = &addr.address {
-                    out.push(a.to_string());
-                }
-            }
-        }
-        Some(Address::Group(groups)) => {
-            for group in groups {
-                for addr in &group.addresses {
-                    if let Some(a) = &addr.address {
-                        out.push(a.to_string());
-                    }
-                }
-            }
-        }
-        None => {}
-    }
-    out
-}
+/// Make an attachment name safe to offer in the save dialog: no path
+/// separators or characters Windows refuses, no invisible bidi or zero-width
+/// characters that disguise the extension (`a\u{202E}fdp.exe`), no reserved
+/// device names, and a sane length that keeps the extension.
+pub fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let mut name = cleaned.trim_matches([' ', '.']).to_string();
 
-/// First ~200 characters of text as a one-line snippet.
-pub fn make_snippet(text: &str) -> String {
-    let collapsed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = collapsed.chars().take(200).collect();
-    if collapsed.chars().count() > 200 {
-        out.push('…');
+    let stem = name.split('.').next().unwrap_or_default();
+    let reserved = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+    ) || (stem.len() == 4
+        && stem
+            .get(..3)
+            .is_some_and(|p| p.eq_ignore_ascii_case("COM") || p.eq_ignore_ascii_case("LPT"))
+        && stem.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        name.insert(0, '_');
     }
-    out
-}
 
-/// Minimal HTML → text: strip tags, decode common entities, collapse space.
-/// This is *not* a sanitizer - it only produces readable plain text for the
-/// native reader (no remote content is ever loaded by the client).
-pub fn strip_html(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut in_tag = false;
-    let mut in_script = false;
-    let mut skip = 0usize;
-    let bytes = html.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if skip > 0 {
-            skip -= 1;
-            i += 1;
-            continue;
-        }
-        match c {
-            b'<' => {
-                let lower = html[i..].to_ascii_lowercase();
-                if lower.starts_with("<script") {
-                    in_script = true;
-                } else if lower.starts_with("</script") {
-                    in_script = false;
-                } else if lower.starts_with("<br")
-                    || lower.starts_with("</p")
-                    || lower.starts_with("</div")
-                {
-                    out.push('\n');
-                }
-                in_tag = true;
-            }
-            b'>' => in_tag = false,
-            _ if !in_tag && !in_script => {
-                if c == b'&' {
-                    // decode a handful of common entities
-                    let rest = &html[i..];
-                    let (entity, len) = decode_entity(rest);
-                    out.push_str(&entity);
-                    skip = len.saturating_sub(1);
-                } else {
-                    out.push(c as char);
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    // collapse runs of whitespace into single spaces
-    let mut result = String::with_capacity(out.len());
-    let mut last_space = false;
-    for ch in out.chars() {
-        if ch.is_whitespace() {
-            if !last_space {
-                result.push(' ');
-            }
-            last_space = true;
+    const MAX: usize = 180;
+    if name.len() > MAX {
+        let (stem, ext) = match name.rsplit_once('.') {
+            Some((s, e)) if e.len() <= 16 => (s, e),
+            _ => (name.as_str(), ""),
+        };
+        let keep = stem.floor_char_boundary(MAX - ext.len() - 1);
+        name = if ext.is_empty() {
+            stem[..keep].to_string()
         } else {
-            result.push(ch);
-            last_space = false;
-        }
+            format!("{}.{ext}", &stem[..keep])
+        };
     }
-    result.trim().to_string()
+    name
 }
 
-fn decode_entity(rest: &str) -> (String, usize) {
-    let end = rest.find(';').unwrap_or(0);
-    if end == 0 {
-        return ("&".into(), 1);
+/// One-line preview for the message list.
+pub fn preview(text: &str) -> String {
+    let mut out = String::with_capacity(160);
+    for word in text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('>'))
+        .flat_map(str::split_whitespace)
+    {
+        if out.len() + word.len() > 160 {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
     }
-    let entity = &rest[..=end];
-    let decoded: String = match entity {
-        "&amp;" => "&".into(),
-        "&lt;" => "<".into(),
-        "&gt;" => ">".into(),
-        "&quot;" => "\"".into(),
-        "&apos;" => "'".into(),
-        "&nbsp;" => " ".into(),
-        _ => {
-            // numeric entities: &#NN; / &#xHH;
-            let inner = &entity[1..entity.len() - 1];
-            if let Some(num) = inner
-                .strip_prefix("#x")
-                .or_else(|| inner.strip_prefix("#X"))
-            {
-                u32::from_str_radix(num, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                    .map(|c| c.to_string())
-            } else if let Some(num) = inner.strip_prefix('#') {
-                num.parse::<u32>()
-                    .ok()
-                    .and_then(char::from_u32)
-                    .map(|c| c.to_string())
-            } else {
-                None
+    out
+}
+
+/// Normalize line endings (`lines()` handles CRLF), drop leading blank
+/// lines and trailing spaces, and squeeze runs of blank lines.
+fn tidy(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut blank = 0;
+    for line in text.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            blank += 1;
+            if out.is_empty() || blank > 1 {
+                continue;
             }
-            .unwrap_or_else(|| entity.to_string())
+        } else {
+            blank = 0;
         }
-    };
-    (decoded, entity.len())
+        out.push_str(if out.is_empty() {
+            line.trim_start()
+        } else {
+            line
+        });
+        out.push('\n');
+    }
+    out.truncate(out.trim_end().len());
+    out
 }
 
-/// Safe plain-text rendering of a body for the native reader. Never loads
-/// remote content; URLs are shown as text only.
-pub fn plain_text_body(text: &str) -> String {
-    text.trim().to_string()
+fn first_addr(address: &Address) -> Option<(String, String)> {
+    let addr = match address {
+        Address::List(list) => list.first(),
+        Address::Group(groups) => groups.first().and_then(|g| g.addresses.first()),
+    }?;
+    Some((
+        addr.name().unwrap_or_default().trim().to_string(),
+        addr.address().unwrap_or_default().trim().to_string(),
+    ))
+}
+
+/// An address header as one RFC 5322 list. Display names with specials are
+/// quoted, so `"Doe, Jane" <j@x.org>` survives being split again for
+/// reply-all.
+fn addresses(address: Option<&Address>) -> String {
+    let mut out = String::new();
+    for a in address.into_iter().flat_map(|a| a.iter()) {
+        let Some(email) = a.address() else { continue };
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        match a.name().map(str::trim).filter(|n| !n.is_empty()) {
+            Some(name)
+                if name.contains([
+                    ',', ';', '<', '>', '"', '(', ')', '@', ':', '[', ']', '\\', '.',
+                ]) =>
+            {
+                out.push('"');
+                for c in name.chars() {
+                    if matches!(c, '"' | '\\') {
+                        out.push('\\');
+                    }
+                    out.push(c);
+                }
+                out.push_str("\" <");
+                out.push_str(email);
+                out.push('>');
+            }
+            Some(name) => {
+                out.push_str(name);
+                out.push_str(" <");
+                out.push_str(email);
+                out.push('>');
+            }
+            None => out.push_str(email),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SAMPLE: &[u8] = b"From: Jane Doe <jane@example.com>\r\nTo: me@example.org\r\nCc: team@example.org\r\nSubject: =?UTF-8?B?SGVsbG8g8J+mgA==?=\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"BOUND\"\r\n\r\n--BOUND\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHi there! This is the body.\r\n--BOUND\r\nContent-Type: text/plain; name=\"notes.txt\"\r\nContent-Disposition: attachment; filename=\"notes.txt\"\r\n\r\nattachment bytes here\r\n--BOUND--\r\n";
+    const HEADER: &[u8] = b"From: Jane Doe <jane@example.com>\r\nTo: Me <me@example.org>, bob@example.org\r\nSubject: =?UTF-8?B?SGVsbG8g8J+mgA==?=\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nMessage-ID: <abc@example.com>\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n";
+
+    const FULL: &[u8] = b"From: Jane <jane@example.com>\r\nTo: me@example.org\r\nSubject: Report\r\nMessage-ID: <m2@example.com>\r\nReferences: <m0@example.com> <m1@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHi,\r\n\r\n\r\n\r\nSee attached.\r\n> quoted\r\n--B\r\nContent-Type: application/pdf; name=\"../../evil.pdf\"\r\nContent-Disposition: attachment; filename=\"../../evil.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--B--\r\n";
 
     #[test]
-    fn parses_envelope_and_attachments() {
-        let parsed = parse(SAMPLE).unwrap();
-        assert_eq!(parsed.subject.as_deref(), Some("Hello 🦀"));
-        assert_eq!(parsed.sender_name.as_deref(), Some("Jane Doe"));
-        assert_eq!(parsed.sender_email.as_deref(), Some("jane@example.com"));
-        assert_eq!(parsed.to, vec!["me@example.org"]);
-        assert_eq!(parsed.cc, vec!["team@example.org"]);
+    fn header_row() {
+        let h = parse_header(HEADER);
+        assert_eq!(h.subject, "Hello 🦀");
+        assert_eq!(h.from_name, "Jane Doe");
+        assert_eq!(h.from_addr, "jane@example.com");
+        assert_eq!(h.to, "Me <me@example.org>, bob@example.org");
+        assert_eq!(h.msgid, "abc@example.com");
+        assert!(h.has_attach);
+        assert!(h.date > 0);
+    }
+
+    #[test]
+    fn body_attachments_and_references() {
+        let b = parse_body(FULL);
+        assert_eq!(b.text, "Hi,\n\nSee attached.\n> quoted");
+        assert_eq!(b.attachments.len(), 1);
+        assert_eq!(b.attachments[0].name, "_.._evil.pdf");
+        assert_eq!(b.attachments[0].size, 5);
         assert_eq!(
-            parsed.body_text.as_deref(),
-            Some("Hi there! This is the body.")
+            b.references,
+            "<m0@example.com> <m1@example.com> <m2@example.com>"
         );
+        let (name, data) = attachment(FULL, 0).unwrap();
+        assert_eq!(name, "_.._evil.pdf");
+        assert_eq!(data, b"%PDF-");
+        assert!(attachment(FULL, 1).is_none());
+    }
+
+    #[test]
+    fn html_only_body_becomes_text() {
+        let raw = b"From: a@b.c\r\nContent-Type: text/html\r\n\r\n<p>Hello <b>there</b></p><p>Second</p><script>x()</script>";
+        assert_eq!(parse_body(raw).text, "Hello there\n\nSecond");
+    }
+
+    #[test]
+    fn preview_skips_quotes_and_truncates() {
+        assert_eq!(preview("Hi\n> old stuff\n  there  "), "Hi there");
+        assert!(preview(&"word ".repeat(100)).len() <= 160);
+    }
+
+    #[test]
+    fn sanitizes_names() {
+        assert_eq!(sanitize_filename("a/b\\c:d.txt"), "a_b_c_d.txt");
+        assert_eq!(sanitize_filename(" .hidden. "), "hidden");
+        assert_eq!(sanitize_filename("a\u{202E}fdp.exe"), "a_fdp.exe");
+        assert_eq!(sanitize_filename("NUL.txt"), "_NUL.txt");
+        assert_eq!(sanitize_filename("com1"), "_com1");
+        assert_eq!(sanitize_filename("COM10.txt"), "COM10.txt");
+        assert_eq!(sanitize_filename("a€"), "a€");
+        let long = format!("{}.pdf", "é".repeat(300));
+        let s = sanitize_filename(&long);
+        assert!(s.len() <= 180 && s.ends_with(".pdf"), "{s}");
+    }
+
+    #[test]
+    fn quotes_display_names_with_specials() {
+        let raw = b"From: a@b.c\r\nTo: \"Doe, Jane\" <j@x.org>, \"Al \\\"Bo\\\" C\" <al@x.org>, bob@x.org\r\n\r\n";
+        let to = parse_header(raw).to;
         assert_eq!(
-            parsed.snippet.as_deref(),
-            Some("Hi there! This is the body.")
+            to,
+            r#""Doe, Jane" <j@x.org>, "Al \"Bo\" C" <al@x.org>, bob@x.org"#
         );
-        assert_eq!(parsed.attachments.len(), 1);
-        assert_eq!(parsed.attachments[0].display_name, "notes.txt");
-        assert!(parsed.date.is_some());
+        assert_eq!(crate::mail::smtp::split_addresses(&to).len(), 3);
     }
 
     #[test]
-    fn parses_threading_headers() {
-        let raw = b"From: Jane <jane@example.com>\r\nTo: me@example.org\r\nSubject: Re: hi\r\nMessage-ID: <msg-2@example.com>\r\nIn-Reply-To: <msg-1@example.com>\r\nReferences: <msg-0@example.com> <msg-1@example.com>\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nReply body.\r\n";
-        let parsed = parse(raw).unwrap();
-        assert_eq!(parsed.message_id.as_deref(), Some("msg-2@example.com"));
-        assert_eq!(parsed.in_reply_to.as_deref(), Some("msg-1@example.com"));
-        assert_eq!(
-            parsed.references.as_deref(),
-            Some("msg-0@example.com msg-1@example.com")
-        );
+    fn references_fall_back_to_in_reply_to() {
+        let raw = b"From: a@b.c\r\nMessage-ID: <self@x>\r\nIn-Reply-To: <parent@x>\r\n\r\nhi";
+        assert_eq!(parse_body(raw).references, "<parent@x> <self@x>");
     }
 
     #[test]
-    fn strips_html_and_entities() {
-        let text = strip_html(
-            "<div><p>Hello &amp; <b>world</b></p><br><script>alert(1)</script><p>Done</p></div>",
-        );
-        assert_eq!(text, "Hello & world Done");
-        assert_eq!(strip_html("a &#65; &#x42; b"), "a A B b");
+    fn inline_cid_images_are_not_attachments() {
+        let raw = b"From: a@b.c\r\nContent-Type: multipart/related; boundary=R\r\n\r\n--R\r\nContent-Type: text/html\r\n\r\n<p>Hi <img src=\"cid:logo\"></p>\r\n--R\r\nContent-Type: image/png\r\nContent-ID: <logo>\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--R\r\nContent-Type: image/png; name=photo.png\r\nContent-ID: <photo>\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--R--\r\n";
+        let b = parse_body(raw);
+        assert_eq!(b.attachments.len(), 1, "{:?}", b.attachments);
+        assert_eq!(b.attachments[0].name, "photo.png");
+        assert_eq!(attachment(raw, 0).unwrap().0, "photo.png");
     }
 
     #[test]
-    fn snippet_collapses_and_truncates() {
-        let long = (0..50)
-            .map(|i| format!("word{i}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let snippet = make_snippet(&long);
-        assert!(snippet.chars().count() <= 201);
-        assert!(!snippet.contains('\n'));
-    }
-
-    #[test]
-    fn empty_html_yields_empty_text() {
-        assert_eq!(strip_html(""), "");
-    }
-
-    #[test]
-    fn header_value_helpers_compile() {
-        use mail_parser::MimeHeaders;
-        // Ensure we can read headers and the content type from a parsed message.
-        let parsed = MessageParser::default().parse(SAMPLE).unwrap();
-        let subject = parsed
-            .header_values("Subject")
-            .next()
-            .and_then(|h| h.as_text());
-        assert_eq!(subject, Some("Hello 🦀"));
-        let ct = parsed.content_type().unwrap();
-        assert_eq!(ct.c_type.as_ref(), "multipart");
+    fn tidy_squeezes_and_trims() {
+        assert_eq!(tidy("\r\n\r\n  a  \r\n\r\n\r\nb\r\n\r\n"), "a\n\nb");
     }
 }

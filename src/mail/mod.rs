@@ -1,717 +1,535 @@
-//! Mail protocols: providers, autodiscovery, OAuth, IMAP, SMTP, MIME.
+//! Mail workers.
+//!
+//! Each account gets two worker threads, each with its own IMAP connection
+//! and SQLite connection:
+//! - **sync**: folder list, header sync, flag sync and body prefetch. These
+//!   jobs can run for a long time.
+//! - **interactive**: opening messages, flag changes, moves and sending.
+//!   These run while a long sync is in progress, so the UI never waits on a
+//!   sync.
+//!
+//! Workers report back through [`Event`]s, which the UI applies on its own
+//! thread.
 
-pub mod discovery;
 pub mod html;
 pub mod imap;
 pub mod mime;
-pub mod oauth;
-pub mod providers;
 pub mod smtp;
-pub mod types;
 
-use crate::db::{Account, AccountDraft, Database, MessageDraft, OutboxEntry};
+use crate::db::{Account, Db, Folder};
+use crate::providers::Server;
+use crate::role::Role;
 use crate::secrets;
 use anyhow::{Context, Result, anyhow};
-use chrono::Utc;
-use std::time::Duration;
+use imap::Imap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
 
-/// Fetch a fresh access token for an OAuth account, refreshing if needed.
-/// Tokens are read from and written back to the OS credential store.
-pub fn oauth_access_token(
-    db: &Database,
-    account: &Account,
-    client_id: &str,
-    client_secret: &str,
-    redirect_uri: &str,
-) -> Result<String> {
-    let refresh = secrets::get(&secrets::key::account_oauth_refresh(&account.id))?
-        .ok_or_else(|| anyhow!("no OAuth refresh token stored for {}", account.email))?;
-    let config = oauth::OAuthConfig::for_kind(
-        providers::ProviderKind::parse_or_default(&account.provider_kind),
-        client_id,
-        client_secret,
-        redirect_uri,
-    )?;
+/// How many headers are fetched per round trip during a first sync.
+const HEADER_BATCH: usize = 500;
+/// How many inbox bodies are prefetched (newest first) for instant opening.
+const PREFETCH_COUNT: usize = 300;
+/// Bodies larger than this are fetched only when opened.
+const PREFETCH_MAX_SIZE: i64 = 512 * 1024;
 
-    // Use the cached access token if it is still valid.
-    if let Some(cached) = secrets::get(&secrets::key::account_oauth_access(&account.id))?
-        && let Some(expires) = db.get_setting(&format!("oauth.expires_at.{}", account.id))?
-        && let Ok(exp) = expires.parse::<i64>()
-        && Utc::now().timestamp() < exp - 60
-    {
-        return Ok(cached);
-    }
-
-    let refreshed = oauth::refresh(&config, &refresh)?;
-    secrets::set(
-        &secrets::key::account_oauth_access(&account.id),
-        &refreshed.access_token,
-    )?;
-    let expires_at = Utc::now().timestamp() + refreshed.expires_in;
-    db.set_setting(
-        &format!("oauth.expires_at.{}", account.id),
-        &expires_at.to_string(),
-    )?;
-    Ok(refreshed.access_token)
+#[derive(Debug, Clone)]
+pub enum Event {
+    Syncing {
+        account_id: i64,
+        active: bool,
+        error: Option<String>,
+    },
+    /// Folder rows changed (`None`: the folder list itself changed).
+    FolderChanged {
+        folder_id: Option<i64>,
+    },
+    BodyReady {
+        message_id: i64,
+    },
+    BodyFailed {
+        message_id: i64,
+        error: String,
+    },
+    Sent {
+        result: Result<(), String>,
+        sent_folder: Option<i64>,
+    },
+    /// A server action failed; the next sync restores the true state.
+    ActionFailed {
+        account_id: i64,
+        error: String,
+    },
+    /// A folder got new mail from our own action (move/append) and should
+    /// be synced.
+    NeedsSync {
+        folder_id: i64,
+    },
 }
 
-/// Full sync of one account: folder discovery plus incremental message fetch.
-/// Returns (folders_created, messages_cached).
-pub fn sync_account(db: &Database, account: &Account) -> Result<SyncSummary> {
-    let imap = imap_settings(account)?;
-    let auth = build_imap_auth(db, account)?;
+pub type Notify = Arc<dyn Fn(Event) + Send + Sync>;
 
-    let folders = imap::ImapConnection::list_folders(&imap, &imap.host, &auth)?;
-    let mut summary = SyncSummary::default();
-    for folder in folders {
-        if folder.special_use.as_deref() == Some("junk") {
-            continue; // skip spam by default (privacy + noise)
-        }
-        let cached = db.upsert_folder(
-            &account.id,
-            &folder.name,
-            Some(folder.name.as_str()),
-            folder.special_use.as_deref(),
-            Some(&folder.name),
-        )?;
-        match sync_folder(db, account, &cached.id, &folder.name, &imap, &auth) {
-            Ok(r) => {
-                summary.fetched += r;
-                summary.folders += 1;
+/// Messages with a queued or running interactive action, keyed by
+/// (folder id, UID), with a count per message. The sync worker leaves these
+/// rows alone, so a sync running at the same time cannot bring back a
+/// message the user just moved, or undo a flag change.
+#[derive(Clone, Default)]
+struct Pending(Arc<Mutex<HashMap<(i64, u32), usize>>>);
+
+impl Pending {
+    fn add(&self, key: (i64, u32)) {
+        *self.0.lock().expect("pending lock").entry(key).or_default() += 1;
+    }
+    fn done(&self, key: (i64, u32)) {
+        let mut map = self.0.lock().expect("pending lock");
+        if let Some(n) = map.get_mut(&key) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&key);
             }
-            Err(e) => summary.errors.push(format!("{}: {e}", folder.name)),
         }
     }
-    Ok(summary)
+    fn uids(&self, folder_id: i64) -> HashSet<u32> {
+        self.0
+            .lock()
+            .expect("pending lock")
+            .keys()
+            .filter(|(f, _)| *f == folder_id)
+            .map(|(_, uid)| *uid)
+            .collect()
+    }
 }
 
-/// Incremental sync of one folder. Returns number of newly cached messages.
-pub fn sync_folder(
-    db: &Database,
-    account: &Account,
-    folder_id: &str,
-    folder_name: &str,
-    settings: &types::ServerSettings,
-    auth: &imap::Auth,
-) -> Result<usize> {
-    let since = db.folder_max_uid(folder_id)?;
-    let mut conn = imap::ImapConnection::open(settings, &settings.host, auth, folder_name)?;
-    let uid_validity = conn.mailbox.uid_validity;
-    let fetched = conn.fetch_new(since, Some(500))?;
-    let inserted = cache_fetched_messages(db, account, folder_id, uid_validity, &fetched)?;
-    let total = conn.mailbox.exists as i64;
-    let unread = conn.mailbox.unseen.map(|u| (u as i64).max(0)).unwrap_or(0);
-    db.set_folder_counts(folder_id, unread, total)?;
-    Ok(inserted)
+pub enum Job {
+    SyncAll,
+    SyncFolder(i64),
+    FetchBody(i64),
+    SetFlag {
+        folder_id: i64,
+        uid: u32,
+        flag: &'static str,
+        on: bool,
+    },
+    Move {
+        folder_id: i64,
+        uid: u32,
+        dest: i64,
+    },
+    Delete {
+        folder_id: i64,
+        uid: u32,
+    },
+    Send {
+        outgoing: Box<smtp::Outgoing>,
+        reply_to: Option<i64>,
+    },
 }
 
-/// Ingest already-fetched messages into the local cache (deduped by IMAP UID).
-///
-/// Split out of [`sync_folder`] so the cache-ingest path is testable with
-/// synthetic fetches and no live server.
-pub fn cache_fetched_messages(
-    db: &Database,
-    account: &Account,
-    folder_id: &str,
-    uid_validity: Option<u32>,
-    fetched: &[imap::RawFetch],
-) -> Result<usize> {
-    let mut count = 0;
-    for fetch in fetched {
-        let uid = fetch.uid;
-        if db.find_message_by_uid(folder_id, uid)?.is_some() {
-            continue;
+pub struct Workers {
+    sync: Sender<Job>,
+    interactive: Sender<Job>,
+    pending: Pending,
+}
+
+impl Workers {
+    pub fn spawn(account: Account, db_path: PathBuf, notify: Notify) -> Self {
+        let (sync, sync_rx) = channel();
+        let (interactive, inter_rx) = channel();
+        let pending = Pending::default();
+        for (rx, name) in [(sync_rx, "sync"), (inter_rx, "interactive")] {
+            let mut w = Worker {
+                account: account.clone(),
+                db_path: db_path.clone(),
+                notify: notify.clone(),
+                imap: None,
+                pending: pending.clone(),
+            };
+            std::thread::Builder::new()
+                .name(format!("{name}-{}", account.id))
+                .spawn(move || w.run(rx))
+                .expect("spawning mail worker");
         }
-        let parsed = mime::parse(&fetch.body)?;
-        let row = MessageDraft {
-            account_id: account.id.clone(),
-            folder_id: folder_id.to_string(),
-            imap_uid: Some(uid),
-            uid_validity,
-            subject: parsed.subject,
-            sender_name: parsed.sender_name,
-            sender_email: parsed.sender_email,
-            to_addresses: serde_json::to_string(&parsed.to).ok(),
-            cc_addresses: serde_json::to_string(&parsed.cc).ok(),
-            bcc_addresses: None,
-            date_received: parsed.date,
-            is_read: fetch.seen,
-            is_flagged: fetch.flagged,
-            snippet: parsed.snippet,
-            body_text: parsed.body_text,
-            body_html: parsed.body_html,
-            size_bytes: Some(fetch.body.len() as i64),
-            has_attachments: !parsed.attachments.is_empty(),
-            rfc_message_id: parsed.message_id,
-            in_reply_to: parsed.in_reply_to,
-            references_header: parsed.references,
-            thread_id: None,
+        Self {
+            sync,
+            interactive,
+            pending,
+        }
+    }
+
+    pub fn send(&self, job: Job) {
+        if let Some(key) = job.message_key() {
+            self.pending.add(key);
+        }
+        let tx = match job {
+            Job::SyncAll | Job::SyncFolder(_) => &self.sync,
+            _ => &self.interactive,
         };
-        let id = db.insert_message(&row)?;
-        for att in parsed.attachments {
-            db.insert_attachment(&id, &att.display_name, att.mime.as_deref(), &att.data)?;
-        }
-        count += 1;
+        // A closed channel means the account was removed; nothing to do.
+        tx.send(job).ok();
     }
-    Ok(count)
 }
 
-/// Send a message; on success, create a local sent copy in the Sent folder
-/// (or the account's first folder if no Sent folder exists yet).
-pub fn send_message(
-    db: &Database,
-    account: &Account,
-    to: &[String],
-    cc: &[String],
-    subject: &str,
-    body_text: &str,
-    attachments: &[smtp::Attachment],
+impl Job {
+    fn message_key(&self) -> Option<(i64, u32)> {
+        match *self {
+            Job::SetFlag { folder_id, uid, .. }
+            | Job::Move { folder_id, uid, .. }
+            | Job::Delete { folder_id, uid } => Some((folder_id, uid)),
+            _ => None,
+        }
+    }
+}
+
+struct Worker {
+    account: Account,
+    db_path: PathBuf,
+    notify: Notify,
+    imap: Option<Imap>,
+    pending: Pending,
+}
+
+impl Worker {
+    fn run(&mut self, rx: Receiver<Job>) {
+        let mut db = match Db::open(&self.db_path) {
+            Ok(db) => db,
+            Err(e) => {
+                (self.notify)(Event::ActionFailed {
+                    account_id: self.account.id,
+                    error: format!("{e:#}"),
+                });
+                return;
+            }
+        };
+        'jobs: while let Ok(job) = rx.recv() {
+            let job = match job {
+                // Coalesce queued sync requests into one pass.
+                Job::SyncAll => loop {
+                    match rx.try_recv() {
+                        Ok(Job::SyncAll) | Ok(Job::SyncFolder(_)) => continue,
+                        Ok(other) => {
+                            self.handle(&mut db, Job::SyncAll);
+                            break other;
+                        }
+                        Err(TryRecvError::Empty) => break Job::SyncAll,
+                        // Account removed: stop, but still log out below.
+                        Err(TryRecvError::Disconnected) => break 'jobs,
+                    }
+                },
+                other => other,
+            };
+            self.handle(&mut db, job);
+        }
+        if let Some(imap) = self.imap.take() {
+            imap.logout();
+        }
+    }
+
+    fn handle(&mut self, db: &mut Db, job: Job) {
+        let key = job.message_key();
+        self.run_job(db, job);
+        if let Some(key) = key {
+            self.pending.done(key);
+        }
+    }
+
+    fn run_job(&mut self, db: &mut Db, job: Job) {
+        let id = self.account.id;
+        match job {
+            Job::SyncAll => {
+                (self.notify)(Event::Syncing {
+                    account_id: id,
+                    active: true,
+                    error: None,
+                });
+                let error = self.sync_all(db).err().map(|e| format!("{e:#}"));
+                (self.notify)(Event::Syncing {
+                    account_id: id,
+                    active: false,
+                    error,
+                });
+            }
+            Job::SyncFolder(folder_id) => {
+                let result = db.folder(folder_id).and_then(|f| {
+                    let f = f.ok_or_else(|| anyhow!("folder no longer exists"))?;
+                    let pending = self.pending.clone();
+                    self.with_imap(|imap, notify| sync_folder(imap, db, &f, notify, &pending))
+                });
+                if let Err(e) = result {
+                    self.fail(e);
+                }
+            }
+            Job::FetchBody(message_id) => {
+                if let Err(e) = self.fetch_body(db, message_id) {
+                    (self.notify)(Event::BodyFailed {
+                        message_id,
+                        error: format!("{e:#}"),
+                    });
+                }
+            }
+            Job::SetFlag {
+                folder_id,
+                uid,
+                flag,
+                on,
+            } => {
+                let result = folder_name(db, folder_id).and_then(|folder| {
+                    self.with_imap(|imap, _| imap.set_flag(&folder, uid, flag, on))
+                });
+                if let Err(e) = result {
+                    self.fail(e);
+                }
+            }
+            Job::Move {
+                folder_id,
+                uid,
+                dest,
+            } => {
+                let result = folder_name(db, folder_id).and_then(|folder| {
+                    let dest_name = folder_name(db, dest)?;
+                    self.with_imap(|imap, _| imap.move_message(&folder, uid, &dest_name))
+                });
+                match result {
+                    Ok(()) => (self.notify)(Event::NeedsSync { folder_id: dest }),
+                    Err(e) => {
+                        self.fail(e);
+                        // Bring the message back if the server kept it.
+                        (self.notify)(Event::NeedsSync { folder_id });
+                    }
+                }
+            }
+            Job::Delete { folder_id, uid } => {
+                let result = folder_name(db, folder_id)
+                    .and_then(|folder| self.with_imap(|imap, _| imap.delete_message(&folder, uid)));
+                if let Err(e) = result {
+                    self.fail(e);
+                    (self.notify)(Event::NeedsSync { folder_id });
+                }
+            }
+            Job::Send { outgoing, reply_to } => {
+                let sent_folder = if self.account.save_sent {
+                    db.folder_by_role(id, Role::Sent).ok().flatten()
+                } else {
+                    None
+                };
+                let result = self
+                    .send(db, *outgoing, reply_to, sent_folder.as_ref())
+                    .map_err(|e| format!("{e:#}"));
+                (self.notify)(Event::Sent {
+                    result,
+                    sent_folder: sent_folder.map(|f| f.id),
+                });
+            }
+        }
+    }
+
+    fn fail(&self, e: anyhow::Error) {
+        (self.notify)(Event::ActionFailed {
+            account_id: self.account.id,
+            error: format!("{e:#}"),
+        });
+    }
+
+    /// Run `f` on a live connection, reconnecting once if the old
+    /// connection went stale (servers drop idle sessions).
+    fn with_imap<T>(&mut self, mut f: impl FnMut(&mut Imap, &Notify) -> Result<T>) -> Result<T> {
+        if let Some(imap) = self.imap.as_mut() {
+            match f(imap, &self.notify) {
+                Ok(v) => return Ok(v),
+                Err(e) if !is_connection_error(&e) => return Err(e),
+                Err(_) => self.imap = None,
+            }
+        }
+        let password = secrets::get_password(self.account.id)?;
+        let imap = self.imap.insert(Imap::connect(
+            &self.account.imap,
+            &self.account.email,
+            &password,
+        )?);
+        f(imap, &self.notify)
+    }
+
+    fn sync_all(&mut self, db: &mut Db) -> Result<()> {
+        let id = self.account.id;
+        let remote = self.with_imap(|imap, _| imap.list_folders())?;
+        let mut keep = Vec::new();
+        for r in &remote {
+            keep.push(db.upsert_folder(id, &r.name, &r.display, r.depth, r.role)?);
+        }
+        db.retain_folders(id, &keep)?;
+        (self.notify)(Event::FolderChanged { folder_id: None });
+
+        let folders: Vec<Folder> = db
+            .folders()?
+            .into_iter()
+            .filter(|f| f.account_id == id)
+            .collect();
+        let mut errors = Vec::new();
+        let pending = self.pending.clone();
+        for f in &folders {
+            if let Err(e) =
+                self.with_imap(|imap, notify| sync_folder(imap, db, f, notify, &pending))
+            {
+                errors.push(format!("{}: {e:#}", f.display));
+            }
+        }
+        // Prefetch once every folder is listed, so other folders never wait.
+        for f in folders.iter().filter(|f| f.role == Role::Inbox) {
+            self.prefetch(db, f).ok();
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(errors.join("; ")))
+        }
+    }
+
+    fn prefetch(&mut self, db: &mut Db, folder: &Folder) -> Result<()> {
+        let missing = db.missing_bodies(folder.id, PREFETCH_COUNT, PREFETCH_MAX_SIZE)?;
+        for chunk in missing.chunks(25) {
+            let uids: Vec<u32> = chunk.iter().map(|(_, uid)| *uid).collect();
+            let bodies = self.with_imap(|imap, _| imap.fetch_bodies(&folder.name, &uids))?;
+            for (uid, raw) in bodies {
+                if let Some((id, _)) = chunk.iter().find(|(_, u)| *u == uid) {
+                    store_body(db, *id, &raw)?;
+                }
+            }
+            (self.notify)(Event::FolderChanged {
+                folder_id: Some(folder.id),
+            });
+        }
+        Ok(())
+    }
+
+    fn fetch_body(&mut self, db: &mut Db, message_id: i64) -> Result<()> {
+        let m = db
+            .message(message_id)?
+            .ok_or_else(|| anyhow!("message is gone"))?;
+        if m.raw.is_none() {
+            let folder = folder_name(db, m.folder_id)?;
+            let mut bodies = self.with_imap(|imap, _| imap.fetch_bodies(&folder, &[m.uid]))?;
+            let (_, raw) = bodies
+                .pop()
+                .ok_or_else(|| anyhow!("the server no longer has this message"))?;
+            store_body(db, message_id, &raw)?;
+        }
+        (self.notify)(Event::BodyReady { message_id });
+        Ok(())
+    }
+
+    fn send(
+        &mut self,
+        db: &mut Db,
+        out: smtp::Outgoing,
+        reply_to: Option<i64>,
+        sent_folder: Option<&Folder>,
+    ) -> Result<()> {
+        let msg = smtp::build(out)?;
+        let password = secrets::get_password(self.account.id)?;
+        smtp::send(&self.account.smtp, &self.account.email, &password, &msg)?;
+        // The message is out; failures below are reported but do not undo it.
+        if let Some(folder) = sent_folder {
+            let raw = msg.formatted();
+            self.with_imap(|imap, _| imap.append(&folder.name, &raw))
+                .context("sent, but saving a copy to Sent failed")?;
+        }
+        if let Some(original) = reply_to
+            && let Some(m) = db.message(original)?
+        {
+            db.set_answered(original)?;
+            let folder = folder_name(db, m.folder_id)?;
+            self.with_imap(|imap, _| imap.set_flag(&folder, m.uid, "\\Answered", true))
+                .ok();
+        }
+        Ok(())
+    }
+}
+
+fn sync_folder(
+    imap: &mut Imap,
+    db: &mut Db,
+    f: &Folder,
+    notify: &Notify,
+    pending: &Pending,
 ) -> Result<()> {
-    let smtp = smtp_settings(account)?;
-    let auth = build_smtp_auth(db, account)?;
-    let from_email = account.email.clone();
-    let req = smtp::SendRequest {
-        from_name: account.display_name.clone(),
-        from_email,
-        to: to.to_vec(),
-        cc: cc.to_vec(),
-        subject: subject.into(),
-        body_text: body_text.into(),
-        body_html: None,
-        attachments: attachments.to_vec(),
+    let sel = imap.select(&f.name)?;
+    let changed = |notify: &Notify| {
+        notify(Event::FolderChanged {
+            folder_id: Some(f.id),
+        })
     };
-    smtp::send(&smtp, &smtp.host, &auth, &req)?;
-
-    // Local sent copy (provider-safe: we never touch the server Sent folder
-    // in this version; the cache is the local record of what was sent).
-    let folders = db.list_folders(&account.id)?;
-    let sent = folders
+    if db.set_uidvalidity(f.id, sel.uidvalidity)? {
+        changed(notify);
+    }
+    let remote = if sel.exists == 0 {
+        HashMap::new()
+    } else {
+        imap.uid_flags()?
+    };
+    let known = db.known_uids(f.id)?;
+    let gone: Vec<u32> = known
         .iter()
-        .find(|f| f.special_use.as_deref() == Some("sent"))
-        .or_else(|| folders.first());
-    if let Some(sent) = sent {
-        let row = MessageDraft {
-            account_id: account.id.clone(),
-            folder_id: sent.id.clone(),
-            subject: Some(subject.into()),
-            sender_email: Some(account.email.clone()),
-            to_addresses: serde_json::to_string(to).ok(),
-            cc_addresses: serde_json::to_string(cc).ok(),
-            date_received: Some(Utc::now().timestamp()),
-            is_read: true,
-            body_text: Some(body_text.into()),
-            snippet: Some(mime::make_snippet(body_text)),
-            has_attachments: !attachments.is_empty(),
-            ..Default::default()
-        };
-        let message_id = db.insert_message(&row)?;
-        for attachment in attachments {
-            db.insert_attachment(
-                &message_id,
-                &attachment.filename,
-                Some(&attachment.content_type),
-                &attachment.data,
-            )?;
+        .filter(|u| !remote.contains_key(u))
+        .copied()
+        .collect();
+    if !gone.is_empty() {
+        db.delete_uids(f.id, &gone)?;
+        changed(notify);
+    }
+    let mut new: Vec<u32> = remote
+        .keys()
+        .filter(|u| !known.contains(u))
+        .copied()
+        .collect();
+    new.sort_unstable_by(|a, b| b.cmp(a)); // newest first
+    for chunk in new.chunks(HEADER_BATCH) {
+        let mut headers = imap.fetch_headers(chunk)?;
+        // A message the user moved or deleted locally still exists on the
+        // server until the interactive worker gets to it; don't re-add it.
+        let busy = pending.uids(f.id);
+        headers.retain(|h| !busy.contains(&h.uid));
+        db.insert_headers(f.account_id, f.id, &headers)?;
+        changed(notify);
+    }
+    if !known.is_empty() && !remote.is_empty() {
+        let busy = pending.uids(f.id);
+        if db.apply_flags(f.id, &remote, &busy)? > 0 {
+            changed(notify);
         }
     }
     Ok(())
 }
 
-/// Discover IMAP/SMTP settings for an address using the real autoconfig HTTP
-/// fetch and the system DNS resolver (autoconfig XML → RFC 6186 SRV → presets).
-pub fn discover_account(email: &str) -> Result<discovery::DiscoveredSettings> {
-    let fetch = |url: &str| -> Result<String> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .build()
-            .context("building autodiscovery HTTP client")?;
-        let resp = client
-            .get(url)
-            .send()
-            .with_context(|| format!("autodiscovery request failed: {url}"))?;
-        let status = resp.status();
-        let text = resp.text().unwrap_or_default();
-        if !status.is_success() {
-            return Err(anyhow!("autodiscovery endpoint returned {status}"));
-        }
-        Ok(text)
-    };
-    discovery::discover(email, &fetch, &discovery::srv_records)
+fn store_body(db: &mut Db, id: i64, raw: &[u8]) -> Result<()> {
+    let body = mime::parse_body(raw);
+    db.set_body(
+        id,
+        raw,
+        &mime::preview(&body.text),
+        !body.attachments.is_empty(),
+    )
 }
 
-/// Create a password-authenticated account, validate provider policy, and
-/// store the password in the OS credential store.
-#[allow(clippy::too_many_arguments)]
-pub fn create_password_account(
-    db: &Database,
-    email: &str,
-    display_name: Option<&str>,
-    provider_kind: types::ProviderKind,
-    imap: Option<&types::ServerSettings>,
-    smtp: Option<&types::ServerSettings>,
-    username: Option<&str>,
-    password: &str,
-) -> Result<Account> {
-    providers::validate_provider_policy(provider_kind, types::AuthMode::Password, imap, smtp)?;
-    let account = db.insert_account(&account_draft(
-        email,
-        display_name,
-        provider_kind,
-        types::AuthMode::Password,
-        imap,
-        smtp,
-        username,
-    ))?;
-    secrets::set(&secrets::key::account_password(&account.id), password)?;
-    Ok(account)
+fn folder_name(db: &Db, folder_id: i64) -> Result<String> {
+    Ok(db
+        .folder(folder_id)?
+        .ok_or_else(|| anyhow!("folder no longer exists"))?
+        .name)
 }
 
-/// Run the OAuth PKCE browser flow for an OAuth provider, create the account,
-/// and persist the tokens (and client settings) for later refresh.
-#[allow(clippy::too_many_arguments)]
-pub fn create_oauth_account(
-    db: &Database,
-    email: &str,
-    display_name: Option<&str>,
-    provider_kind: types::ProviderKind,
-    client_id: &str,
-    client_secret: &str,
-    redirect_uri: &str,
-    imap: Option<&types::ServerSettings>,
-    smtp: Option<&types::ServerSettings>,
-    username: Option<&str>,
-) -> Result<Account> {
-    providers::validate_provider_policy(provider_kind, types::AuthMode::OAuth, imap, smtp)?;
-    let config =
-        oauth::OAuthConfig::for_kind(provider_kind, client_id, client_secret, redirect_uri)?;
-    let session = oauth::start(&config)?;
-    open::that(&session.auth_url).context("opening the authorization URL in your browser")?;
-    let code = oauth::wait_for_code(&session.redirect_uri, Duration::from_secs(300))?;
-    let tokens = oauth::exchange(&config, &code, &session.verifier)?;
-
-    let account = db.insert_account(&account_draft(
-        email,
-        display_name,
-        provider_kind,
-        types::AuthMode::OAuth,
-        imap,
-        smtp,
-        username,
-    ))?;
-
-    secrets::set(
-        &secrets::key::account_oauth_refresh(&account.id),
-        tokens.refresh_token.as_deref().unwrap_or_default(),
-    )?;
-    secrets::set(
-        &secrets::key::account_oauth_access(&account.id),
-        &tokens.access_token,
-    )?;
-    db.set_setting(
-        &format!("oauth.expires_at.{}", account.id),
-        &(Utc::now().timestamp() + tokens.expires_in).to_string(),
-    )?;
-    // Client settings needed by build_imap_auth / build_smtp_auth for refresh.
-    // The client_id and redirect_uri are non-secret app registration values and
-    // stay in settings; the client_secret is a credential and lives only in the
-    // OS credential store, never in SQLite.
-    db.set_setting(&format!("oauth.client_id.{}", account.id), client_id)?;
-    secrets::set(
-        &secrets::key::account_oauth_client_secret(&account.id),
-        client_secret,
-    )?;
-    db.set_setting(&format!("oauth.redirect_uri.{}", account.id), redirect_uri)?;
-    Ok(account)
-}
-
-/// Build the account draft shared by password and OAuth creation paths.
-fn account_draft(
-    email: &str,
-    display_name: Option<&str>,
-    provider_kind: types::ProviderKind,
-    auth_mode: types::AuthMode,
-    imap: Option<&types::ServerSettings>,
-    smtp: Option<&types::ServerSettings>,
-    username: Option<&str>,
-) -> AccountDraft {
-    AccountDraft {
-        email: email.to_string(),
-        display_name: display_name.map(str::to_string),
-        provider_kind: provider_kind.as_str().to_string(),
-        auth_mode: auth_mode.as_str().to_string(),
-        username: username.map(str::to_string),
-        imap_host: imap.map(|s| s.host.clone()),
-        imap_port: imap.map(|s| s.port as i64),
-        imap_security: imap.map(|s| s.security.as_str().to_string()),
-        smtp_host: smtp.map(|s| s.host.clone()),
-        smtp_port: smtp.map(|s| s.port as i64),
-        smtp_security: smtp.map(|s| s.security.as_str().to_string()),
-    }
-}
-
-/// Result of an outbox replay pass for one account.
-#[derive(Debug, Default)]
-pub struct ReplaySummary {
-    pub applied: usize,
-    pub conflicts: Vec<String>,
-}
-
-/// Apply every pending offline mutation for `account` to the IMAP server.
-///
-/// Mutations are grouped by source mailbox so each group shares one
-/// connection. Applied entries are marked as reconciled; failures stay
-/// pending and are reported as conflicts (retried on the next sync).
-pub fn replay_outbox(db: &Database, account: &Account) -> ReplaySummary {
-    let mut summary = ReplaySummary::default();
-    let entries: Vec<OutboxEntry> = match db.list_pending_mutations() {
-        Ok(list) => list
-            .into_iter()
-            .filter(|e| e.account_id == account.id)
-            .collect(),
-        Err(e) => {
-            summary.conflicts.push(format!("outbox read failed: {e}"));
-            return summary;
-        }
-    };
-    if entries.is_empty() {
-        return summary;
-    }
-
-    let settings = match imap_settings(account) {
-        Ok(s) => s,
-        Err(e) => {
-            summary.conflicts.push(format!("{}: {e}", account.email));
-            return summary;
-        }
-    };
-    let auth = match build_imap_auth(db, account) {
-        Ok(a) => a,
-        Err(e) => {
-            summary.conflicts.push(format!("{}: {e}", account.email));
-            return summary;
-        }
-    };
-
-    // Group pending mutations by source mailbox (remote folder name).
-    let mut groups: std::collections::BTreeMap<String, Vec<OutboxEntry>> =
-        std::collections::BTreeMap::new();
-    for entry in entries {
-        let source = entry
-            .source_folder
-            .clone()
-            .or_else(|| db.folder_name_of_message(&entry.message_id).ok().flatten());
-        match source {
-            Some(name) => groups.entry(name).or_default().push(entry),
-            None => {
-                // The cached message is gone (removed on another device);
-                // the mutation has nothing left to act on.
-                let _ = db.mark_mutation_applied(&entry.id);
-                summary
-                    .conflicts
-                    .push("skipped: message no longer cached".to_string());
-            }
-        }
-    }
-
-    for (folder, ops) in groups {
-        let mut conn = match imap::ImapConnection::open(&settings, &settings.host, &auth, &folder) {
-            Ok(c) => c,
-            Err(e) => {
-                // Leave everything pending; retried on the next sync.
-                summary
-                    .conflicts
-                    .push(format!("offline ({folder}), will retry: {e}"));
-                continue;
-            }
-        };
-        for op in ops {
-            let result = match op.kind.as_str() {
-                "move" => match op.target_folder.as_deref() {
-                    Some(dest) => conn
-                        .copy_message(op.uid, dest)
-                        .and_then(|_| conn.delete_message(op.uid)),
-                    None => Err(anyhow::anyhow!("move mutation missing target folder")),
-                },
-                "delete" => conn.delete_message(op.uid),
-                "flag" => conn.set_flagged(op.uid, true),
-                "unflag" => conn.set_flagged(op.uid, false),
-                "mark_read" => conn.set_seen(op.uid, true),
-                "mark_unread" => conn.set_seen(op.uid, false),
-                other => Err(anyhow::anyhow!("unknown mutation kind '{other}'")),
-            };
-            match result {
-                Ok(()) => {
-                    let _ = db.mark_mutation_applied(&op.id);
-                    summary.applied += 1;
-                }
-                Err(e) => summary.conflicts.push(format!("{}: {e}", op.kind)),
-            }
-        }
-        conn.logout();
-    }
-    summary
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SyncSummary {
-    pub fetched: usize,
-    pub folders: usize,
-    pub errors: Vec<String>,
-    pub replayed: usize,
-    pub conflicts: usize,
-    /// Rule actions fired during this pass.
-    pub rules_applied: usize,
-    /// Locally-cached message ids inserted by this sync (for rules).
-    pub new_ids: Vec<String>,
-}
-
-fn imap_settings(account: &Account) -> Result<types::ServerSettings> {
-    Ok(types::ServerSettings {
-        host: account
-            .imap_host
-            .clone()
-            .ok_or_else(|| anyhow!("account {} has no IMAP host", account.email))?,
-        port: account.imap_port.unwrap_or(993) as u16,
-        security: types::Security::parse_or_default(
-            account.imap_security.as_deref().unwrap_or("tls"),
-        ),
+fn is_connection_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>().is_some()
+            || c.downcast_ref::<::imap::Error>().is_some_and(|ie| {
+                matches!(ie, ::imap::Error::Io(_) | ::imap::Error::ConnectionLost)
+            })
     })
 }
 
-fn smtp_settings(account: &Account) -> Result<types::ServerSettings> {
-    Ok(types::ServerSettings {
-        host: account
-            .smtp_host
-            .clone()
-            .ok_or_else(|| anyhow!("account {} has no SMTP host", account.email))?,
-        port: account.smtp_port.unwrap_or(587) as u16,
-        security: types::Security::parse_or_default(
-            account.smtp_security.as_deref().unwrap_or("starttls"),
-        ),
-    })
-}
-
-fn build_imap_auth(db: &Database, account: &Account) -> Result<imap::Auth> {
-    let username = account
-        .username
-        .clone()
-        .unwrap_or_else(|| account.email.clone());
-    match account.auth_mode.as_str() {
-        "oauth" => {
-            let client_id = db
-                .get_setting(&format!("oauth.client_id.{}", account.id))?
-                .ok_or_else(|| anyhow!("missing OAuth client id for {}", account.email))?;
-            let client_secret =
-                secrets::get(&secrets::key::account_oauth_client_secret(&account.id))?
-                    .unwrap_or_default();
-            let redirect_uri = db
-                .get_setting(&format!("oauth.redirect_uri.{}", account.id))?
-                .unwrap_or_else(|| "http://127.0.0.1:8765/callback".into());
-            let token = oauth_access_token(db, account, &client_id, &client_secret, &redirect_uri)?;
-            Ok(imap::Auth::XOAuth2 {
-                username,
-                access_token: token,
-            })
-        }
-        _ => {
-            let password = secrets::get(&secrets::key::account_password(&account.id))?
-                .ok_or_else(|| anyhow!("no password stored for {}", account.email))?;
-            Ok(imap::Auth::Password { username, password })
-        }
-    }
-}
-
-fn build_smtp_auth(db: &Database, account: &Account) -> Result<smtp::SmtpAuth> {
-    let username = account
-        .username
-        .clone()
-        .unwrap_or_else(|| account.email.clone());
-    match account.auth_mode.as_str() {
-        "oauth" => {
-            let client_id = db
-                .get_setting(&format!("oauth.client_id.{}", account.id))?
-                .ok_or_else(|| anyhow!("missing OAuth client id for {}", account.email))?;
-            let client_secret =
-                secrets::get(&secrets::key::account_oauth_client_secret(&account.id))?
-                    .unwrap_or_default();
-            let redirect_uri = db
-                .get_setting(&format!("oauth.redirect_uri.{}", account.id))?
-                .unwrap_or_else(|| "http://127.0.0.1:8765/callback".into());
-            let token = oauth_access_token(db, account, &client_id, &client_secret, &redirect_uri)?;
-            Ok(smtp::SmtpAuth::XOAuth2 {
-                username,
-                access_token: token,
-            })
-        }
-        _ => {
-            let password = secrets::get(&secrets::key::account_password(&account.id))?
-                .ok_or_else(|| anyhow!("no password stored for {}", account.email))?;
-            Ok(smtp::SmtpAuth::Password { username, password })
-        }
-    }
-}
-
-// Demo mailbox seeding lives in `demo.rs`.
-pub mod demo;
-pub use demo::seed_local_demo;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn demo_seed_is_idempotent() {
-        let db = Database::in_memory().unwrap();
-        seed_local_demo(&db).unwrap();
-        seed_local_demo(&db).unwrap();
-        assert_eq!(db.list_accounts().unwrap().len(), 1);
-        let inbox = db.list_folders(&db.list_accounts().unwrap()[0].id).unwrap();
-        assert!(
-            inbox
-                .iter()
-                .any(|f| f.special_use.as_deref() == Some("inbox"))
-        );
-    }
-
-    #[test]
-    fn demo_seed_creates_threads() {
-        let db = Database::in_memory().unwrap();
-        seed_local_demo(&db).unwrap();
-        let account = db.list_accounts().unwrap().remove(0);
-        let inbox = db
-            .list_folders(&account.id)
-            .unwrap()
-            .into_iter()
-            .find(|f| f.special_use.as_deref() == Some("inbox"))
-            .unwrap();
-        let reply = db
-            .list_messages(&inbox.id, 1000, 0)
-            .unwrap()
-            .into_iter()
-            .find(|m| m.subject.as_deref() == Some("Re: Partnership Proposal"))
-            .unwrap();
-        let detail = db.get_message_detail(&reply.id).unwrap().unwrap();
-        let tid = detail.thread_id.clone().unwrap();
-        let thread = db.list_thread_messages(&tid).unwrap();
-        assert_eq!(thread.len(), 2);
-        assert_eq!(thread[0].subject.as_deref(), Some("Partnership Proposal"));
-        assert_eq!(
-            thread[1].subject.as_deref(),
-            Some("Re: Partnership Proposal")
-        );
-    }
-
-    #[test]
-    fn imap_auth_requires_stored_secret() {
-        let db = Database::in_memory().unwrap();
-        let account = db
-            .insert_account(&crate::db::AccountDraft {
-                email: "a@b.test".into(),
-                provider_kind: "custom".into(),
-                auth_mode: "password".into(),
-                ..Default::default()
-            })
-            .unwrap();
-        // No secret stored → clear error, never a panic.
-        let err = build_imap_auth(&db, &account).unwrap_err();
-        assert!(err.to_string().contains("no password stored"));
-    }
-
-    /// A minimal RFC822 message with one attachment, used to exercise the
-    /// cache-ingest path without a live IMAP server.
-    const FETCH_BODY: &[u8] = b"From: Jane Doe <jane@example.com>\r\nTo: me@example.org\r\nSubject: Sync ingest\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBody from a live fetch.\r\n--B\r\nContent-Type: text/plain; name=\"notes.txt\"\r\nContent-Disposition: attachment; filename=\"notes.txt\"\r\n\r\nfile bytes\r\n--B--\r\n";
-
-    #[test]
-    fn cache_fetched_messages_ingests_and_dedupes() {
-        let db = Database::in_memory().unwrap();
-        let account = db
-            .insert_account(&AccountDraft {
-                email: "me@example.org".into(),
-                provider_kind: "custom".into(),
-                auth_mode: "password".into(),
-                ..Default::default()
-            })
-            .unwrap();
-        let folder = db
-            .upsert_folder(&account.id, "INBOX", None, Some("inbox"), None)
-            .unwrap();
-
-        let fetched = [imap::RawFetch {
-            uid: 7,
-            body: FETCH_BODY.to_vec(),
-            seen: false,
-            flagged: true,
-        }];
-        let inserted =
-            cache_fetched_messages(&db, &account, &folder.id, Some(42), &fetched).unwrap();
-        assert_eq!(inserted, 1);
-
-        let rows = db.list_messages(&folder.id, 10, 0).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].subject.as_deref(), Some("Sync ingest"));
-        assert_eq!(rows[0].sender_email.as_deref(), Some("jane@example.com"));
-        assert!(!rows[0].is_read);
-        assert!(rows[0].is_flagged);
-
-        let attachments = db.list_attachments(&rows[0].id).unwrap();
-        assert_eq!(attachments.len(), 1);
-        assert_eq!(attachments[0].display_name, "notes.txt");
-        assert_eq!(
-            db.get_attachment_data(&attachments[0].id).unwrap().unwrap(),
-            b"file bytes"
-        );
-
-        // Re-ingesting the same UID is a no-op.
-        let again = cache_fetched_messages(&db, &account, &folder.id, Some(42), &fetched).unwrap();
-        assert_eq!(again, 0);
-        assert_eq!(db.list_messages(&folder.id, 10, 0).unwrap().len(), 1);
-    }
-
-    #[test]
-    fn account_draft_maps_server_settings() {
-        let draft = account_draft(
-            "me@example.org",
-            Some("Me"),
-            types::ProviderKind::Custom,
-            types::AuthMode::Password,
-            Some(&types::ServerSettings {
-                host: "imap.example.org".into(),
-                port: 993,
-                security: types::Security::Tls,
-            }),
-            Some(&types::ServerSettings {
-                host: "smtp.example.org".into(),
-                port: 587,
-                security: types::Security::StartTls,
-            }),
-            None,
-        );
-        assert_eq!(draft.email, "me@example.org");
-        assert_eq!(draft.provider_kind, "custom");
-        assert_eq!(draft.auth_mode, "password");
-        assert_eq!(draft.imap_host.as_deref(), Some("imap.example.org"));
-        assert_eq!(draft.imap_security.as_deref(), Some("tls"));
-        assert_eq!(draft.smtp_host.as_deref(), Some("smtp.example.org"));
-        assert_eq!(draft.smtp_security.as_deref(), Some("starttls"));
-    }
-
-    #[test]
-    fn password_account_policy_refuses_gmail() {
-        // Policy check runs before any secret is written, so this can be
-        // tested with an in-memory DB and no keyring.
-        let db = Database::in_memory().unwrap();
-        let gmail = providers::preset(types::ProviderKind::Gmail).unwrap();
-        let err = create_password_account(
-            &db,
-            "me@gmail.com",
-            None,
-            types::ProviderKind::Gmail,
-            gmail.imap.as_ref(),
-            gmail.smtp.as_ref(),
-            None,
-            "secret",
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("OAuth"));
-    }
+/// Check that an account's settings and password work before saving it.
+pub fn verify(imap_server: &Server, username: &str, password: &str) -> Result<()> {
+    let mut imap = Imap::connect(imap_server, username, password)?;
+    imap.noop()?;
+    imap.logout();
+    Ok(())
 }

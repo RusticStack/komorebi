@@ -1,220 +1,217 @@
-//! IMAP client wrapper (sync, on OS threads).
-//!
-//! Supports TLS and STARTTLS, password login and XOAUTH2 SASL for OAuth
-//! providers, folder listing with special-use attributes, incremental UID
-//! sync, flag updates, and outbox replay primitives (COPY, \Deleted+EXPUNGE).
-//! Provider-safe posture: destructive mutations are only issued by the
-//! explicit outbox replay path.
+//! Thin IMAP session wrapper (blocking, used from worker threads only).
 
-use super::types::{Security, ServerSettings};
+use super::mime::{HEADER_FIELDS, parse_header};
+use crate::db::{self, NewHeader};
+use crate::providers::{Security, Server};
+use crate::role::Role;
 use anyhow::{Context, Result, anyhow};
-use imap::types::{Flag, Mailbox, Name, NameAttribute};
-use imap::{Client, Session};
-use native_tls::TlsConnector;
-use std::net::TcpStream;
+use imap::types::{Flag, NameAttribute};
+use native_tls::{TlsConnector, TlsStream};
+use std::collections::HashMap;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 
-#[derive(Debug)]
-pub enum Auth {
-    Password {
-        username: String,
-        password: String,
-    },
-    XOAuth2 {
-        username: String,
-        access_token: String,
-    },
+type Session = imap::Session<TlsStream<TcpStream>>;
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const IO_TIMEOUT: Duration = Duration::from_secs(90);
+
+pub struct Imap {
+    session: Session,
+    selected: Option<String>,
+    has_move: bool,
+    has_uidplus: bool,
 }
 
-/// Minimal XOAUTH2 SASL authenticator for the `imap` crate's generic
-/// `AUTHENTICATE` handshake.
-struct XOAuth2Authenticator {
-    username: String,
-    access_token: String,
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteFolder {
+    /// Raw server name (modified UTF-7), used in commands.
+    pub name: String,
+    /// Decoded last path segment, shown in the sidebar.
+    pub display: String,
+    pub depth: i64,
+    pub role: Role,
 }
 
-impl imap::Authenticator for XOAuth2Authenticator {
-    type Response = Vec<u8>;
-
-    fn process(&self, _challenge: &[u8]) -> Vec<u8> {
-        format!(
-            "user={}\x01auth=Bearer {}\x01\x01",
-            self.username, self.access_token
-        )
-        .into_bytes()
-    }
+pub struct Selected {
+    pub uidvalidity: u32,
+    pub exists: u32,
 }
 
-/// A live IMAP connection bound to one mailbox folder.
-pub struct ImapConnection {
-    session: Session<native_tls::TlsStream<TcpStream>>,
-    pub folder: String,
-    pub mailbox: Mailbox,
-}
-
-pub fn connect(
-    settings: &ServerSettings,
-    tls_domain: &str,
-) -> Result<Client<native_tls::TlsStream<TcpStream>>> {
-    let tls = TlsConnector::builder()
-        .build()
-        .context("building TLS connector")?;
-    let addr = (settings.host.as_str(), settings.port);
-    match settings.security {
-        Security::Tls => imap::connect(addr, tls_domain, &tls).context("IMAP TLS connect failed"),
-        Security::StartTls => {
-            imap::connect_starttls(addr, tls_domain, &tls).context("IMAP STARTTLS connect failed")
-        }
-        Security::None => Err(anyhow!(
-            "IMAP requires TLS or STARTTLS; refusing a plaintext connection"
-        )),
-    }
-}
-
-pub fn authenticate(
-    client: Client<native_tls::TlsStream<TcpStream>>,
-    auth: &Auth,
-) -> Result<Session<native_tls::TlsStream<TcpStream>>> {
-    match auth {
-        Auth::Password { username, password } => client
+impl Imap {
+    pub fn connect(server: &Server, username: &str, password: &str) -> Result<Self> {
+        let addr = (server.host.as_str(), server.port)
+            .to_socket_addrs()
+            .with_context(|| format!("resolving {}", server.host))?
+            .next()
+            .ok_or_else(|| anyhow!("{} has no address", server.host))?;
+        let tcp = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
+            .with_context(|| format!("connecting to {}:{}", server.host, server.port))?;
+        tcp.set_read_timeout(Some(IO_TIMEOUT))?;
+        tcp.set_write_timeout(Some(IO_TIMEOUT))?;
+        let tls = TlsConnector::new().context("initializing TLS")?;
+        let client = match server.security {
+            Security::Tls => {
+                let stream = tls
+                    .connect(&server.host, tcp)
+                    .map_err(|e| anyhow!("TLS handshake with {} failed: {e}", server.host))?;
+                let mut client = imap::Client::new(stream);
+                client.read_greeting().context("reading IMAP greeting")?;
+                client
+            }
+            Security::StartTls => {
+                let mut client = imap::Client::new(tcp);
+                client.read_greeting().context("reading IMAP greeting")?;
+                client
+                    .secure(&server.host, &tls)
+                    .context("IMAP STARTTLS failed")?
+            }
+        };
+        let mut session = client
             .login(username, password)
-            .map_err(|(e, _)| e)
-            .context("IMAP LOGIN failed"),
-        Auth::XOAuth2 {
-            username,
-            access_token,
-        } => client
-            .authenticate(
-                "XOAUTH2",
-                &XOAuth2Authenticator {
-                    username: username.clone(),
-                    access_token: access_token.clone(),
-                },
-            )
-            .map_err(|(e, _)| e)
-            .context("IMAP XOAUTH2 failed"),
-    }
-}
-
-impl ImapConnection {
-    pub fn open(
-        settings: &ServerSettings,
-        tls_domain: &str,
-        auth: &Auth,
-        folder: &str,
-    ) -> Result<Self> {
-        let client = connect(settings, tls_domain)?;
-        let mut session = authenticate(client, auth)?;
-        let mailbox = session
-            .select(folder)
-            .with_context(|| format!("selecting folder {folder}"))?;
+            .map_err(|(e, _)| anyhow!("sign-in failed: {e}"))?;
+        let (has_move, has_uidplus) = match session.capabilities() {
+            Ok(caps) => (caps.has_str("MOVE"), caps.has_str("UIDPLUS")),
+            Err(_) => (false, false),
+        };
         Ok(Self {
             session,
-            folder: folder.to_string(),
-            mailbox,
+            selected: None,
+            has_move,
+            has_uidplus,
         })
     }
 
-    /// List all selectable folders with RFC 6154 special-use attributes.
-    pub fn list_folders(
-        settings: &ServerSettings,
-        tls_domain: &str,
-        auth: &Auth,
-    ) -> Result<Vec<FolderInfo>> {
-        let client = connect(settings, tls_domain)?;
-        let mut session = authenticate(client, auth)?;
-        let names = session
-            .list(Some(""), Some("*"))
-            .context("IMAP LIST failed")?;
+    pub fn noop(&mut self) -> Result<()> {
+        Ok(self.session.noop()?)
+    }
+
+    pub fn list_folders(&mut self) -> Result<Vec<RemoteFolder>> {
+        let names = self.session.list(Some(""), Some("*"))?;
         let mut out = Vec::new();
-        for name in names.iter() {
-            if name
-                .attributes()
-                .iter()
-                .any(|a| matches!(a, NameAttribute::NoSelect))
-            {
+        for n in names.iter() {
+            let attrs = n.attributes();
+            if attrs.iter().any(|a| matches!(a, NameAttribute::NoSelect)) {
                 continue;
             }
-            out.push(FolderInfo {
-                name: name.name().to_string(),
-                delimiter: name.delimiter().map(|d| d.to_string()),
-                special_use: special_use(name),
+            let special = attrs.iter().find_map(|a| match a {
+                NameAttribute::Custom(v) => Role::from_attr(v),
+                _ => None,
             });
+            out.push(remote_folder(n.name(), n.delimiter(), special));
         }
-        session.logout().ok();
         Ok(out)
     }
 
-    /// Fetch messages with UID > `since_uid`, extracting the data we cache.
-    /// Pass `since_uid = 0` for a full initial fetch (capped by `limit`).
-    pub fn fetch_new(&mut self, since_uid: u32, limit: Option<u32>) -> Result<Vec<RawFetch>> {
-        let start = since_uid.saturating_add(1);
-        let range = match limit {
-            Some(n) if n > 0 => format!("{start}:{}", start.saturating_add(n).saturating_sub(1)),
-            _ => format!("{start}:*"),
-        };
-        let result = self
+    pub fn select(&mut self, folder: &str) -> Result<Selected> {
+        let mb = self
             .session
-            .uid_fetch(range, "(UID FLAGS BODY.PEEK[])")
-            .map_err(|e| anyhow!("IMAP UID FETCH failed: {e}"))?;
-        Ok(result.iter().map(RawFetch::from).collect())
+            .select(folder)
+            .with_context(|| format!("opening folder {folder}"))?;
+        self.selected = Some(folder.to_string());
+        Ok(Selected {
+            uidvalidity: mb.uid_validity.unwrap_or(0),
+            exists: mb.exists,
+        })
     }
 
-    /// Fetch a single message by UID.
-    pub fn fetch_one(&mut self, uid: u32) -> Result<RawFetch> {
-        let result = self
-            .session
-            .uid_fetch(uid.to_string(), "(UID FLAGS BODY.PEEK[])")
-            .map_err(|e| anyhow!("IMAP UID FETCH failed: {e}"))?;
-        let mut it = result.iter();
-        let fetch = it
-            .next()
-            .ok_or_else(|| anyhow!("no message with UID {uid}"))?;
-        Ok(RawFetch::from(fetch))
+    fn ensure_selected(&mut self, folder: &str) -> Result<()> {
+        if self.selected.as_deref() != Some(folder) {
+            self.select(folder)?;
+        }
+        Ok(())
     }
 
-    pub fn set_seen(&mut self, uid: u32, seen: bool) -> Result<()> {
-        let op = if seen {
-            "+FLAGS.SILENT"
+    /// UID → flag bits of every message in the selected folder, in one
+    /// round trip (replaces SEARCH ALL/UNSEEN/FLAGGED/ANSWERED).
+    pub fn uid_flags(&mut self) -> Result<HashMap<u32, u8>> {
+        let fetches = self.session.uid_fetch("1:*", "(UID FLAGS)")?;
+        Ok(fetches
+            .iter()
+            .filter_map(|f| Some((f.uid?, flag_bits(f.flags()))))
+            .collect())
+    }
+
+    pub fn fetch_headers(&mut self, uids: &[u32]) -> Result<Vec<NewHeader>> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fetches = self.session.uid_fetch(
+            uid_set(uids),
+            format!("(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])"),
+        )?;
+        Ok(fetches
+            .iter()
+            .filter_map(|f| {
+                let uid = f.uid?;
+                let mut h = parse_header(f.header().unwrap_or_default());
+                h.uid = uid;
+                h.size = f.size.unwrap_or(0) as i64;
+                let bits = flag_bits(f.flags());
+                h.seen = bits & db::SEEN != 0;
+                h.flagged = bits & db::FLAGGED != 0;
+                h.answered = bits & db::ANSWERED != 0;
+                Some(h)
+            })
+            .collect())
+    }
+
+    /// Full RFC 822 bytes of messages, without setting \Seen.
+    pub fn fetch_bodies(&mut self, folder: &str, uids: &[u32]) -> Result<Vec<(u32, Vec<u8>)>> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.ensure_selected(folder)?;
+        let fetches = self.session.uid_fetch(uid_set(uids), "(UID BODY.PEEK[])")?;
+        Ok(fetches
+            .iter()
+            .filter_map(|f| Some((f.uid?, f.body()?.to_vec())))
+            .collect())
+    }
+
+    pub fn set_flag(&mut self, folder: &str, uid: u32, flag: &str, on: bool) -> Result<()> {
+        self.ensure_selected(folder)?;
+        let op = if on { "+FLAGS.SILENT" } else { "-FLAGS.SILENT" };
+        self.session
+            .uid_store(uid.to_string(), format!("{op} ({flag})"))?;
+        Ok(())
+    }
+
+    /// Move a message to another folder (MOVE, or COPY + delete).
+    pub fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<()> {
+        self.ensure_selected(folder)?;
+        if self.has_move {
+            self.session.uid_mv(uid.to_string(), dest)?;
         } else {
-            "-FLAGS.SILENT"
-        };
-        self.session
-            .uid_store(uid.to_string(), format!("({op} (\\Seen))"))
-            .map_err(|e| anyhow!("IMAP STORE \\Seen failed: {e}"))?;
+            self.session.uid_copy(uid.to_string(), dest)?;
+            self.expunge(uid)?;
+        }
         Ok(())
     }
 
-    pub fn set_flagged(&mut self, uid: u32, flagged: bool) -> Result<()> {
-        let op = if flagged {
-            "+FLAGS.SILENT"
+    /// Permanently remove a message from the selected folder.
+    pub fn delete_message(&mut self, folder: &str, uid: u32) -> Result<()> {
+        self.ensure_selected(folder)?;
+        self.expunge(uid)
+    }
+
+    fn expunge(&mut self, uid: u32) -> Result<()> {
+        self.session
+            .uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")?;
+        if self.has_uidplus {
+            self.session.uid_expunge(uid.to_string())?;
         } else {
-            "-FLAGS.SILENT"
-        };
-        self.session
-            .uid_store(uid.to_string(), format!("({op} (\\Flagged))"))
-            .map_err(|e| anyhow!("IMAP STORE \\Flagged failed: {e}"))?;
+            // Without UIDPLUS, EXPUNGE also removes anything another client
+            // marked \Deleted in this folder (standard IMAP behavior).
+            self.session.expunge()?;
+        }
         Ok(())
     }
 
-    /// Copy a message to another mailbox by UID (server must support COPY).
-    pub fn copy_message(&mut self, uid: u32, dest: &str) -> Result<()> {
+    pub fn append(&mut self, folder: &str, raw: &[u8]) -> Result<()> {
         self.session
-            .uid_copy(uid.to_string(), dest)
-            .map_err(|e| anyhow!("IMAP COPY to {dest} failed: {e}"))?;
-        Ok(())
-    }
-
-    /// Mark a message \Deleted and expunge the mailbox. Note: EXPUNGE also
-    /// purges any other messages another client flagged \Deleted in this
-    /// mailbox - the standard trade-off without UID EXPUNGE support.
-    pub fn delete_message(&mut self, uid: u32) -> Result<()> {
-        self.session
-            .uid_store(uid.to_string(), "(+FLAGS.SILENT (\\Deleted))")
-            .map_err(|e| anyhow!("IMAP STORE \\Deleted failed: {e}"))?;
-        self.session
-            .expunge()
-            .map_err(|e| anyhow!("IMAP EXPUNGE failed: {e}"))?;
-        Ok(())
+            .append_with_flags(folder, raw, &[Flag::Seen])
+            .with_context(|| format!("saving a copy to {folder}"))
     }
 
     pub fn logout(mut self) {
@@ -222,75 +219,121 @@ impl ImapConnection {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FolderInfo {
-    pub name: String,
-    pub delimiter: Option<String>,
-    pub special_use: Option<String>,
+pub fn flag_bits(flags: &[Flag]) -> u8 {
+    flags.iter().fold(0, |bits, f| {
+        bits | match f {
+            Flag::Seen => db::SEEN,
+            Flag::Flagged => db::FLAGGED,
+            Flag::Answered => db::ANSWERED,
+            _ => 0,
+        }
+    })
 }
 
-fn special_use(name: &Name) -> Option<String> {
-    for attr in name.attributes() {
-        if let NameAttribute::Custom(value) = attr {
-            let lower = value.to_ascii_lowercase();
-            let special = match lower.as_str() {
-                "\\sent" => Some("sent"),
-                "\\drafts" => Some("drafts"),
-                "\\trash" => Some("trash"),
-                "\\junk" => Some("junk"),
-                "\\archive" => Some("archive"),
-                "\\all" => Some("all"),
-                "\\flagged" => Some("flagged"),
-                _ => None,
-            };
-            if let Some(s) = special {
-                return Some(s.into());
-            }
+fn uid_set(uids: &[u32]) -> String {
+    let mut sorted = uids.to_vec();
+    sorted.sort_unstable();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < sorted.len() {
+        let start = sorted[i];
+        let mut end = start;
+        while i + 1 < sorted.len() && sorted[i + 1] == end + 1 {
+            i += 1;
+            end = sorted[i];
+        }
+        if !out.is_empty() {
+            out.push(',');
+        }
+        if start == end {
+            out.push_str(&start.to_string());
+        } else {
+            out.push_str(&format!("{start}:{end}"));
+        }
+        i += 1;
+    }
+    out
+}
+
+fn remote_folder(name: &str, delimiter: Option<&str>, special: Option<Role>) -> RemoteFolder {
+    let (leaf, depth) = match delimiter.filter(|d| !d.is_empty()) {
+        Some(d) => (
+            name.rsplit(d).next().unwrap_or(name),
+            name.matches(d).count() as i64,
+        ),
+        None => (name, 0),
+    };
+    // Match well-known names on the decoded name; the top-level INBOX always
+    // wins over special-use attributes.
+    let display = decode_mutf7(leaf);
+    let role = match Role::from_name(name, &display) {
+        Some(Role::Inbox) => Role::Inbox,
+        by_name => special.or(by_name).unwrap_or_default(),
+    };
+    RemoteFolder {
+        name: name.to_string(),
+        display: if role == Role::Inbox {
+            "Inbox".to_string()
+        } else {
+            display
+        },
+        depth: if role == Role::Other { depth } else { 0 },
+        role,
+    }
+}
+
+/// Decode an IMAP modified UTF-7 mailbox name (RFC 3501 §5.1.3).
+pub fn decode_mutf7(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('-') else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let encoded = &after[..end];
+        if encoded.is_empty() {
+            out.push('&');
+        } else if let Some(units) = decode_mbase64(encoded) {
+            out.push_str(&String::from_utf16_lossy(&units));
+        } else {
+            out.push_str(&rest[start..start + end + 2]);
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_mbase64(s: &str) -> Option<Vec<u16>> {
+    let mut bits = 0u32;
+    let mut nbits = 0;
+    let mut bytes = Vec::new();
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b',' => 63,
+            _ => return None,
+        } as u32;
+        bits = (bits << 6) | v;
+        nbits += 6;
+        if nbits >= 8 {
+            nbits -= 8;
+            bytes.push((bits >> nbits) as u8);
+            bits &= (1 << nbits) - 1;
         }
     }
-    special_use_from_name(name.name())
-}
-
-/// Name-based special-use heuristic fallback (INBOX handled by callers).
-fn special_use_from_name(name: &str) -> Option<String> {
-    let lower = name.to_lowercase();
-    if lower.ends_with("/sent") || lower.ends_with("sent items") || lower == "sent" {
-        return Some("sent".into());
-    }
-    if lower.ends_with("/drafts") || lower == "drafts" {
-        return Some("drafts".into());
-    }
-    if lower.ends_with("/trash") || lower == "trash" || lower == "deleted items" {
-        return Some("trash".into());
-    }
-    if lower.ends_with("/junk") || lower == "junk" || lower == "spam" || lower == "junk email" {
-        return Some("junk".into());
-    }
-    if lower.ends_with("/archive") || lower == "archive" {
-        return Some("archive".into());
-    }
-    None
-}
-
-/// The subset of a fetched message we persist to the cache.
-#[derive(Debug, Clone)]
-pub struct RawFetch {
-    pub uid: u32,
-    pub body: Vec<u8>,
-    pub seen: bool,
-    pub flagged: bool,
-}
-
-impl RawFetch {
-    pub fn from(fetch: &imap::types::Fetch) -> Self {
-        let flags = fetch.flags();
-        Self {
-            uid: fetch.uid.unwrap_or(0),
-            body: fetch.body().unwrap_or_default().to_vec(),
-            seen: flags.contains(&Flag::Seen),
-            flagged: flags.contains(&Flag::Flagged),
-        }
-    }
+    Some(
+        bytes
+            .chunks_exact(2)
+            .map(|p| u16::from_be_bytes([p[0], p[1]]))
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -298,33 +341,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn xoauth2_payload_format() {
-        use imap::Authenticator as _;
-        let auth = XOAuth2Authenticator {
-            username: "me@example.com".into(),
-            access_token: "tok123".into(),
-        };
-        let payload = String::from_utf8(auth.process(b"")).unwrap();
-        assert_eq!(payload, "user=me@example.com\x01auth=Bearer tok123\x01\x01");
+    fn packs_flags() {
+        assert_eq!(
+            flag_bits(&[Flag::Seen, Flag::Answered, Flag::Deleted]),
+            db::SEEN | db::ANSWERED
+        );
+        assert_eq!(flag_bits(&[]), 0);
     }
 
     #[test]
-    fn special_use_name_heuristics() {
-        assert_eq!(special_use_from_name("Sent Items"), Some("sent".into()));
-        assert_eq!(special_use_from_name("Archive"), Some("archive".into()));
-        assert_eq!(special_use_from_name("Deleted Items"), Some("trash".into()));
-        assert_eq!(special_use_from_name("Junk Email"), Some("junk".into()));
-        assert_eq!(special_use_from_name("Projects/Team"), None);
+    fn compresses_uid_sets() {
+        assert_eq!(uid_set(&[5, 1, 2, 3, 9, 10]), "1:3,5,9:10");
+        assert_eq!(uid_set(&[7]), "7");
     }
 
     #[test]
-    fn refuses_plaintext_imap() {
-        let settings = ServerSettings {
-            host: "imap.example.com".into(),
-            port: 143,
-            security: Security::None,
-        };
-        let err = connect(&settings, "imap.example.com").unwrap_err();
-        assert!(err.to_string().contains("plaintext"));
+    fn folder_roles_and_names() {
+        let f = remote_folder("INBOX", Some("/"), None);
+        assert_eq!((f.display.as_str(), f.role), ("Inbox", Role::Inbox));
+        let f = remote_folder("INBOX.Sent Items", Some("."), None);
+        assert_eq!(
+            (f.display.as_str(), f.role, f.depth),
+            ("Sent Items", Role::Sent, 0)
+        );
+        let f = remote_folder("Projects/Entw&APw-rfe", Some("/"), None);
+        assert_eq!(
+            (f.display.as_str(), f.role, f.depth),
+            ("Entwürfe", Role::Other, 1)
+        );
+        let f = remote_folder("Papierkorb", Some("/"), Some(Role::Trash));
+        assert_eq!(f.role, Role::Trash);
+        let f = remote_folder("INBOX", Some("/"), Some(Role::Archive));
+        assert_eq!(f.role, Role::Inbox);
+    }
+
+    #[test]
+    fn modified_utf7() {
+        assert_eq!(decode_mutf7("Hello"), "Hello");
+        assert_eq!(decode_mutf7("&ZeVnLIqe-"), "日本語");
+        assert_eq!(decode_mutf7("A&-B"), "A&B");
     }
 }

@@ -1,52 +1,40 @@
 [package]
 name = "komorebi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "AI-first, privacy-first, local-first email client built on Zed GPUI"
+description = "A small, fast, privacy-respecting email client for Windows"
 license = "Apache-2.0"
-
-[lib]
-name = "komorebi"
-path = "src/lib.rs"
-
-[[bin]]
-name = "komorebi"
-path = "src/main.rs"
+build = "build.rs"
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
-chrono = { version = "0.4", features = ["serde", "clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "6"
-env_logger = "0.11"
-gpui = "0.2.2"
-gpui-component = "0.5.1"
-hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
 imap = "2.4"
-keyring = "4"
-lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "native-tls", "pool", "smtp-transport"] }
-log = "0.4"
+keyring = { version = "4" }
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "native-tls", "smtp-transport"] }
 mail-parser = "0.11"
 native-tls = "0.2"
-notify-rust = "4"
-open = "5"
-percent-encoding = "2"
-quick-xml = "0.41"
-rand = "0.9"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "brotli", "charset", "deflate", "form", "gzip", "json", "rustls"] }
+rfd = { version = "0.17", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-thiserror = "2"
-tokio = { version = "1", features = ["net", "rt", "time"] }
-unicode-width = "0.2"
-url = "2"
-uuid = { version = "1", features = ["v4"] }
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility"] }
+
+[build-dependencies]
+slint-build = "1.18"
 
 [dev-dependencies]
-tempfile = "3"
+base64 = "0.22"
 
 [profile.release]
 lto = "thin"
+codegen-units = 1
 strip = true
+panic = "abort"
+
+# Slint's software renderer is unusably slow unoptimized; optimize
+# dependencies in debug builds and keep our own crate fast to rebuild.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2

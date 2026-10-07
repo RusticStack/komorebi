@@ -9,13 +9,15 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_INCREMENTAL: 0
+
 jobs:
   build:
-    # Komorebi is a Windows-native GPUI app: rust-toolchain.toml pins the
-    # x86_64-pc-windows-msvc target and gpui's Linux backend needs system
-    # libraries (libxkbcommon, wayland, xcb) that bare ubuntu runners lack.
-    # windows-latest ships the MSVC toolchain + Windows SDK, so this is where
-    # the crate actually builds and the exact commands below pass.
+    # Komorebi is a Windows app: rust-toolchain.toml pins the
+    # x86_64-pc-windows-msvc target, and windows-latest ships the MSVC
+    # toolchain + Windows SDK that Slint's winit backend and rusqlite's
+    # bundled SQLite build need.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,21 +32,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo check
-        run: cargo check --all-targets
-
-      - name: cargo test
-        run: cargo test
-
-      - name: cargo build
-        run: cargo build
+      # Cheapest first. Clippy type-checks every target (it replaces a
+      # separate cargo check), and cargo test builds the dev profile.
+      - name: cargo fmt
+        run: cargo fmt --check
 
       # Clippy is clean in src/; the only remaining warning is a third-party
       # future-incompat notice from imap-proto (transitive via the imap crate),
       # which is not actionable here. Keep -D warnings off only because of that
       # transitive notice.
       - name: cargo clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --locked
 
-      - name: cargo fmt
-        run: cargo fmt --check
+      - name: cargo test
+        run: cargo test --locked
