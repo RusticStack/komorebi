@@ -1,0 +1,237 @@
+Content-Type: multipart/mixed; boundary="===============7888065036531277690=="
+MIME-Version: 1.0
+From: Rui Mendes <rui.mendes@example.com>
+To: marta@example.org
+Subject: Invitation: Rendering engine design review @ Wed 14 Oct 2026 10:00 -
+ 11:00 (WEST) (marta@example.org)
+Date: Wed, 07 Oct 2026 12:00:00 -0000
+Message-ID: <179140428528.29476.486224356804789593@calendar.example.com>
+
+--===============7888065036531277690==
+Content-Type: multipart/alternative;
+ boundary="===============1057688221747181105=="
+
+--===============1057688221747181105==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+You have been invited to the following event.
+Rendering engine design review
+
+When
+Wed 14 Oct 2026 10:00 =E2=80=93 11:00 Western European Time - Lisbon
+
+Where
+Sala Douro, Rua do Exemplo 100, Porto (map)
+
+Joining info
+Join with Meet
+meet.example.invalid/abc-defg-hij
+Join by phone: (PT) +351 000 000 000 PIN: 123 456 789#
+
+Calendar
+marta@example.org
+
+Who
+Rui Mendes - Organizer
+Marta Silva=20
+In=C3=AAs Costa=20
+Tom=C3=A1s Lopes - Optional
+
+Agenda:
+1. Parser & sanitizer limits
+2. CSS subset (what we support, what we drop)
+3. Remote content policy =E2=80=93 default deny
+4. Perf budget: first paint < 16 ms for typical mail
+
+Going (marta@example.org)?=20
+YesMaybeNomore options =C2=BB
+
+Invitation from Calendar
+You are receiving this email at the account marta@example.org because you are=
+ an attendee of this event.
+To stop receiving future updates for this event, decline this event. Forwardi=
+ng this invitation could allow any recipient to send a response to the organi=
+zer.
+
+--===============1057688221747181105==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<span itemscope itemtype=3D"http://schema.org/InformAction"><span style=3D"di=
+splay:none" itemprop=3D"about" itemscope itemtype=3D"http://schema.org/Person=
+"><meta itemprop=3D"description" content=3D"Invitation from Rui Mendes"></spa=
+n><span itemprop=3D"object" itemscope itemtype=3D"http://schema.org/Event"><d=
+iv style=3D""><table cellspacing=3D"0" cellpadding=3D"8" border=3D"0" summary=
+=3D"" style=3D"width:100%;font-family:Arial,Sans-serif;border:1px Solid #ccc;=
+border-width:1px 2px 2px 1px;background-color:#fff;"><tr><td><meta itemprop=
+=3D"eventStatus" content=3D"http://schema.org/EventScheduled"/><h4 style=3D"p=
+adding:6px 10px;margin:0 0 4px 0;font-family:Arial,Sans-serif;font-size:13px;=
+line-height:1.4;border:1px Solid #fff;background:#fff;color:#090;font-weight:=
+normal"><strong>You have been invited to the following event.</strong></h4><d=
+iv style=3D"padding:2px"><span itemprop=3D"publisher" itemscope itemtype=3D"h=
+ttp://schema.org/Organization"><meta itemprop=3D"name" content=3D"Calendar"/>=
+</span><meta itemprop=3D"eventId/googleCalendar" content=3D"evt123"/><h3 styl=
+e=3D"padding:0 0 6px 0;margin:0;font-family:Arial,Sans-serif;font-size:16px;f=
+ont-weight:bold;color:#222"><span itemprop=3D"name">Rendering engine design r=
+eview</span></h3>
+<table style=3D"display:inline-table" cellpadding=3D"0" cellspacing=3D"0" bor=
+der=3D"0" summary=3D"Event details"><tr><td style=3D"padding:0 1em 10px 0;fon=
+t-family:Arial,Sans-serif;font-size:13px;color:#888;white-space:nowrap" valig=
+n=3D"top"><div><i style=3D"font-style:normal">When</i></div></td><td style=3D=
+"padding-bottom:10px;font-family:Arial,Sans-serif;font-size:13px;color:#222" =
+valign=3D"top"><time itemprop=3D"startDate" datetime=3D"20261014T090000Z"></t=
+ime><time itemprop=3D"endDate" datetime=3D"20261014T100000Z"></time>Wed 14 Oc=
+t 2026 10:00 &ndash; 11:00 <span style=3D"color:#888">Western European Time -=
+ Lisbon</span></td></tr>
+<tr><td style=3D"padding:0 1em 10px 0;font-family:Arial,Sans-serif;font-size:=
+13px;color:#888;white-space:nowrap" valign=3D"top"><div><i style=3D"font-styl=
+e:normal">Where</i></div></td><td style=3D"padding-bottom:10px;font-family:Ar=
+ial,Sans-serif;font-size:13px;color:#222" valign=3D"top"><span itemprop=3D"lo=
+cation" itemscope itemtype=3D"http://schema.org/Place"><span itemprop=3D"name=
+" class=3D"notranslate">Sala Douro, Rua do Exemplo 100, Porto</span><span dir=
+=3D"ltr"> (<a href=3D"https://maps.example.invalid/?q=3DSala+Douro" style=3D"=
+color:#20c;white-space:nowrap" target=3D"_blank" itemprop=3D"map">map</a>)</s=
+pan></span></td></tr>
+<tr><td style=3D"padding:0 1em 10px 0;font-family:Arial,Sans-serif;font-size:=
+13px;color:#888;white-space:nowrap" valign=3D"top"><div><i style=3D"font-styl=
+e:normal">Joining info</i></div></td><td style=3D"padding-bottom:10px;font-fa=
+mily:Arial,Sans-serif;font-size:13px;color:#222" valign=3D"top"><a href=3D"ht=
+tps://meet.example.invalid/abc-defg-hij" style=3D"display:inline-block;backgr=
+ound-color:#1a73e8;border-radius:4px;color:#fff;font:500 14px/36px 'Google Sa=
+ns',Roboto,Arial;padding:0 24px;text-decoration:none"><img src=3D"https://exa=
+mple.invalid/cal/video_white_24dp.png" width=3D"18" height=3D"18" alt=3D"" st=
+yle=3D"vertical-align:middle;margin-right:8px">Join with Meet</a><br><span st=
+yle=3D"color:#70757a">meet.example.invalid/abc-defg-hij</span><br>Join by pho=
+ne: <a href=3D"tel:+351-000-000-000%3B123456789%23">(PT) +351 000 000 000</a>=
+ PIN: 123 456 789#</td></tr>
+<tr><td style=3D"padding:0 1em 10px 0;font-family:Arial,Sans-serif;font-size:=
+13px;color:#888;white-space:nowrap" valign=3D"top"><div><i style=3D"font-styl=
+e:normal">Calendar</i></div></td><td style=3D"padding-bottom:10px;font-family=
+:Arial,Sans-serif;font-size:13px;color:#222" valign=3D"top">marta@example.org=
+</td></tr>
+<tr><td style=3D"padding:0 1em 10px 0;font-family:Arial,Sans-serif;font-size:=
+13px;color:#888;white-space:nowrap" valign=3D"top"><div><i style=3D"font-styl=
+e:normal">Who</i></div></td><td style=3D"padding-bottom:10px;font-family:Aria=
+l,Sans-serif;font-size:13px;color:#222" valign=3D"top"><div style=3D"padding:=
+2px 0"><span itemprop=3D"attendee" itemscope itemtype=3D"http://schema.org/Pe=
+rson"><span itemprop=3D"name" class=3D"notranslate">Rui Mendes</span><meta it=
+emprop=3D"email" content=3D"rui.mendes@example.com"></span><span style=3D"col=
+or:#70757a"> - Organizer</span></div><div style=3D"padding:2px 0"><span itemp=
+rop=3D"attendee" itemscope itemtype=3D"http://schema.org/Person"><span itempr=
+op=3D"name" class=3D"notranslate">Marta Silva</span><meta itemprop=3D"email" =
+content=3D"marta@example.org"></span><span style=3D"color:#70757a"> </span></=
+div><div style=3D"padding:2px 0"><span itemprop=3D"attendee" itemscope itemty=
+pe=3D"http://schema.org/Person"><span itemprop=3D"name" class=3D"notranslate"=
+>In=C3=AAs Costa</span><meta itemprop=3D"email" content=3D"ines.costa@example=
+.com"></span><span style=3D"color:#70757a"> </span></div><div style=3D"paddin=
+g:2px 0"><span itemprop=3D"attendee" itemscope itemtype=3D"http://schema.org/=
+Person"><span itemprop=3D"name" class=3D"notranslate">Tom=C3=A1s Lopes</span>=
+<meta itemprop=3D"email" content=3D"tomas@example.net"></span><span style=3D"=
+color:#70757a"> - Optional</span></div></td></tr></table>
+<div style=3D"padding-bottom:12px"><span itemprop=3D"description">Agenda:<br>=
+1. Parser &amp; sanitizer limits<br>2. CSS subset (what we support, what we d=
+rop)<br>3. Remote content policy &ndash; <b>default deny</b><br>4. Perf budge=
+t: first paint &lt; 16&nbsp;ms for typical mail</span></div>
+<p style=3D"color:#222;font-size:13px;margin:0"><span style=3D"color:#888">Go=
+ing (marta@example.org)?&nbsp;&nbsp;&nbsp;</span></p><table cellpadding=3D"0"=
+ cellspacing=3D"0" border=3D"0"><tr><td style=3D"padding-right:8px"><a href=
+=3D"https://calendar.example.invalid/event?action=3DRESPOND&amp;eid=3DZXZ0MTI=
+z&amp;rst=3D1" style=3D"display:inline-block;padding:6px 16px;border:1px soli=
+d #dadce0;border-radius:16px;color:#1a73e8;font:500 14px/20px 'Google Sans',R=
+oboto,Arial,sans-serif;text-decoration:none">Yes</a></td><td style=3D"padding=
+-right:8px"><a href=3D"https://calendar.example.invalid/event?action=3DRESPON=
+D&amp;eid=3DZXZ0MTIz&amp;rst=3D3" style=3D"display:inline-block;padding:6px 1=
+6px;border:1px solid #dadce0;border-radius:16px;color:#1a73e8;font:500 14px/2=
+0px 'Google Sans',Roboto,Arial,sans-serif;text-decoration:none">Maybe</a></td=
+><td style=3D"padding-right:8px"><a href=3D"https://calendar.example.invalid/=
+event?action=3DRESPOND&amp;eid=3DZXZ0MTIz&amp;rst=3D2" style=3D"display:inlin=
+e-block;padding:6px 16px;border:1px solid #dadce0;border-radius:16px;color:#1=
+a73e8;font:500 14px/20px 'Google Sans',Roboto,Arial,sans-serif;text-decoratio=
+n:none">No</a></td><td><a href=3D"https://calendar.example.invalid/event?acti=
+on=3DVIEW&amp;eid=3DZXZ0MTIz" style=3D"color:#20c;font-size:13px">more option=
+s &raquo;</a></td></tr></table>
+</div></td></tr><tr><td style=3D"background-color:#f6f6f6;color:#888;border-t=
+op:1px Solid #ccc;font-family:Arial,Sans-serif;font-size:11px"><p>Invitation =
+from Calendar</p><p>You are receiving this email at the account marta@example=
+.org because you are an attendee of this event.</p><p>To stop receiving futur=
+e updates for this event, decline this event. Forwarding this invitation coul=
+d allow any recipient to send a response to the organizer.</p></td></tr></tab=
+le></div></span></span>
+
+--===============1057688221747181105==
+Content-Transfer-Encoding: 7bit
+Content-Type: text/calendar; charset="utf-8"; method="REQUEST"
+
+BEGIN:VCALENDAR
+PRODID:-//Example//Calendar 1.0//EN
+VERSION:2.0
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VTIMEZONE
+TZID:Europe/Lisbon
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+TZNAME:WEST
+DTSTART:19700329T010000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+TZNAME:WET
+DTSTART:19701025T020000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTART;TZID=Europe/Lisbon:20261014T100000
+DTEND;TZID=Europe/Lisbon:20261014T110000
+DTSTAMP:20261007T120000Z
+ORGANIZER;CN=Rui Mendes:mailto:rui.mendes@example.com
+UID:evt123@calendar.example.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=Marta Silva:mailto:marta@example.org
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;CN=Ines Costa:mailto:ines.costa@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=Tomas Lopes:mailto:tomas@example.net
+SUMMARY:Rendering engine design review
+LOCATION:Sala Douro\, Rua do Exemplo 100\, Porto
+DESCRIPTION:Agenda:\n1. Parser & sanitizer limits\n2. CSS subset\n3. Remote content policy - default deny\n4. Perf budget
+SEQUENCE:0
+STATUS:CONFIRMED
+TRANSP:OPAQUE
+END:VEVENT
+END:VCALENDAR
+
+--===============1057688221747181105==--
+
+--===============7888065036531277690==
+Content-Type: application/ics
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invite.ics"
+
+QkVHSU46VkNBTEVOREFSDQpQUk9ESUQ6LS8vRXhhbXBsZS8vQ2FsZW5kYXIgMS4wLy9FTg0KVkVS
+U0lPTjoyLjANCkNBTFNDQUxFOkdSRUdPUklBTg0KTUVUSE9EOlJFUVVFU1QNCkJFR0lOOlZUSU1F
+Wk9ORQ0KVFpJRDpFdXJvcGUvTGlzYm9uDQpCRUdJTjpEQVlMSUdIVA0KVFpPRkZTRVRGUk9NOisw
+MDAwDQpUWk9GRlNFVFRPOiswMTAwDQpUWk5BTUU6V0VTVA0KRFRTVEFSVDoxOTcwMDMyOVQwMTAw
+MDANClJSVUxFOkZSRVE9WUVBUkxZO0JZTU9OVEg9MztCWURBWT0tMVNVDQpFTkQ6REFZTElHSFQN
+CkJFR0lOOlNUQU5EQVJEDQpUWk9GRlNFVEZST006KzAxMDANClRaT0ZGU0VUVE86KzAwMDANClRa
+TkFNRTpXRVQNCkRUU1RBUlQ6MTk3MDEwMjVUMDIwMDAwDQpSUlVMRTpGUkVRPVlFQVJMWTtCWU1P
+TlRIPTEwO0JZREFZPS0xU1UNCkVORDpTVEFOREFSRA0KRU5EOlZUSU1FWk9ORQ0KQkVHSU46VkVW
+RU5UDQpEVFNUQVJUO1RaSUQ9RXVyb3BlL0xpc2JvbjoyMDI2MTAxNFQxMDAwMDANCkRURU5EO1Ra
+SUQ9RXVyb3BlL0xpc2JvbjoyMDI2MTAxNFQxMTAwMDANCkRUU1RBTVA6MjAyNjEwMDdUMTIwMDAw
+Wg0KT1JHQU5JWkVSO0NOPVJ1aSBNZW5kZXM6bWFpbHRvOnJ1aS5tZW5kZXNAZXhhbXBsZS5jb20N
+ClVJRDpldnQxMjNAY2FsZW5kYXIuZXhhbXBsZS5jb20NCkFUVEVOREVFO0NVVFlQRT1JTkRJVklE
+VUFMO1JPTEU9UkVRLVBBUlRJQ0lQQU5UO1BBUlRTVEFUPU5FRURTLUFDVElPTjtSU1ZQPVRSVUU7
+Q049TWFydGEgU2lsdmE6bWFpbHRvOm1hcnRhQGV4YW1wbGUub3JnDQpBVFRFTkRFRTtDVVRZUEU9
+SU5ESVZJRFVBTDtST0xFPVJFUS1QQVJUSUNJUEFOVDtQQVJUU1RBVD1BQ0NFUFRFRDtDTj1JbmVz
+IENvc3RhOm1haWx0bzppbmVzLmNvc3RhQGV4YW1wbGUuY29tDQpBVFRFTkRFRTtDVVRZUEU9SU5E
+SVZJRFVBTDtST0xFPU9QVC1QQVJUSUNJUEFOVDtQQVJUU1RBVD1ORUVEUy1BQ1RJT047Q049VG9t
+YXMgTG9wZXM6bWFpbHRvOnRvbWFzQGV4YW1wbGUubmV0DQpTVU1NQVJZOlJlbmRlcmluZyBlbmdp
+bmUgZGVzaWduIHJldmlldw0KTE9DQVRJT046U2FsYSBEb3Vyb1wsIFJ1YSBkbyBFeGVtcGxvIDEw
+MFwsIFBvcnRvDQpERVNDUklQVElPTjpBZ2VuZGE6XG4xLiBQYXJzZXIgJiBzYW5pdGl6ZXIgbGlt
+aXRzXG4yLiBDU1Mgc3Vic2V0XG4zLiBSZW1vdGUgY29udGVudCBwb2xpY3kgLSBkZWZhdWx0IGRl
+bnlcbjQuIFBlcmYgYnVkZ2V0DQpTRVFVRU5DRTowDQpTVEFUVVM6Q09ORklSTUVEDQpUUkFOU1A6
+T1BBUVVFDQpFTkQ6VkVWRU5UDQpFTkQ6VkNBTEVOREFSDQo=
+
+--===============7888065036531277690==--

@@ -1,13 +1,60 @@
 import { Theme, Icons } from "theme.slint";
+import { ScrollView, Palette } from "std-widgets.slint";
+
+// Where the keyboard focus came from last: the list and the folders show
+// their current row only after a key moved it, not after a click.
+export global Focus {
+    in-out property <bool> keyboard;
+}
+
+// The 2 px keyboard focus ring, drawn over its control.
+export component FocusRing inherits Rectangle {
+    in property <bool> shown;
+    border-width: root.shown ? 2px : 0;
+    border-color: Theme.focus;
+    border-radius: Theme.radius;
+}
+
+// A Tab stop for a custom control: Space or Enter presses it. A click
+// doesn't take the focus (the list keeps the keys).
+export component PressKeys inherits FocusScope {
+    callback pressed;
+    focus-on-click: false;
+    key-pressed(e) => {
+        if (e.text == " " || e.text == Key.Return) && !e.modifiers.control && !e.modifiers.alt {
+            root.pressed();
+            return accept;
+        }
+        reject
+    }
+}
+
+// The edges of a dialog: Tab past its last control (or Shift+Tab before
+// its first) lands here, and `entered` sends the focus round to the other
+// end, so the keyboard stays in the dialog. It runs from a change handler,
+// after the focus change is done.
+export component FocusTrap inherits FocusScope {
+    callback entered;
+    property <int> hits;
+    width: 0;
+    height: 0;
+    focus-on-click: false;
+    focus-gained(reason) => { self.hits += 1; }
+    changed hits => { root.entered(); }
+}
 
 export struct NavItem {
-    kind: int,        // 0 = all inboxes, 1 = account header, 2 = folder
+    kind: int,        // 0 = all inboxes, 1 = account header, 2 = folder, 3 = local drafts, 4 = outbox
     id: int,          // folder id (kind 2) or account id (kind 1)
     label: string,
     icon: string,
     unread: int,
+    count: int,       // items, shown quietly (local drafts, outbox)
     depth: int,
     expanded: bool,
+    warn: bool,       // account header: its sign-in is rejected
+    off: bool,        // its account is switched off (shown greyed)
+    dot: color,       // account header: its colour (transparent: none)
 }
 
 export struct MailRow {
@@ -20,6 +67,10 @@ export struct MailRow {
     flagged: bool,
     attach: bool,
     answered: bool,
+    draft: bool,      // a local draft replies to it
+    selected: bool,   // in the multi-selection
+    folder: string,   // its folder, in a search of all folders
+    dot: color,       // its account's colour in All inboxes (transparent: none)
 }
 
 export struct AttachmentRow {
@@ -32,6 +83,12 @@ export struct AccountRow {
     id: int,
     email: string,
     detail: string,
+    status: string,   // its last sync, from this session only
+    warn: bool,       // the sign-in is rejected
+    enabled: bool,    // switched on (off: no connections, shown greyed)
+    dot: color,       // its colour (All inboxes rows, navigation)
+    first: bool,      // first and last in the account order
+    last: bool,
 }
 
 export struct FolderOption {
@@ -55,17 +112,39 @@ export component IconButton inherits Rectangle {
     in property <string> tooltip;
     in property <bool> enabled: true;
     in property <color> icon-color: Theme.text-2;
+    // A text glyph ("1.") instead of an icon-font one.
+    in property <string> icon-font: Theme.icon-font;
+    in property <length> icon-size: 16px;
     in property <LayoutAlignment> alignment: center;
+    // `elide` lets a long label shrink with its row.
+    in property <TextOverflow> label-overflow: clip;
+    // A Tab stop, pressed with Space or Enter; off: reached only by the
+    // arrows of its toolbar.
+    in property <bool> tab-stop: true;
+    // A toggle (flag, unread): its state for screen readers.
+    in property <bool> checkable;
+    in property <bool> checked;
+    out property <bool> has-focus: fs.has-focus;
     callback clicked;
 
+    forward-focus: fs;
     accessible-role: button;
     accessible-label: root.label != "" ? root.label : root.tooltip;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
     accessible-action-default => { root.clicked(); }
 
     height: 32px;
     min-width: 32px;
     border-radius: Theme.radius;
     background: !enabled ? transparent : ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+
+    fs := PressKeys {
+        enabled: root.enabled;
+        focus-on-tab-navigation: root.tab-stop;
+        pressed => { root.clicked(); }
+    }
 
     ta := TouchArea {
         enabled: root.enabled;
@@ -80,6 +159,8 @@ export component IconButton inherits Rectangle {
         alignment: root.alignment;
         Icon {
             text: root.icon;
+            font-family: root.icon-font;
+            font-size: root.icon-size;
             color: root.enabled ? root.icon-color : Theme.text-disabled;
             width: 20px;
         }
@@ -88,8 +169,10 @@ export component IconButton inherits Rectangle {
             font-size: Theme.body;
             color: root.enabled ? Theme.text : Theme.text-disabled;
             vertical-alignment: center;
+            overflow: root.label-overflow;
         }
     }
+    FocusRing { shown: fs.has-focus; }
 }
 
 // Accent-filled primary action ("New mail", "Send").
@@ -97,16 +180,23 @@ export component AccentButton inherits Rectangle {
     in property <string> icon;
     in property <string> label;
     in property <bool> enabled: true;
+    out property <bool> has-focus: fs.has-focus;
     callback clicked;
 
+    forward-focus: fs;
     accessible-role: button;
     accessible-label: root.label;
+    accessible-enabled: root.enabled;
     accessible-action-default => { root.clicked(); }
 
     height: 32px;
     border-radius: Theme.radius;
-    background: !enabled ? Theme.stroke : ta.pressed ? Theme.accent.darker(0.2) : ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
+    background: !enabled ? Theme.accent-disabled : ta.pressed ? Theme.accent.darker(0.2) : ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
+    fs := PressKeys {
+        enabled: root.enabled;
+        pressed => { root.clicked(); }
+    }
     ta := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
@@ -119,16 +209,57 @@ export component AccentButton inherits Rectangle {
         alignment: center;
         if root.icon != "": Icon {
             text: root.icon;
-            color: root.enabled ? Theme.on-accent : Theme.text-disabled;
+            color: root.enabled ? Theme.on-accent : Theme.on-accent-disabled;
             width: 16px;
         }
         if root.label != "": Text {
             text: root.label;
             font-size: Theme.body;
             font-weight: 600;
-            color: root.enabled ? Theme.on-accent : Theme.text-disabled;
+            color: root.enabled ? Theme.on-accent : Theme.on-accent-disabled;
             vertical-alignment: center;
         }
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+// Text that acts as a button ("Unsubscribe", "Update password"): accent
+// coloured, a Tab stop, pressed with Space or Enter.
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <string> label: root.text;
+    in property <length> font-size: Theme.body;
+    in property <int> font-weight: 400;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    // As big as its text, so the ring and the click area hug it.
+    min-width: t.preferred-width;
+    max-width: t.preferred-width;
+    min-height: t.preferred-height;
+    max-height: t.preferred-height;
+    fs := PressKeys { pressed => { root.clicked(); } }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    t := Text {
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        color: ta.has-hover ? Theme.text : Theme.accent-text;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+    FocusRing {
+        x: -2px;
+        y: -1px;
+        width: parent.width + 4px;
+        height: parent.height + 2px;
+        shown: fs.has-focus;
     }
 }
 
@@ -137,12 +268,18 @@ export component NavRow inherits Rectangle {
     in property <bool> selected;
     // Icon-only rail for narrow windows.
     in property <bool> compact;
+    // The keyboard's current row in the folder list.
+    in property <bool> ring;
     callback clicked;
 
     accessible-role: list-item;
-    accessible-label: item.label + (item.unread > 0 ? ", " + item.unread + " unread" : "");
+    accessible-label: item.label + (item.off && item.kind == 1 ? ", switched off" : "") + (item.warn ? ", sign-in rejected" : "") + (item.unread > 0 ? ", " + item.unread + " unread" : "") + (item.count > 0 ? ", " + item.count : "");
     accessible-item-selected: root.selected;
+    // Account headers fold their folders.
+    accessible-expandable: item.kind == 1;
+    accessible-expanded: item.kind == 1 && item.expanded;
     accessible-action-default => { root.clicked(); }
+    accessible-action-expand => { root.clicked(); }
 
     height: item.kind == 1 ? (compact ? 9px : 36px) : (compact ? 40px : 32px);
     border-radius: Theme.radius;
@@ -150,7 +287,10 @@ export component NavRow inherits Rectangle {
 
     ta := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            Focus.keyboard = false;
+            root.clicked();
+        }
     }
 
     // Selection indicator pill (Fluent nav)
@@ -163,10 +303,10 @@ export component NavRow inherits Rectangle {
     }
 
     if compact && item.kind == 1: Rectangle {
-        height: 1px;
+        height: item.warn ? 2px : 1px;
         x: Theme.s2;
         width: parent.width - 2 * Theme.s2;
-        background: Theme.stroke-strong;
+        background: item.warn ? Theme.danger : Theme.stroke-strong;
     }
     if compact && item.kind != 1: Icon {
         text: item.icon;
@@ -188,16 +328,32 @@ export component NavRow inherits Rectangle {
             text: item.kind == 1 ? (item.expanded ? Icons.chevron-down : Icons.chevron-right) : item.icon;
             font-size: item.kind == 1 ? 10px : 16px;
             width: 20px;
-            color: item.kind == 1 ? Theme.text-3 : Theme.text-2;
+            color: item.kind == 1 || item.off ? Theme.text-3 : Theme.text-2;
+        }
+        // The account's colour, as its rows show it in All inboxes.
+        if item.dot != transparent: Rectangle {
+            width: 8px;
+            height: 8px;
+            y: (parent.height - 8px) / 2;
+            border-radius: 4px;
+            background: item.dot;
         }
         Text {
             text: item.label;
             font-size: item.kind == 1 ? Theme.caption : Theme.body;
             font-weight: item.kind == 1 || item.unread > 0 ? 600 : 400;
-            color: item.kind == 1 ? Theme.text-2 : Theme.text;
+            color: item.off ? Theme.text-3 : item.kind == 1 ? Theme.text-2 : Theme.text;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
+        }
+        // A rejected sign-in: the account needs its password updated.
+        if item.warn: Rectangle {
+            width: 8px;
+            height: 8px;
+            y: (parent.height - 8px) / 2;
+            border-radius: 4px;
+            background: Theme.danger;
         }
         if item.unread > 0 && !(item.kind == 1 && item.expanded): Text {
             text: item.unread;
@@ -206,24 +362,54 @@ export component NavRow inherits Rectangle {
             color: Theme.accent-text;
             vertical-alignment: center;
         }
+        if item.count > 0 && item.unread == 0: Text {
+            text: item.count;
+            font-size: Theme.caption;
+            color: Theme.text-3;
+            vertical-alignment: center;
+        }
     }
+    FocusRing { shown: root.ring; }
 }
 
 export component MailItem inherits Rectangle {
     in property <MailRow> mail;
     in property <bool> selected;
-    callback clicked;
+    // The keyboard's current row (the list has the focus).
+    in property <bool> ring;
+    // With the modifiers held when the button went down (Ctrl+click
+    // toggles the row, Shift+click selects a range).
+    callback clicked(/* ctrl */ bool, /* shift */ bool);
+    // A right-click, at this window position (for the row menu).
+    callback context(/* x */ length, /* y */ length);
 
     accessible-role: list-item;
-    accessible-label: (mail.unread ? "Unread, " : "") + mail.sender + ", " + mail.subject + ", " + mail.date;
+    accessible-label: (mail.unread ? "Unread, " : "") + (mail.draft ? "Draft, " : "") + mail.sender + ", " + mail.subject + ", " + mail.date
+        + (mail.flagged ? ", Flagged" : "") + (mail.attach ? ", Has attachment" : "") + (mail.answered ? ", Replied" : "")
+        + (mail.folder != "" ? ", in " + mail.folder : "");
     accessible-item-selected: root.selected;
-    accessible-action-default => { root.clicked(); }
+    accessible-action-default => { root.clicked(false, false); }
 
-    height: 76px;
+    height: Theme.row-height;
     background: root.selected ? Theme.row-selected : ta.has-hover ? Theme.hover : transparent;
+    // Selected rows keep an outline, so they show without the fill too.
+    border-width: root.selected ? 1px : 0;
+    border-color: Theme.row-border;
 
     ta := TouchArea {
-        clicked => { root.clicked(); }
+        property <bool> ctrl;
+        property <bool> shift;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+                self.ctrl = e.modifiers.control;
+                self.shift = e.modifiers.shift;
+                if e.button == PointerEventButton.right {
+                    root.context(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+        }
+        clicked => { root.clicked(self.ctrl, self.shift); }
     }
 
     if mail.unread: Rectangle {
@@ -240,6 +426,14 @@ export component MailItem inherits Rectangle {
         spacing: 1px;
         HorizontalLayout {
             spacing: Theme.s2;
+            // Its account, in All inboxes with more than one account.
+            if mail.dot != transparent: Rectangle {
+                width: 8px;
+                height: 8px;
+                y: (parent.height - 8px) / 2;
+                border-radius: 4px;
+                background: mail.dot;
+            }
             Text {
                 text: mail.sender;
                 font-size: Theme.body;
@@ -247,6 +441,13 @@ export component MailItem inherits Rectangle {
                 color: Theme.text;
                 overflow: elide;
                 horizontal-stretch: 1;
+            }
+            if mail.draft: Text {
+                text: "Draft";
+                font-size: Theme.caption;
+                font-weight: 600;
+                color: Theme.danger;
+                vertical-alignment: center;
             }
             if mail.answered: Icon { text: Icons.reply; font-size: 12px; color: Theme.text-3; }
             if mail.attach: Icon { text: Icons.attach; font-size: 12px; color: Theme.text-3; }
@@ -263,14 +464,34 @@ export component MailItem inherits Rectangle {
             text: mail.subject == "" ? "(no subject)" : mail.subject;
             font-size: Theme.body;
             font-weight: mail.unread ? 600 : 400;
-            color: mail.unread ? Theme.accent-text : Theme.text-2;
+            color: mail.unread ? Theme.text : Theme.text-2;
             overflow: elide;
         }
-        Text {
-            text: mail.preview;
-            font-size: Theme.caption + 1px;
-            color: Theme.text-3;
-            overflow: elide;
+        HorizontalLayout {
+            spacing: Theme.s1;
+            // Its folder, in a search of all folders.
+            if mail.folder != "": Rectangle {
+                border-radius: 3px;
+                border-width: 1px;
+                border-color: Theme.stroke-strong;
+                HorizontalLayout {
+                    padding-left: 5px;
+                    padding-right: 5px;
+                    Text {
+                        text: mail.folder;
+                        font-size: Theme.caption;
+                        color: Theme.text-2;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            Text {
+                text: mail.preview;
+                font-size: Theme.caption + 1px;
+                color: Theme.text-3;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
         }
     }
 
@@ -281,6 +502,7 @@ export component MailItem inherits Rectangle {
         width: parent.width - 2 * Theme.s4;
         background: Theme.stroke;
     }
+    FocusRing { shown: root.ring; }
 }
 
 // Attachment chip: file name, size, and a single action.
@@ -290,6 +512,15 @@ export component Chip inherits Rectangle {
     in property <string> action-icon;
     in property <string> action-label;
     callback action;
+    // A click on the chip itself (the reader opens the attachment).
+    callback clicked;
+    // The chip itself opens (the reader); else only its action works.
+    in property <bool> opens;
+
+    accessible-role: button;
+    accessible-label: (root.opens ? "Open " : "") + root.name + ", " + root.size;
+    accessible-enabled: root.opens;
+    accessible-action-default => { root.clicked(); }
 
     height: 40px;
     border-radius: Theme.radius;
@@ -297,9 +528,13 @@ export component Chip inherits Rectangle {
     border-color: Theme.stroke-strong;
     background: ta.has-hover ? Theme.hover : transparent;
 
+    fs := PressKeys {
+        enabled: root.opens;
+        pressed => { root.clicked(); }
+    }
     ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.action(); }
+        mouse-cursor: root.opens ? pointer : default;
+        clicked => { root.clicked(); }
     }
     HorizontalLayout {
         padding-left: Theme.s3;
@@ -329,6 +564,7 @@ export component Chip inherits Rectangle {
             clicked => { root.action(); }
         }
     }
+    FocusRing { shown: fs.has-focus; }
 }
 
 export component FieldLabel inherits Text {
@@ -336,4 +572,103 @@ export component FieldLabel inherits Text {
     color: Theme.text-3;
     vertical-alignment: center;
     width: 64px;
+}
+
+// The composer body: a plain TextInput in a scroll view, styled like the
+// Fluent TextEdit, that also reports its selection for the formatting
+// toolbar (UTF-8 byte offsets; the TextEdit widget hides them).
+// `anchor-position-byte-offset` and `cursor-position-byte-offset` are
+// internal, test-only TextInput properties in Slint 1.18.1: check them
+// again on every Slint upgrade.
+export component ComposeBody inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <length> font-size <=> input.font-size;
+    in-out property <length> content-y <=> scroll.content-y;
+    out property <bool> has-focus: input.has-focus;
+    out property <int> anchor: input.anchor-position-byte-offset;
+    out property <int> cursor: input.cursor-position-byte-offset;
+    callback edited(text: string);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    public function set-selection-offsets(anchor: int, cursor: int) {
+        input.set-selection-offsets(anchor, cursor);
+    }
+
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-value <=> input.text;
+    accessible-action-set-value(v) => {
+        input.text = v;
+        root.edited(v);
+    }
+    accessible-action-set-selection-offsets(a, c) => { input.set-selection-offsets(a, c); }
+
+    background: input.has-focus ? (Theme.dark ? #1e1e1e : #ffffff) : Palette.control-background;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.stroke-strong;
+
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Cut";
+                activated => { input.cut(); }
+            }
+            MenuItem {
+                title: "Copy";
+                enabled: input.text != "";
+                activated => { input.copy(); }
+            }
+            MenuItem {
+                title: "Paste";
+                activated => { input.paste(); }
+            }
+            MenuItem {
+                title: "Select all";
+                enabled: input.text != "";
+                activated => { input.select-all(); }
+            }
+        }
+
+        scroll := ScrollView {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, input.preferred-height);
+
+            input := TextInput {
+                single-line: false;
+                wrap: word-wrap;
+                color: Palette.foreground;
+                selection-background-color: Palette.selection-background;
+                selection-foreground-color: Palette.selection-foreground;
+                page-height: scroll.visible-height;
+                // The component above is the accessible text field.
+                accessible-role: none;
+                edited => { root.edited(self.text); }
+                key-pressed(e) => { root.key-pressed(e) }
+                // Keep the caret in view (as the Fluent TextEdit does; the
+                // 20 px stands in for a line height).
+                cursor-position-changed(p) => {
+                    if p.y + scroll.content-y < 0 {
+                        scroll.content-y = min(0, scroll.visible-height - p.y - 20px, max(scroll.visible-height - self.height, -p.y));
+                    } else if p.y + scroll.content-y > scroll.visible-height - 20px {
+                        scroll.content-y = min(0, max(scroll.visible-height - self.height, scroll.visible-height - p.y - 20px));
+                    }
+                }
+            }
+        }
+    }
+
+    // The Fluent focus underline.
+    if input.has-focus: Rectangle {
+        x: root.border-radius;
+        y: root.height - self.height;
+        width: root.width - 2 * root.border-radius;
+        height: 2px;
+        border-radius: 1px;
+        background: Palette.accent-background;
+    }
 }

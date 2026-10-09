@@ -1,0 +1,33 @@
+From: Rui Mendes <rui.mendes@example.org>
+To: Seed Account <seed@komorebi.invalid>
+Subject: Invitation: Stand-up
+Date: Thu, 8 Oct 2026 15:00:00 +0000
+Message-ID: <07-recurring-weekly@komorebi.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt07"
+
+--alt07
+Content-Type: text/plain; charset="UTF-8"
+
+Short stand-up twice a week.
+
+--alt07
+Content-Type: text/calendar; charset="UTF-8"; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+DTSTART;TZID=Europe/Lisbon:20261012T093000
+DTEND;TZID=Europe/Lisbon:20261012T094500
+RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20271231T235959Z
+DTSTAMP:20261008T150000Z
+ORGANIZER;CN=Rui Mendes:mailto:rui.mendes@example.org
+UID:standup-weekly@example.org
+ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=Seed Account:mailto:seed@komorebi.invalid
+SUMMARY:Stand-up
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+--alt07--

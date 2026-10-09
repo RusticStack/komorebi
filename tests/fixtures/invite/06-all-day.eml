@@ -1,0 +1,33 @@
+From: Ana Silva <ana.silva@example.com>
+To: Seed Account <seed@komorebi.invalid>
+Subject: Invitation: Team offsite
+Date: Thu, 8 Oct 2026 14:00:00 +0000
+Message-ID: <06-all-day@komorebi.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt06"
+
+--alt06
+Content-Type: text/plain; charset="UTF-8"
+
+Two days away from the screens.
+
+--alt06
+Content-Type: text/calendar; charset="UTF-8"; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20270410
+DTEND;VALUE=DATE:20270412
+DTSTAMP:20261008T140000Z
+ORGANIZER;CN=Ana Silva:mailto:ana.silva@example.com
+UID:offsite-2027@example.com
+ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:seed@komorebi.invalid
+SUMMARY:Team offsite
+LOCATION:Sintra
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR
+
+--alt06--

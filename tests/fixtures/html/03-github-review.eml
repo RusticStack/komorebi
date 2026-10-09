@@ -1,0 +1,151 @@
+Content-Type: multipart/alternative;
+ boundary="===============7520080438671948848=="
+MIME-Version: 1.0
+From: octo-cat <notifications@github.example.com>
+To: komorebi/komorebi <komorebi@noreply.github.example.com>
+Subject:
+ Re: [komorebi/komorebi] Render HTML mail without a web engine (PR #318)
+Cc: Mention <mention@noreply.github.example.com>
+Date: Wed, 07 Oct 2026 12:00:00 -0000
+Message-ID: <179140428520.29476.5166209607226604313@github.example.com>
+List-ID: komorebi/komorebi <komorebi.komorebi.github.example.com>
+X-GitHub-Reason: mention
+
+--===============7520080438671948848==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+@octo-cat requested changes on this pull request.
+
+In src/mail/render.rs:
+
+> + let doc =3D html::parse(&raw, Limits::default())?;
+> + let styled =3D css::cascade(&doc, &self.ua_sheet);
+
+ src/mail/render.rs
+
+@@ -112,14 +112,22 @@ pub fn render_message(&self, id: MessageId) -> Result<R=
+endered> {
+ let raw =3D self.db.body(id)?;
+- let text =3D html_to_text(&raw);
+- Ok(Rendered::Plain(text))
++ let doc =3D html::parse(&raw, Limits::default())?;
++ let styled =3D css::cascade(&doc, &self.ua_sheet);
++ let boxes =3D layout::flow(&styled, self.width);
++ Ok(Rendered::Boxes(boxes))
+ }
+
+This runs on the UI thread. css::cascade is O(rules =C3=97 elements) and the =
+Mailchimp fixture has ~400 rules =C3=97 ~3k elements. Please move parse+casca=
+de+layout into the background executor and cache the result keyed by (id, wid=
+th_bucket).
+
+Also: what happens with <img src=3D"https://..."> here? We must not fetch rem=
+ote content until the user opts in.
+
+ move to background
+
+ block remote images by default
+
+=E2=80=94
+Reply to this email directly, view it on GitHub, or unsubscribe.
+You are receiving this because you were mentioned.Message ID: <komorebi/komor=
+ebi/pull/318/review/2219001@github.example.com>
+
+--===============7520080438671948848==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<p></p>
+<p><b>@octo-cat</b> requested changes on this pull request.</p>
+<hr>
+<p>In <a href=3D"https://github.example.invalid/komorebi/komorebi/pull/318#di=
+scussion_r1789201">src/mail/render.rs</a>:</p>
+<pre style=3D'color:#555'>&gt; +    let doc =3D html::parse(&amp;raw, Limits:=
+:default())?;
+&gt; +    let styled =3D css::cascade(&amp;doc, &amp;self.ua_sheet);
+</pre>
+<table style=3D"border:1px solid #d1d5da;border-radius:6px;border-collapse:se=
+parate;width:100%;max-width:720px" cellspacing=3D"0" cellpadding=3D"0">
+<tr><td style=3D"background:#fafbfc;border-bottom:1px solid #d1d5da;padding:6=
+px 8px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI'=
+,Helvetica,Arial,sans-serif"><img src=3D"data:image/gif;base64,R0lGODlhAQABAI=
+AAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width=3D"16" height=3D"16" alt=3D=
+"" style=3D"vertical-align:middle"> src/mail/render.rs</td></tr>
+<tr><td style=3D"background:#f1f8ff;color:#6a737d;padding:0 8px;white-space:p=
+re;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font=
+-size:12px;line-height:20px">@@ -112,14 +112,22 @@ pub fn render_message(&amp=
+;self, id: MessageId) -&gt; Result&lt;Rendered&gt; {</td></tr><tr><td style=
+=3D"background:#ffffff;color:#24292e;padding:0 8px;white-space:pre;font-famil=
+y:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;li=
+ne-height:20px">     let raw =3D self.db.body(id)?;</td></tr><tr><td style=3D=
+"background:#ffeef0;color:#b31d28;padding:0 8px;white-space:pre;font-family:S=
+FMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;line-=
+height:20px">-    let text =3D html_to_text(&amp;raw);</td></tr><tr><td style=
+=3D"background:#ffeef0;color:#b31d28;padding:0 8px;white-space:pre;font-famil=
+y:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;li=
+ne-height:20px">-    Ok(Rendered::Plain(text))</td></tr><tr><td style=3D"back=
+ground:#f0fff4;color:#22863a;padding:0 8px;white-space:pre;font-family:SFMono=
+-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;line-heigh=
+t:20px">+    let doc =3D html::parse(&amp;raw, Limits::default())?;</td></tr>=
+<tr><td style=3D"background:#f0fff4;color:#22863a;padding:0 8px;white-space:p=
+re;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font=
+-size:12px;line-height:20px">+    let styled =3D css::cascade(&amp;doc, &amp;=
+self.ua_sheet);</td></tr><tr><td style=3D"background:#f0fff4;color:#22863a;pa=
+dding:0 8px;white-space:pre;font-family:SFMono-Regular,Consolas,'Liberation M=
+ono',Menlo,monospace;font-size:12px;line-height:20px">+    let boxes =3D layo=
+ut::flow(&amp;styled, self.width);</td></tr><tr><td style=3D"background:#f0ff=
+f4;color:#22863a;padding:0 8px;white-space:pre;font-family:SFMono-Regular,Con=
+solas,'Liberation Mono',Menlo,monospace;font-size:12px;line-height:20px">+   =
+ Ok(Rendered::Boxes(boxes))</td></tr><tr><td style=3D"background:#ffffff;colo=
+r:#24292e;padding:0 8px;white-space:pre;font-family:SFMono-Regular,Consolas,'=
+Liberation Mono',Menlo,monospace;font-size:12px;line-height:20px">     }</td>=
+</tr>
+</table>
+<p>This runs on the UI thread. <code style=3D"background:rgba(27,31,35,.05);b=
+order-radius:3px;font-size:85%;padding:.2em .4em">css::cascade</code> is O(ru=
+les &times; elements) and the Mailchimp fixture has ~400 rules &times; ~3k el=
+ements. Please move parse+cascade+layout into the background executor and cac=
+he the result keyed by <code>(id, width_bucket)</code>.</p>
+<blockquote>
+<p>Also: what happens with <code>&lt;img src=3D"https://..."&gt;</code> here?=
+ We must not fetch remote content until the user opts in.</p>
+</blockquote>
+<ul>
+<li class=3D"task-list-item"><input type=3D"checkbox" disabled checked> move =
+to background</li>
+<li class=3D"task-list-item"><input type=3D"checkbox" disabled> block remote =
+images by default</li>
+</ul>
+<p>&mdash;<br>Reply to this email directly, <a href=3D"https://github.example=
+.invalid/komorebi/komorebi/pull/318#pullrequestreview-2219001">view it on Git=
+Hub</a>, or <a href=3D"https://github.example.invalid/notifications/unsubscri=
+be-auth/AABCD3EFG">unsubscribe</a>.<br>You are receiving this because you wer=
+e mentioned.<img src=3D"https://github.example.invalid/notifications/beacon/A=
+ABCD3EFGHIJ.gif" height=3D"1" width=3D"1" alt=3D""><span style=3D"color: tran=
+sparent; font-size: 0; display: none; visibility: hidden; overflow: hidden; o=
+pacity: 0; width: 0; height: 0; max-width: 0; max-height: 0; mso-hide: all">M=
+essage ID: <span>&lt;komorebi/komorebi/pull/318/review/2219001@github.example=
+.com&gt;</span></span></p>
+<script type=3D"application/ld+json">[
+{
+"@context": "http://schema.org",
+"@type": "EmailMessage",
+"potentialAction": {
+"@type": "ViewAction",
+"target": "https://github.example.invalid/komorebi/komorebi/pull/318#pullrequ=
+estreview-2219001",
+"url": "https://github.example.invalid/komorebi/komorebi/pull/318#pullrequest=
+review-2219001",
+"name": "View Pull Request"
+},
+"description": "@octo-cat requested changes on #318",
+"publisher": {
+"@type": "Organization",
+"name": "GitHub",
+"url": "https://github.example.invalid"
+}
+}
+]</script>
+
+--===============7520080438671948848==--

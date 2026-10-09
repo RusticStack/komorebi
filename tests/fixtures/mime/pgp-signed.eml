@@ -1,0 +1,33 @@
+From: Hugo Brandao <hugo@example.com>
+To: Lara Pinto <lara@example.org>
+Subject: Release checksum
+Date: Tue, 6 Oct 2026 18:40:00 +0100
+Message-ID: <pgp-signed-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha256;
+ protocol="application/pgp-signature"; boundary="pgp-b-41d2"
+
+This is an OpenPGP/MIME signed message (RFC 4880 and 3156)
+--pgp-b-41d2
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi Lara,
+
+The release checksum is 3f2a=E2=80=A69c1d. Please compare it before
+installing.
+
+Hugo
+--pgp-b-41d2
+Content-Type: application/pgp-signature; name="signature.asc"
+Content-Description: OpenPGP digital signature
+Content-Disposition: attachment; filename="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+U3ludGhldGljIHRlc3QgZml4dHVyZTsgbm90IGEgcmVhbCBPcGVuUEdQIHNpZ25h
+dHVyZS4=
+=AAAA
+-----END PGP SIGNATURE-----
+
+--pgp-b-41d2--

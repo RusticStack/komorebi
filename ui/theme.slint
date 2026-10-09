@@ -18,7 +18,11 @@ export global Theme {
     out property <color> pressed: dark ? #ffffff0a : #00000006;
     out property <color> selected: dark ? #ffffff14 : #0000000f;
     out property <color> row-selected: dark ? #2f3b4a : #e3eefb;
+    // A selected folder: `selected` over the layer.
+    out property <color> nav-selected: dark ? #313131 : #e4e4e4;
     out property <color> scrim: #00000066;
+    // One message row (the list scrolls and pages by it).
+    out property <length> row-height: 76px;
 
     // Text
     out property <color> text: dark ? #ffffff : #242424;
@@ -30,9 +34,21 @@ export global Theme {
     // System accent (Windows settings), as Fluent apps do.
     out property <color> accent: Palette.accent-background;
     out property <color> on-accent: Palette.accent-foreground;
-    out property <color> accent-text: Palette.accent-background;
+    // Accent-coloured text, darkened (light) or lightened (dark) by the
+    // Rust side until it reads at 4.5:1 on the darkest (lightest) surface
+    // it sits on: a selected list row or folder.
+    pure callback readable(/* text */ color, /* background */ color) -> color;
+    out property <color> accent-text: readable(readable(accent, row-selected), nav-selected);
+    // The border of the selected rows (also seen without the fill).
+    out property <color> row-border: accent-text;
+    // A disabled accent button: a neutral fill whose label still reads.
+    out property <color> accent-disabled: dark ? #3d3d3d : #e0e0e0;
+    out property <color> on-accent-disabled: dark ? #8c8c8c : #757575;
+    // The keyboard focus ring (2 px).
+    out property <color> focus: text;
     out property <color> danger: dark ? #dc626d : #c50f1f;
     out property <color> danger-bg: dark ? #3f1011 : #fdf3f4;
+    out property <color> warning: dark ? #faa06b : #bc4b09;
     out property <color> info-bg: dark ? #333333 : #ffffff;
 
     // Type ramp (Fluent 2)
@@ -76,9 +92,22 @@ export global Icons {
     out property <string> dismiss: "\u{E711}";
     out property <string> chevron-down: "\u{E70D}";
     out property <string> chevron-right: "\u{E76C}";
+    out property <string> chevron-up: "\u{E70E}";
+    out property <string> back: "\u{E72B}";
     out property <string> save: "\u{E74E}";
     out property <string> move: "\u{E8DE}";
+    out property <string> more: "\u{E712}";
+    out property <string> multi-select: "\u{E762}";
     out property <string> person: "\u{E77B}";
+    out property <string> picture: "\u{E8B9}";
     out property <string> error: "\u{E783}";
     out property <string> info: "\u{E946}";
+    out property <string> document: "\u{E8A5}";
+    out property <string> colors: "\u{E790}";
+    out property <string> bold: "\u{E8DD}";
+    out property <string> italic: "\u{E8DB}";
+    out property <string> link: "\u{E71B}";
+    out property <string> bullets: "\u{E8FD}";
+    out property <string> accept: "\u{E8FB}";
+    out property <string> tentative: "\u{E9CE}";
 }

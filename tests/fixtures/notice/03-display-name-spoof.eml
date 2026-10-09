@@ -1,0 +1,14 @@
+Authentication-Results: mx.komorebi.invalid;
+ spf=pass smtp.mailfrom=mailer.example.net; dkim=pass header.d=mailer.example.net; dmarc=pass header.from=mailer.example.net
+Received: from mailer.example.net (mailer.example.net [192.0.2.10])
+ by mx.komorebi.invalid with ESMTPS; Thu, 8 Oct 2026 09:00:00 +0000
+From: "paypal.com Security" <alerts@mailer.example.net>
+Subject: Confirm your payment details
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 08:40:00 +0000
+Message-ID: <03-display-name-spoof@komorebi.invalid>
+MIME-Version: 1.0
+
+We noticed unusual activity. Confirm your payment details today.

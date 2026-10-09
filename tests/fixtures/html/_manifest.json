@@ -1,0 +1,113 @@
+[
+ {
+  "name": "01-mailchimp-campaign",
+  "desc": "Mailchimp 'Sell Products' template: MSO OfficeDocumentSettings XML, <link> + @import remote web fonts, ~7 KB <style> with ID/class selectors and 20 max-width/min-width media queries, hidden preheader, <center>, ghost tables, nested mcn* block tables, cid logo/hero/product images, remote social icons + lifestyle images, VML-free bulletproof button (bg-colored td), open-tracking pixel, &euro;/&rarr; entities, vcard footer, HTML comment containing markup.",
+  "cids": {
+   "logo-lumen@lumen.example.com": "logo-lumen.png",
+   "hero-autumn@lumen.example.com": "hero-autumn.jpg",
+   "prod-mug@lumen.example.com": "prod-mug.jpg",
+   "prod-lamp@lumen.example.com": "prod-lamp.jpg",
+   "prod-plant@lumen.example.com": "prod-plant.jpg",
+   "prod-book@lumen.example.com": "prod-book.jpg"
+  }
+ },
+ {
+  "name": "02-substack-post",
+  "desc": "Substack long-form post: div-based (not table) layout with max-width:550px;margin:0 auto, class CSS, system font stacks, h1-h3, blockquote, pullquote, <figure>/<picture>/<source srcset> with remote image, <pre><code>, nested ol/ul with <p> in <li>, footnote anchors (#fragment links), tracked redirect links, &#847;/&zwnj; preheader padding, large cid hero (1200x600 downscaled to 550), inline-block buttons with border-radius, open pixel.",
+  "cids": {
+   "hero-substack@fieldnotes.example.com": "hero-substack.jpg"
+  }
+ },
+ {
+  "name": "03-github-review",
+  "desc": "GitHub PR review notification: fragment HTML with no <html>/<head>/<body>, leading empty <p>, <pre> with escaped quoted diff, diff table with white-space:pre per-row background colors, rgba() colors, <code> inline styling, disabled task-list checkboxes, blockquote, data: URI GIF icon, remote beacon pixel, hidden Message-ID span, JSON-LD <script type=application/ld+json> (must be ignored, never executed). No cid parts (multipart/alternative only).",
+  "cids": {}
+ },
+ {
+  "name": "04-order-receipt",
+  "desc": "Amazon-style order confirmation: XHTML 1.0 Transitional doctype, bgcolor on body/table/td, fixed 600 px wrapper + max-width, MSO ghost table, CSS font shorthand (font:14px/20px Arial), right-aligned price column with nowrap, align=right floated totals table, colspan spacer row (1px line-height trick), border-radius:8px card with border-collapse:separate, pill button (bgcolor td + border-radius:20px), cid logo + 4 cid thumbnails, 3 remote recommendation images with styled alt text, &euro;/&minus;/&ordm;/&Oslash; entities, media query hiding nav, open pixel.",
+  "cids": {
+   "logo-parcelo@parcelo.example.com": "logo-parcelo.png",
+   "prod-mug@parcelo.example.com": "prod-mug.jpg",
+   "prod-lamp@parcelo.example.com": "prod-lamp.jpg",
+   "prod-plant@parcelo.example.com": "prod-plant.jpg",
+   "prod-book@parcelo.example.com": "prod-book.jpg"
+  }
+ },
+ {
+  "name": "05-bank-statement",
+  "desc": "Bank statement, ~200 KB: legacy uppercase HTML 3.2-era markup, charset=iso-8859-1 (QP body with =E3/=E7 bytes) declared in both MIME and <META>, BODY BGCOLOR/LEFTMARGIN/TEXT/LINK attrs, <CENTER>, CSS inside <!-- --> in <STYLE>, 240-row table with THEAD/TBODY/TFOOT, alternating TR bgcolor zebra, <FONT face size color> everywhere (size=1/2), red/green signed amounts, BORDER=1 + BORDERCOLOR + border-collapse summary table, cid logo + cid PNG chart, tel: link, Portuguese accents. Stresses large-table layout performance.",
+  "cids": {
+   "logo-northbank@northbank.example.com": "logo-northbank.png",
+   "chart-spend@northbank.example.com": "chart-spend.png"
+  }
+ },
+ {
+  "name": "06-outlook-word",
+  "desc": "Outlook/Word 'filtered medium' HTML in windows-1252 (QP, 0x93/0x94/0x96 smart punctuation bytes): v:/o:/w:/m: namespaces, unquoted attributes, VML behavior styles inside <!--[if !mso]>, @font-face panose blocks, @page/@list mso-* CSS, p.MsoNormal with <o:p></o:p>, downlevel-revealed <![if !supportLists]> fake bullets with Symbol font, MsoTableGrid with pt widths and per-cell borders + Excel-like conditional fills, Outlook-style cid:image001.png@01DB... signature image, 'From:/Sent:/To:' reply header with border-top:solid #E1E1E1, mailto link.",
+  "cids": {
+   "image001.png@01DB1A2B.3C4D5E60": "avatar-mr.png"
+  }
+ },
+ {
+  "name": "07-gmail-reply-chain",
+  "desc": "26-message Gmail thread with 26 levels of nested quoting: <blockquote class=gmail_quote> with border-left rgb(), gmail_attr headers with U+202F narrow no-break space, gmail_signature with '-- ' prefix, embedded Outlook segment (divRplyFwdMsg + <hr style=display:inline-block>, <font face color>), embedded Apple Mail segment (<blockquote type=cite>, dir=auto), pasted inline image (cid:ii_...), nested lists, <font color> + rgb() background highlight. Fragment HTML (no <html>/<body>). Tests deep nesting indentation and quote collapsing.",
+  "cids": {
+   "ii_m1x2y3z40@gmail.example.com": "hero-autumn.jpg"
+  }
+ },
+ {
+  "name": "08-dark-marketing",
+  "desc": "Dark-background SaaS promo: <meta name=color-scheme content=dark>, :root color-scheme, @media (prefers-color-scheme: dark/light), Outlook.com [data-ogsc]/[data-ogsb] overrides, Gmail 'u + .body' hack, white-on-transparent alpha PNG logo (must composite on dark), CSS font shorthand with numeric weights (900), letter-spacing/text-transform, linear-gradient backgrounds with bgcolor fallback, background-clip:text gradient headline with color fallback, box-shadow/border-radius on image, dashed-border coupon, two VML v:roundrect bulletproof buttons (filled + ghost/transparent), role=article wrapper div, <link rel=preconnect> + remote Inter font, &#8199;&#65279; preheader padding, remote white social icons, display:none tracking pixel.",
+  "cids": {
+   "logo-atlas@atlas.example.com": "logo-atlas.png",
+   "hero-neon@atlas.example.com": "hero-neon.jpg"
+  }
+ },
+ {
+  "name": "09-image-heavy-promo",
+  "desc": "Image-heavy retail promo: VML <v:background> body fill and <v:rect>/<v:fill type=frame>/<v:textbox> hero, <td background=cid:...> attribute + CSS background-image:url('cid:...') + background-size:cover with text overlaid on rgba(0,0,0,.35) panel, text-shadow, tiled remote background on outer table (background attr + CSS), CSS background shorthand with position/size and remote url, 12 remote image slices in a 3x4 grid with styled alt text (font/color/background on <img>), image map <map>/<area>, data: URI PNG logo, cid banner, media query swapping background image, <font> footer. Most pixels are remote -> tests blocked-image placeholder layout.",
+  "cids": {
+   "banner-wide@shop.example.com": "banner-wide.jpg",
+   "hero-bg-promo@shop.example.com": "hero-bg-promo.jpg"
+  }
+ },
+ {
+  "name": "10-transactional-buttons",
+  "desc": "Transactional verification email (pt-PT): three bulletproof button techniques (VML v:roundrect + <a> fallback, padding-based bgcolor td/a with mso-padding-alt, thick same-colour border-based <a> with outline), :hover rule, hidden preheader with &zwnj;&nbsp; filler, <center>, IE/MSO ghost table, min-width/max-width media queries, monospace OTP with letter-spacing and zero-width space (&#8203;), long unbreakable URL with word-break:break-all, border-radius card, 'yahoo' boolean attribute on body, HTML entities for Portuguese accents, single cid logo.",
+  "cids": {
+   "logo-fieldnotes@fieldnotes.example.com": "logo-fieldnotes.png"
+  }
+ },
+ {
+  "name": "11-newsletter-2col",
+  "desc": "Hybrid/fluid newsletter (Parcel/Good Email Code style): role=presentation tables, inline-block 'column' divs with max-width in a font-size:0 parent (columns must sit side by side at >=600 px and stack when narrow), dir=rtl column-reversal trick, MSO ghost tables per row, min-width/max-width media queries (col-sml 27% / col-lge 73%), 3-column footer row with .stack and .hide-sm, @import Merriweather, MSO letter-spacing button padding hack (mso-text-raise), border-spacing:0, rgba border-color, mixed cid + remote story images, &reg;/&rsaquo; entities.",
+  "cids": {
+   "logo-fieldnotes@fieldnotes.example.com": "logo-fieldnotes.png",
+   "hero-autumn@fieldnotes.example.com": "hero-autumn.jpg",
+   "prod-mug@fieldnotes.example.com": "prod-mug.jpg",
+   "prod-plant@fieldnotes.example.com": "prod-plant.jpg",
+   "prod-book@fieldnotes.example.com": "prod-book.jpg",
+   "prod-lamp@fieldnotes.example.com": "prod-lamp.jpg"
+  }
+ },
+ {
+  "name": "12-personal-applemail",
+  "desc": "Small (~2 KB) personal message as written by Apple Mail: <div dir=auto> paragraphs with <div><br></div> spacing, -webkit-nbsp-mode/line-break body styles, raw UTF-8 Portuguese + emoji (no entities), <b>/<i>, link, tel:/mailto: links, signature table with rgb() colours and border-radius avatar, UUID-style cid (no @domain), Apple MIME-Version comment header. Baseline for the common case: must render instantly.",
+  "cids": {
+   "6F1D2A8B-3C4E-4F5A-9B7C-0D1E2F3A4B5C": "avatar-mr.png"
+  }
+ },
+ {
+  "name": "13-calendar-invite",
+  "desc": "Google-Calendar-style invitation: fragment HTML wrapped in schema.org microdata (itemscope/itemprop/<meta>/<time> inside body), summary attrs, display:inline-table, border-width per side, CSS keyword case ('1px Solid #ccc'), pill RSVP links, Meet button with remote icon, tel: link with %3B/%23 escapes, &raquo;. MIME: multipart/mixed[alternative[text/plain, text/html, text/calendar; method=REQUEST], application/ics attachment] - tests that the calendar part is not chosen as the body.",
+  "cids": {}
+ },
+ {
+  "name": "14-adversarial-malformed",
+  "desc": "Adversarial/malformed: <script> (inline, src, JSON in body), on* handlers (onload/onerror/onfocus/onmouseover), javascript:/vbscript:/data:text/html/file: hrefs incl. entity- and tab-obfuscated, meta refresh, <base href>, <iframe>/srcdoc, <object>/<embed>/<applet>, <video>/<audio autoplay>, <form> with password field, SVG with onload/script/foreignObject, mXSS vectors (math/style, noscript, template), CSS expression()/behavior/-moz-binding/javascript: url()/CSS-escaped url(), remote @import/@font-face/background tracking, position:fixed full-viewport overlay at max z-index, negative margins, absolute-positioned fake banner, font-size:99999px, white-on-white text, RTL override U+202E, zero-width chars, 5000-char unbroken word, misnested/unclosed tags, table inside <p>, colspan/rowspan=99999, width=99999, 400 nested divs, 150 nested tables (30 left unclosed), bad entities, CDATA/PI/xmp/plaintext, NUL + ANSI control chars, invalid UTF-8 sequences (overlong, surrogate, truncated), conflicting charsets (shift_jis meta vs windows-1251 meta vs duplicate MIME charset params), no </body></html>, truncated final tag. EML: 8bit HTML with raw invalid bytes, preamble with script, broken RFC 2047 subject, 2000-char header, two text/html alternatives, cid to missing part, truncated data: URIs, image/png part that is actually HTML, path-traversal filename, truncated JPEG part, missing closing MIME boundary.",
+  "cids": {
+   "inline-ok@adv.example.com": "prod-plant.jpg"
+  }
+ }
+]

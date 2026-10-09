@@ -1,0 +1,172 @@
+name: Release
+
+# A tag vX.Y.Z (equal to the Cargo version) builds, checks and packages a
+# release, and opens it as a draft GitHub Release to review and publish
+# by hand. Run by hand (workflow_dispatch) it is a dry run: the same
+# build, checks and packages, kept as a workflow artifact, no release.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # the draft release
+    env:
+      # Signing is optional: without these secrets the build is unsigned
+      # (see README, "Install"). SIGN_CERT_PFX is a base64 .pfx, signed
+      # with signtool and an RFC 3161 timestamp. Secrets can't be read in
+      # `if:`, so the step checks this flag.
+      HAS_SIGNING: ${{ secrets.SIGN_CERT_PFX != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (1.95.0, pinned in rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages |
+            Where-Object name -eq 'komorebi' | Select-Object -ExpandProperty version
+          if (-not $version) { throw 'no komorebi package version' }
+          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}' -ne "v$version") {
+            throw "tag ${{ github.ref_name }} does not match the Cargo version $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "Komorebi $version"
+
+      - name: cargo test
+        run: cargo test --locked
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      - name: Binary size
+        shell: pwsh
+        run: |
+          $size = (Get-Item target/release/komorebi.exe).Length
+          "komorebi.exe: $size bytes ({0:N3} MB; ceiling 15,000,000 bytes)" -f ($size / 1e6)
+          if ($size -gt 15000000) { throw "komorebi.exe is over the 15.0 MB ceiling" }
+
+      # As in ci.yml: boot offline on a freshly seeded throwaway cache and
+      # fail on a blank list or reader.
+      - name: Offline boot snapshot
+        shell: pwsh
+        run: |
+          $db = Join-Path $env:RUNNER_TEMP 'seed.sqlite3'
+          cargo run --release --locked --example seed -- $db 2000
+          if ($LASTEXITCODE -ne 0) { throw 'seeding failed' }
+          $env:KOMOREBI_OFFLINE = '1'
+          $env:KOMOREBI_DB = $db
+          $env:KOMOREBI_TIMING = '1'
+          $env:KOMOREBI_SNAPSHOT = Join-Path $env:RUNNER_TEMP 'boot.bmp'
+          $env:KOMOREBI_SNAPSHOT_CHECK = '1'
+          $env:KOMOREBI_SNAPSHOT_SELECT = '0'
+          $env:KOMOREBI_SIZE = '1280x800'
+          $env:KOMOREBI_THEME = 'light'
+          $p = Start-Process target/release/komorebi.exe -NoNewWindow -Wait -PassThru `
+            -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'boot.log')
+          Get-Content (Join-Path $env:RUNNER_TEMP 'boot.log')
+          if ($p.ExitCode -ne 0) { throw "boot snapshot failed (exit $($p.ExitCode))" }
+
+      - name: Sign komorebi.exe
+        if: env.HAS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          SIGN_CERT_PFX: ${{ secrets.SIGN_CERT_PFX }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+          SIGN_TIMESTAMP_URL: ${{ vars.SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
+        run: ./scripts/sign.ps1 target/release/komorebi.exe
+
+      # Inno Setup 6, if the runner image does not have it.
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'installing Inno Setup failed' }
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" installer/komorebi.iss
+          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+
+      - name: Sign the installer
+        if: env.HAS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          SIGN_CERT_PFX: ${{ secrets.SIGN_CERT_PFX }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+          SIGN_TIMESTAMP_URL: ${{ vars.SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
+        run: ./scripts/sign.ps1 "dist/komorebi-${{ steps.version.outputs.version }}-setup.exe"
+
+      # The portable zip (the same, possibly signed, komorebi.exe), the
+      # debug symbols as their own asset, and checksums of everything.
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $stage = Join-Path $env:RUNNER_TEMP "komorebi-$v"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item target/release/komorebi.exe $stage
+          Copy-Item LICENSE (Join-Path $stage 'LICENSE.txt')
+          Copy-Item NOTICE (Join-Path $stage 'NOTICE.txt')
+          Copy-Item PRIVACY.md, README.md, CHANGELOG.md $stage
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist/komorebi-$v-portable-x64.zip"
+          if (Test-Path target/release/komorebi.pdb) {
+            Copy-Item target/release/komorebi.pdb "dist/komorebi-$v.pdb"
+          } else {
+            Write-Warning 'no komorebi.pdb was written'
+          }
+          Push-Location dist
+          Get-ChildItem -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS
+          Pop-Location
+
+      # The release notes: this version's section of CHANGELOG.md.
+      - name: Release notes
+        shell: pwsh
+        run: |
+          $v = [regex]::Escape('${{ steps.version.outputs.version }}')
+          $text = Get-Content CHANGELOG.md -Raw
+          $m = [regex]::Match($text, "(?ms)^## \[$v\][^\n]*\n(.*?)(?=^## \[|\z)")
+          if (-not $m.Success) { throw 'CHANGELOG.md has no section for this version' }
+          $notes = $m.Groups[1].Value.Trim()
+          if ($env:HAS_SIGNING -ne 'true') {
+            $notes += "`n`nThis build is not code-signed: Windows SmartScreen may warn before it runs (More info > Run anyway). Check the download against SHA256SUMS first."
+          }
+          Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'notes.md') $notes
+
+      - name: Keep the packages (dry run and tag alike)
+        uses: actions/upload-artifact@v4
+        with:
+          name: komorebi-${{ steps.version.outputs.version }}
+          path: |
+            dist/
+            ${{ runner.temp }}/notes.md
+            ${{ runner.temp }}/boot.bmp
+          if-no-files-found: error
+
+      - name: Draft GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: Komorebi ${{ steps.version.outputs.version }}
+          body_path: ${{ runner.temp }}/notes.md
+          files: dist/*
+          fail_on_unmatched_files: true

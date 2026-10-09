@@ -37,12 +37,75 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --check
 
-      # Clippy is clean in src/; the only remaining warning is a third-party
-      # future-incompat notice from imap-proto (transitive via the imap crate),
-      # which is not actionable here. Keep -D warnings off only because of that
-      # transitive notice.
+      # Lints in this crate are errors. The imap-proto future-incompat
+      # notice (transitive, via the imap crate) is a cargo report, not a
+      # lint, so it does not fail this step.
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: cargo test
         run: cargo test --locked
+
+      # The exact-pinned renderer crates must stay single copies.
+      - name: Pin consistency
+        shell: pwsh
+        run: ./scripts/check-pins.ps1
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      # The product budget: komorebi.exe at most 15.0 MB (decimal).
+      - name: Binary size
+        shell: pwsh
+        run: |
+          $size = (Get-Item target/release/komorebi.exe).Length
+          "komorebi.exe: $size bytes ({0:N2} MiB, {1:N3} MB; ceiling 15,000,000 bytes)" -f ($size / 1MB), ($size / 1e6)
+          if ($size -gt 15000000) { throw "komorebi.exe is over the 15.0 MB ceiling" }
+
+      # Boot the release build offline on a freshly seeded throwaway cache,
+      # open the newest message and render the window to a file. The app
+      # exits non-zero if the list or the reader came out blank.
+      - name: Offline boot snapshot
+        shell: pwsh
+        run: |
+          $db = Join-Path $env:RUNNER_TEMP 'seed.sqlite3'
+          cargo run --release --locked --example seed -- $db 2000
+          if ($LASTEXITCODE -ne 0) { throw 'seeding failed' }
+          $env:KOMOREBI_OFFLINE = '1'
+          $env:KOMOREBI_DB = $db
+          $env:KOMOREBI_TIMING = '1'
+          $env:KOMOREBI_SNAPSHOT = Join-Path $env:RUNNER_TEMP 'boot.bmp'
+          $env:KOMOREBI_SNAPSHOT_CHECK = '1'
+          $env:KOMOREBI_SNAPSHOT_SELECT = '0'
+          $env:KOMOREBI_SIZE = '1280x800'
+          $env:KOMOREBI_THEME = 'light'
+          $p = Start-Process target/release/komorebi.exe -NoNewWindow -Wait -PassThru `
+            -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'boot.log')
+          Get-Content (Join-Path $env:RUNNER_TEMP 'boot.log')
+          if ($p.ExitCode -ne 0) { throw "boot snapshot failed (exit $($p.ExitCode))" }
+
+      - name: Upload the boot snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-snapshot
+          path: ${{ runner.temp }}/boot.bmp
+          if-no-files-found: ignore
+
+  # Licenses (deny.toml) and RustSec advisories for the Windows graph.
+  deny:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (1.95.0, pinned in rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: cargo deny
+        run: cargo deny --locked check licenses advisories

@@ -1,0 +1,6 @@
+# Mail fixtures are byte-exact RFC 5322 messages: keep CRLF and 8-bit bytes.
+tests/fixtures/**/*.eml -text
+# The fetch tests' throwaway TLS identity: keep it byte-exact.
+tests/fixtures/tls/*.pem -text
+# The app icon (assets/komorebi.ico).
+*.ico binary

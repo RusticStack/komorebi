@@ -1,0 +1,14 @@
+From: Rita Mendes <rita@example.org>
+Subject: Encrypted: contract draft
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="smime.p7m"
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 08:10:00 +0000
+Message-ID: <06-smime-enveloped@komorebi.invalid>
+MIME-Version: 1.0
+
+U3ludGhldGljIHRlc3QgZml4dHVyZTsgbm90IHJlYWwgUy9NSU1FIGVudmVsb3BlZCBkYXRhLiBT
+eW50aGV0aWMgdGVzdCBmaXh0dXJlOyBub3QgcmVhbCBTL01JTUUgZW52ZWxvcGVkIGRhdGEuIFN5
+bnRoZXRpYyB0ZXN0IGZpeHR1cmU7IG5vdCByZWFsIFMvTUlNRSBlbnZlbG9wZWQgZGF0YS4gU3lu
+dGhldGljIHRlc3QgZml4dHVyZTsgbm90IHJlYWwgUy9NSU1FIGVudmVsb3BlZCBkYXRhLiA=

@@ -1,0 +1,1013 @@
+Content-Type: multipart/related; type="multipart/alternative";
+ boundary="===============8893811216697874724=="
+MIME-Version: 1.0
+From: Rui Mendes <rui.mendes@example.com>
+To: =?utf-8?q?In=C3=AAs?= Costa <ines.costa@example.com>,
+ Marta Silva <marta@example.org>
+Subject: RE: Agenda for Tuesday
+Date: Wed, 07 Oct 2026 12:00:00 -0000
+Message-ID: <179140428524.29476.3513290479272534151@example.com>
+X-MS-Has-Attach: yes
+Thread-Index: AdsYAbCdEfGhIjKlMnOpQrStUvWxYz==
+Content-Language: en-GB
+
+--===============8893811216697874724==
+Content-Type: multipart/alternative;
+ boundary="===============6664557716988099809=="
+
+--===============6664557716988099809==
+Content-Type: text/plain; charset="windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+Hi all,
+
+Thanks for joining today=92s sync. Minutes and action items below =96 please =
+shout if I=92ve missed anything.
+
+Decisions
+
+=B7 Ship the plain-text fallback first =96 it=92s what 80% of people see today
+
+=B7 Block remote images by default; show a Load images bar
+
+=B7 Keep startup under 200 ms =96 no rendering work at launch
+
+=B7 Investigate CSS media queries for narrow panes
+
+Action items
+
+Item
+Owner
+Status
+
+Action item 1: review =93rendering=94 spec section 1
+Rui
+Done
+
+Action item 2: review =93rendering=94 spec section 2
+In=EAs
+Blocked
+
+Action item 3: review =93rendering=94 spec section 3
+Marta
+Open
+
+Action item 4: review =93rendering=94 spec section 4
+Tom=E1s
+Done
+
+Action item 5: review =93rendering=94 spec section 5
+Beatriz
+Blocked
+
+Action item 6: review =93rendering=94 spec section 6
+Rui
+Open
+
+Action item 7: review =93rendering=94 spec section 7
+In=EAs
+Done
+
+Action item 8: review =93rendering=94 spec section 8
+Marta
+Blocked
+
+Action item 9: review =93rendering=94 spec section 9
+Tom=E1s
+Open
+
+Action item 10: review =93rendering=94 spec section 1
+Beatriz
+Done
+
+Action item 11: review =93rendering=94 spec section 2
+Rui
+Blocked
+
+Action item 12: review =93rendering=94 spec section 3
+In=EAs
+Open
+
+Action item 13: review =93rendering=94 spec section 4
+Marta
+Done
+
+Action item 14: review =93rendering=94 spec section 5
+Tom=E1s
+Blocked
+
+Action item 15: review =93rendering=94 spec section 6
+Beatriz
+Open
+
+Action item 16: review =93rendering=94 spec section 7
+Rui
+Done
+
+Action item 17: review =93rendering=94 spec section 8
+In=EAs
+Blocked
+
+Action item 18: review =93rendering=94 spec section 9
+Marta
+Open
+
+Action item 19: review =93rendering=94 spec section 1
+Tom=E1s
+Done
+
+Action item 20: review =93rendering=94 spec section 2
+Beatriz
+Blocked
+
+Action item 21: review =93rendering=94 spec section 3
+Rui
+Open
+
+Action item 22: review =93rendering=94 spec section 4
+In=EAs
+Done
+
+Action item 23: review =93rendering=94 spec section 5
+Marta
+Blocked
+
+Action item 24: review =93rendering=94 spec section 6
+Tom=E1s
+Open
+
+Action item 25: review =93rendering=94 spec section 7
+Beatriz
+Done
+
+Action item 26: review =93rendering=94 spec section 8
+Rui
+Blocked
+
+Action item 27: review =93rendering=94 spec section 9
+In=EAs
+Open
+
+Action item 28: review =93rendering=94 spec section 1
+Marta
+Done
+
+Action item 29: review =93rendering=94 spec section 2
+Tom=E1s
+Blocked
+
+Action item 30: review =93rendering=94 spec section 3
+Beatriz
+Open
+
+Action item 31: review =93rendering=94 spec section 4
+Rui
+Done
+
+Action item 32: review =93rendering=94 spec section 5
+In=EAs
+Blocked
+
+Action item 33: review =93rendering=94 spec section 6
+Marta
+Open
+
+Action item 34: review =93rendering=94 spec section 7
+Tom=E1s
+Done
+
+Action item 35: review =93rendering=94 spec section 8
+Beatriz
+Blocked
+
+Action item 36: review =93rendering=94 spec section 9
+Rui
+Open
+
+Action item 37: review =93rendering=94 spec section 1
+In=EAs
+Done
+
+Action item 38: review =93rendering=94 spec section 2
+Marta
+Blocked
+
+Action item 39: review =93rendering=94 spec section 3
+Tom=E1s
+Open
+
+Action item 40: review =93rendering=94 spec section 4
+Beatriz
+Done
+
+Action item 41: review =93rendering=94 spec section 5
+Rui
+Blocked
+
+Action item 42: review =93rendering=94 spec section 6
+In=EAs
+Open
+
+Action item 43: review =93rendering=94 spec section 7
+Marta
+Done
+
+Action item 44: review =93rendering=94 spec section 8
+Tom=E1s
+Blocked
+
+Action item 45: review =93rendering=94 spec section 9
+Beatriz
+Open
+
+Kind regards,
+
+Rui Mendes
+Engineering Manager | Exemplo Lda
+rui.mendes@example.com | +351 000 000 000
+
+From: In=EAs Costa <ines.costa@example.com>=20
+Sent: Monday, October 6, 2026 4:12 PM
+To: Rui Mendes <rui.mendes@example.com>; Marta Silva <marta@example.org>
+Subject: Agenda for Tuesday
+
+Some ideas survived intact, others were quietly retired, and a few came back =
+in forms we did not expect.. We spent the summer testing glazes, weights and =
+handles with a group of two hundred early customers, and their notes shaped e=
+very piece in this collection. We spent the summer testing glazes, weights an=
+d handles with a group of two hundred early customers, and their notes shaped=
+ every piece in this collection.
+
+We spent the summer testing glazes, weights and handles with a group of two h=
+undred early customers, and their notes shaped every piece in this collection=
+. Some ideas survived intact, others were quietly retired, and a few came bac=
+k in forms we did not expect.. We spent the summer testing glazes, weights an=
+d handles with a group of two hundred early customers, and their notes shaped=
+ every piece in this collection.
+
+Some ideas survived intact, others were quietly retired, and a few came back =
+in forms we did not expect.. Some ideas survived intact, others were quietly =
+retired, and a few came back in forms we did not expect.. Some ideas survived=
+ intact, others were quietly retired, and a few came back in forms we did not=
+ expect.
+
+Design is not just what it looks like and feels like; it is how the small, re=
+peated decisions add up over a season of use. Design is not just what it look=
+s like and feels like; it is how the small, repeated decisions add up over a =
+season of use. Some ideas survived intact, others were quietly retired, and a=
+ few came back in forms we did not expect.
+
+Design is not just what it looks like and feels like; it is how the small, re=
+peated decisions add up over a season of use. Design is not just what it look=
+s like and feels like; it is how the small, repeated decisions add up over a =
+season of use. We spent the summer testing glazes, weights and handles with a=
+ group of two hundred early customers, and their notes shaped every piece in =
+this collection.
+
+Design is not just what it looks like and feels like; it is how the small, re=
+peated decisions add up over a season of use. Some ideas survived intact, oth=
+ers were quietly retired, and a few came back in forms we did not expect.. So=
+me ideas survived intact, others were quietly retired, and a few came back in=
+ forms we did not expect.
+
+We spent the summer testing glazes, weights and handles with a group of two h=
+undred early customers, and their notes shaped every piece in this collection=
+. Some ideas survived intact, others were quietly retired, and a few came bac=
+k in forms we did not expect.. Design is not just what it looks like and feel=
+s like; it is how the small, repeated decisions add up over a season of use.
+
+Some ideas survived intact, others were quietly retired, and a few came back =
+in forms we did not expect.. Some ideas survived intact, others were quietly =
+retired, and a few came back in forms we did not expect.. We spent the summer=
+ testing glazes, weights and handles with a group of two hundred early custom=
+ers, and their notes shaped every piece in this collection.
+
+Design is not just what it looks like and feels like; it is how the small, re=
+peated decisions add up over a season of use. Design is not just what it look=
+s like and feels like; it is how the small, repeated decisions add up over a =
+season of use. We spent the summer testing glazes, weights and handles with a=
+ group of two hundred early customers, and their notes shaped every piece in =
+this collection.
+
+Design is not just what it looks like and feels like; it is how the small, re=
+peated decisions add up over a season of use. We spent the summer testing gla=
+zes, weights and handles with a group of two hundred early customers, and the=
+ir notes shaped every piece in this collection. Design is not just what it lo=
+oks like and feels like; it is how the small, repeated decisions add up over =
+a season of use.
+
+CONFIDENTIALITY NOTICE: This e-mail is synthetic test data.
+
+--===============6664557716988099809==
+Content-Type: text/html; charset="windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+<html xmlns:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:schemas-micros=
+oft-com:office:office" xmlns:w=3D"urn:schemas-microsoft-com:office:word" xmln=
+s:m=3D"http://schemas.microsoft.com/office/2004/12/omml" xmlns=3D"http://www.=
+w3.org/TR/REC-html40"><head><meta http-equiv=3DContent-Type content=3D"text/h=
+tml; charset=3Dwindows-1252"><meta name=3DGenerator content=3D"Microsoft Word=
+ 15 (filtered medium)"><!--[if !mso]><style>v\:* {behavior:url(#default#VML);}
+o\:* {behavior:url(#default#VML);}
+w\:* {behavior:url(#default#VML);}
+.shape {behavior:url(#default#VML);}
+</style><![endif]--><style><!--
+/* Font Definitions */
+@font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Calibri;
+	panose-1:2 15 5 2 2 2 4 3 2 4;}
+@font-face
+	{font-family:Aptos;
+	panose-1:2 11 0 4 2 2 2 2 2 4;}
+/* Style Definitions */
+p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin:0cm;
+	font-size:11.0pt;
+	font-family:"Aptos",sans-serif;
+	mso-ligatures:standardcontextual;
+	mso-fareast-language:EN-US;}
+a:link, span.MsoHyperlink
+	{mso-style-priority:99;
+	color:#467886;
+	text-decoration:underline;}
+p.MsoListParagraph, li.MsoListParagraph, div.MsoListParagraph
+	{mso-style-priority:34;
+	margin-top:0cm;
+	margin-right:0cm;
+	margin-bottom:0cm;
+	margin-left:36.0pt;
+	font-size:11.0pt;
+	font-family:"Aptos",sans-serif;}
+span.EmailStyle18
+	{mso-style-type:personal-reply;
+	font-family:"Aptos",sans-serif;
+	color:windowtext;}
+.MsoChpDefault
+	{mso-style-type:export-only;
+	font-size:10.0pt;
+	mso-ligatures:none;}
+@page WordSection1
+	{size:612.0pt 792.0pt;
+	margin:72.0pt 72.0pt 72.0pt 72.0pt;}
+div.WordSection1
+	{page:WordSection1;}
+/* List Definitions */
+@list l0
+	{mso-list-id:1043558977;
+	mso-list-type:hybrid;
+	mso-list-template-ids:-1218365852 134807553 134807555 134807557 134807553 13=
+4807555 134807557 134807553 134807555 134807557;}
+@list l0:level1
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0B7;
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	text-indent:-18.0pt;
+	font-family:Symbol;}
+@list l1:level1
+	{mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	text-indent:-18.0pt;}
+ol
+	{margin-bottom:0cm;}
+ul
+	{margin-bottom:0cm;}
+--></style><!--[if gte mso 9]><xml>
+<o:shapedefaults v:ext=3D"edit" spidmax=3D"1026" />
+</xml><![endif]--><!--[if gte mso 9]><xml>
+<o:shapelayout v:ext=3D"edit">
+<o:idmap v:ext=3D"edit" data=3D"1" />
+</o:shapelayout></xml><![endif]--></head><body lang=3DEN-GB link=3D"#467886" =
+vlink=3D"#96607D" style=3D'word-wrap:break-word'><div class=3DWordSection1>
+<p class=3DMsoNormal>Hi all,<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Thanks for joining today=92s sync. Minutes and action it=
+ems below =96 please shout if I=92ve missed anything.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+
+<p class=3DMsoNormal><b><span style=3D'font-size:14.0pt;color:#0F4761'>Decisi=
+ons<o:p></o:p></span></b><o:p></o:p></p>
+
+<p class=3DMsoListParagraph style=3D'text-indent:-18.0pt;mso-list:l0 level1 l=
+fo1'><![if !supportLists]><span style=3D'font-family:Symbol'><span style=3D'm=
+so-list:Ignore'>=B7<span style=3D'font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&=
+nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Ship the plain-t=
+ext fallback first =96 it=92s what 80% of people see today<o:p></o:p></p>
+<p class=3DMsoListParagraph style=3D'text-indent:-18.0pt;mso-list:l0 level1 l=
+fo1'><![if !supportLists]><span style=3D'font-family:Symbol'><span style=3D'm=
+so-list:Ignore'>=B7<span style=3D'font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&=
+nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Block remote ima=
+ges by default; show a <b>Load images</b> bar<o:p></o:p></p>
+<p class=3DMsoListParagraph style=3D'text-indent:-18.0pt;mso-list:l0 level1 l=
+fo1'><![if !supportLists]><span style=3D'font-family:Symbol'><span style=3D'm=
+so-list:Ignore'>=B7<span style=3D'font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&=
+nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Keep startup und=
+er 200=A0ms =96 no rendering work at launch<o:p></o:p></p>
+<p class=3DMsoListParagraph style=3D'text-indent:-18.0pt;mso-list:l0 level1 l=
+fo1'><![if !supportLists]><span style=3D'font-family:Symbol'><span style=3D'm=
+so-list:Ignore'>=B7<span style=3D'font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&=
+nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Investigate <spa=
+n style=3D'color:#C00000'>CSS media queries</span> for narrow panes<o:p></o:p=
+></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+
+<p class=3DMsoNormal><b><span style=3D'font-size:14.0pt;color:#0F4761'>Action=
+ items</span></b><o:p></o:p></p>
+
+<table class=3DMsoTableGrid border=3D1 cellspacing=3D0 cellpadding=3D0 style=
+=3D'border-collapse:collapse;border:none;mso-border-alt:solid windowtext .5pt=
+;mso-yfti-tbllook:1184;mso-padding-alt:0cm 5.4pt 0cm 5.4pt'>
+<tr style=3D'mso-yfti-irow:0;mso-yfti-firstrow:yes'><td width=3D208 valign=3D=
+top style=3D'width:155.8pt;border:solid windowtext 1.0pt;background:#0F4761;p=
+adding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><b><span style=3D'color:whit=
+e'>Item<o:p></o:p></span></b></p></td><td width=3D104 valign=3Dtop style=3D'w=
+idth:77.9pt;border:solid windowtext 1.0pt;border-left:none;background:#0F4761=
+;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><b><span style=3D'color:wh=
+ite'>Owner<o:p></o:p></span></b></p></td><td width=3D104 valign=3Dtop style=
+=3D'width:77.9pt;border:solid windowtext 1.0pt;border-left:none;background:#0=
+F4761;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><b><span style=3D'col=
+or:white'>Status<o:p></o:p></span></b></p></td></tr>
+<tr style=3D'mso-yfti-irow:1'><td width=3D208 valign=3Dtop style=3D'width:155=
+.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4p=
+t'><p class=3DMsoNormal>Action item 1: review =93rendering=94 spec section 1<=
+o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-=
+top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:s=
+olid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Rui<o=
+:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-t=
+op:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:so=
+lid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=
+=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p></td></t=
+r><tr style=3D'mso-yfti-irow:2'><td width=3D208 valign=3Dtop style=3D'width:1=
+55.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.=
+4pt'><p class=3DMsoNormal>Action item 2: review =93rendering=94 spec section =
+2<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;borde=
+r-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right=
+:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>In=
+=EAs<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;bo=
+rder-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-ri=
+ght:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p=
+ class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p></span></p=
+></td></tr><tr style=3D'mso-yfti-irow:3'><td width=3D208 valign=3Dtop style=
+=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5=
+.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 3: review =93rendering=94 sp=
+ec section 3<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:7=
+7.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;b=
+order-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMs=
+oNormal>Marta<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:=
+77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;=
+border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DM=
+soNormal><span style=3D'color:black'>Open<o:p></o:p></span></p></td></tr><tr =
+style=3D'mso-yfti-irow:4'><td width=3D208 valign=3Dtop style=3D'width:155.8pt=
+;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><=
+p class=3DMsoNormal>Action item 4: review =93rendering=94 spec section 4<o:p>=
+</o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:=
+none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid=
+ windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Tom=E1s<o=
+:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-t=
+op:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:so=
+lid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=
+=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p></td></t=
+r><tr style=3D'mso-yfti-irow:5'><td width=3D208 valign=3Dtop style=3D'width:1=
+55.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.=
+4pt'><p class=3DMsoNormal>Action item 5: review =93rendering=94 spec section =
+5<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;borde=
+r-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right=
+:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Bea=
+triz<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;bo=
+rder-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-ri=
+ght:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p=
+ class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p></span></p=
+></td></tr><tr style=3D'mso-yfti-irow:6'><td width=3D208 valign=3Dtop style=
+=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5=
+.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 6: review =93rendering=94 sp=
+ec section 6<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:7=
+7.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;b=
+order-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMs=
+oNormal>Rui<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77=
+.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;bo=
+rder-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMso=
+Normal><span style=3D'color:black'>Open<o:p></o:p></span></p></td></tr><tr st=
+yle=3D'mso-yfti-irow:7'><td width=3D208 valign=3Dtop style=3D'width:155.8pt;b=
+order:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p =
+class=3DMsoNormal>Action item 7: review =93rendering=94 spec section 7<o:p></=
+o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:no=
+ne;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid w=
+indowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>In=EAs<o:p>=
+</o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:=
+none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid=
+ windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3D=
+MsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p></td></tr><=
+tr style=3D'mso-yfti-irow:8'><td width=3D208 valign=3Dtop style=3D'width:155.=
+8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt=
+'><p class=3DMsoNormal>Action item 8: review =93rendering=94 spec section 8<o=
+:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-t=
+op:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:so=
+lid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Marta<=
+o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-=
+top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:s=
+olid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p clas=
+s=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p></span></p></td=
+></tr><tr style=3D'mso-yfti-irow:9'><td width=3D208 valign=3Dtop style=3D'wid=
+th:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0c=
+m 5.4pt'><p class=3DMsoNormal>Action item 9: review =93rendering=94 spec sect=
+ion 9<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;b=
+order-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-r=
+ight:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal=
+>Tom=E1s<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9p=
+t;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;borde=
+r-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNor=
+mal><span style=3D'color:black'>Open<o:p></o:p></span></p></td></tr><tr style=
+=3D'mso-yfti-irow:10'><td width=3D208 valign=3Dtop style=3D'width:155.8pt;bor=
+der:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p cl=
+ass=3DMsoNormal>Action item 10: review =93rendering=94 spec section 1<o:p></o=
+:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:non=
+e;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid wi=
+ndowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Beatriz<o:p>=
+</o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:=
+none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid=
+ windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3D=
+MsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p></td></tr><=
+tr style=3D'mso-yfti-irow:11'><td width=3D208 valign=3Dtop style=3D'width:155=
+.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4p=
+t'><p class=3DMsoNormal>Action item 11: review =93rendering=94 spec section 2=
+<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border=
+-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:=
+solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Rui<=
+o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-=
+top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:s=
+olid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p clas=
+s=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p></span></p></td=
+></tr><tr style=3D'mso-yfti-irow:12'><td width=3D208 valign=3Dtop style=3D'wi=
+dth:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0=
+cm 5.4pt'><p class=3DMsoNormal>Action item 12: review =93rendering=94 spec se=
+ction 3<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt=
+;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border=
+-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNorm=
+al>In=EAs<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9=
+pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;bord=
+er-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNo=
+rmal><span style=3D'color:black'>Open<o:p></o:p></span></p></td></tr><tr styl=
+e=3D'mso-yfti-irow:13'><td width=3D208 valign=3Dtop style=3D'width:155.8pt;bo=
+rder:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p c=
+lass=3DMsoNormal>Action item 13: review =93rendering=94 spec section 4<o:p></=
+o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:no=
+ne;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid w=
+indowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Marta<o:p><=
+/o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:n=
+one;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid =
+windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DM=
+soNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p></td></tr><t=
+r style=3D'mso-yfti-irow:14'><td width=3D208 valign=3Dtop style=3D'width:155.=
+8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt=
+'><p class=3DMsoNormal>Action item 14: review =93rendering=94 spec section 5<=
+o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-=
+top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:s=
+olid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Tom=
+=E1s<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;bo=
+rder-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-ri=
+ght:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p=
+ class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p></span></p=
+></td></tr><tr style=3D'mso-yfti-irow:15'><td width=3D208 valign=3Dtop style=
+=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5=
+.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 15: review =93rendering=94 s=
+pec section 6<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:=
+77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;=
+border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DM=
+soNormal>Beatriz<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'wid=
+th:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0=
+pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=
+=3DMsoNormal><span style=3D'color:black'>Open<o:p></o:p></span></p></td></tr>=
+<tr style=3D'mso-yfti-irow:16'><td width=3D208 valign=3Dtop style=3D'width:15=
+5.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4=
+pt'><p class=3DMsoNormal>Action item 16: review =93rendering=94 spec section =
+7<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;borde=
+r-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right=
+:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Rui=
+<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border=
+-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-right:=
+solid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p cla=
+ss=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p></td><=
+/tr><tr style=3D'mso-yfti-irow:17'><td width=3D208 valign=3Dtop style=3D'widt=
+h:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm=
+ 5.4pt'><p class=3DMsoNormal>Action item 17: review =93rendering=94 spec sect=
+ion 8<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;b=
+order-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-r=
+ight:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal=
+>In=EAs<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt=
+;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border=
+-right:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'=
+><p class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p></span>=
+</p></td></tr><tr style=3D'mso-yfti-irow:18'><td width=3D208 valign=3Dtop sty=
+le=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm=
+ 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 18: review =93rendering=94=
+ spec section 9<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'widt=
+h:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0p=
+t;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=
+=3DMsoNormal>Marta<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'w=
+idth:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1=
+.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p clas=
+s=3DMsoNormal><span style=3D'color:black'>Open<o:p></o:p></span></p></td></tr=
+><tr style=3D'mso-yfti-irow:19'><td width=3D208 valign=3Dtop style=3D'width:1=
+55.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.=
+4pt'><p class=3DMsoNormal>Action item 19: review =93rendering=94 spec section=
+ 1<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;bord=
+er-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-righ=
+t:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>To=
+m=E1s<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;b=
+order-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border-r=
+ight:solid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><=
+p class=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span></p><=
+/td></tr><tr style=3D'mso-yfti-irow:20'><td width=3D208 valign=3Dtop style=3D=
+'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4p=
+t 0cm 5.4pt'><p class=3DMsoNormal>Action item 20: review =93rendering=94 spec=
+ section 2<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.=
+9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;bor=
+der-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoN=
+ormal>Beatriz<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:=
+77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;=
+border-right:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0cm =
+5.4pt'><p class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p><=
+/span></p></td></tr><tr style=3D'mso-yfti-irow:21'><td width=3D208 valign=3Dt=
+op style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;paddi=
+ng:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 21: review =93render=
+ing=94 spec section 3<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=
+=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windowt=
+ext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p=
+ class=3DMsoNormal>Rui<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=
+=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windowt=
+ext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p=
+ class=3DMsoNormal><span style=3D'color:black'>Open<o:p></o:p></span></p></td=
+></tr><tr style=3D'mso-yfti-irow:22'><td width=3D208 valign=3Dtop style=3D'wi=
+dth:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0=
+cm 5.4pt'><p class=3DMsoNormal>Action item 22: review =93rendering=94 spec se=
+ction 4<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9pt=
+;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;border=
+-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNorm=
+al>In=EAs<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:77.9=
+pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;bord=
+er-right:solid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0cm 5.4p=
+t'><p class=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o:p></span><=
+/p></td></tr><tr style=3D'mso-yfti-irow:23'><td width=3D208 valign=3Dtop styl=
+e=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm =
+5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 23: review =93rendering=94 =
+spec section 5<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width=
+:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt=
+;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3D=
+MsoNormal>Marta<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'widt=
+h:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0p=
+t;border-right:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm 5.4pt 0c=
+m 5.4pt'><p class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o:p></o:p=
+></span></p></td></tr><tr style=3D'mso-yfti-irow:24'><td width=3D208 valign=
+=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;p=
+adding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 24: review =93re=
+ndering=94 spec section 6<o:p></o:p></p></td><td width=3D104 valign=3Dtop sty=
+le=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windo=
+wtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'>=
+<p class=3DMsoNormal>Tom=E1s<o:p></o:p></p></td><td width=3D104 valign=3Dtop =
+style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid wi=
+ndowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4p=
+t'><p class=3DMsoNormal><span style=3D'color:black'>Open<o:p></o:p></span></p=
+></td></tr><tr style=3D'mso-yfti-irow:25'><td width=3D208 valign=3Dtop style=
+=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding:0cm 5=
+.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 25: review =93rendering=94 s=
+pec section 7<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'width:=
+77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0pt;=
+border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DM=
+soNormal>Beatriz<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'wid=
+th:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext 1.0=
+pt;border-right:solid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4pt 0=
+cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o:p><=
+/span></p></td></tr><tr style=3D'mso-yfti-irow:26'><td width=3D208 valign=3Dt=
+op style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;paddi=
+ng:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 26: review =93render=
+ing=94 spec section 8<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=
+=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windowt=
+ext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p=
+ class=3DMsoNormal>Rui<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=
+=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windowt=
+ext 1.0pt;border-right:solid windowtext 1.0pt;background:#FFC7CE;padding:0cm =
+5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#9C0006'>Blocked<o=
+:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:27'><td width=3D208 =
+valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:=
+none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 27: review=
+ =93rendering=94 spec section 9<o:p></o:p></p></td><td width=3D104 valign=3Dt=
+op style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid=
+ windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5=
+.4pt'><p class=3DMsoNormal>In=EAs<o:p></o:p></p></td><td width=3D104 valign=
+=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:s=
+olid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0=
+cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:black'>Open<o:p></o:p></s=
+pan></p></td></tr><tr style=3D'mso-yfti-irow:28'><td width=3D208 valign=3Dtop=
+ style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;padding=
+:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 28: review =93renderin=
+g=94 spec section 1<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D'=
+width:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext =
+1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p cla=
+ss=3DMsoNormal>Marta<o:p></o:p></p></td><td width=3D104 valign=3Dtop style=3D=
+'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windowtext=
+ 1.0pt;border-right:solid windowtext 1.0pt;background:#C6EFCE;padding:0cm 5.4=
+pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#006100'>Done<o:p></o=
+:p></span></p></td></tr><tr style=3D'mso-yfti-irow:29'><td width=3D208 valign=
+=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;p=
+adding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 29: review =93re=
+ndering=94 spec section 2<o:p></o:p></p></td><td width=3D104 valign=3Dtop sty=
+le=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windo=
+wtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'>=
+<p class=3DMsoNormal>Tom=E1s<o:p></o:p></p></td><td width=3D104 valign=3Dtop =
+style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid wi=
+ndowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#FFC7CE;padding=
+:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#9C0006'>Bloc=
+ked<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:30'><td width=
+=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;bord=
+er-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 30:=
+ review =93rendering=94 spec section 3<o:p></o:p></p></td><td width=3D104 val=
+ign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-botto=
+m:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4p=
+t 0cm 5.4pt'><p class=3DMsoNormal>Beatriz<o:p></o:p></p></td><td width=3D104 =
+valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bo=
+ttom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5=
+.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:black'>Open<o:p></o=
+:p></span></p></td></tr><tr style=3D'mso-yfti-irow:31'><td width=3D208 valign=
+=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;p=
+adding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 31: review =93re=
+ndering=94 spec section 4<o:p></o:p></p></td><td width=3D104 valign=3Dtop sty=
+le=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windo=
+wtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'>=
+<p class=3DMsoNormal>Rui<o:p></o:p></p></td><td width=3D104 valign=3Dtop styl=
+e=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid window=
+text 1.0pt;border-right:solid windowtext 1.0pt;background:#C6EFCE;padding:0cm=
+ 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#006100'>Done<o:p=
+></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:32'><td width=3D208 va=
+lign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:no=
+ne;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 32: review =
+=93rendering=94 spec section 5<o:p></o:p></p></td><td width=3D104 valign=3Dto=
+p style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid =
+windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.=
+4pt'><p class=3DMsoNormal>In=EAs<o:p></o:p></p></td><td width=3D104 valign=3D=
+top style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:soli=
+d windowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#FFC7CE;pad=
+ding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#9C0006'>=
+Blocked<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:33'><td wid=
+th=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;bo=
+rder-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 3=
+3: review =93rendering=94 spec section 6<o:p></o:p></p></td><td width=3D104 v=
+align=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bot=
+tom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.=
+4pt 0cm 5.4pt'><p class=3DMsoNormal>Marta<o:p></o:p></p></td><td width=3D104 =
+valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bo=
+ttom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5=
+.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:black'>Open<o:p></o=
+:p></span></p></td></tr><tr style=3D'mso-yfti-irow:34'><td width=3D208 valign=
+=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top:none;p=
+adding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 34: review =93re=
+ndering=94 spec section 7<o:p></o:p></p></td><td width=3D104 valign=3Dtop sty=
+le=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid windo=
+wtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'>=
+<p class=3DMsoNormal>Tom=E1s<o:p></o:p></p></td><td width=3D104 valign=3Dtop =
+style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:solid wi=
+ndowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#C6EFCE;padding=
+:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#006100'>Done=
+<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:35'><td width=3D20=
+8 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-to=
+p:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 35: revi=
+ew =93rendering=94 spec section 8<o:p></o:p></p></td><td width=3D104 valign=
+=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:s=
+olid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0=
+cm 5.4pt'><p class=3DMsoNormal>Beatriz<o:p></o:p></p></td><td width=3D104 val=
+ign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-botto=
+m:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#FFC7=
+CE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#9C=
+0006'>Blocked<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:36'><=
+td width=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.=
+0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action =
+item 36: review =93rendering=94 spec section 9<o:p></o:p></p></td><td width=
+=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;bo=
+rder-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;paddin=
+g:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Rui<o:p></o:p></p></td><td width=
+=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;bo=
+rder-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;paddin=
+g:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:black'>Open<=
+o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:37'><td width=3D208=
+ valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;border-top=
+:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 37: revie=
+w =93rendering=94 spec section 1<o:p></o:p></p></td><td width=3D104 valign=3D=
+top style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:soli=
+d windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm =
+5.4pt'><p class=3DMsoNormal>In=EAs<o:p></o:p></p></td><td width=3D104 valign=
+=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bottom:s=
+olid windowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#C6EFCE;=
+padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:#00610=
+0'>Done<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:38'><td wid=
+th=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;bo=
+rder-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 3=
+8: review =93rendering=94 spec section 2<o:p></o:p></p></td><td width=3D104 v=
+align=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bot=
+tom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.=
+4pt 0cm 5.4pt'><p class=3DMsoNormal>Marta<o:p></o:p></p></td><td width=3D104 =
+valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bo=
+ttom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#F=
+FC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:=
+#9C0006'>Blocked<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:39=
+'><td width=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext=
+ 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Acti=
+on item 39: review =93rendering=94 spec section 3<o:p></o:p></p></td><td widt=
+h=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;b=
+order-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;paddi=
+ng:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Tom=E1s<o:p></o:p></p></td><td w=
+idth=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:non=
+e;border-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;pa=
+dding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:black'>O=
+pen<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:40'><td width=
+=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;bord=
+er-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item 40:=
+ review =93rendering=94 spec section 4<o:p></o:p></p></td><td width=3D104 val=
+ign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-botto=
+m:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm 5.4p=
+t 0cm 5.4pt'><p class=3DMsoNormal>Beatriz<o:p></o:p></p></td><td width=3D104 =
+valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-bo=
+ttom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;background:#C=
+6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:=
+#006100'>Done<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:41'><=
+td width=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.=
+0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action =
+item 41: review =93rendering=94 spec section 5<o:p></o:p></p></td><td width=
+=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;bo=
+rder-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;paddin=
+g:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Rui<o:p></o:p></p></td><td width=
+=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;bo=
+rder-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;backgr=
+ound:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D=
+'color:#9C0006'>Blocked<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-=
+irow:42'><td width=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid win=
+dowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNorm=
+al>Action item 42: review =93rendering=94 spec section 6<o:p></o:p></p></td><=
+td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left=
+:none;border-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0p=
+t;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>In=EAs<o:p></o:p></p></td=
+><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-le=
+ft:none;border-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.=
+0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'color:bl=
+ack'>Open<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:43'><td w=
+idth=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext 1.0pt;=
+border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Action item=
+ 43: review =93rendering=94 spec section 7<o:p></o:p></p></td><td width=3D104=
+ valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-b=
+ottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;padding:0cm =
+5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Marta<o:p></o:p></p></td><td width=3D10=
+4 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;border-=
+bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;background:=
+#C6EFCE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'colo=
+r:#006100'>Done<o:p></o:p></span></p></td></tr><tr style=3D'mso-yfti-irow:44'=
+><td width=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid windowtext =
+1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Actio=
+n item 44: review =93rendering=94 spec section 8<o:p></o:p></p></td><td width=
+=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none;bo=
+rder-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;paddin=
+g:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Tom=E1s<o:p></o:p></p></td><td wi=
+dth=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-left:none=
+;border-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1.0pt;bac=
+kground:#FFC7CE;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=
+=3D'color:#9C0006'>Blocked<o:p></o:p></span></p></td></tr><tr style=3D'mso-yf=
+ti-irow:45'><td width=3D208 valign=3Dtop style=3D'width:155.8pt;border:solid =
+windowtext 1.0pt;border-top:none;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoN=
+ormal>Action item 45: review =93rendering=94 spec section 9<o:p></o:p></p></t=
+d><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;border-l=
+eft:none;border-bottom:solid windowtext 1.0pt;border-right:solid windowtext 1=
+.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal>Beatriz<o:p></o:p></p>=
+</td><td width=3D104 valign=3Dtop style=3D'width:77.9pt;border-top:none;borde=
+r-left:none;border-bottom:solid windowtext 1.0pt;border-right:solid windowtex=
+t 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'><p class=3DMsoNormal><span style=3D'colo=
+r:black'>Open<o:p></o:p></span></p></td></tr>
+</table>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Kind regards,<o:p></o:p></p>
+
+<table class=3DMsoNormalTable border=3D0 cellspacing=3D0 cellpadding=3D0 styl=
+e=3D'border-collapse:collapse'><tr><td width=3D60 valign=3Dtop style=3D'width=
+:45.0pt;padding:0cm 5.4pt 0cm 0cm'><p class=3DMsoNormal><span style=3D'mso-li=
+gatures:none;mso-fareast-language:EN-GB'><img width=3D48 height=3D48 style=3D=
+'width:.5in;height:.5in' id=3D"Picture_x0020_1" src=3D"cid:image001.png@01DB1=
+A2B.3C4D5E60" alt=3D"Avatar"></span><o:p></o:p></p></td>
+<td valign=3Dtop style=3D'padding:0cm 0cm 0cm 0cm'><p class=3DMsoNormal><b><s=
+pan style=3D'font-size:10.0pt;font-family:"Segoe UI",sans-serif;color:#1F3864=
+'>Rui Mendes<o:p></o:p></span></b></p><p class=3DMsoNormal><span style=3D'fon=
+t-size:9.0pt;font-family:"Segoe UI",sans-serif;color:#595959'>Engineering Man=
+ager | Exemplo Lda<o:p></o:p></span></p><p class=3DMsoNormal><span style=3D'f=
+ont-size:9.0pt;font-family:"Segoe UI",sans-serif'><a href=3D"mailto:rui.mende=
+s@example.com"><span style=3D'color:#0563C1'>rui.mendes@example.com</span></a=
+> | +351 000 000 000<o:p></o:p></span></p></td></tr></table>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+
+<div style=3D'border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0cm 0c=
+m 0cm'><p class=3DMsoNormal><b><span lang=3DEN-US style=3D'font-family:"Calib=
+ri",sans-serif;mso-ligatures:none'>From:</span></b><span lang=3DEN-US style=
+=3D'font-family:"Calibri",sans-serif;mso-ligatures:none'> In=EAs Costa &lt;<a=
+ href=3D"mailto:ines.costa@example.com">ines.costa@example.com</a>&gt; <br><b=
+>Sent:</b> Monday, October 6, 2026 4:12 PM<br><b>To:</b> Rui Mendes &lt;rui.m=
+endes@example.com&gt;; Marta Silva &lt;marta@example.org&gt;<br><b>Subject:</=
+b> Agenda for Tuesday<o:p></o:p></span></p></div>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+
+<p class=3DMsoNormal>Some ideas survived intact, others were quietly retired,=
+ and a few came back in forms we did not expect.. We spent the summer testing=
+ glazes, weights and handles with a group of two hundred early customers, and=
+ their notes shaped every piece in this collection. We spent the summer testi=
+ng glazes, weights and handles with a group of two hundred early customers, a=
+nd their notes shaped every piece in this collection.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>We spent the summer testing glazes, weights and handles =
+with a group of two hundred early customers, and their notes shaped every pie=
+ce in this collection. Some ideas survived intact, others were quietly retire=
+d, and a few came back in forms we did not expect.. We spent the summer testi=
+ng glazes, weights and handles with a group of two hundred early customers, a=
+nd their notes shaped every piece in this collection.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Some ideas survived intact, others were quietly retired,=
+ and a few came back in forms we did not expect.. Some ideas survived intact,=
+ others were quietly retired, and a few came back in forms we did not expect.=
+. Some ideas survived intact, others were quietly retired, and a few came bac=
+k in forms we did not expect.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Design is not just what it looks like and feels like; it=
+ is how the small, repeated decisions add up over a season of use. Design is =
+not just what it looks like and feels like; it is how the small, repeated dec=
+isions add up over a season of use. Some ideas survived intact, others were q=
+uietly retired, and a few came back in forms we did not expect.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Design is not just what it looks like and feels like; it=
+ is how the small, repeated decisions add up over a season of use. Design is =
+not just what it looks like and feels like; it is how the small, repeated dec=
+isions add up over a season of use. We spent the summer testing glazes, weigh=
+ts and handles with a group of two hundred early customers, and their notes s=
+haped every piece in this collection.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Design is not just what it looks like and feels like; it=
+ is how the small, repeated decisions add up over a season of use. Some ideas=
+ survived intact, others were quietly retired, and a few came back in forms w=
+e did not expect.. Some ideas survived intact, others were quietly retired, a=
+nd a few came back in forms we did not expect.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>We spent the summer testing glazes, weights and handles =
+with a group of two hundred early customers, and their notes shaped every pie=
+ce in this collection. Some ideas survived intact, others were quietly retire=
+d, and a few came back in forms we did not expect.. Design is not just what i=
+t looks like and feels like; it is how the small, repeated decisions add up o=
+ver a season of use.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Some ideas survived intact, others were quietly retired,=
+ and a few came back in forms we did not expect.. Some ideas survived intact,=
+ others were quietly retired, and a few came back in forms we did not expect.=
+. We spent the summer testing glazes, weights and handles with a group of two=
+ hundred early customers, and their notes shaped every piece in this collecti=
+on.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Design is not just what it looks like and feels like; it=
+ is how the small, repeated decisions add up over a season of use. Design is =
+not just what it looks like and feels like; it is how the small, repeated dec=
+isions add up over a season of use. We spent the summer testing glazes, weigh=
+ts and handles with a group of two hundred early customers, and their notes s=
+haped every piece in this collection.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+<p class=3DMsoNormal>Design is not just what it looks like and feels like; it=
+ is how the small, repeated decisions add up over a season of use. We spent t=
+he summer testing glazes, weights and handles with a group of two hundred ear=
+ly customers, and their notes shaped every piece in this collection. Design i=
+s not just what it looks like and feels like; it is how the small, repeated d=
+ecisions add up over a season of use.<o:p></o:p></p>
+<p class=3DMsoNormal>&nbsp;<o:p></o:p></p>
+
+<p class=3DMsoNormal><span style=3D'font-size:8.0pt;color:gray'>CONFIDENTIALI=
+TY NOTICE: This e-mail is synthetic test data.<o:p></o:p></span></p>
+</div></body></html>
+
+--===============6664557716988099809==--
+
+--===============8893811216697874724==
+Content-Transfer-Encoding: base64
+Content-ID: <image001.png@01DB1A2B.3C4D5E60>
+Content-Disposition: inline; filename="avatar-mr.png"
+Content-Type: image/png; name="avatar-mr.png"
+
+iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAARnQU1BAACx
+jwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAN8SURBVGhD1VoxiBNBFE1paWm3zqSxsLC8UrCx
+EktLK7EUK8FM9grBQiFYKTap5CqxEUQQrhEsLNLZBjG78VSMiBDEIvJmb9afP3+zs0luMz54XLIz
+O///zZuZ/2ev0zkBHKXJmWnavUiJa7xfFBinyams172a99UwN3qW9/ViJW0fdTDp6WvjNDnNx2sN
+eKpwJDd67jnZgFlfvZr09HU+/olhkiYX8r4+5I5sTKNH+d3uZW5va5imydm8r154hrfPwyxNznH7
+G+FTmuxlRk8FYydDo2eYV9yPtQB9bqrzdZkZfYf70wiZUft80PaphtyvIEyMvukPtiuq+9y/lYDm
+dyWbKgbPCaw2rU7YUBo9xxLO/fXQ0lK5Ho0ecX+XcLxJ+TdGRMxN7ncJuxsKN8VEyBv5F/e9UyRk
+/g0xMjP6Fve/g6SKd4yVmdHjJeeR1sa2bNZxaUVCbs47xE5kCWUANq8XOnH+eJkuKH5/fO/1AWfP
+by/1m394XTmGw59v48Wvt08Xnx/seeOJNPrdvwAC5SMZlwwiMIqQACim9857Y0q0FZ3Vv9AoUTKO
+p037ICCOqgC+PrlS3oNfwIGPWUU7D1A88IYqUuPuKXMZOfnQX6EuAH4dn7ltkajgitpWaBRIjfx8
+87D8TGXkHKftIQHQ/sG/AGppW7AIjRKp8S+PLnkGqXxoe10A+EsROgfsStQk76fG8d3p1snIyQfX
+8d2hKgAO9EPg3G4VbQDQEW+oIg+Ay4jKB+0OoQF8f3bDs7mKNrFrkoHyAKhMuLzQ7lAVAKRDxwAa
+/QIocnDkxxuqyAMA3VN3cnLyAR1WBYBrdA7Q++uIyvF4J/YbJUoB8F3XyQd0qAsARB+H0GW0PG8N
+PWmTAuAbF5WAQ0gAfBxph6dcykiRX/MOEqUAQCojet0hJADeRu+ROO2rx2UAxbGh3ylq8nPU/6Gc
+LGn03CsrQ2UUB4XTOvuiIsbzIE6j55Vve5qkFbujGnC/lxDzXKg8UqGw6XVghdY2Ubtzf0XEKaWG
+J9TYKPxBdkOcWXH/amFXpRgOu4werf06FkHY97980JaIB7i28xS72eRqlsumQO7RykZn9Cx4tWmK
+YrdW+0H/UtCUdulWg61Ipg5FFacG29sv1AEyYm6nFaAuxZKLAsN3TGYhRTXc+T98cOCAADs5HIPU
+KHHNtoW8qGuAv1pomEssUalzAAAAAElFTkSuQmCC
+
+--===============8893811216697874724==--

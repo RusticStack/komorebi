@@ -1,0 +1,37 @@
+# cargo-deny (CI: `cargo deny --locked check licenses advisories`).
+# Only the Windows build's dependency graph counts.
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+all-features = true
+
+[advisories]
+# RustSec: known vulnerabilities, unsound, unmaintained and yanked crates.
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive licenses, MPL-2.0 (file-level copyleft, used unmodified) and
+# Slint's royalty-free license, whose attribution is Settings → About
+# (AboutSlint). Slint's GPL-3.0 option is not the one taken.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "LicenseRef-Slint-Royalty-free-2.0",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

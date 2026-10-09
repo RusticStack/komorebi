@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2024"
 description = "A small, fast, privacy-respecting email client for Windows"
 license = "Apache-2.0"
+repository = "https://github.com/RusticStack/komorebi"
 build = "build.rs"
 
 [dependencies]
@@ -11,25 +12,77 @@ anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "6"
 imap = "2.4"
-keyring = { version = "4" }
-lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "native-tls", "smtp-transport"] }
-mail-parser = "0.11"
+imap-proto = "0.10"  # already used by imap; named for its Capability type
+# The credential API; the Windows store is below. (The `keyring` wrapper
+# enabled the store's `search` feature, which linked `regex`.)
+keyring-core = "1"
+lettre = { version = "0.11", default-features = false, features = ["builder", "native-tls", "smtp-transport"] }
+# full_encoding decodes legacy CJK charsets (ISO-2022-JP, Big5, GB2312, ...).
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 native-tls = "0.2"
 rfd = { version = "0.17", default-features = false }
-rusqlite = { version = "0.40", features = ["bundled"] }
-slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility"] }
+rusqlite = { version = "0.40", features = ["bundled", "functions"] }
+# Pinned: the HTML renderer's parley/tiny-skia versions below are coupled to it.
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
+# HTML renderer (src/mail/render). Each is already linked into the app through
+# Slint; pinned to the exact locked version so no second copy appears.
+gif = "=0.14.2"
+image-webp = "=0.2.4"
+parley = "=0.11.1"
+png = "=0.18.1"
+skrifa = "=0.44.0"
+tiny-skia = "=0.12.0"
+# Caps characters per grapheme cluster before shaping (parley counts them
+# in a u8). Already linked through Slint; pinned to the locked version.
+unicode-segmentation = "=1.13.3"
+zune-core = "=0.5.3"
+zune-jpeg = "=0.5.15"
+# Link checks parse URLs as browsers do (host in xn-- form, numeric IPs).
+# Already linked through lettre and Slint; pinned to the locked version.
+url = "=2.5.8"
+# The sender notice shows an xn-- domain in its Unicode form. Already linked
+# through url; pinned to the locked version.
+idna = "=1.1.0"
+
+[target.'cfg(windows)'.dependencies]
+# Windows Credential Manager, the store `keyring` v4 used: pinned, so saved
+# passwords keep their credential names. No `search` (it links `regex`).
+windows-native-keyring-store = { version = "=1.1.0", default-features = false }
+# ShellExecuteW, to open a confirmed http(s) link in the default browser or
+# an opened attachment; CreateMutexW (Threading, Security) and FindWindowW
+# for one app per cache; GetClipboardData (DataExchange) and GlobalLock
+# (Memory) to paste copied files; EnumDisplayMonitors (Graphics_Gdi) to keep
+# a restored window on a monitor; FlashWindowEx for the opt-in taskbar flash;
+# DwmSetWindowAttribute (Graphics_Dwm) for a title bar that follows the theme
+# (ProcessStatus: examples/peak_memory only).
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[features]
+# Honor KOMOREBI_PASSWORD (with KOMOREBI_DB) in release builds too.
+dev-env-password = []
 
 [build-dependencies]
+# Compiles assets/komorebi.rc (icon, version information, manifest).
+embed-resource = "3"
 slint-build = "1.18"
 
 [dev-dependencies]
 base64 = "0.22"
 
+# Size-optimized, except Slint's core and software renderer, whose pixel
+# loops need full optimization to keep frame times unchanged. Never "z".
 [profile.release]
-lto = "thin"
+opt-level = "s"
+lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+[profile.release.package.i-slint-core]
+opt-level = 3
+
+[profile.release.package.i-slint-renderer-software]
+opt-level = 3
 
 # Slint's software renderer is unusably slow unoptimized; optimize
 # dependencies in debug builds and keep our own crate fast to rebuild.

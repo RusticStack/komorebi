@@ -1,0 +1,10 @@
+# Link the C runtime statically so the app runs without the VC++
+# redistributable. A RUSTFLAGS environment variable overrides this.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# The bundled SQLite is built without the optional modules the cache never
+# uses (full-text search, R-tree, STAT4 planner samples, dbstat, soundex).
+# This keeps the release binary under its size ceiling.
+[env]
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_STAT4 -USQLITE_ENABLE_DBSTAT_VTAB -USQLITE_SOUNDEX"

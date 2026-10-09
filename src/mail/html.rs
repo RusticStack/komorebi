@@ -12,6 +12,11 @@
 
 use std::borrow::Cow;
 
+/// Output cap, the same as the reader's display cap. Text past it is
+/// dropped, so a hostile message can't blow up the output (deep quotes
+/// repeat their prefix on every line).
+const MAX_OUTPUT: usize = 300_000;
+
 /// Elements whose contents are dropped entirely.
 fn is_skipped(name: &str) -> bool {
     matches!(
@@ -101,13 +106,12 @@ pub fn html_to_text(html: &str) -> String {
                 }
                 ("li", false) => {
                     out.line(quote);
-                    for _ in 1..lists.len() {
-                        out.text("  ", quote);
-                    }
+                    // Deep nesting stays readable; the real depth still counts.
+                    out.text(&"  ".repeat(lists.len().saturating_sub(1).min(6)), quote);
                     match lists.last_mut() {
                         Some(Some(n)) => {
                             out.text(&format!("{n}. "), quote);
-                            *n += 1;
+                            *n = n.saturating_add(1);
                         }
                         _ => out.text("• ", quote),
                     }
@@ -133,7 +137,8 @@ pub fn html_to_text(html: &str) -> String {
                 ("a", false) => link = tag.href.map(|h| (h, out.buf.len())),
                 ("a", true) => {
                     if let Some((href, start)) = link.take() {
-                        let label = out.buf[start..].trim();
+                        // The buffer may have been trimmed below `start` since.
+                        let label = out.buf.get(start..).unwrap_or("").trim();
                         let shown = href.trim_start_matches("mailto:").trim_end_matches('/');
                         if is_followable(&href)
                             && !label.is_empty()
@@ -155,7 +160,12 @@ pub fn html_to_text(html: &str) -> String {
         }
 
         // Text up to the next possible tag (a stray '<' is plain text).
-        let next = lower[i + 1..].find('<').map_or(bytes.len(), |e| i + 1 + e);
+        // Byte search: `i + 1` can fall inside a multi-byte character, but
+        // '<' is ASCII, so the index found is always a character boundary.
+        let next = bytes[i + 1..]
+            .iter()
+            .position(|&b| b == b'<')
+            .map_or(bytes.len(), |e| i + 1 + e);
         let decoded = decode_entities(&html[i..next]);
         i = next;
         if pre > 0 {
@@ -257,12 +267,20 @@ struct Writer {
     /// Whether the last thing written was whitespace (or the line start).
     space: bool,
     at_line_start: bool,
+    /// Output reached `MAX_OUTPUT`; further writes are dropped.
+    truncated: bool,
 }
 
 impl Writer {
+    fn full(&mut self) -> bool {
+        self.truncated |= self.buf.len() >= MAX_OUTPUT;
+        self.truncated
+    }
+
     fn ensure_prefix(&mut self, quote: usize) {
         if self.at_line_start || self.buf.is_empty() {
-            for _ in 0..quote {
+            // Only the printed depth is clamped; the caller keeps the count.
+            for _ in 0..quote.min(6) {
                 self.buf.push_str("> ");
             }
             self.at_line_start = false;
@@ -270,7 +288,7 @@ impl Writer {
     }
 
     fn text(&mut self, s: &str, quote: usize) {
-        if s.is_empty() {
+        if s.is_empty() || self.full() {
             return;
         }
         self.ensure_prefix(quote);
@@ -283,6 +301,9 @@ impl Writer {
         let trailing = s.ends_with(char::is_whitespace);
         let mut first = true;
         for word in s.split_whitespace() {
+            if self.full() {
+                return;
+            }
             if (!first || leading) && !self.space && !self.at_line_start && !self.buf.is_empty() {
                 self.buf.push(' ');
             }
@@ -304,6 +325,9 @@ impl Writer {
     }
 
     fn newline(&mut self, quote: usize) {
+        if self.full() {
+            return;
+        }
         self.trim_trailing_space();
         if self.at_line_start {
             // keep quote markers on blank lines inside quotes
@@ -325,7 +349,7 @@ impl Writer {
     /// End the current block: at most one blank line between blocks.
     fn block(&mut self) {
         self.trim_trailing_space();
-        if self.buf.is_empty() {
+        if self.buf.is_empty() || self.full() {
             return;
         }
         let trailing_newlines = self.buf.len() - self.buf.trim_end_matches('\n').len();
@@ -358,7 +382,13 @@ impl Writer {
             out.push_str(line);
             out.push('\n');
         }
-        out.trim().to_string()
+        let mut out = out.trim().to_string();
+        // A single long run (one huge <pre> line) can pass the cap unflagged.
+        if self.truncated || out.len() > MAX_OUTPUT {
+            out.truncate(out.floor_char_boundary(MAX_OUTPUT));
+            out.push_str("\n[Message shortened]");
+        }
+        out
     }
 }
 
@@ -582,12 +612,132 @@ mod tests {
     }
 
     #[test]
+    fn text_starting_with_multibyte_chars() {
+        // Regression: a real newsletter crashed the converter when a text run
+        // began with a multi-byte character right after a tag.
+        assert_eq!(html_to_text("<b>›</b> ok"), "› ok");
+        assert_eq!(
+            html_to_text("<p>📦 envio</p><p>ação ›› fim</p>"),
+            "📦 envio
+
+ação ›› fim"
+        );
+        for s in [
+            "›",
+            "<",
+            "<›",
+            "›<",
+            "a<›>b",
+            "<a href=\"›\">›</a>",
+            "&›;",
+            "<!--›",
+            "<p ›",
+        ] {
+            html_to_text(s);
+        }
+    }
+
+    #[test]
     fn hostile_input_is_linear() {
         let start = std::time::Instant::now();
         html_to_text(&"<a".repeat(200_000));
         html_to_text(&"<".repeat(1_000_000));
         html_to_text(&"<a x=\">".repeat(100_000));
         assert!(start.elapsed().as_secs() < 2);
+    }
+
+    #[test]
+    fn link_label_after_trim_does_not_panic() {
+        // `</td>` and the block start trim the buffer below the link start.
+        html_to_text("</td><a href=e><ol></a>");
+    }
+
+    #[test]
+    fn deep_nesting_is_clamped_and_capped() {
+        let html = "<blockquote>".repeat(20_000) + &"x<br>".repeat(30_000);
+        let out = html_to_text(&html);
+        assert!(out.len() <= MAX_OUTPUT + 64, "{}", out.len());
+        assert!(out.starts_with("> > > > > > x\n"), "{}", &out[..40]);
+        assert!(out.ends_with("[Message shortened]"));
+        assert!(html_to_text(&"x ".repeat(200_000)).len() <= MAX_OUTPUT + 64);
+        let pre = format!("<pre>{}", "é".repeat(200_000));
+        assert!(html_to_text(&pre).len() <= MAX_OUTPUT + 64);
+        let html = "<ul><li>".repeat(50) + "deep";
+        assert!(html_to_text(&html).ends_with(&format!("{}• deep", "  ".repeat(6))));
+        // Closing tags still pop the real depth.
+        let html = "<blockquote>".repeat(10) + "a" + &"</blockquote>".repeat(10) + "b";
+        assert_eq!(html_to_text(&html), "> > > > > > a\n\nb");
+    }
+
+    /// Seeded token fuzz: hostile tag soup must never panic or overrun the cap.
+    #[test]
+    fn token_fuzz() {
+        const TOKENS: &[&str] = &[
+            "<p>",
+            "</p>",
+            "<br>",
+            "<li>",
+            "</li>",
+            "<ul>",
+            "</ul>",
+            "<ol>",
+            "</ol>",
+            "<ol start=4294967295>",
+            "<ol start=99999999999>",
+            "<td>",
+            "</td>",
+            "<th>",
+            "</tr>",
+            "<a href=",
+            "<a href=\"https://x.org/\">",
+            "</a>",
+            "<blockquote>",
+            "</blockquote>",
+            "<pre>",
+            "</pre>",
+            "<img alt=\"›\">",
+            "<!--",
+            "-->",
+            "<script>",
+            "</script>",
+            "<head>",
+            "<body>",
+            "&#",
+            "&#x",
+            "&#150;",
+            "&amp;",
+            "&",
+            ";",
+            "<",
+            ">",
+            "\"",
+            "'",
+            "=",
+            " ",
+            "\n",
+            "x",
+            "word ",
+            "›",
+            "📦",
+            "ação",
+            "é",
+            "\u{200B}",
+        ];
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..5_000 {
+            let len = next() % 200;
+            let doc: String = (0..len)
+                .map(|_| TOKENS[(next() % TOKENS.len() as u64) as usize])
+                .collect();
+            let out = html_to_text(&doc);
+            assert!(out.len() <= MAX_OUTPUT + 64, "{doc:?}");
+        }
     }
 
     #[test]

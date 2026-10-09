@@ -1,0 +1,30 @@
+From: Hugo Brandao <hugo@example.com>
+Subject: Encrypted: release keys
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted";
+ boundary="pgp-enc-5e1a"
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 08:00:00 +0000
+Message-ID: <07-pgp-mime-encrypted@komorebi.invalid>
+MIME-Version: 1.0
+
+This is an OpenPGP/MIME encrypted message (RFC 4880 and 3156)
+--pgp-enc-5e1a
+Content-Type: application/pgp-encrypted
+Content-Description: PGP/MIME version identification
+
+Version: 1
+
+--pgp-enc-5e1a
+Content-Type: application/octet-stream; name="encrypted.asc"
+Content-Description: OpenPGP encrypted message
+Content-Disposition: inline; filename="encrypted.asc"
+
+-----BEGIN PGP MESSAGE-----
+
+U3ludGhldGljIHRlc3QgZml4dHVyZTsgbm90IGEgcmVhbCBPcGVuUEdQIG1lc3NhZ2UuIFN5bnRo
+ZXRpYyB0ZXN0IGZpeHR1cmU7IG5vdCBhIHJlYWwgT3BlblBHUCBtZXNzYWdlLiBTeW50aGV0aWMg
+dGVzdCBmaXh0dXJlOyBub3QgYSByZWFsIE9wZW5QR1AgbWVzc2FnZS4g
+=AAAA
+-----END PGP MESSAGE-----
+
+--pgp-enc-5e1a--

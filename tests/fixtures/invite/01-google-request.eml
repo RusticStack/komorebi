@@ -1,0 +1,75 @@
+From: Ana Silva <ana.silva@example.com>
+To: Seed Account <seed@komorebi.invalid>
+Subject: Invitation: Quarterly planning @ Tue 16 Mar 2027 14:00 - 15:00 (WET)
+Date: Thu, 8 Oct 2026 09:00:00 +0000
+Message-ID: <01-google-request@komorebi.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed01"
+
+--mixed01
+Content-Type: multipart/alternative; boundary="alt01"
+
+--alt01
+Content-Type: text/plain; charset="UTF-8"
+
+You have been invited to the following event.
+
+Quarterly planning
+Tuesday 16 March 2027 14:00 - 15:00 (WET)
+Join with Google Meet: https://meet.google.com/abc-defg-hij
+
+--alt01
+Content-Type: text/html; charset="UTF-8"
+
+<p>You have been invited to the following event.</p><h3>Quarterly planning</h3><p>Tuesday 16 March 2027 14:00 - 15:00 (WET)</p><p><a href="https://meet.google.com/abc-defg-hij">Join with Google Meet</a></p>
+--alt01
+Content-Type: text/calendar; charset="UTF-8"; method=REQUEST
+Content-Transfer-Encoding: 7bit
+
+BEGIN:VCALENDAR
+PRODID:-//Google Inc//Google Calendar 70.9054//EN
+VERSION:2.0
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+DTSTART:20270316T140000Z
+DTEND:20270316T150000Z
+DTSTAMP:20261008T090000Z
+ORGANIZER;CN=Ana Silva:mailto:ana.silva@example.com
+UID:0a1b2c3d4e5f@google.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE
+ ;CN=Ana Silva;X-NUM-GUESTS=0:mailto:ana.silva@example.com
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
+ TRUE;CN=seed@komorebi.invalid;X-NUM-GUESTS=0:mailto:seed@komorebi.invalid
+ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=
+ TRUE;CN=Rui Mendes;X-NUM-GUESTS=0:mailto:rui.mendes@example.org
+X-GOOGLE-CONFERENCE:https://meet.google.com/abc-defg-hij
+CREATED:20261008T085900Z
+DESCRIPTION:Agenda:\n- review Q1 numbers\n- plan Q2 hiring\, budget\n\nJoin
+  with Google Meet: https://meet.google.com/abc-defg-hij
+LAST-MODIFIED:20261008T090000Z
+LOCATION:Room 2.04\, Lisbon office
+SEQUENCE:0
+STATUS:CONFIRMED
+SUMMARY:Quarterly planning
+TRANSP:OPAQUE
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:This is an event reminder
+TRIGGER:-P0DT0H10M0S
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+
+--alt01--
+
+--mixed01
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: base64
+
+QkVHSU46VkNBTEVOREFSDQpNRVRIT0Q6UkVRVUVTVA0KQkVHSU46VkVWRU5UDQpVSUQ6MGExYjJj
+M2Q0ZTVmQGdvb2dsZS5jb20NCkRUU1RBUlQ6MjAyNzAzMTZUMTQwMDAwWg0KU1VNTUFSWTpRdWFy
+dGVybHkgcGxhbm5pbmcNCkVORDpWRVZFTlQNCkVORDpWQ0FMRU5EQVINCg==
+
+--mixed01--

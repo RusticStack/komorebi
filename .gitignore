@@ -1,5 +1,11 @@
 .task
 bin
 target
+# Installer and release packages (installer/komorebi.iss, release.yml).
+dist
 test-results
 .freebuff/
+
+# Local secrets (test account credentials) must never be committed.
+.env
+.env.*

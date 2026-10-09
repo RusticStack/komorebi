@@ -1,0 +1,14 @@
+From: Weekly Digest <digest@news.example.com>
+Subject: This week's digest
+List-Unsubscribe: <https://news.example.com/u/abc123>,
+ <mailto:unsubscribe@news.example.com?subject=unsubscribe%20abc123>
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 07:40:00 +0000
+Message-ID: <09-unsubscribe-mailto@komorebi.invalid>
+MIME-Version: 1.0
+
+Five links worth reading this week.
+
+You are receiving this because you subscribed.

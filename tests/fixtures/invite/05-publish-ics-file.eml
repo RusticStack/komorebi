@@ -1,0 +1,34 @@
+From: Lisbon Tech Meetup <events@meetup.example.net>
+To: Seed Account <seed@komorebi.invalid>
+Subject: Your ticket: Rust in production
+Date: Thu, 8 Oct 2026 13:00:00 +0000
+Message-ID: <05-publish-ics-file@komorebi.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed05"
+
+--mixed05
+Content-Type: text/plain; charset="UTF-8"
+
+Thanks for registering. The event is attached: add it to your calendar.
+
+--mixed05
+Content-Type: text/calendar; charset="UTF-8"; name="rust-in-production.ics"
+Content-Disposition: attachment; filename="rust-in-production.ics"
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Meetup Example//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:rust-prod-2027@meetup.example.net
+DTSTAMP:20261008T130000Z
+DTSTART:20270422T173000Z
+DURATION:PT2H
+SUMMARY:Rust in production
+LOCATION:Auditorium\, Rua Exemplo 12\, Lisbon
+URL:https://meetup.example.net/events/rust-prod-2027
+DESCRIPTION:Talks and drinks.
+END:VEVENT
+END:VCALENDAR
+
+--mixed05--

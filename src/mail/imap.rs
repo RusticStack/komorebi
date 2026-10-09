@@ -1,27 +1,474 @@
 //! Thin IMAP session wrapper (blocking, used from worker threads only).
+//!
+//! This is the only file that names the `imap` crate (an abandoned parser):
+//! every command goes through [`Imap::run`], failures leave as [`Failure`],
+//! and the stream ([`Counted`]) refuses the replies the crate would abort
+//! on (a tagged reply with another command's tag, a tagged OK to IDLE).
 
 use super::mime::{HEADER_FIELDS, parse_header};
 use crate::db::{self, NewHeader};
+use crate::diag;
 use crate::providers::{Security, Server};
 use crate::role::Role;
 use anyhow::{Context, Result, anyhow};
-use imap::types::{Flag, NameAttribute};
+use imap::extensions::idle::SetReadTimeout;
+use imap::types::{Flag, Name, NameAttribute, StatusAttribute, UnsolicitedResponse};
+use imap_proto::types::Capability;
 use native_tls::{TlsConnector, TlsStream};
-use std::collections::HashMap;
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime};
 
-type Session = imap::Session<TlsStream<TcpStream>>;
+/// How an IDLE wait ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitOutcome {
+    TimedOut,
+    MailboxChanged,
+}
 
+/// What an IMAP command's failure was, for callers that must not name the
+/// crate's error type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    /// The connection failed or was lost (I/O, EOF, a timeout).
+    Unreachable,
+    /// A reply the parser can't read, or one the stream refused: the
+    /// stream is out of step and the command may have run.
+    Protocol,
+    /// A tagged NO, with its text (a response code first, if any).
+    No(String),
+    /// A tagged BAD, with its text.
+    Bad(String),
+}
+
+/// The [`Failure`] in `e`'s chain, if an IMAP command failed.
+pub fn failure(e: &anyhow::Error) -> Option<Failure> {
+    e.chain().find_map(|c| {
+        Some(match c.downcast_ref::<imap::Error>()? {
+            imap::Error::Io(io) if violation(io) => Failure::Protocol,
+            imap::Error::Io(_) | imap::Error::ConnectionLost => Failure::Unreachable,
+            imap::Error::No(text) => Failure::No(text.clone()),
+            imap::Error::Bad(text) => Failure::Bad(text.clone()),
+            // APPEND refused before its literal (the crate drops the text);
+            // the stream is in step.
+            imap::Error::Append => Failure::No(String::new()),
+            // Refused before anything was sent.
+            imap::Error::Validate(v) => Failure::Bad(v.to_string()),
+            _ => Failure::Protocol,
+        })
+    })
+}
+
+/// The crate's own description of an IMAP failure in `e` (its Debug form
+/// names the response it rejected), for development tools.
+pub fn detail(e: &anyhow::Error) -> Option<String> {
+    e.chain()
+        .find_map(|c| c.downcast_ref::<imap::Error>())
+        .map(|ie| format!("{ie:?}"))
+}
+
+/// A server reply the stream refused to hand to the crate.
+#[derive(Debug)]
+struct Violation(&'static str);
+
+impl std::fmt::Display for Violation {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "the server sent {}", self.0)
+    }
+}
+
+impl std::error::Error for Violation {}
+
+/// Whether an I/O error is a refused reply ([`Violation`]), not the network.
+fn violation(e: &std::io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<Violation>())
+}
+
+/// A stream that counts the bytes it carries, so sync cost can be measured
+/// (TLS payload bytes, i.e. IMAP protocol traffic). It also follows the
+/// lines both ways ([`Lines`]) to keep two replies from the crate:
+/// - a tagged reply whose tag is not the last command's: the crate asserts
+///   on it, which aborts a release build;
+/// - anything but `+` or a tagged NO/BAD as the first reply to IDLE: on a
+///   tagged OK the crate reaches `unreachable!()`.
+///
+/// Either fails the read instead, so the connection is dropped.
+pub struct Counted<S> {
+    inner: S,
+    bytes: Arc<AtomicU64>,
+    done: Arc<DoneGuard>,
+    sent: Lines,
+    received: Lines,
+    /// The tag of the last command sent.
+    tag: Vec<u8>,
+    /// IDLE was sent and its first reply has not arrived yet.
+    idle_reply: bool,
+}
+
+impl<S> Counted<S> {
+    fn new(inner: S, bytes: Arc<AtomicU64>, done: Arc<DoneGuard>) -> Self {
+        Self {
+            inner,
+            bytes,
+            done,
+            // The client sends a literal only after the server's `+`.
+            sent: Lines {
+                hold: true,
+                ..Lines::default()
+            },
+            received: Lines::default(),
+            tag: Vec::new(),
+            idle_reply: false,
+        }
+    }
+}
+
+/// The start of a line, enough for its tag and command.
+const LINE_HEAD: usize = 32;
+/// The end of a line kept, enough for a `{n}` literal announcement.
+const LINE_TAIL: usize = 24;
+
+/// Follows an IMAP byte stream line by line, passing over literals, so
+/// each new line's start can be checked before the crate sees it.
+#[derive(Default)]
+struct Lines {
+    /// Literal bytes still to pass over.
+    literal: u64,
+    /// The current line goes on after a literal: not a new line.
+    continued: bool,
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    /// A literal announced at the end of a line only follows once the
+    /// other side says so (the client's literals wait for a `+`).
+    hold: bool,
+    /// The literal announced and held, until [`Lines::release`].
+    waiting: u64,
+}
+
+impl Lines {
+    /// Follow `buf`, calling `line` with the start of every new line it
+    /// completes (the crate acts on a line only once its LF has arrived).
+    fn feed(
+        &mut self,
+        mut buf: &[u8],
+        mut line: impl FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        while !buf.is_empty() {
+            if self.literal > 0 {
+                let n = usize::try_from(self.literal).map_or(buf.len(), |l| l.min(buf.len()));
+                self.literal -= n as u64;
+                buf = &buf[n..];
+                continue;
+            }
+            let end = buf.iter().position(|&b| b == b'\n');
+            let part = &buf[..end.map_or(buf.len(), |i| i + 1)];
+            buf = &buf[part.len()..];
+            if !self.continued && self.head.len() < LINE_HEAD {
+                let take = (LINE_HEAD - self.head.len()).min(part.len());
+                self.head.extend_from_slice(&part[..take]);
+            }
+            self.tail.extend_from_slice(part);
+            if self.tail.len() > LINE_TAIL {
+                self.tail.drain(..self.tail.len() - LINE_TAIL);
+            }
+            if end.is_some() {
+                let new_line = !self.continued;
+                let literal = announced(&self.tail);
+                if self.hold {
+                    (self.literal, self.waiting) = (0, literal);
+                } else {
+                    self.literal = literal;
+                }
+                self.continued = self.literal > 0;
+                self.tail.clear();
+                let head = std::mem::take(&mut self.head);
+                if new_line {
+                    line(&head)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Lines {
+    /// The other side asked for the held literal (`+`): pass over it, and
+    /// take what follows it as the rest of its line.
+    fn release(&mut self) {
+        self.literal = std::mem::take(&mut self.waiting);
+        self.continued = self.literal > 0;
+    }
+}
+
+/// The size of the literal a line ending in `{n}` (or `{n+}`) announces;
+/// 0 for none.
+fn announced(line: &[u8]) -> u64 {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let Some(rest) = line.strip_suffix(b"}") else {
+        return 0;
+    };
+    let rest = rest.strip_suffix(b"+").unwrap_or(rest);
+    let digits = rest.iter().rev().take_while(|b| b.is_ascii_digit()).count();
+    let Some(open) = rest.len().checked_sub(digits + 1) else {
+        return 0;
+    };
+    if digits == 0 || rest[open] != b'{' {
+        return 0;
+    }
+    std::str::from_utf8(&rest[open + 1..])
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(u64::MAX)
+}
+
+/// The first word of a line.
+fn first_word(line: &[u8]) -> &[u8] {
+    line.split(|&b| matches!(b, b' ' | b'\r' | b'\n'))
+        .next()
+        .unwrap_or_default()
+}
+
+/// Check the start of a reply line against the last command's tag (and,
+/// right after IDLE, that it is the continuation or a refusal).
+fn check_reply(head: &[u8], tag: &[u8], idle_reply: &mut bool) -> std::io::Result<()> {
+    let refuse = |what| {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            Violation(what),
+        ))
+    };
+    let word = first_word(head);
+    if std::mem::take(idle_reply) {
+        let status = first_word(head.get(word.len() + 1..).unwrap_or_default());
+        let refusal = word == tag
+            && (status.eq_ignore_ascii_case(b"NO") || status.eq_ignore_ascii_case(b"BAD"));
+        if word != b"+" && !refusal {
+            return refuse("no continuation for IDLE");
+        }
+    }
+    if word == b"*" || word == b"+" || word == tag {
+        Ok(())
+    } else {
+        refuse("a reply with an unexpected tag")
+    }
+}
+
+/// Watches the DONE that ends an IDLE. The crate sends it from a `Drop`
+/// that ignores every error, even after the server refused the IDLE.
+#[derive(Default)]
+struct DoneGuard {
+    /// Refuse to send DONE. Set while IDLE awaits its continuation, and for
+    /// good once the server refused: a reply to a stray DONE (Dovecot's
+    /// `DONE BAD ...`) trips the crate's tag assert, which aborts a release
+    /// build.
+    refuse: AtomicBool,
+    /// I/O failed since the last DONE went out, so its reply may be unread
+    /// and the stream out of step.
+    failed: AtomicBool,
+    /// When the current IDLE wait must end. The crate's own timeout applies
+    /// per read and restarts on every `* OK Still here` keepalive (Dovecot
+    /// sends one every 2 minutes), so a longer wait would never end.
+    deadline: std::sync::Mutex<Option<Instant>>,
+}
+
+impl Read for Counted<Transport> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let deadline = *self.done.deadline.lock().expect("deadline lock");
+        if let Some(deadline) = deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                self.done.failed.store(true, Ordering::Relaxed);
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "IDLE wait over",
+                ));
+            }
+            self.inner.sock().set_read_timeout(Some(left))?;
+        }
+        let n = self
+            .inner
+            .read(buf)
+            .inspect_err(|_| self.done.failed.store(true, Ordering::Relaxed))?;
+        self.bytes.fetch_add(n as u64, Ordering::Relaxed);
+        let Counted {
+            received,
+            sent,
+            tag,
+            idle_reply,
+            ..
+        } = self;
+        received
+            .feed(&buf[..n], |head| {
+                // A literal the client announced goes out only after `+`;
+                // a tagged reply instead refused it.
+                match first_word(head) {
+                    b"+" => sent.release(),
+                    b"*" => {}
+                    _ => sent.waiting = 0,
+                }
+                check_reply(head, tag, idle_reply)
+            })
+            .inspect_err(|_| self.done.failed.store(true, Ordering::Relaxed))?;
+        Ok(n)
+    }
+}
+
+impl<S: Write> Write for Counted<S> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.starts_with(b"DONE") {
+            if self.done.refuse.load(Ordering::Relaxed) {
+                return Err(std::io::Error::other("not ending a refused IDLE"));
+            }
+            self.done.failed.store(false, Ordering::Relaxed);
+        }
+        let n = self
+            .inner
+            .write(buf)
+            .inspect_err(|_| self.done.failed.store(true, Ordering::Relaxed))?;
+        self.bytes.fetch_add(n as u64, Ordering::Relaxed);
+        let Counted {
+            sent,
+            tag,
+            idle_reply,
+            ..
+        } = self;
+        sent.feed(&buf[..n], |head| {
+            // A command (`a12 IDLE`); DONE and literals carry no tag.
+            let word = first_word(head);
+            if word.len() > 1 && word[0] == b'a' && word[1..].iter().all(u8::is_ascii_digit) {
+                *tag = word.to_vec();
+                let verb = first_word(head.get(word.len() + 1..).unwrap_or_default());
+                *idle_reply = verb.eq_ignore_ascii_case(b"IDLE");
+            }
+            Ok(())
+        })?;
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// The byte stream under an IMAP session. Production connections are always
+/// TLS; the plaintext variant exists only for the fake server in tests.
+pub enum Transport {
+    Tls(Box<TlsStream<TcpStream>>),
+    #[cfg(test)]
+    Plain(TcpStream),
+}
+
+impl Read for Transport {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Transport::Tls(s) => s.read(buf),
+            #[cfg(test)]
+            Transport::Plain(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Transport {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Transport::Tls(s) => s.write(buf),
+            #[cfg(test)]
+            Transport::Plain(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Transport::Tls(s) => s.flush(),
+            #[cfg(test)]
+            Transport::Plain(s) => s.flush(),
+        }
+    }
+}
+
+impl Transport {
+    fn sock(&self) -> &TcpStream {
+        match self {
+            Transport::Tls(s) => s.get_ref(),
+            #[cfg(test)]
+            Transport::Plain(s) => s,
+        }
+    }
+}
+
+impl SetReadTimeout for Counted<Transport> {
+    /// The crate calls this with the wait's timeout before an IDLE wait and
+    /// with `None` after it. The timeout becomes a deadline for the whole
+    /// wait (see `DoneGuard::deadline`); `None` clears it before the crate
+    /// sends DONE and reads the reply, and never leaves the socket unbounded.
+    fn set_read_timeout(&mut self, t: Option<Duration>) -> imap::Result<()> {
+        *self.done.deadline.lock().expect("deadline lock") = t.map(|t| Instant::now() + t);
+        self.inner
+            .sock()
+            .set_read_timeout(Some(t.unwrap_or(IO_TIMEOUT)))
+            .map_err(imap::Error::Io)
+    }
+}
+
+type Session = imap::Session<Counted<Transport>>;
+
+/// Per-address connect timeout; the last address gets [`CONNECT_TIMEOUT`].
+const ADDR_TIMEOUT: Duration = Duration::from_secs(4);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const IO_TIMEOUT: Duration = Duration::from_secs(90);
+/// A connection unused for longer than this is checked with a NOOP before
+/// it carries a command (it may have died during sleep or a network change).
+const STALE_AFTER: Duration = Duration::from_secs(60);
+/// How long that NOOP may take before the connection counts as dead.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 pub struct Imap {
     session: Session,
-    selected: Option<String>,
+    /// The underlying TCP socket (under TLS), for timeouts and shutdown.
+    sock: TcpStream,
+    /// Whether the server has a folder selected (`selected` is only our
+    /// cached choice and is reset to force a fresh SELECT).
+    in_folder: bool,
+    /// The selected folder and its UIDVALIDITY.
+    selected: Option<(String, u32)>,
+    /// UIDNEXT when that folder was selected (0: unknown).
+    selected_uidnext: u32,
     has_move: bool,
     has_uidplus: bool,
+    /// Folders are opened with EXAMINE and every mutating call is refused.
+    read_only: bool,
+    bytes: Arc<AtomicU64>,
+    done: Arc<DoneGuard>,
+    /// IMAP commands issued on this connection (see `commands()`).
+    commands: u64,
+    capabilities: Vec<String>,
+    /// The server refused `LIST ... RETURN (STATUS ...)` once; don't ask again
+    /// on this connection.
+    list_status_broken: bool,
+    /// When the connection last carried a command (wall clock, so time
+    /// asleep counts).
+    last_used: SystemTime,
+    /// The account the diagnostics log names for this connection's
+    /// commands (0: none yet, e.g. while an account is being added).
+    account: i64,
 }
+
+/// The STATUS data items the sync gate needs. An item the server left out
+/// is 0, so a NOMODSEQ folder has `hms == 0`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FolderStatus {
+    pub messages: u32,
+    pub uidnext: u32,
+    pub uidvalidity: u32,
+    pub hms: u64,
+}
+
+/// Folder STATUS by raw server name.
+pub type Statuses = HashMap<String, FolderStatus>;
+
+const STATUS_ITEMS: &str = "(MESSAGES UIDNEXT UIDVALIDITY HIGHESTMODSEQ)";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoteFolder {
@@ -36,88 +483,486 @@ pub struct RemoteFolder {
 pub struct Selected {
     pub uidvalidity: u32,
     pub exists: u32,
+    pub uid_next: u32,
+}
+
+/// What a delete did on the server.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Expunged {
+    /// The message is gone (UID EXPUNGE, or MOVE).
+    Removed,
+    /// Without UIDPLUS the message is only flagged \Deleted: a bare EXPUNGE
+    /// would also remove whatever other clients flagged in that folder.
+    LeftFlagged,
+}
+
+/// The folder's UIDVALIDITY no longer matches the cache, so cached UIDs may
+/// name other messages. The action is refused; a sync resets the folder.
+#[derive(Debug)]
+pub struct UidValidityChanged;
+
+impl std::fmt::Display for UidValidityChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("the folder changed on the server; refreshing it")
+    }
+}
+
+impl std::error::Error for UidValidityChanged {}
+
+/// The server rejected the username or password. Retrying with the same
+/// password only adds failed logins (and risks a lockout).
+#[derive(Debug)]
+pub struct AuthFailed(pub String);
+
+impl std::fmt::Display for AuthFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "sign-in rejected: {}", self.0)
+    }
+}
+
+impl std::error::Error for AuthFailed {}
+
+/// The TLS handshake failed (an untrusted or mismatched certificate, or
+/// the connection broke during it).
+#[derive(Debug)]
+pub struct TlsFailed(pub String);
+
+impl std::fmt::Display for TlsFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "TLS handshake failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for TlsFailed {}
+
+/// Whether a tagged NO to LOGIN rejects the credentials. imap-proto leaves
+/// response codes it doesn't know (all of RFC 5530's) in the text. Any other
+/// code (`[UNAVAILABLE]`, `[INUSE]`, `[LIMIT]`, ...) is a transient refusal.
+/// A NO without a code is taken as a wrong password, unless its text says
+/// it is about connections or temporary (Dovecot's "Maximum number of
+/// connections from user+IP exceeded", "Temporary authentication failure").
+fn rejects_credentials(text: &str) -> bool {
+    let upper = text.trim_start().to_ascii_uppercase();
+    if upper.starts_with('[') {
+        return [
+            "[AUTHENTICATIONFAILED]",
+            "[AUTHORIZATIONFAILED]",
+            "[EXPIRED]",
+        ]
+        .iter()
+        .any(|code| upper.starts_with(code));
+    }
+    !transient_text(&upper)
+}
+
+/// Whether an upper-cased refusal text says "for now": too many
+/// connections, temporary, or try again later.
+pub fn transient_text(upper: &str) -> bool {
+    [
+        "TOO MANY",
+        "CONNECTION LIMIT",
+        "MAXIMUM NUMBER OF CONNECTIONS",
+        "TEMPORAR",
+        "TRY AGAIN",
+        "UNAVAILABLE",
+    ]
+    .iter()
+    .any(|t| upper.contains(t))
+}
+
+/// The response code a NO or BAD text starts with (`[OVERQUOTA] ...` gives
+/// `OVERQUOTA`), upper-cased; only the code's atom, never the free text.
+pub fn response_code(text: &str) -> Option<String> {
+    let code = text.trim_start().strip_prefix('[')?;
+    let end = code.find([']', ' ']).unwrap_or(code.len());
+    let code = &code[..end];
+    (!code.is_empty()
+        && code.len() <= 32
+        && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    .then(|| code.to_ascii_uppercase())
+}
+
+/// A failed command's status for the diagnostics log: `NO`/`BAD` with its
+/// response code if any, or the kind of failure. Never the server's text.
+fn status_of(e: &imap::Error) -> String {
+    let (status, text) = match e {
+        imap::Error::No(t) => ("NO", t),
+        imap::Error::Bad(t) => ("BAD", t),
+        imap::Error::Io(io) if violation(io) => return "REFUSED".into(),
+        imap::Error::Io(_) => return "IO".into(),
+        imap::Error::ConnectionLost => return "LOST".into(),
+        imap::Error::Append => return "NO".into(),
+        imap::Error::Parse(_) => return "PARSE".into(),
+        _ => return "ERROR".into(),
+    };
+    match response_code(text) {
+        Some(code) => format!("{status} [{code}]"),
+        None => status.into(),
+    }
 }
 
 impl Imap {
     pub fn connect(server: &Server, username: &str, password: &str) -> Result<Self> {
-        let addr = (server.host.as_str(), server.port)
+        let addrs: Vec<_> = (server.host.as_str(), server.port)
             .to_socket_addrs()
             .with_context(|| format!("resolving {}", server.host))?
-            .next()
-            .ok_or_else(|| anyhow!("{} has no address", server.host))?;
-        let tcp = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
+            .collect();
+        if addrs.is_empty() {
+            anyhow::bail!("{} has no address", server.host);
+        }
+        let tcp = connect_any(&interleave(addrs))
             .with_context(|| format!("connecting to {}:{}", server.host, server.port))?;
         tcp.set_read_timeout(Some(IO_TIMEOUT))?;
         tcp.set_write_timeout(Some(IO_TIMEOUT))?;
         let tls = TlsConnector::new().context("initializing TLS")?;
-        let client = match server.security {
-            Security::Tls => {
-                let stream = tls
-                    .connect(&server.host, tcp)
-                    .map_err(|e| anyhow!("TLS handshake with {} failed: {e}", server.host))?;
-                let mut client = imap::Client::new(stream);
-                client.read_greeting().context("reading IMAP greeting")?;
-                client
-            }
-            Security::StartTls => {
-                let mut client = imap::Client::new(tcp);
-                client.read_greeting().context("reading IMAP greeting")?;
-                client
-                    .secure(&server.host, &tls)
-                    .context("IMAP STARTTLS failed")?
-            }
+        let tcp = match server.security {
+            Security::Tls => tcp,
+            Security::StartTls => starttls(tcp).context("IMAP STARTTLS failed")?,
         };
-        let mut session = client
-            .login(username, password)
-            .map_err(|(e, _)| anyhow!("sign-in failed: {e}"))?;
-        let (has_move, has_uidplus) = match session.capabilities() {
-            Ok(caps) => (caps.has_str("MOVE"), caps.has_str("UIDPLUS")),
-            Err(_) => (false, false),
+        // A second handle to the plain socket, for timeouts and shutdown.
+        let sock = tcp.try_clone()?;
+        let stream = tls
+            .connect(&server.host, tcp)
+            .map_err(|e| TlsFailed(format!("{}: {e}", server.host)))?;
+        let stream = Transport::Tls(Box::new(stream));
+        let greeting = server.security == Security::Tls;
+        Self::login(stream, sock, greeting, username, password)
+    }
+
+    /// Plaintext connection to a local fake server (tests only).
+    #[cfg(test)]
+    pub(crate) fn connect_plain(
+        addr: impl ToSocketAddrs,
+        username: &str,
+        password: &str,
+    ) -> Result<Self> {
+        let tcp = TcpStream::connect(addr)?;
+        tcp.set_read_timeout(Some(IO_TIMEOUT))?;
+        tcp.set_write_timeout(Some(IO_TIMEOUT))?;
+        let sock = tcp.try_clone()?;
+        Self::login(Transport::Plain(tcp), sock, true, username, password)
+    }
+
+    /// Read the greeting (unless STARTTLS already did), sign in and read the
+    /// capabilities.
+    fn login(
+        stream: Transport,
+        sock: TcpStream,
+        greeting: bool,
+        username: &str,
+        password: &str,
+    ) -> Result<Self> {
+        let bytes = Arc::new(AtomicU64::new(0));
+        let done = Arc::new(DoneGuard::default());
+        let mut client = imap::Client::new(Counted::new(stream, bytes.clone(), done.clone()));
+        if greeting {
+            client.read_greeting().context("reading IMAP greeting")?;
+        }
+        let mut session = client.login(username, password).map_err(|(e, _)| match e {
+            imap::Error::No(text) if rejects_credentials(&text) => AuthFailed(text).into(),
+            // Kept typed, so an I/O failure counts as a connection error.
+            e => anyhow::Error::new(e).context("sign-in failed"),
+        })?;
+        let capabilities: Vec<String> = match session.capabilities() {
+            Ok(caps) => caps
+                .iter()
+                .map(|c| match c {
+                    Capability::Imap4rev1 => "IMAP4rev1".to_string(),
+                    Capability::Auth(a) => format!("AUTH={a}"),
+                    Capability::Atom(a) => a.to_string(),
+                })
+                .collect(),
+            Err(_) => Vec::new(),
         };
+        let has = |name: &str| capabilities.iter().any(|c| c.eq_ignore_ascii_case(name));
         Ok(Self {
+            has_move: has("MOVE"),
+            has_uidplus: has("UIDPLUS"),
             session,
+            sock,
             selected: None,
-            has_move,
-            has_uidplus,
+            selected_uidnext: 0,
+            in_folder: false,
+            read_only: false,
+            bytes,
+            done,
+            commands: 2, // LOGIN + CAPABILITY
+            capabilities,
+            list_status_broken: false,
+            last_used: SystemTime::now(),
+            account: 0,
         })
+    }
+
+    /// Name `account` in the diagnostics log lines of this connection.
+    pub fn set_account(&mut self, account: i64) {
+        self.account = account;
+    }
+
+    /// Run one command on the session: every command goes through here,
+    /// so it is counted, and timed for the diagnostics log under `verb`
+    /// (with its status or response code only, never its arguments).
+    fn run<T>(
+        &mut self,
+        verb: &'static str,
+        f: impl FnOnce(&mut Session) -> imap::Result<T>,
+    ) -> imap::Result<T> {
+        self.commands += 1;
+        let started = Instant::now();
+        let result = f(&mut self.session);
+        if diag::enabled() {
+            let status = match &result {
+                Ok(_) => "OK".to_string(),
+                Err(e) => status_of(e),
+            };
+            diag::record(self.account, verb, &status, started.elapsed());
+        }
+        result
+    }
+
+    /// Open folders with EXAMINE and refuse every call that could change the
+    /// mailbox (flags, moves, deletes, appends).
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+        self.selected = None;
+    }
+
+    fn writable(&self) -> Result<()> {
+        if self.read_only {
+            anyhow::bail!("this IMAP connection is read-only");
+        }
+        Ok(())
+    }
+
+    /// The underlying TCP socket, e.g. to set timeouts or shut it down from
+    /// another thread.
+    pub fn socket(&self) -> &TcpStream {
+        &self.sock
+    }
+
+    /// IMAP payload bytes sent and received on this connection so far.
+    pub fn bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Relaxed)
+    }
+
+    /// IMAP commands issued on this connection so far, LOGIN included.
+    pub fn commands(&self) -> u64 {
+        self.commands
+    }
+
+    /// Capabilities advertised after login, e.g. `IDLE`, `AUTH=PLAIN`.
+    pub fn capabilities(&self) -> &[String] {
+        &self.capabilities
+    }
+
+    pub fn has_capability(&self, name: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(name))
+    }
+
+    /// Run a UID FETCH through the normal parser and count the results
+    /// (checks whether the parser understands a server extension).
+    pub fn fetch_count(&mut self, uid_set: &str, query: &str) -> Result<usize> {
+        Ok(self.run("FETCH", |s| s.uid_fetch(uid_set, query))?.len())
+    }
+
+    /// Send a raw command and return the untagged response bytes. A
+    /// read-only connection allows only commands that change nothing.
+    pub fn raw(&mut self, command: &str) -> Result<Vec<u8>> {
+        if self.read_only && !reads_only(command) {
+            anyhow::bail!("this IMAP connection is read-only");
+        }
+        Ok(self.run("RAW", |s| s.run_command_and_read_response(command))?)
     }
 
     pub fn noop(&mut self) -> Result<()> {
-        Ok(self.session.noop()?)
+        Ok(self.run("NOOP", |s| s.noop())?)
+    }
+
+    /// IDLE on the selected folder (RFC 2177) until the server reports a
+    /// change or `timeout` passes, then end it with DONE. A tagged NO or BAD
+    /// comes back as an error, after which the connection must be dropped
+    /// (not logged out). Any other first reply than the `+` continuation
+    /// (a tagged OK would reach the crate's `unreachable!()`) is refused by
+    /// the stream ([`Counted`]) and fails the connection the same way.
+    pub fn idle(&mut self, timeout: Duration) -> Result<WaitOutcome> {
+        let done = self.done.clone();
+        done.refuse.store(true, Ordering::Relaxed);
+        let outcome = self.run("IDLE", |s| {
+            let handle = s.idle()?;
+            done.refuse.store(false, Ordering::Relaxed);
+            handle.wait_with_timeout(timeout)
+        });
+        self.sock.set_read_timeout(Some(IO_TIMEOUT))?;
+        let outcome = match outcome? {
+            imap::extensions::idle::WaitOutcome::TimedOut => WaitOutcome::TimedOut,
+            imap::extensions::idle::WaitOutcome::MailboxChanged => WaitOutcome::MailboxChanged,
+        };
+        if self.done.failed.load(Ordering::Relaxed) {
+            // DONE's reply wasn't read: the next tagged reply would not match.
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "IDLE did not end cleanly",
+            )
+            .into());
+        }
+        Ok(outcome)
+    }
+
+    /// Note that the connection just carried a command.
+    pub fn touch(&mut self) {
+        self.last_used = SystemTime::now();
+    }
+
+    /// If the connection sat unused for over a minute, check it with a
+    /// short NOOP; an error means it is dead and should be replaced.
+    pub fn check_if_stale(&mut self) -> Result<()> {
+        // A clock that went back counts as stale too.
+        if self
+            .last_used
+            .elapsed()
+            .is_ok_and(|idle| idle <= STALE_AFTER)
+        {
+            return Ok(());
+        }
+        self.sock.set_read_timeout(Some(PROBE_TIMEOUT))?;
+        // An UNSELECT that went through proves the connection alive, so the
+        // NOOP is only needed when no folder was open.
+        let was_in_folder = self.in_folder && self.has_capability("UNSELECT");
+        let result = self
+            .leave_folder()
+            .and_then(|()| if was_in_folder { Ok(()) } else { self.noop() });
+        self.sock.set_read_timeout(Some(IO_TIMEOUT))?;
+        self.drain_unsolicited();
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_last_used(&mut self, at: SystemTime) {
+        self.last_used = at;
     }
 
     pub fn list_folders(&mut self) -> Result<Vec<RemoteFolder>> {
-        let names = self.session.list(Some(""), Some("*"))?;
-        let mut out = Vec::new();
-        for n in names.iter() {
-            let attrs = n.attributes();
-            if attrs.iter().any(|a| matches!(a, NameAttribute::NoSelect)) {
-                continue;
-            }
-            let special = attrs.iter().find_map(|a| match a {
-                NameAttribute::Custom(v) => Role::from_attr(v),
-                _ => None,
-            });
-            out.push(remote_folder(n.name(), n.delimiter(), special));
+        let names = self.run("LIST", |s| s.list(Some(""), Some("*")))?;
+        Ok(to_remote(&names))
+    }
+
+    /// The folder list and every folder's STATUS in one round trip
+    /// (LIST-STATUS, RFC 5819). `None` if the server can't do that, or once
+    /// refused it on this connection. Asking for HIGHESTMODSEQ needs no
+    /// ENABLE: it turns CONDSTORE on implicitly (RFC 7162 §3.1).
+    pub fn list_status(&mut self) -> Result<Option<(Vec<RemoteFolder>, Statuses)>> {
+        if self.list_status_broken
+            || !["LIST-STATUS", "LIST-EXTENDED", "CONDSTORE"]
+                .iter()
+                .all(|c| self.has_capability(c))
+        {
+            return Ok(None);
         }
-        Ok(out)
+        self.leave_folder()?;
+        self.drain_unsolicited();
+        // The crate puts the pattern into the command as-is.
+        let pattern = format!("\"*\" RETURN (STATUS {STATUS_ITEMS})");
+        let names = match self.run("LIST-STATUS", |s| s.list(Some(""), Some(&pattern))) {
+            Ok(names) => names,
+            // A tagged NO/BAD leaves the stream in step.
+            Err(imap::Error::No(_) | imap::Error::Bad(_)) => {
+                self.list_status_broken = true;
+                return Ok(None);
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let folders = to_remote(&names);
+        Ok(Some((folders, self.take_statuses())))
+    }
+
+    /// One folder's STATUS, or `None` if the server refused it (e.g. the
+    /// folder is gone) or sent no STATUS line. Only with CONDSTORE, since
+    /// the sync gate is useless without HIGHESTMODSEQ.
+    pub fn status(&mut self, folder: &str) -> Result<Option<FolderStatus>> {
+        if !self.has_capability("CONDSTORE") {
+            return Ok(None);
+        }
+        // Also keeps STATUS off the selected folder (RFC 3501 §6.3.10).
+        self.leave_folder()?;
+        self.drain_unsolicited();
+        match self.run("STATUS", |s| s.status(folder, STATUS_ITEMS)) {
+            Ok(_) => {}
+            Err(imap::Error::No(_) | imap::Error::Bad(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        }
+        Ok(self.take_statuses().remove(folder))
+    }
+
+    /// The STATUS lines queued by the last command, by folder name.
+    fn take_statuses(&mut self) -> Statuses {
+        fold_statuses(self.session.unsolicited_responses.try_iter())
+    }
+
+    /// Leave the selected folder with UNSELECT (RFC 3691), which, unlike
+    /// CLOSE, never expunges. While a folder is selected the server may send
+    /// legal unsolicited responses (`* n FETCH (FLAGS ...)`, `* OK [...]`)
+    /// that the crate's NOOP, SEARCH and LIST parsers reject, failing the
+    /// command and desynchronizing the stream; with nothing selected none
+    /// arrive. Without UNSELECT this does nothing.
+    pub fn leave_folder(&mut self) -> Result<()> {
+        if !self.in_folder || !self.has_capability("UNSELECT") {
+            return Ok(());
+        }
+        self.run("UNSELECT", |s| s.run_command_and_check_ok("UNSELECT"))?;
+        self.in_folder = false;
+        self.selected = None;
+        Ok(())
+    }
+
+    /// Discard queued unsolicited responses. Nothing acts on them, and the
+    /// crate's channel would otherwise grow for the connection's lifetime.
+    pub fn drain_unsolicited(&mut self) {
+        while self.session.unsolicited_responses.try_recv().is_ok() {}
     }
 
     pub fn select(&mut self, folder: &str) -> Result<Selected> {
-        let mb = self
-            .session
-            .select(folder)
-            .with_context(|| format!("opening folder {folder}"))?;
-        self.selected = Some(folder.to_string());
+        // A failed SELECT leaves no folder selected (RFC 3501 §6.3.1).
+        self.selected = None;
+        self.in_folder = false;
+        let mb = if self.read_only {
+            self.run("EXAMINE", |s| s.examine(folder))
+        } else {
+            self.run("SELECT", |s| s.select(folder))
+        }
+        .with_context(|| format!("opening folder {folder}"))?;
+        let uidvalidity = mb.uid_validity.unwrap_or(0);
+        self.selected = Some((folder.to_string(), uidvalidity));
+        self.selected_uidnext = mb.uid_next.unwrap_or(0);
+        self.in_folder = true;
         Ok(Selected {
-            uidvalidity: mb.uid_validity.unwrap_or(0),
+            uidvalidity,
             exists: mb.exists,
+            uid_next: mb.uid_next.unwrap_or(0),
         })
     }
 
-    fn ensure_selected(&mut self, folder: &str) -> Result<()> {
-        if self.selected.as_deref() != Some(folder) {
-            self.select(folder)?;
+    /// Select `folder` unless it already is, and check that its UIDVALIDITY
+    /// is still `expected` (the cached value; 0 skips the check). A mismatch
+    /// on an earlier selection is rechecked with a fresh SELECT.
+    /// Make `folder` the selected folder, re-SELECTing if it isn't, or if
+    /// `max_uid` is at or above the UIDNEXT it had when selected: some servers
+    /// (seen on Postale's Dovecot) never show a long-open selection mail that
+    /// arrived later, not even after NOOP, and a UID STORE or MOVE on an
+    /// unknown UID succeeds without doing anything.
+    fn ensure_selected(&mut self, folder: &str, expected: u32, max_uid: u32) -> Result<()> {
+        let fresh_enough = self.selected_uidnext == 0 || max_uid < self.selected_uidnext;
+        let uidvalidity = match &self.selected {
+            Some((name, v))
+                if name == folder && (expected == 0 || *v == expected) && fresh_enough =>
+            {
+                *v
+            }
+            _ => self.select(folder)?.uidvalidity,
+        };
+        if expected != 0 && uidvalidity != expected {
+            return Err(UidValidityChanged.into());
         }
         Ok(())
     }
@@ -125,10 +970,54 @@ impl Imap {
     /// UID → flag bits of every message in the selected folder, in one
     /// round trip (replaces SEARCH ALL/UNSEEN/FLAGGED/ANSWERED).
     pub fn uid_flags(&mut self) -> Result<HashMap<u32, u8>> {
-        let fetches = self.session.uid_fetch("1:*", "(UID FLAGS)")?;
+        self.flags_of("1:*", "(UID FLAGS)")
+    }
+
+    /// UID → flag bits of the selected folder's messages whose flags changed
+    /// since mod-sequence `modseq` (CHANGEDSINCE, RFC 7162 §3.1.4). Expunged
+    /// messages are not reported.
+    pub fn uid_flags_changed(&mut self, modseq: u64) -> Result<HashMap<u32, u8>> {
+        self.flags_of("1:*", &format!("(UID FLAGS) (CHANGEDSINCE {modseq})"))
+    }
+
+    /// UID → flag bits of `uids` in the selected folder.
+    pub fn uid_flags_of(&mut self, uids: &[u32]) -> Result<HashMap<u32, u8>> {
+        if uids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        self.flags_of(&uid_set(uids), "(UID FLAGS)")
+    }
+
+    fn flags_of(&mut self, set: &str, query: &str) -> Result<HashMap<u32, u8>> {
+        let fetches = self.run("FETCH", |s| s.uid_fetch(set, query))?;
         Ok(fetches
             .iter()
             .filter_map(|f| Some((f.uid?, flag_bits(f.flags()))))
+            .collect())
+    }
+
+    /// Every UID in the selected folder (UID SEARCH ALL; ESEARCH replies
+    /// can't be parsed, so none is asked for).
+    pub fn uids(&mut self) -> Result<HashSet<u32>> {
+        self.search("ALL")
+    }
+
+    /// UIDs in the selected folder matching a SEARCH `query`.
+    pub fn search(&mut self, query: &str) -> Result<HashSet<u32>> {
+        Ok(self.run("SEARCH", |s| s.uid_search(query))?)
+    }
+
+    /// The server's INTERNALDATE (delivery time, Unix seconds) per UID.
+    pub fn internal_dates(&mut self, uids: &[u32]) -> Result<Vec<(u32, i64)>> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fetches = self.run("FETCH", |s| {
+            s.uid_fetch(uid_set(uids), "(UID INTERNALDATE)")
+        })?;
+        Ok(fetches
+            .iter()
+            .filter_map(|f| Some((f.uid?, f.internal_date()?.timestamp())))
             .collect())
     }
 
@@ -136,18 +1025,36 @@ impl Imap {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
-        let fetches = self.session.uid_fetch(
-            uid_set(uids),
-            format!("(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])"),
-        )?;
+        self.headers_of(uid_set(uids))
+    }
+
+    /// Headers of the messages with UID `first` and above. `first:*` always
+    /// includes the highest UID (RFC 3501 §6.4.8), so a lower one is dropped.
+    pub fn fetch_headers_from(&mut self, first: u32) -> Result<Vec<NewHeader>> {
+        let mut headers = self.headers_of(format!("{first}:*"))?;
+        headers.retain(|h| h.uid >= first);
+        Ok(headers)
+    }
+
+    fn headers_of(&mut self, set: String) -> Result<Vec<NewHeader>> {
+        let query = format!(
+            "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])"
+        );
+        let fetches = self.run("FETCH", |s| s.uid_fetch(set, query))?;
         Ok(fetches
             .iter()
             .filter_map(|f| {
                 let uid = f.uid?;
+                let bits = flag_bits(f.flags());
+                // Flagged \Deleted since the flags fetch: hidden like the rest.
+                if bits & db::DELETED != 0 {
+                    return None;
+                }
                 let mut h = parse_header(f.header().unwrap_or_default());
                 h.uid = uid;
                 h.size = f.size.unwrap_or(0) as i64;
-                let bits = flag_bits(f.flags());
+                let internal = f.internal_date().map(|d| d.timestamp());
+                h.date = message_date(h.date, internal);
                 h.seen = bits & db::SEEN != 0;
                 h.flagged = bits & db::FLAGGED != 0;
                 h.answered = bits & db::ANSWERED != 0;
@@ -157,66 +1064,217 @@ impl Imap {
     }
 
     /// Full RFC 822 bytes of messages, without setting \Seen.
-    pub fn fetch_bodies(&mut self, folder: &str, uids: &[u32]) -> Result<Vec<(u32, Vec<u8>)>> {
+    /// `uidvalidity` is the folder's cached value (see `ensure_selected`).
+    pub fn fetch_bodies(
+        &mut self,
+        (folder, uidvalidity): (&str, u32),
+        uids: &[u32],
+    ) -> Result<Vec<(u32, Vec<u8>)>> {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
-        self.ensure_selected(folder)?;
-        let fetches = self.session.uid_fetch(uid_set(uids), "(UID BODY.PEEK[])")?;
+        let max_uid = uids.iter().copied().max().unwrap_or(0);
+        self.ensure_selected(folder, uidvalidity, max_uid)?;
+        let fetches = self.run("FETCH", |s| s.uid_fetch(uid_set(uids), "(UID BODY.PEEK[])"))?;
         Ok(fetches
             .iter()
             .filter_map(|f| Some((f.uid?, f.body()?.to_vec())))
             .collect())
     }
 
-    pub fn set_flag(&mut self, folder: &str, uid: u32, flag: &str, on: bool) -> Result<()> {
-        self.ensure_selected(folder)?;
+    /// Set or clear `flag` on `uids` in `folder`: one STORE per UID set
+    /// (see [`uid_sets`]).
+    pub fn set_flags(
+        &mut self,
+        (folder, uidvalidity): (&str, u32),
+        uids: &[u32],
+        flag: &str,
+        on: bool,
+    ) -> Result<()> {
+        self.writable()?;
+        let Some(&max_uid) = uids.iter().max() else {
+            return Ok(());
+        };
+        self.ensure_selected(folder, uidvalidity, max_uid)?;
         let op = if on { "+FLAGS.SILENT" } else { "-FLAGS.SILENT" };
-        self.session
-            .uid_store(uid.to_string(), format!("{op} ({flag})"))?;
-        Ok(())
-    }
-
-    /// Move a message to another folder (MOVE, or COPY + delete).
-    pub fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<()> {
-        self.ensure_selected(folder)?;
-        if self.has_move {
-            self.session.uid_mv(uid.to_string(), dest)?;
-        } else {
-            self.session.uid_copy(uid.to_string(), dest)?;
-            self.expunge(uid)?;
+        for set in uid_sets(uids, MAX_UID_SET) {
+            self.run("STORE", |s| s.uid_store(set, format!("{op} ({flag})")))?;
         }
         Ok(())
     }
 
-    /// Permanently remove a message from the selected folder.
-    pub fn delete_message(&mut self, folder: &str, uid: u32) -> Result<()> {
-        self.ensure_selected(folder)?;
-        self.expunge(uid)
-    }
-
-    fn expunge(&mut self, uid: u32) -> Result<()> {
-        self.session
-            .uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")?;
-        if self.has_uidplus {
-            self.session.uid_expunge(uid.to_string())?;
-        } else {
-            // Without UIDPLUS, EXPUNGE also removes anything another client
-            // marked \Deleted in this folder (standard IMAP behavior).
-            self.session.expunge()?;
+    /// Mark every message of `folder` up to UID `through` read: one STORE
+    /// on `1:through`, so mail that arrived after the last sync stays unread.
+    pub fn mark_read_through(
+        &mut self,
+        (folder, uidvalidity): (&str, u32),
+        through: u32,
+    ) -> Result<()> {
+        self.writable()?;
+        if through == 0 {
+            return Ok(());
         }
+        self.ensure_selected(folder, uidvalidity, through)?;
+        self.run("STORE", |s| {
+            s.uid_store(format!("1:{through}"), "+FLAGS.SILENT (\\Seen)")
+        })?;
         Ok(())
     }
 
+    /// Move messages to another folder (MOVE, or COPY + delete), a UID set
+    /// at a time, so a failure leaves each set either moved or untouched.
+    pub fn move_messages(
+        &mut self,
+        (folder, uidvalidity): (&str, u32),
+        uids: &[u32],
+        dest: &str,
+    ) -> Result<Expunged> {
+        self.writable()?;
+        // The crate sends COPY's mailbox name unquoted; a name it can't
+        // quote is refused before any I/O.
+        let quoted = if self.has_move {
+            None
+        } else {
+            Some(quote(dest)?)
+        };
+        let Some(&max_uid) = uids.iter().max() else {
+            return Ok(Expunged::Removed);
+        };
+        self.ensure_selected(folder, uidvalidity, max_uid)?;
+        let mut done = Expunged::Removed;
+        for set in uid_sets(uids, MAX_UID_SET) {
+            match &quoted {
+                None => self.run("MOVE", |s| s.uid_mv(&set, dest))?,
+                // A failed COPY returns here, before the originals are flagged.
+                Some(dest) => {
+                    self.run("COPY", |s| {
+                        s.run_command_and_check_ok(format!("UID COPY {set} {dest}"))
+                    })?;
+                    done = self.expunge(&set)?;
+                }
+            }
+        }
+        Ok(done)
+    }
+
+    /// Remove messages from the selected folder (see [`Expunged`]).
+    pub fn delete_messages(
+        &mut self,
+        (folder, uidvalidity): (&str, u32),
+        uids: &[u32],
+    ) -> Result<Expunged> {
+        self.writable()?;
+        let Some(&max_uid) = uids.iter().max() else {
+            return Ok(Expunged::Removed);
+        };
+        self.ensure_selected(folder, uidvalidity, max_uid)?;
+        let mut done = Expunged::Removed;
+        for set in uid_sets(uids, MAX_UID_SET) {
+            done = self.expunge(&set)?;
+        }
+        Ok(done)
+    }
+
+    fn expunge(&mut self, set: &str) -> Result<Expunged> {
+        self.run("STORE", |s| s.uid_store(set, r"+FLAGS.SILENT (\Deleted)"))?;
+        if !self.has_uidplus {
+            // A bare EXPUNGE would also remove anything another client
+            // flagged \Deleted here, so the messages stay flagged (and hidden).
+            return Ok(Expunged::LeftFlagged);
+        }
+        self.run("EXPUNGE", |s| s.uid_expunge(set))?;
+        Ok(Expunged::Removed)
+    }
+
+    /// Save a copy of a sent message to `folder`, flagged \Seen.
     pub fn append(&mut self, folder: &str, raw: &[u8]) -> Result<()> {
-        self.session
-            .append_with_flags(folder, raw, &[Flag::Seen])
+        self.append_flagged(folder, raw, Flag::Seen)
+    }
+
+    /// Save a draft to `folder`, flagged \Draft only. The crate drops the
+    /// tagged reply, so an APPENDUID in it can't be read: find the copy
+    /// with [`Imap::find_message_id`].
+    pub fn append_draft(&mut self, folder: &str, raw: &[u8]) -> Result<()> {
+        self.append_flagged(folder, raw, Flag::Draft)
+    }
+
+    /// The (UIDVALIDITY, UID) of the newest message in `folder` that is not
+    /// flagged \Deleted and has Message-ID `message_id`. The folder is
+    /// selected afresh, so it shows a message appended just now.
+    pub fn find_message_id(
+        &mut self,
+        folder: &str,
+        message_id: &str,
+    ) -> Result<Option<(u32, u32)>> {
+        let uidvalidity = self.select(folder)?.uidvalidity;
+        let query = format!("UNDELETED HEADER Message-ID {}", quote(message_id)?);
+        Ok(self
+            .search(&query)?
+            .into_iter()
+            .max()
+            .filter(|_| uidvalidity != 0)
+            .map(|uid| (uidvalidity, uid)))
+    }
+
+    fn append_flagged(&mut self, folder: &str, raw: &[u8], flag: Flag<'static>) -> Result<()> {
+        self.writable()?;
+        // The crate puts the name between quotes without escaping it.
+        if folder.contains(['"', '\\', '\r', '\n', '\0']) {
+            anyhow::bail!(
+                "can't save to {folder:?}: the name has a quote, backslash or line break"
+            );
+        }
+        self.run("APPEND", |s| s.append_with_flags(folder, raw, &[flag]))
             .with_context(|| format!("saving a copy to {folder}"))
     }
 
     pub fn logout(mut self) {
-        self.session.logout().ok();
+        self.run("LOGOUT", |s| s.logout()).ok();
     }
+}
+
+/// Fold STATUS responses into one [`FolderStatus`] per folder name. EXISTS,
+/// EXPUNGE and RECENT for the selected folder are dropped: a sync reads its
+/// own snapshot after SELECT.
+fn fold_statuses(responses: impl Iterator<Item = UnsolicitedResponse>) -> Statuses {
+    let mut out = Statuses::new();
+    for r in responses {
+        let UnsolicitedResponse::Status {
+            mailbox,
+            attributes,
+        } = r
+        else {
+            continue;
+        };
+        let st = out.entry(mailbox).or_default();
+        for a in attributes {
+            match a {
+                StatusAttribute::Messages(n) => st.messages = n,
+                StatusAttribute::UidNext(n) => st.uidnext = n,
+                StatusAttribute::UidValidity(n) => st.uidvalidity = n,
+                StatusAttribute::HighestModSeq(n) => st.hms = n,
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Selectable folders of a LIST reply.
+fn to_remote(names: &[Name]) -> Vec<RemoteFolder> {
+    let mut out = Vec::new();
+    for n in names {
+        let attrs = n.attributes();
+        if attrs.iter().any(|a| matches!(a, NameAttribute::NoSelect)) {
+            continue;
+        }
+        let special = attrs.iter().find_map(|a| match a {
+            NameAttribute::Custom(v) => Role::from_attr(v),
+            _ => None,
+        });
+        out.push(remote_folder(n.name(), n.delimiter(), special));
+    }
+    out
 }
 
 pub fn flag_bits(flags: &[Flag]) -> u8 {
@@ -225,34 +1283,154 @@ pub fn flag_bits(flags: &[Flag]) -> u8 {
             Flag::Seen => db::SEEN,
             Flag::Flagged => db::FLAGGED,
             Flag::Answered => db::ANSWERED,
+            Flag::Deleted => db::DELETED,
             _ => 0,
         }
     })
 }
 
+/// A header's Date, unless it is missing or more than a day ahead of the
+/// server's INTERNALDATE (bogus or spam dates), in which case the latter.
+fn message_date(header: i64, internal: Option<i64>) -> i64 {
+    match internal {
+        Some(internal) if header == 0 || header > internal + 86_400 => internal,
+        _ => header,
+    }
+}
+
+/// Whether a raw command only reads (FETCH, SEARCH, STATUS, LIST, NOOP or
+/// CAPABILITY, with or without UID) and is a single line.
+fn reads_only(command: &str) -> bool {
+    let mut words = command.split(' ');
+    let mut verb = words.next().unwrap_or_default();
+    if verb.eq_ignore_ascii_case("UID") {
+        verb = words.next().unwrap_or_default();
+    }
+    !command.contains(['\r', '\n', '\0'])
+        && ["FETCH", "SEARCH", "STATUS", "LIST", "NOOP", "CAPABILITY"]
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case(verb))
+}
+
+/// An IMAP quoted string (RFC 3501 §4.3).
+fn quote(s: &str) -> Result<String> {
+    if s.contains(['\r', '\n', '\0']) {
+        anyhow::bail!("folder name {s:?} contains a line break or NUL");
+    }
+    Ok(format!(
+        "\"{}\"",
+        s.replace('\\', r"\\").replace('"', "\\\"")
+    ))
+}
+
+/// Resolved addresses in connect order: alternating families, starting
+/// with the first one's (RFC 8305 §4).
+fn interleave(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let first_v6 = addrs.first().is_some_and(SocketAddr::is_ipv6);
+    let (first, other): (Vec<_>, Vec<_>) = addrs.into_iter().partition(|a| a.is_ipv6() == first_v6);
+    let (mut first, mut other) = (first.into_iter(), other.into_iter());
+    let mut out = Vec::new();
+    loop {
+        match (first.next(), other.next()) {
+            (None, None) => return out,
+            (a, b) => out.extend(a.into_iter().chain(b)),
+        }
+    }
+}
+
+/// Connect to the first address that answers, a few seconds each, so one
+/// dead address (e.g. IPv6 without a route) doesn't cost the full timeout.
+fn connect_any(addrs: &[SocketAddr]) -> Result<TcpStream> {
+    let mut last_err = None;
+    for (i, addr) in addrs.iter().enumerate() {
+        let timeout = if i + 1 == addrs.len() {
+            CONNECT_TIMEOUT
+        } else {
+            ADDR_TIMEOUT
+        };
+        match TcpStream::connect_timeout(addr, timeout) {
+            Ok(tcp) => {
+                tcp.set_nodelay(true)?;
+                return Ok(tcp);
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.map_or_else(|| anyhow!("no address"), Into::into))
+}
+
+/// Plain-text greeting and STARTTLS exchange, before the TLS handshake.
+fn starttls<S: Read + Write>(stream: S) -> Result<S> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    if !line.starts_with("* OK") {
+        anyhow::bail!("unexpected greeting");
+    }
+    reader.get_mut().write_all(b"a0 STARTTLS\r\n")?;
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            anyhow::bail!("connection closed");
+        }
+        if let Some(rest) = line.strip_prefix("a0 ") {
+            if !rest.starts_with("OK") {
+                anyhow::bail!("server refused STARTTLS");
+            }
+            // Bytes sent before the handshake would be taken as if they had
+            // come over TLS (response injection).
+            if !reader.buffer().is_empty() {
+                anyhow::bail!("unexpected data before TLS");
+            }
+            return Ok(reader.into_inner());
+        }
+    }
+}
+
+/// Longest UID set in one STORE, MOVE, COPY or EXPUNGE, so a large
+/// selection stays well inside the 8,192-octet command line servers are
+/// asked to accept (RFC 7162 §4).
+const MAX_UID_SET: usize = 4000;
+
+/// `uids` as one compressed UID set (`1:3,5,9:10`).
 fn uid_set(uids: &[u32]) -> String {
+    uid_sets(uids, usize::MAX).pop().unwrap_or_default()
+}
+
+/// `uids` sorted, without repeats, as compressed UID sets of at most
+/// `max_len` bytes each (a single range may be longer).
+fn uid_sets(uids: &[u32], max_len: usize) -> Vec<String> {
     let mut sorted = uids.to_vec();
     sorted.sort_unstable();
+    sorted.dedup();
+    let mut sets = Vec::new();
     let mut out = String::new();
     let mut i = 0;
     while i < sorted.len() {
         let start = sorted[i];
         let mut end = start;
-        while i + 1 < sorted.len() && sorted[i + 1] == end + 1 {
+        while i + 1 < sorted.len() && Some(sorted[i + 1]) == end.checked_add(1) {
             i += 1;
             end = sorted[i];
+        }
+        let piece = if start == end {
+            start.to_string()
+        } else {
+            format!("{start}:{end}")
+        };
+        if !out.is_empty() && out.len() + 1 + piece.len() > max_len {
+            sets.push(std::mem::take(&mut out));
         }
         if !out.is_empty() {
             out.push(',');
         }
-        if start == end {
-            out.push_str(&start.to_string());
-        } else {
-            out.push_str(&format!("{start}:{end}"));
-        }
+        out.push_str(&piece);
         i += 1;
     }
-    out
+    if !out.is_empty() {
+        sets.push(out);
+    }
+    sets
 }
 
 fn remote_folder(name: &str, delimiter: Option<&str>, special: Option<Role>) -> RemoteFolder {
@@ -338,13 +1516,430 @@ fn decode_mbase64(s: &str) -> Option<Vec<u16>> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::fake::*;
     use super::*;
+
+    #[test]
+    fn read_only_round_trip_against_fake_server() {
+        let server = FakeServer::start(vec![
+            Step::Send("* OK fake IMAP ready\r\n"),
+            Step::Expect(r#"a1 LOGIN "user" "pass""#),
+            Step::Send("{tag} OK LOGIN completed\r\n"),
+            Step::Expect("a2 CAPABILITY"),
+            Step::Send("* CAPABILITY IMAP4rev1 MOVE IDLE\r\n{tag} OK done\r\n"),
+            Step::Expect("a3 LIST"),
+            Step::Send(concat!(
+                r#"* LIST (\HasNoChildren) "/" "INBOX""#,
+                "\r\n",
+                r#"* LIST (\HasNoChildren \Sent) "/" "Gesendet""#,
+                "\r\n",
+                r#"* LIST (\Noselect) "/" "Archive""#,
+                "\r\n",
+                "{tag} OK LIST completed\r\n",
+            )),
+            Step::Expect(r#"a4 EXAMINE "INBOX""#),
+            Step::Send(concat!(
+                r"* FLAGS (\Seen \Flagged \Answered)",
+                "\r\n",
+                "* 2 EXISTS\r\n",
+                "* OK [UIDVALIDITY 7] ok\r\n",
+                "* OK [UIDNEXT 12] ok\r\n",
+                "{tag} OK [READ-ONLY] EXAMINE completed\r\n",
+            )),
+            Step::Expect("a5 UID FETCH 1:* (UID FLAGS)"),
+            Step::Send(concat!(
+                r"* 1 FETCH (UID 10 FLAGS (\Seen))",
+                "\r\n",
+                r"* 2 FETCH (UID 11 FLAGS (\Flagged \Answered))",
+                "\r\n",
+                "{tag} OK FETCH completed\r\n",
+            )),
+            Step::Expect("a6 LOGOUT"),
+            Step::Send("* BYE bye\r\n{tag} OK LOGOUT completed\r\n"),
+            Step::Close,
+        ]);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        assert!(imap.has_capability("move") && !imap.has_capability("UIDPLUS"));
+        imap.set_read_only(true);
+        let folders = imap.list_folders().unwrap();
+        let names: Vec<_> = folders.iter().map(|f| (f.name.as_str(), f.role)).collect();
+        assert_eq!(names, [("INBOX", Role::Inbox), ("Gesendet", Role::Sent)]);
+        let sel = imap.select("INBOX").unwrap();
+        assert_eq!((sel.uidvalidity, sel.exists), (7, 2));
+        let flags = imap.uid_flags().unwrap();
+        assert_eq!(
+            flags,
+            HashMap::from([(10, db::SEEN), (11, db::FLAGGED | db::ANSWERED)])
+        );
+        assert_eq!(imap.commands(), 5);
+        assert!(imap.bytes() > 0);
+        assert_eq!(imap.socket().read_timeout().unwrap(), Some(IO_TIMEOUT));
+        imap.logout();
+
+        let sent = server.finish();
+        assert_eq!(sent.len(), 6);
+        assert!(sent.iter().all(|l| !l.contains("SELECT")));
+    }
+
+    #[test]
+    fn acting_on_a_uid_newer_than_the_selection_reselects_first() {
+        // Postale's Dovecot never shows a long-open selection mail delivered
+        // later, and a STORE on a UID it doesn't know silently does nothing.
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(select_reply(3, 12)),
+            // UID 11 is below the UIDNEXT seen at SELECT: no new SELECT.
+            Step::Expect(r"a4 UID STORE 11 +FLAGS.SILENT (\Seen)"),
+            Step::Send("{tag} OK STORE completed\r\n"),
+            // UID 15 is newer: select again first.
+            Step::Expect(r#"a5 SELECT "INBOX""#),
+            Step::Send(select_reply(4, 16)),
+            Step::Expect(r"a6 UID STORE 15 +FLAGS.SILENT (\Seen)"),
+            Step::Send("{tag} OK STORE completed\r\n"),
+        ]);
+        script.extend(logout_steps("a7 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.select("INBOX").unwrap();
+        imap.set_flags(("INBOX", 7), &[11], "\\Seen", true).unwrap();
+        imap.set_flags(("INBOX", 7), &[15], "\\Seen", true).unwrap();
+        imap.logout();
+        server.finish();
+    }
+
+    #[test]
+    fn idle_deadline_holds_despite_keepalives() {
+        // Dovecot sends `* OK Still here` while idling; the crate restarts
+        // its per-read timeout on each, so only our deadline ends the wait.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            for _ in 0..30 {
+                if s.write_all(b"* OK Still here\r\n").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let mut stream = Counted::new(
+            Transport::Plain(TcpStream::connect(addr).unwrap()),
+            Arc::default(),
+            Arc::default(),
+        );
+        let start = Instant::now();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut buf = [0u8; 64];
+        let err = loop {
+            match stream.read(&mut buf) {
+                Ok(n) => assert!(n > 0, "server closed early"),
+                Err(e) => break e,
+            }
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(
+            start.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            start.elapsed()
+        );
+        // `None` (after the wait) clears the deadline: reads work again.
+        stream.set_read_timeout(None).unwrap();
+        assert!(stream.read(&mut buf).is_ok());
+        drop(stream);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn list_status_leaves_the_selected_folder_first() {
+        // While a folder is selected the server may push `* n FETCH` and
+        // `* OK [...]` lines, which the crate's LIST parser rejects. Seen live
+        // on Dovecot after new mail arrived; UNSELECT absorbs them safely.
+        let mut script = login_steps(
+            "* CAPABILITY IMAP4rev1 CONDSTORE LIST-EXTENDED LIST-STATUS UNSELECT\r\n{tag} OK done\r\n",
+        );
+        script.extend([
+            Step::Expect(r#"a3 EXAMINE "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect("a4 UNSELECT"),
+            Step::Send(concat!(
+                r"* 3 FETCH (FLAGS (\Seen))",
+                "\r\n* OK [HIGHESTMODSEQ 9] ok\r\n{tag} OK UNSELECT completed\r\n",
+            )),
+            Step::Expect(leak(format!("a5 {LIST_STATUS}"))),
+            Step::Send(concat!(
+                r#"* LIST (\HasNoChildren) "/" "INBOX""#,
+                "\r\n",
+                r#"* STATUS "INBOX" (MESSAGES 3 UIDNEXT 12 UIDVALIDITY 7 HIGHESTMODSEQ 9)"#,
+                "\r\n{tag} OK LIST completed\r\n",
+            )),
+        ]);
+        script.extend(logout_steps("a6 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.set_read_only(true);
+        imap.select("INBOX").unwrap();
+        let (folders, statuses) = imap.list_status().unwrap().unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(statuses["INBOX"].hms, 9);
+        // Nothing selected now, so the next list_status sends no UNSELECT.
+        assert!(!imap.in_folder);
+        imap.logout();
+        server.finish();
+    }
+
+    const IDLE_CAPS: &str = "* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK done\r\n";
+
+    #[test]
+    fn idle_reports_changes_and_renews_after_a_timeout() {
+        let mut script = login_steps(IDLE_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 EXAMINE "INBOX""#),
+            Step::Send(SELECT_OK),
+            // A keepalive is no change; the wait then times out.
+            Step::Expect("a4 IDLE"),
+            Step::Send("+ idling\r\n* OK Still here\r\n"),
+            Step::Expect("DONE"),
+            Step::Send("a4 OK IDLE terminated\r\n"),
+            Step::Expect("a5 IDLE"),
+            Step::Send("+ idling\r\n* 5 EXISTS\r\n"),
+            Step::Expect("DONE"),
+            Step::Send("* 5 RECENT\r\na5 OK IDLE terminated\r\n"),
+        ]);
+        script.extend(logout_steps("a6 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.set_read_only(true);
+        imap.select("INBOX").unwrap();
+        let wait = Duration::from_millis(300);
+        assert_eq!(imap.idle(wait).unwrap(), WaitOutcome::TimedOut);
+        // The crate leaves the socket without a timeout after a wait.
+        assert_eq!(imap.socket().read_timeout().unwrap(), Some(IO_TIMEOUT));
+        assert_eq!(imap.idle(wait).unwrap(), WaitOutcome::MailboxChanged);
+        assert_eq!(imap.socket().read_timeout().unwrap(), Some(IO_TIMEOUT));
+        imap.logout();
+        server.finish();
+    }
+
+    #[test]
+    fn refused_idle_is_an_error_and_sends_no_done() {
+        let mut script = login_steps(IDLE_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 EXAMINE "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect("a4 IDLE"),
+            Step::Send("{tag} NO IDLE not allowed now\r\n"),
+            // A DONE here would draw a `DONE BAD` the crate panics on.
+            Step::ExpectEof,
+        ]);
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.set_read_only(true);
+        imap.select("INBOX").unwrap();
+        let err = imap.idle(Duration::from_secs(5)).err().unwrap();
+        assert!(matches!(
+            err.downcast_ref::<imap::Error>(),
+            Some(imap::Error::No(_))
+        ));
+        // Even LOGOUT can't flush the queued DONE out.
+        imap.logout();
+        assert_eq!(server.finish().len(), 4);
+    }
+
+    fn has_expunge(sent: &[String]) -> bool {
+        sent.iter().any(|l| l.split(' ').nth(1) == Some("EXPUNGE"))
+    }
+
+    #[test]
+    fn delete_without_uidplus_leaves_message_flagged() {
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect(r"a4 UID STORE 5 +FLAGS.SILENT (\Deleted)"),
+            Step::Send("{tag} OK STORE completed\r\n"),
+        ]);
+        script.extend(logout_steps("a5 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        let done = imap.delete_messages(("INBOX", 7), &[5]).unwrap();
+        assert_eq!(done, Expunged::LeftFlagged);
+        imap.logout();
+        assert!(!has_expunge(&server.finish()));
+    }
+
+    #[test]
+    fn copy_move_quotes_the_name_and_never_expunges() {
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            // A failed COPY flags nothing.
+            Step::Expect(r#"a4 UID COPY 5 "Gone""#),
+            Step::Send("{tag} NO [TRYCREATE] no such folder\r\n"),
+            Step::Expect(r#"a5 UID COPY 5 "Sent Items""#),
+            Step::Send("{tag} OK COPY completed\r\n"),
+            Step::Expect(r"a6 UID STORE 5 +FLAGS.SILENT (\Deleted)"),
+            Step::Send("{tag} OK STORE completed\r\n"),
+        ]);
+        script.extend(logout_steps("a7 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        assert!(imap.move_messages(("INBOX", 7), &[5], "Gone").is_err());
+        let done = imap
+            .move_messages(("INBOX", 7), &[5], "Sent Items")
+            .unwrap();
+        assert_eq!(done, Expunged::LeftFlagged);
+        // Names the crate would send unescaped are refused before any I/O.
+        assert!(imap.append("Bad\"Name", b"x").is_err());
+        assert!(imap.move_messages(("INBOX", 7), &[5], "a\r\nb").is_err());
+        imap.logout();
+        assert!(!has_expunge(&server.finish()));
+    }
+
+    #[test]
+    fn failed_select_forgets_the_previous_folder() {
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect(r#"a4 SELECT "Gone""#),
+            Step::Send("{tag} NO no such folder\r\n"),
+            Step::Expect(r#"a5 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect(r"a6 UID STORE 5 +FLAGS.SILENT (\Seen)"),
+            Step::Send("{tag} OK STORE completed\r\n"),
+        ]);
+        script.extend(logout_steps("a7 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        let sel = imap.select("INBOX").unwrap();
+        assert_eq!((sel.uidvalidity, sel.exists, sel.uid_next), (7, 3, 12));
+        assert!(imap.select("Gone").is_err());
+        imap.set_flags(("INBOX", 7), &[5], "\\Seen", true).unwrap();
+        imap.logout();
+        server.finish();
+    }
+
+    #[test]
+    fn header_dates_fall_back_and_deleted_is_skipped() {
+        let reply = [
+            header_fetch(1, 1, "", "Subject: no date\r\n\r\n"),
+            header_fetch(2, 2, "", "Date: Sat, 1 Jan 2050 00:00:00 +0000\r\n\r\n"),
+            header_fetch(
+                3,
+                3,
+                r"\Seen",
+                "Date: Sun, 31 Dec 2023 12:00:00 +0000\r\n\r\n",
+            ),
+            header_fetch(4, 4, r"\Deleted", "Subject: gone\r\n\r\n"),
+        ]
+        .concat()
+            + "{tag} OK FETCH completed\r\n";
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect("a4 UID FETCH 1:4 (UID FLAGS INTERNALDATE RFC822.SIZE"),
+            Step::Send(leak(reply)),
+        ]);
+        script.extend(logout_steps("a5 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.select("INBOX").unwrap();
+        let headers = imap.fetch_headers(&[1, 2, 3, 4]).unwrap();
+        let dates: Vec<_> = headers.iter().map(|h| (h.uid, h.date)).collect();
+        assert_eq!(dates, [(1, 1704067200), (2, 1704067200), (3, 1704024000)]);
+        assert!(headers[2].seen);
+        imap.logout();
+        server.finish();
+    }
+
+    #[test]
+    fn dates_and_quoting() {
+        assert_eq!(message_date(0, Some(100)), 100);
+        assert_eq!(message_date(100 + 86_401, Some(100)), 100);
+        assert_eq!(message_date(100 + 3_600, Some(100)), 3_700);
+        assert_eq!(message_date(50, None), 50);
+        assert_eq!(quote("Sent Items").unwrap(), r#""Sent Items""#);
+        assert_eq!(quote(r#"a"b\c"#).unwrap(), r#""a\"b\\c""#);
+        assert!(quote("a\0b").is_err());
+        assert!(reads_only("UID FETCH 1:* (UID) (CHANGEDSINCE 1)"));
+        assert!(reads_only("noop"));
+        for writes in [
+            r"UID STORE 1 +FLAGS (\Deleted)",
+            "EXPUNGE",
+            "DELETE x",
+            "NOOP\r\nEXPUNGE",
+        ] {
+            assert!(!reads_only(writes), "{writes:?}");
+        }
+    }
+
+    #[test]
+    fn folds_status_responses_by_folder() {
+        let status = |mailbox: &str, attributes| UnsolicitedResponse::Status {
+            mailbox: mailbox.to_string(),
+            attributes,
+        };
+        let got = fold_statuses(
+            [
+                status(
+                    "INBOX",
+                    vec![
+                        StatusAttribute::Messages(3),
+                        StatusAttribute::UidNext(12),
+                        StatusAttribute::UidValidity(7),
+                        StatusAttribute::HighestModSeq(1 << 40),
+                        StatusAttribute::Unseen(1),
+                    ],
+                ),
+                UnsolicitedResponse::Exists(9),
+                UnsolicitedResponse::Expunge(1),
+                // No HIGHESTMODSEQ (NOMODSEQ): left at 0.
+                status("Sent", vec![StatusAttribute::Messages(2)]),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            got,
+            HashMap::from([
+                (
+                    "INBOX".to_string(),
+                    FolderStatus {
+                        messages: 3,
+                        uidnext: 12,
+                        uidvalidity: 7,
+                        hms: 1 << 40,
+                    }
+                ),
+                (
+                    "Sent".to_string(),
+                    FolderStatus {
+                        messages: 2,
+                        ..Default::default()
+                    }
+                ),
+            ])
+        );
+    }
 
     #[test]
     fn packs_flags() {
         assert_eq!(
             flag_bits(&[Flag::Seen, Flag::Answered, Flag::Deleted]),
-            db::SEEN | db::ANSWERED
+            db::SEEN | db::ANSWERED | db::DELETED
         );
         assert_eq!(flag_bits(&[]), 0);
     }
@@ -353,6 +1948,21 @@ mod tests {
     fn compresses_uid_sets() {
         assert_eq!(uid_set(&[5, 1, 2, 3, 9, 10]), "1:3,5,9:10");
         assert_eq!(uid_set(&[7]), "7");
+        assert_eq!(uid_set(&[12, 1, 2, 3, 4, 5, 7, 9, 10, 11, 7]), "1:5,7,9:12");
+        assert_eq!(uid_set(&[]), "");
+        // Long selections split into sets that each fit a command line.
+        assert_eq!(
+            uid_sets(&[1, 2, 3, 5, 7, 9, 10, 11, 12], 7),
+            ["1:3,5,7", "9:12"]
+        );
+        let sparse: Vec<u32> = (0..5000).map(|n| n * 2 + 1).collect();
+        let sets = uid_sets(&sparse, MAX_UID_SET);
+        assert!(sets.len() > 1 && sets.iter().all(|s| s.len() <= MAX_UID_SET));
+        assert_eq!(sets.join(","), uid_set(&sparse));
+        assert_eq!(
+            uid_set(&[u32::MAX, 1, u32::MAX - 1]),
+            "1,4294967294:4294967295"
+        );
     }
 
     #[test]
@@ -380,5 +1990,363 @@ mod tests {
         assert_eq!(decode_mutf7("Hello"), "Hello");
         assert_eq!(decode_mutf7("&ZeVnLIqe-"), "日本語");
         assert_eq!(decode_mutf7("A&-B"), "A&B");
+    }
+
+    #[test]
+    fn login_refusals_by_response_code() {
+        assert!(rejects_credentials(
+            "[AUTHENTICATIONFAILED] Invalid credentials"
+        ));
+        assert!(rejects_credentials("[EXPIRED] Password expired"));
+        assert!(rejects_credentials("LOGIN failed."));
+        assert!(!rejects_credentials("[UNAVAILABLE] Try again later"));
+        assert!(!rejects_credentials("[INUSE] Mailbox in use"));
+        assert!(!rejects_credentials("[LIMIT] Too many connections"));
+    }
+
+    #[test]
+    fn login_no_is_typed() {
+        let server = FakeServer::start(vec![
+            Step::Send("* OK fake IMAP ready\r\n"),
+            Step::Expect("a1 LOGIN"),
+            Step::Send("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n"),
+        ]);
+        let err = Imap::connect_plain(server.addr, "user", "pass")
+            .err()
+            .unwrap();
+        server.finish();
+        assert!(err.downcast_ref::<AuthFailed>().is_some());
+    }
+
+    #[test]
+    fn interleaves_address_families() {
+        let v4 = |n| SocketAddr::from(([10, 0, 0, n], 993));
+        let v6 = |n| SocketAddr::from(([0xfd00, 0, 0, 0, 0, 0, 0, n], 993));
+        assert_eq!(
+            interleave(vec![v6(1), v6(2), v6(3), v4(1)]),
+            [v6(1), v4(1), v6(2), v6(3)]
+        );
+        assert_eq!(
+            interleave(vec![v4(1), v4(2), v6(1), v6(2)]),
+            [v4(1), v6(1), v4(2), v6(2)]
+        );
+        assert!(interleave(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn connect_any_moves_past_a_dead_address() {
+        // A port nothing listens on any more, then a live one.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let live = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tcp = connect_any(&[dead, live.local_addr().unwrap()]).unwrap();
+        assert_eq!(tcp.peer_addr().unwrap(), live.local_addr().unwrap());
+        assert!(tcp.nodelay().unwrap());
+        assert!(connect_any(&[dead]).is_err());
+    }
+
+    /// A stream that replays canned server bytes and swallows writes.
+    struct Canned(std::io::Cursor<&'static [u8]>);
+
+    impl Read for Canned {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(buf)
+        }
+    }
+
+    impl Write for Canned {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn starttls_refuses_bytes_before_the_handshake() {
+        let canned = |s: &'static str| Canned(std::io::Cursor::new(s.as_bytes()));
+        assert!(starttls(canned("* OK ready\r\na0 OK begin TLS\r\n")).is_ok());
+        let err = starttls(canned("* OK ready\r\na0 OK begin TLS\r\n* OK injected\r\n"))
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("unexpected data"));
+        assert!(starttls(canned("* OK ready\r\na0 NO not now\r\n")).is_err());
+    }
+
+    // ---- the fence: replies the crate would abort on, and odd servers
+
+    /// A session after LOGIN with `caps`, then `steps`, then LOGOUT as
+    /// command `logout` (none if the connection is expected to fail).
+    fn session(steps: Vec<Step>, logout: Option<&'static str>) -> (FakeServer, Imap) {
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend(steps);
+        match logout {
+            Some(line) => script.extend(logout_steps(line)),
+            None => script.push(Step::ExpectEof),
+        }
+        let server = FakeServer::start(script);
+        let imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        (server, imap)
+    }
+
+    #[test]
+    fn a_tagged_ok_to_idle_without_continuation_fails_the_connection() {
+        let mut script = login_steps(IDLE_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 EXAMINE "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect("a4 IDLE"),
+            // The crate would reach `unreachable!()` on this.
+            Step::Send("{tag} OK IDLE done\r\n"),
+            Step::ExpectEof,
+        ]);
+        let server = FakeServer::start(script);
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.set_read_only(true);
+        imap.select("INBOX").unwrap();
+        let err = imap.idle(Duration::from_secs(5)).err().unwrap();
+        assert_eq!(failure(&err), Some(Failure::Protocol));
+        drop(imap);
+        // No DONE (and nothing else) went out.
+        assert_eq!(server.finish().len(), 4);
+    }
+
+    #[test]
+    fn a_reply_with_another_commands_tag_fails_instead_of_aborting() {
+        // The crate asserts the tag matches, which aborts a release build.
+        let (server, mut imap) = session(
+            vec![Step::Expect("a3 NOOP"), Step::Send("a9 OK NOOP done\r\n")],
+            None,
+        );
+        let err = imap.noop().err().unwrap();
+        assert_eq!(failure(&err), Some(Failure::Protocol));
+        drop(imap);
+        server.finish();
+        // Dovecot's answer to a stray DONE is tagged `DONE`.
+        let (server, mut imap) = session(
+            vec![
+                Step::Expect("a3 NOOP"),
+                Step::Send("DONE BAD expected IDLE\r\n"),
+            ],
+            None,
+        );
+        assert_eq!(
+            failure(&imap.noop().err().unwrap()),
+            Some(Failure::Protocol)
+        );
+        drop(imap);
+        server.finish();
+    }
+
+    #[test]
+    fn lines_inside_a_literal_are_message_text() {
+        // A body whose lines look like tagged and untagged replies.
+        let raw = "Subject: x\r\n\r\na9 OK not a reply\r\n* BYE not either\r\n+ nor this {12}\r\n";
+        let reply = leak(format!(
+            "* 1 FETCH (UID 5 BODY[] {{{}}}\r\n{raw})\r\n{{tag}} OK done\r\n",
+            raw.len()
+        ));
+        let (server, mut imap) = session(
+            vec![
+                Step::Expect(r#"a3 SELECT "INBOX""#),
+                Step::Send(SELECT_OK),
+                Step::Expect("a4 UID FETCH 5 (UID BODY.PEEK[])"),
+                Step::Send(reply),
+            ],
+            Some("a5 LOGOUT"),
+        );
+        let bodies = imap.fetch_bodies(("INBOX", 7), &[5]).unwrap();
+        assert_eq!(bodies, [(5, raw.as_bytes().to_vec())]);
+        imap.logout();
+        server.finish();
+    }
+
+    #[test]
+    fn an_expunge_during_a_fetch_is_set_aside() {
+        let (server, mut imap) = session(
+            vec![
+                Step::Expect(r#"a3 SELECT "INBOX""#),
+                Step::Send(SELECT_OK),
+                Step::Expect("a4 UID FETCH 1:* (UID FLAGS)"),
+                Step::Send(concat!(
+                    "* 1 FETCH (UID 10 FLAGS (\\Seen))\r\n",
+                    "* 2 EXPUNGE\r\n",
+                    "* 2 FETCH (UID 12 FLAGS ())\r\n",
+                    "{tag} OK done\r\n",
+                )),
+            ],
+            Some("a5 LOGOUT"),
+        );
+        imap.select("INBOX").unwrap();
+        let flags = imap.uid_flags().unwrap();
+        assert_eq!(flags, HashMap::from([(10, db::SEEN), (12, 0)]));
+        imap.drain_unsolicited();
+        imap.logout();
+        server.finish();
+    }
+
+    #[test]
+    fn an_unsolicited_ok_with_a_code_during_a_fetch() {
+        let (server, mut imap) = session(
+            vec![
+                Step::Expect(r#"a3 SELECT "INBOX""#),
+                Step::Send(SELECT_OK),
+                Step::Expect("a4 UID FETCH 1:* (UID FLAGS)"),
+                Step::Send(concat!(
+                    "* OK [HIGHESTMODSEQ 99] changed\r\n",
+                    "* 1 FETCH (UID 10 FLAGS ())\r\n",
+                    "* OK [ALERT] the server says hello\r\n",
+                    "{tag} OK done\r\n",
+                )),
+            ],
+            Some("a5 LOGOUT"),
+        );
+        imap.select("INBOX").unwrap();
+        // Whatever the crate makes of it: no panic, and the stream stays
+        // usable or the error says it is not.
+        match imap.uid_flags() {
+            Ok(flags) => {
+                assert_eq!(flags, HashMap::from([(10, 0)]));
+                imap.logout();
+                server.finish();
+            }
+            Err(e) => assert_eq!(failure(&e), Some(Failure::Protocol)),
+        }
+    }
+
+    #[test]
+    fn a_truncated_literal_is_a_lost_connection() {
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect("a4 UID FETCH 5 (UID BODY.PEEK[])"),
+            Step::Send("* 1 FETCH (UID 5 BODY[] {100}\r\nSubject: cut off"),
+            Step::Close,
+        ]);
+        let server = FakeServer::start(script);
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        let err = imap.fetch_bodies(("INBOX", 7), &[5]).err().unwrap();
+        assert_eq!(failure(&err), Some(Failure::Unreachable));
+        server.finish();
+    }
+
+    #[test]
+    fn esearch_and_vanished_replies_fail_without_a_panic() {
+        // Never asked for, but a server may send them anyway.
+        let (server, mut imap) = session(
+            vec![
+                Step::Expect(r#"a3 SELECT "INBOX""#),
+                Step::Send(SELECT_OK),
+                Step::Expect("a4 UID SEARCH ALL"),
+                Step::Send("* ESEARCH (TAG \"a4\") UID ALL 1:3\r\n{tag} OK done\r\n"),
+            ],
+            None,
+        );
+        imap.select("INBOX").unwrap();
+        match imap.uids() {
+            // Read as no match: the delta's EXISTS check refuses an answer
+            // that disagrees with the folder's count.
+            Ok(uids) => assert!(uids.is_empty()),
+            Err(e) => assert_eq!(failure(&e), Some(Failure::Protocol)),
+        }
+        drop(imap);
+        server.finish();
+
+        let (server, mut imap) = session(
+            vec![
+                Step::Expect(r#"a3 SELECT "INBOX""#),
+                Step::Send(SELECT_OK),
+                Step::Expect("a4 UID FETCH 1:* (UID FLAGS)"),
+                Step::Send("* VANISHED (EARLIER) 1:2\r\n{tag} OK done\r\n"),
+            ],
+            None,
+        );
+        imap.select("INBOX").unwrap();
+        let err = imap.uid_flags().err().unwrap();
+        assert_eq!(failure(&err), Some(Failure::Protocol));
+        drop(imap);
+        server.finish();
+    }
+
+    #[test]
+    fn literal_announcements() {
+        assert_eq!(announced(b"* 1 FETCH (BODY[] {123}\r\n"), 123);
+        assert_eq!(announced(b"a5 APPEND \"x\" () {9+}\r\n"), 9);
+        assert_eq!(announced(b"* 1 FETCH (BINARY[] ~{7}\r\n"), 7);
+        assert_eq!(announced(b"* OK {not a literal}\r\n"), 0);
+        assert_eq!(announced(b"{}\r\n"), 0);
+        assert_eq!(announced(b"* OK done\r\n"), 0);
+        assert_eq!(announced(b"{99999999999999999999999}\r\n"), u64::MAX);
+        // Lines are found across reads, and literals passed over.
+        let mut lines = Lines::default();
+        let mut heads = Vec::new();
+        for part in [
+            &b"* 1 FETCH (BODY[] {5}\r"[..],
+            b"\na1 OK",
+            b")\r\na2 OK done\r\n",
+        ] {
+            lines
+                .feed(part, |h| {
+                    heads.push(String::from_utf8_lossy(h).into_owned());
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert_eq!(heads, ["* 1 FETCH (BODY[] {5}\r\n", "a2 OK done\r\n"]);
+    }
+
+    /// Whether Rust source names the crate: `imap_proto`, a crate-rooted
+    /// `::imap::`, or one of the crate's own items. Our module's paths
+    /// (`mail::imap::Imap`, `super::imap::failure`) don't count.
+    fn names_crate(text: &str) -> bool {
+        let rooted = text.match_indices("::imap::").any(|(i, _)| {
+            !text[..i]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        });
+        rooted
+            || [
+                "imap_proto",
+                "imap::Error",
+                "imap::types",
+                "imap::extensions",
+                "imap::Session",
+            ]
+            .iter()
+            .any(|n| text.contains(n))
+    }
+
+    /// Only this file names the `imap` crate (and imap-proto); everything
+    /// else goes through [`Imap`] and [`failure`].
+    #[test]
+    fn only_this_file_names_the_imap_crate() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut stack = vec![root.join("src"), root.join("examples"), root.join("tests")];
+        let mut offenders = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && !path.ends_with("src/mail/imap.rs")
+                    && names_crate(&std::fs::read_to_string(&path).unwrap())
+                {
+                    offenders.push(path.display().to_string());
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "{offenders:?}");
+        assert!(names_crate("let e = ::imap::Error::Bad(x);"));
+        assert!(names_crate("use imap_proto::types::Capability;"));
+        assert!(!names_crate(
+            "use komorebi::mail::imap::{Imap, WaitOutcome};"
+        ));
+        assert!(!names_crate("use super::imap::{self, Failure};"));
     }
 }

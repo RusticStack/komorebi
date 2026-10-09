@@ -1,0 +1,22 @@
+From: Lara Pinto <lara@example.org>
+Subject: Encrypted note
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 07:50:00 +0000
+Message-ID: <08-pgp-inline@komorebi.invalid>
+MIME-Version: 1.0
+
+Hi,
+
+The note is below.
+
+-----BEGIN PGP MESSAGE-----
+
+U3ludGhldGljIHRlc3QgZml4dHVyZTsgbm90IGEgcmVhbCBPcGVuUEdQIG1lc3NhZ2UuIFN5bnRo
+ZXRpYyB0ZXN0IGZpeHR1cmU7IG5vdCBhIHJlYWwgT3BlblBHUCBtZXNzYWdlLiBTeW50aGV0aWMg
+dGVzdCBmaXh0dXJlOyBub3QgYSByZWFsIE9wZW5QR1AgbWVzc2FnZS4g
+=AAAA
+-----END PGP MESSAGE-----
+
+Lara

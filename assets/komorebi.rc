@@ -1,0 +1,39 @@
+// Windows resources for komorebi.exe, compiled by build.rs (embed-resource).
+// No #include: rc.exe finds <windows.h> only in a Visual Studio prompt, so
+// the resource types are numeric. build.rs defines VER_MAJOR, VER_MINOR,
+// VER_PATCH and VER_STRING from the Cargo package version.
+
+// The first icon: the .exe's icon in Explorer, and the window's.
+1 ICON "komorebi.ico"
+
+// RT_MANIFEST (24), id 1: the process manifest.
+1 24 "komorebi.manifest"
+
+1 VERSIONINFO
+FILEVERSION VER_MAJOR, VER_MINOR, VER_PATCH, 0
+PRODUCTVERSION VER_MAJOR, VER_MINOR, VER_PATCH, 0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "The Komorebi Authors"
+            VALUE "FileDescription", "Komorebi"
+            VALUE "FileVersion", VER_STRING
+            VALUE "InternalName", "komorebi"
+            VALUE "LegalCopyright", "Apache-2.0, see LICENSE and NOTICE"
+            VALUE "OriginalFilename", "komorebi.exe"
+            VALUE "ProductName", "Komorebi"
+            VALUE "ProductVersion", VER_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

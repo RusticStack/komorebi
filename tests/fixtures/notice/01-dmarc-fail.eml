@@ -1,0 +1,20 @@
+Authentication-Results: mx.komorebi.invalid;
+ spf=pass smtp.mailfrom=mailer.example.net;
+ dkim=pass header.d=mailer.example.net;
+ dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=bank.example
+Received: from mailer.example.net (mailer.example.net [192.0.2.10])
+ by mx.komorebi.invalid with ESMTPS; Thu, 8 Oct 2026 09:00:00 +0000
+From: Bank Example <security@bank.example>
+Subject: Your account is locked
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 09:00:00 +0000
+Message-ID: <01-dmarc-fail@komorebi.invalid>
+MIME-Version: 1.0
+
+Dear customer,
+
+Your account is locked. Sign in within 24 hours to keep it.
+
+Bank Example security team

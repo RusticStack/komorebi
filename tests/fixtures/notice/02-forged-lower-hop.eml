@@ -1,0 +1,19 @@
+Authentication-Results: mx.komorebi.invalid;
+ spf=pass smtp.mailfrom=newsletter.example.org;
+ dkim=pass header.d=newsletter.example.org;
+ dmarc=pass header.from=newsletter.example.org
+Received: from mailer.example.net (mailer.example.net [192.0.2.10])
+ by mx.komorebi.invalid with ESMTPS; Thu, 8 Oct 2026 09:00:00 +0000
+Authentication-Results: mx.komorebi.invalid; dmarc=fail header.from=newsletter.example.org
+Authentication-Results: mx.other.example; spf=fail; dkim=fail; dmarc=fail
+From: Newsletter <hello@newsletter.example.org>
+Subject: Forged lower-hop results (no notice expected)
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+To: Seed Account <seed@komorebi.invalid>
+Date: Thu, 8 Oct 2026 08:50:00 +0000
+Message-ID: <02-forged-lower-hop@komorebi.invalid>
+MIME-Version: 1.0
+
+The topmost Authentication-Results header from the account's server
+passes; the lower ones were written by the sender and must be ignored.

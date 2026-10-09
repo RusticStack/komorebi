@@ -1,20 +1,69 @@
 import { LineEdit, TextEdit, ComboBox, CheckBox, ListView, ScrollView, AboutSlint, Spinner, Palette } from "std-widgets.slint";
 import { Theme, Icons } from "theme.slint";
-import { NavItem, MailRow, AttachmentRow, AccountRow, FolderOption, Icon, IconButton, AccentButton, NavRow, MailItem, Chip, FieldLabel } from "widgets.slint";
+import { NavItem, MailRow, AttachmentRow, AccountRow, FolderOption, Focus, FocusRing, PressKeys, FocusTrap, Icon, IconButton, AccentButton, TextButton, NavRow, MailItem, Chip, FieldLabel, ComposeBody } from "widgets.slint";
 
 export { Theme, Palette }
 
 export struct AccountForm {
+    id: int,            // the account edited (0: a new one)
     provider: int,      // index into the provider list; past the presets = manual
     name: string,
     email: string,
     password: string,
     imap-host: string,
     imap-port: string,
+    imap-starttls: bool,
     smtp-host: string,
     smtp-port: string,
     smtp-starttls: bool,
     save-sent: bool,
+    signature: string,
+}
+
+// A composer field, for edits, focus and address checks.
+export enum ComposeField { to, cc, bcc, subject, body }
+
+// A recipient suggested from the address index (`name` may be empty).
+export struct Suggestion {
+    name: string,
+    addr: string,
+}
+
+// The formatting toolbar's actions on the composer body.
+export enum FormatAction { bold, italic, bullets, numbers, quote }
+
+// A formatting edit made by the controller: whether the body changed, and
+// the selection (UTF-8 byte offsets) to show in it.
+export struct BodyEdit {
+    done: bool,
+    anchor: int,
+    cursor: int,
+}
+
+// One band of a rendered HTML body: 256 logical px tall (the last one may
+// be shorter), rasterized at physical pixels so it blits 1:1.
+export struct Tile {
+    img: image,
+    h: length,
+}
+
+// A selection highlight on the HTML page, in page coordinates.
+export struct SelRect {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+}
+
+// A link on the HTML page for screen readers: its first hit area (page
+// coordinates), text and target.
+export struct LinkItem {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    text: string,
+    href: string,
 }
 
 component Card inherits Rectangle {
@@ -30,6 +79,76 @@ component Divider inherits Rectangle {
     background: Theme.stroke;
 }
 
+// The folders a message or the selection can move to (in a PopupWindow).
+component MoveList inherits Rectangle {
+    in property <[FolderOption]> targets;
+    callback picked(int);
+    Rectangle {
+        background: Theme.card;
+        border-radius: Theme.radius-lg;
+        border-width: 1px;
+        border-color: Theme.stroke-strong;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000033;
+        VerticalLayout {
+            padding: Theme.s1;
+            for f in root.targets: Rectangle {
+                height: 32px;
+                border-radius: Theme.radius;
+                background: fta.has-hover ? Theme.hover : transparent;
+                accessible-role: button;
+                accessible-label: f.label;
+                accessible-action-default => { root.picked(f.id); }
+                fks := PressKeys { pressed => { root.picked(f.id); } }
+                fta := TouchArea { clicked => { root.picked(f.id); } }
+                HorizontalLayout {
+                    padding-left: Theme.s2;
+                    spacing: Theme.s2;
+                    Icon { text: Icons.folder; width: 20px; }
+                    Text { text: f.label; font-family: Theme.text-font; font-size: Theme.body; color: Theme.text; vertical-alignment: center; overflow: elide; }
+                }
+                FocusRing { shown: fks.has-focus; }
+            }
+        }
+    }
+}
+
+// One of the list's filter toggles (Unread, Flagged): on or off.
+component FilterToggle inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback toggled;
+
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.on;
+    accessible-label: root.label;
+    accessible-action-default => { root.toggled(); }
+
+    height: 24px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.on ? Theme.accent : Theme.stroke-strong;
+    background: root.on ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    fs := PressKeys { pressed => { root.toggled(); } }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+    HorizontalLayout {
+        padding-left: Theme.s3;
+        padding-right: Theme.s3;
+        Text {
+            text: root.label;
+            font-size: Theme.caption;
+            font-weight: root.on ? 600 : 400;
+            color: root.on ? Theme.text : Theme.text-2;
+            vertical-alignment: center;
+        }
+    }
+    FocusRing { shown: fs.has-focus; border-radius: 12px; }
+}
+
 component Heading inherits Text {
     font-size: Theme.subtitle;
     font-weight: 600;
@@ -38,18 +157,150 @@ component Heading inherits Text {
     overflow: elide;
 }
 
+// An address problem, under its field (lined up with the field).
+component FieldError inherits HorizontalLayout {
+    in property <string> text;
+    padding-left: 64px + Theme.s2;
+    Text {
+        text: root.text;
+        font-size: Theme.caption;
+        color: Theme.danger;
+        wrap: word-wrap;
+    }
+}
+
+// Recipient suggestions under the address rows (lined up with the fields;
+// one list for To, Cc and Bcc keeps the binary small): a list in the
+// layout rather than a popup, so the field keeps the keyboard. The
+// composer's keys move `current` and take a row (`suggest-key`).
+component SuggestList inherits HorizontalLayout {
+    in property <[Suggestion]> items;
+    in property <int> current;
+    callback picked(int);
+    padding-left: 64px + Theme.s2;
+    Rectangle {
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.stroke-strong;
+        background: Theme.card;
+        accessible-role: list;
+        accessible-label: "Suggested recipients";
+        VerticalLayout {
+            padding: 3px;
+            for s[i] in root.items: Rectangle {
+                height: 32px;
+                border-radius: Theme.radius;
+                background: i == root.current ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+                accessible-role: list-item;
+                accessible-label: s.name != "" ? s.name + ", " + s.addr : s.addr;
+                accessible-item-selected: i == root.current;
+                accessible-action-default => { root.picked(i); }
+                ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.picked(i); }
+                }
+                Rectangle {
+                    x: 0;
+                    width: 3px;
+                    height: 16px;
+                    border-radius: 1.5px;
+                    background: Theme.accent;
+                    visible: i == root.current;
+                }
+                HorizontalLayout {
+                    padding-left: Theme.s3;
+                    padding-right: Theme.s2;
+                    spacing: s.name != "" ? Theme.s2 : 0;
+                    Text {
+                        text: s.name;
+                        font-size: Theme.body;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: s.addr;
+                        font-size: s.name != "" ? Theme.caption : Theme.body;
+                        color: s.name != "" ? Theme.text-3 : Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 component BodyText inherits Text {
     font-size: Theme.body;
     color: Theme.text;
     wrap: word-wrap;
 }
 
+
 // ---------------------------------------------------------------- settings
+
+// A section tab at the top of Settings.
+component SettingsTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    forward-focus: fs;
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+    height: 36px;
+    min-width: tab-text.preferred-width + 2 * Theme.s3;
+    border-radius: Theme.radius;
+    background: ta.has-hover ? Theme.hover : transparent;
+    fs := PressKeys { pressed => { root.clicked(); } }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    tab-text := Text {
+        text: root.label;
+        font-size: Theme.body;
+        font-weight: root.selected ? 600 : 400;
+        color: root.selected ? Theme.text : Theme.text-2;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+    if root.selected: Rectangle {
+        y: parent.height - 3px;
+        x: (parent.width - 16px) / 2;
+        width: 16px;
+        height: 3px;
+        border-radius: 1.5px;
+        background: Theme.accent;
+    }
+    FocusRing { shown: fs.has-focus; }
+}
 
 component SettingsDialog inherits Rectangle {
     in property <[AccountRow]> accounts;
     in property <bool> busy;
     in property <string> error;
+    in property <[string]> remote-senders;
+    // 0 Accounts, 1 General, 2 Privacy, 3 About.
+    in-out property <int> section;
+    // The account being edited (0: the form adds one), and its settings
+    // without the password, which the form never shows.
+    in-out property <int> edit-id;
+    in property <AccountForm> edit;
+    // General: indexes into the choices below, and the taskbar flash.
+    in property <[int]> g-choices;
+    in property <bool> g-flash;
+    // Privacy: the diagnostics log (reported as general-changed 5).
+    in property <bool> g-diag;
+    callback general-changed(/* which */ int, /* value */ int);
+    in property <string> about-version;
+    in property <string> about-data;
+    callback open-repository();
+    // The account form (Add account or Edit) shows instead of the list.
+    property <bool> form-open: false;
     // The form lives only while the dialog is open, so a typed password is
     // gone as soon as it closes.
     property <int> provider: 0;      // 0 Purelymail, 1 Postale.io, 2 Other
@@ -61,174 +312,610 @@ component SettingsDialog inherits Rectangle {
     property <string> smtp-host;
     property <string> smtp-port: "465";
     property <int> smtp-security: 0; // 0 SSL/TLS, 1 STARTTLS
+    property <int> imap-security: 0; // 0 SSL/TLS, 1 STARTTLS
     property <bool> save-sent: true;
+    property <string> signature;
     callback close;
-    callback add-account(AccountForm);
+    callback save-account(AccountForm);
+    callback edit-account(int);
     callback remove-account(int);
+    callback account-enabled(int, bool);
+    callback move-account(int, /* up */ bool);
+    callback redownload(int);
+    callback remove-all-data();
+    callback forget-remote(string);
+    callback forget-all-remote();
+    // The keyboard stays in the dialog: past its last control Tab goes to
+    // its first (`first-seq`), before its first Shift+Tab goes to its last
+    // (`last-seq`); which controls those are depends on the section.
+    property <int> first-seq;
+    property <int> last-seq;
+    // Bumped when a prompt over the dialog closes: the focus comes back.
+    in property <int> refocus;
+    changed refocus => { root.first-seq += 1; }
+
+    // Fill the form from `edit` (or empty it for a new account).
+    function load-form() {
+        root.password = "";
+        if root.edit-id == 0 {
+            root.provider = 0;
+            root.name = "";
+            root.email = "";
+            root.imap-host = "";
+            root.imap-port = "993";
+            root.imap-security = 0;
+            root.smtp-host = "";
+            root.smtp-port = "465";
+            root.smtp-security = 0;
+            root.save-sent = true;
+            root.signature = "";
+        } else {
+            root.provider = 2;
+            root.name = root.edit.name;
+            root.email = root.edit.email;
+            root.imap-host = root.edit.imap-host;
+            root.imap-port = root.edit.imap-port;
+            root.imap-security = root.edit.imap-starttls ? 1 : 0;
+            root.smtp-host = root.edit.smtp-host;
+            root.smtp-port = root.edit.smtp-port;
+            root.smtp-security = root.edit.smtp-starttls ? 1 : 0;
+            root.save-sent = root.edit.save-sent;
+            root.signature = root.edit.signature;
+        }
+    }
+    // Edit (or "Update password") opens the form on Accounts.
+    function open-edit() {
+        load-form();
+        if root.edit-id != 0 {
+            root.section = 0;
+            root.form-open = true;
+        }
+    }
+    function back() {
+        root.form-open = false;
+        root.edit-id = 0;
+    }
+    // The selected tab (or the form's first field) takes the focus as it
+    // appears.
+    init => { open-edit(); }
+    changed edit-id => { open-edit(); }
+    // Each section (and the form) starts at its top.
+    changed section => { settings-scroll.content-y = 0; }
+    changed form-open => { settings-scroll.content-y = 0; }
 
     background: Theme.scrim;
     TouchArea { }  // swallow clicks behind the dialog
 
-    Card {
-        width: min(560px, root.width - 32px);
-        height: min(720px, root.height - 32px);
-        background: Theme.card;
-        drop-shadow-blur: 32px;
-        drop-shadow-color: #00000040;
-        drop-shadow-offset-y: 8px;
-
-        VerticalLayout {
-            padding: Theme.s6;
-            spacing: Theme.s4;
-            HorizontalLayout {
-                Text {
-                    text: "Settings";
-                    font-size: Theme.title;
-                    font-weight: 600;
-                    color: Theme.text;
-                    horizontal-stretch: 1;
+    // Esc leaves the account form, then closes Settings (text fields keep
+    // the keys they use).
+    keys := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                if root.form-open && !root.busy {
+                    root.back();
+                } else if !root.form-open {
+                    root.close();
                 }
-                IconButton {
-                    icon: Icons.dismiss;
-                    tooltip: "Close";
-                    width: 32px;
-                    clicked => { root.close(); }
-                }
+                return accept;
             }
+            reject
+        }
+        Card {
+            width: min(600px, root.width - 32px);
+            height: min(720px, root.height - 32px);
+            background: Theme.card;
+            drop-shadow-blur: 32px;
+            drop-shadow-color: #00000040;
+            drop-shadow-offset-y: 8px;
 
-            ScrollView {
-                vertical-stretch: 1;
-        VerticalLayout {
-                    spacing: Theme.s3;
-                    padding-right: Theme.s3;
-
-                    Heading { text: "Accounts"; }
-                    if accounts.length == 0: Text {
-                        text: "No accounts yet.";
-                        font-size: Theme.body;
-                        color: Theme.text-3;
+            FocusTrap { entered => { root.last-seq += 1; } }
+            VerticalLayout {
+                padding: Theme.s6;
+                padding-bottom: Theme.s4;
+                spacing: Theme.s3;
+                HorizontalLayout {
+                    spacing: Theme.s2;
+                    if root.form-open: IconButton {
+                        property <int> first: root.first-seq;
+                        changed first => { self.focus(); }
+                        icon: Icons.back;
+                        tooltip: "Back to accounts";
+                        width: 32px;
+                        enabled: !root.busy;
+                        clicked => { root.back(); }
                     }
-                    for a in accounts: Rectangle {
-                        height: 52px;
-                        border-radius: Theme.radius;
-                        border-width: 1px;
-                        border-color: Theme.stroke;
-                        HorizontalLayout {
-                            padding-left: Theme.s3;
-                            padding-right: Theme.s2;
+                    Text {
+                        text: !root.form-open ? "Settings" : root.edit-id == 0 ? "Add an account" : "Edit " + root.email;
+                        font-size: Theme.title;
+                        font-weight: 600;
+                        color: Theme.text;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: Icons.dismiss;
+                        tooltip: "Close (Esc)";
+                        width: 32px;
+                        clicked => { root.close(); }
+                    }
+                }
+
+                if !root.form-open: HorizontalLayout {
+                    alignment: start;
+                    spacing: Theme.s1;
+                    for name[i] in ["Accounts", "General", "Privacy", "About"]: SettingsTab {
+                        property <int> first: root.first-seq;
+                        changed first => { if self.selected { self.focus(); } }
+                        init => { if self.selected { self.focus(); } }
+                        label: name;
+                        selected: root.section == i;
+                        clicked => { root.section = i; }
+                    }
+                }
+                if !root.form-open: Divider { }
+
+                // One scroll view for every section (and the account form).
+                settings-scroll := ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-right: Theme.s3;
+                        // ---- Accounts: the list
+                        if !root.form-open && root.section == 0: VerticalLayout {
+                            alignment: start;
                             spacing: Theme.s3;
-                            Icon { text: Icons.person; width: 20px; }
-                            VerticalLayout {
-                                alignment: center;
-                                horizontal-stretch: 1;
-                                Text { text: a.email; font-size: Theme.body; color: Theme.text; overflow: elide; }
-                                Text { text: a.detail; font-size: Theme.caption; color: Theme.text-3; overflow: elide; }
+                            if accounts.length == 0: Text {
+                                text: "No accounts yet.";
+                                font-size: Theme.body;
+                                color: Theme.text-3;
                             }
-                            IconButton {
-                                icon: Icons.delete;
-                                label: "Remove";
-                                y: 10px;
-                                clicked => { root.remove-account(a.id); }
+                            for a in accounts: Rectangle {
+                                height: 104px;
+                                border-radius: Theme.radius;
+                                border-width: 1px;
+                                border-color: Theme.stroke;
+                                VerticalLayout {
+                                    padding-left: Theme.s3;
+                                    padding-right: Theme.s2;
+                                    padding-top: Theme.s2;
+                                    padding-bottom: Theme.s1;
+                                    spacing: Theme.s1;
+                                    HorizontalLayout {
+                                        spacing: Theme.s3;
+                                        Rectangle {
+                                            width: 20px;
+                                            Icon {
+                                                text: a.warn ? Icons.error : Icons.person;
+                                                color: a.warn ? Theme.danger : a.enabled ? Theme.text-2 : Theme.text-disabled;
+                                            }
+                                            // The account's colour (All inboxes rows, navigation).
+                                            if root.accounts.length > 1: Rectangle {
+                                                x: parent.width - 6px;
+                                                y: parent.height / 2 + 2px;
+                                                width: 8px;
+                                                height: 8px;
+                                                border-radius: 4px;
+                                                background: a.dot;
+                                                border-width: 1px;
+                                                border-color: Theme.card;
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            horizontal-stretch: 1;
+                                            Text { text: a.email; font-size: Theme.body; color: a.enabled ? Theme.text : Theme.text-3; overflow: elide; }
+                                            Text { text: a.detail; font-size: Theme.caption; color: Theme.text-3; overflow: elide; }
+                                            HorizontalLayout {
+                                                spacing: Theme.s2;
+                                                Text {
+                                                    text: a.status;
+                                                    font-size: Theme.caption;
+                                                    color: a.warn ? Theme.danger : Theme.text-3;
+                                                    overflow: elide;
+                                                }
+                                                if a.warn: TextButton {
+                                                    text: "Update password";
+                                                    label: "Update password for " + a.email;
+                                                    font-size: Theme.caption;
+                                                    font-weight: 600;
+                                                    clicked => { root.edit-account(a.id); }
+                                                }
+                                                Rectangle { horizontal-stretch: 1; }
+                                            }
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: Theme.s1;
+                                        padding-left: 20px + Theme.s3;
+                                        CheckBox {
+                                            text: "Enabled";
+                                            checked: a.enabled;
+                                            enabled: !root.busy;
+                                            accessible-label: "Enabled: " + a.email;
+                                            toggled => { root.account-enabled(a.id, self.checked); }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        IconButton {
+                                            icon: Icons.chevron-up;
+                                            tooltip: "Move up";
+                                            width: 32px;
+                                            enabled: !root.busy && !a.first;
+                                            clicked => { root.move-account(a.id, true); }
+                                        }
+                                        IconButton {
+                                            icon: Icons.chevron-down;
+                                            tooltip: "Move down";
+                                            width: 32px;
+                                            enabled: !root.busy && !a.last;
+                                            clicked => { root.move-account(a.id, false); }
+                                        }
+                                        IconButton {
+                                            icon: Icons.compose;
+                                            label: "Edit";
+                                            tooltip: "Edit " + a.email;
+                                            enabled: !root.busy;
+                                            clicked => { root.edit-account(a.id); }
+                                        }
+                                        IconButton {
+                                            icon: Icons.delete;
+                                            label: "Remove";
+                                            tooltip: "Remove " + a.email;
+                                            enabled: !root.busy;
+                                            clicked => { root.remove-account(a.id); }
+                                        }
+                                    }
+                                }
                             }
-                        }
-                    }
-
-                    Divider { }
-                    Heading { text: "Add an account"; }
-                    GridLayout {
-                        spacing: Theme.s2;
-                        Row {
-                            FieldLabel { text: "Provider"; width: 96px; }
-                            ComboBox {
-                                model: ["Purelymail", "Postale.io", "Other (manual)"];
-                                current-index <=> root.provider;
-                                selected(v) => {
-                                    if root.provider == 0 { root.smtp-port = "465"; root.imap-port = "993"; }
+                            HorizontalLayout {
+                                alignment: start;
+                                AccentButton {
+                                    property <int> last: root.last-seq;
+                                    changed last => { self.focus(); }
+                                    icon: Icons.add;
+                                    label: "Add account";
+                                    enabled: !root.busy;
+                                    clicked => {
+                                        root.edit-id = 0;
+                                        root.load-form();
+                                        root.form-open = true;
+                                    }
                                 }
                             }
                         }
-                        Row {
-                            FieldLabel { text: "Name"; width: 96px; }
-                            LineEdit { text <=> root.name; placeholder-text: "Shown to recipients"; }
-                        }
-                        Row {
-                            FieldLabel { text: "Email"; width: 96px; }
-                            LineEdit { text <=> root.email; placeholder-text: "you@yourdomain.com";  }
-                        }
-                        Row {
-                            FieldLabel { text: "Password"; width: 96px; }
-                            LineEdit { text <=> root.password; input-type: InputType.password; placeholder-text: "Password or app password"; }
-                        }
-                    }
-                    if root.provider == 2: GridLayout {
-                        spacing: Theme.s2;
-                        Row {
-                            FieldLabel { text: "IMAP"; width: 96px; }
-                            LineEdit { text <=> root.imap-host; placeholder-text: "imap.example.com"; }
-                            LineEdit { text <=> root.imap-port; width: 72px; input-type: InputType.number; }
-                        }
-                        Row {
-                            FieldLabel { text: "SMTP"; width: 96px; }
-                            LineEdit { text <=> root.smtp-host; placeholder-text: "smtp.example.com"; }
-                            LineEdit { text <=> root.smtp-port; width: 72px; input-type: InputType.number; }
-                        }
-                        Row {
-                            FieldLabel { text: "SMTP security"; width: 96px; }
-                            ComboBox {
-                                colspan: 2;
-                                model: ["SSL/TLS (port 465)", "STARTTLS (port 587)"];
-                                current-index <=> root.smtp-security;
-                                selected(v) => { root.smtp-port = root.smtp-security == 0 ? "465" : "587"; }
-                            }
-                        }
-                    }
-                    CheckBox {
-                        text: "Save a copy of sent mail in the Sent folder";
-                        checked <=> root.save-sent;
-                    }
-                    if root.error != "": Rectangle {
-                        background: Theme.danger-bg;
-                        border-radius: Theme.radius;
-                        HorizontalLayout {
-                            padding: Theme.s2;
-                            spacing: Theme.s2;
-                            Icon { text: Icons.error; color: Theme.danger; width: 20px; }
-                            BodyText { text: root.error; color: Theme.danger; horizontal-stretch: 1; }
-                        }
-                    }
-                    HorizontalLayout {
-                        alignment: end;
-                        spacing: Theme.s2;
-                        if root.busy: Spinner { indeterminate: true; width: 24px; height: 24px; }
-                        AccentButton {
-                            label: root.busy ? "Signing in…" : "Add account";
-                            enabled: !root.busy && root.email != "" && root.password != "";
-                            clicked => {
-                                root.add-account({
-                                    provider: root.provider,
-                                    name: root.name,
-                                    email: root.email,
-                                    password: root.password,
-                                    imap-host: root.imap-host,
-                                    imap-port: root.imap-port,
-                                    smtp-host: root.smtp-host,
-                                    smtp-port: root.smtp-port,
-                                    smtp-starttls: root.smtp-security == 1,
-                                    save-sent: root.save-sent,
-                                });
-                            }
-                        }
-                    }
 
-                    Divider { }
-                    Heading { text: "About"; }
-                    BodyText {
-                        text: "Komorebi is a free, open-source email client. No telemetry, no ads, no remote content. Passwords are kept in Windows Credential Manager.";
-                        color: Theme.text-2;
+                        // ---- Accounts: the form (Add account or Edit)
+                        if root.form-open: VerticalLayout {
+                            alignment: start;
+                            spacing: Theme.s3;
+                            // Editing shows the servers themselves.
+                            if root.edit-id == 0: HorizontalLayout {
+                                spacing: Theme.s2;
+                                FieldLabel { text: "Provider"; width: 96px; }
+                                ComboBox {
+                                    model: ["Purelymail", "Postale.io", "Other (manual)"];
+                                    current-index <=> root.provider;
+                                    selected(v) => {
+                                        if root.provider == 0 { root.smtp-port = "465"; root.imap-port = "993"; }
+                                    }
+                                }
+                            }
+                            GridLayout {
+                                spacing: Theme.s2;
+                                Row {
+                                    FieldLabel { text: "Name"; width: 96px; }
+                                    // A new account starts here.
+                                    LineEdit {
+                                        text <=> root.name;
+                                        placeholder-text: "Shown to recipients";
+                                        accessible-label: "Name";
+                                        init => { if root.edit-id == 0 { self.focus(); } }
+                                    }
+                                }
+                                Row {
+                                    FieldLabel { text: "Email"; width: 96px; }
+                                    // An account's address is its identity: fixed once added.
+                                    LineEdit { text <=> root.email; enabled: root.edit-id == 0; placeholder-text: "you@yourdomain.com"; accessible-label: "Email"; }
+                                }
+                                Row {
+                                    FieldLabel { text: "Password"; width: 96px; }
+                                    // Editing (often "Update password") starts here.
+                                    LineEdit {
+                                        text <=> root.password;
+                                        input-type: InputType.password;
+                                        placeholder-text: root.edit-id == 0 ? "Password or app password" : "Leave empty to keep the current one";
+                                        accessible-label: "Password";
+                                        init => { if root.edit-id != 0 { self.focus(); } }
+                                    }
+                                }
+                            }
+                            if root.provider == 2: GridLayout {
+                                spacing: Theme.s2;
+                                Row {
+                                    FieldLabel { text: "IMAP"; width: 96px; }
+                                    LineEdit { text <=> root.imap-host; placeholder-text: "imap.example.com"; accessible-label: "IMAP server"; }
+                                    LineEdit { text <=> root.imap-port; width: 72px; input-type: InputType.number; accessible-label: "IMAP port"; }
+                                }
+                                Row {
+                                    FieldLabel { text: "IMAP security"; width: 96px; }
+                                    ComboBox {
+                                        colspan: 2;
+                                        model: ["SSL/TLS (port 993)", "STARTTLS (port 143)"];
+                                        current-index <=> root.imap-security;
+                                        selected(v) => { root.imap-port = root.imap-security == 0 ? "993" : "143"; }
+                                    }
+                                }
+                                Row {
+                                    FieldLabel { text: "SMTP"; width: 96px; }
+                                    LineEdit { text <=> root.smtp-host; placeholder-text: "smtp.example.com"; accessible-label: "SMTP server"; }
+                                    LineEdit { text <=> root.smtp-port; width: 72px; input-type: InputType.number; accessible-label: "SMTP port"; }
+                                }
+                                Row {
+                                    FieldLabel { text: "SMTP security"; width: 96px; }
+                                    ComboBox {
+                                        colspan: 2;
+                                        model: ["SSL/TLS (port 465)", "STARTTLS (port 587)"];
+                                        current-index <=> root.smtp-security;
+                                        selected(v) => { root.smtp-port = root.smtp-security == 0 ? "465" : "587"; }
+                                    }
+                                }
+                            }
+                            CheckBox {
+                                text: "Save a copy of sent mail in the Sent folder";
+                                checked <=> root.save-sent;
+                            }
+                            FieldLabel { text: "Signature"; width: 96px; }
+                            TextEdit {
+                                text <=> root.signature;
+                                height: 76px;
+                                wrap: word-wrap;
+                                placeholder-text: "Added below new mail, replies and forwards";
+                                accessible-label: "Signature";
+                            }
+                            if root.error != "": Rectangle {
+                                background: Theme.danger-bg;
+                                border-radius: Theme.radius;
+                                HorizontalLayout {
+                                    padding: Theme.s2;
+                                    spacing: Theme.s2;
+                                    Icon { text: Icons.error; color: Theme.danger; width: 20px; }
+                                    BodyText { text: root.error; color: Theme.danger; horizontal-stretch: 1; }
+                                }
+                            }
+                            HorizontalLayout {
+                                alignment: end;
+                                spacing: Theme.s2;
+                                if root.busy: Spinner { indeterminate: true; width: 24px; height: 24px; }
+                                IconButton {
+                                    icon: Icons.dismiss;
+                                    label: "Cancel";
+                                    enabled: !root.busy;
+                                    clicked => { root.back(); }
+                                }
+                                AccentButton {
+                                    property <int> last: root.last-seq;
+                                    changed last => { self.focus(); }
+                                    label: root.busy ? "Signing in…" : root.edit-id == 0 ? "Add account" : "Save";
+                                    enabled: !root.busy && root.email != "" && (root.password != "" || root.edit-id != 0);
+                                    clicked => {
+                                        root.save-account({
+                                            id: root.edit-id,
+                                            provider: root.provider,
+                                            name: root.name,
+                                            email: root.email,
+                                            password: root.password,
+                                            imap-host: root.imap-host,
+                                            imap-port: root.imap-port,
+                                            imap-starttls: root.imap-security == 1,
+                                            smtp-host: root.smtp-host,
+                                            smtp-port: root.smtp-port,
+                                            smtp-starttls: root.smtp-security == 1,
+                                            save-sent: root.save-sent,
+                                            signature: root.signature,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- General
+                        if !root.form-open && root.section == 1: VerticalLayout {
+                            alignment: start;
+                            spacing: Theme.s3;
+                            // One row per choice (one ComboBox for all four).
+                            for row[i] in [
+                                { label: "Theme", options: ["System", "Light", "Dark"] },
+                                { label: "Check for new mail", options: ["Every minute", "Every 2 minutes", "Every 5 minutes", "Every 15 minutes"] },
+                                { label: "Undo send", options: ["Off", "5 seconds", "10 seconds", "20 seconds", "30 seconds"] },
+                                { label: "Mark as read", options: ["Right away", "After 1 second", "After 3 seconds", "Never"] },
+                            ]: HorizontalLayout {
+                                spacing: Theme.s3;
+                                FieldLabel { text: row.label; width: 168px; }
+                                ComboBox {
+                                    model: row.options;
+                                    current-index: root.g-choices[i];
+                                    accessible-label: row.label;
+                                    selected(v) => { root.general-changed(i, self.current-index); }
+                                }
+                            }
+                            BodyText {
+                                text: "Servers that push new mail show it within seconds whatever the check interval. Undo send holds a sent message this long so it can be taken back.";
+                                font-size: Theme.caption;
+                                color: Theme.text-3;
+                            }
+                            Divider { }
+                            CheckBox {
+                                property <int> last: root.last-seq;
+                                changed last => { self.focus(); }
+                                text: "Flash the taskbar button when new mail arrives in the background";
+                                checked: root.g-flash;
+                                toggled => { root.general-changed(4, self.checked ? 1 : 0); }
+                            }
+                        }
+
+                        // ---- Privacy
+                        if !root.form-open && root.section == 2: VerticalLayout {
+                            alignment: start;
+                            spacing: Theme.s3;
+                            Heading { text: "Remote images"; }
+                            BodyText {
+                                text: "Images from these senders load without asking. Everyone else's stay blocked until you load them, and tracking pixels never load.";
+                                font-size: Theme.caption;
+                                color: Theme.text-3;
+                            }
+                            if root.remote-senders.length == 0: Text {
+                                text: "No senders.";
+                                font-size: Theme.body;
+                                color: Theme.text-3;
+                            }
+                            for a in root.remote-senders: Rectangle {
+                                height: 40px;
+                                border-radius: Theme.radius;
+                                border-width: 1px;
+                                border-color: Theme.stroke;
+                                HorizontalLayout {
+                                    padding-left: Theme.s3;
+                                    padding-right: Theme.s1;
+                                    spacing: Theme.s3;
+                                    Text {
+                                        text: a;
+                                        font-size: Theme.body;
+                                        color: Theme.text;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                    IconButton {
+                                        icon: Icons.delete;
+                                        label: "Remove";
+                                        y: 4px;
+                                        clicked => { root.forget-remote(a); }
+                                    }
+                                }
+                            }
+                            if root.remote-senders.length > 0: HorizontalLayout {
+                                alignment: end;
+                                IconButton {
+                                    icon: Icons.delete;
+                                    label: "Forget all";
+                                    clicked => { root.forget-all-remote(); }
+                                }
+                            }
+
+                            Divider { }
+                            Heading { text: "Downloaded mail"; }
+                            BodyText {
+                                text: "Komorebi keeps a copy of your mail on this computer. Download again forgets an account's copy and fetches it from the server once more; mail on the server is not affected.";
+                                font-size: Theme.caption;
+                                color: Theme.text-3;
+                            }
+                            if accounts.length == 0: Text {
+                                text: "No accounts yet.";
+                                font-size: Theme.body;
+                                color: Theme.text-3;
+                            }
+                            for a in root.accounts: Rectangle {
+                                height: 40px;
+                                border-radius: Theme.radius;
+                                border-width: 1px;
+                                border-color: Theme.stroke;
+                                HorizontalLayout {
+                                    padding-left: Theme.s3;
+                                    padding-right: Theme.s1;
+                                    spacing: Theme.s3;
+                                    Text {
+                                        text: a.email;
+                                        font-size: Theme.body;
+                                        color: Theme.text;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                    IconButton {
+                                        icon: Icons.refresh;
+                                        label: "Download again";
+                                        tooltip: "Download the mail of " + a.email + " again";
+                                        y: 4px;
+                                        enabled: !root.busy;
+                                        clicked => { root.redownload(a.id); }
+                                    }
+                                }
+                            }
+
+                            Divider { }
+                            Heading { text: "Diagnostics log"; }
+                            BodyText {
+                                text: "Off unless you turn it on. It records only server command names, response codes, timings and account numbers, never mail, addresses, folder names or passwords, in the logs folder inside the data folder (see About). Nothing is sent anywhere.";
+                                font-size: Theme.caption;
+                                color: Theme.text-3;
+                            }
+                            CheckBox {
+                                text: "Keep a diagnostics log";
+                                checked: root.g-diag;
+                                toggled => { root.general-changed(5, self.checked ? 1 : 0); }
+                            }
+
+                            Divider { }
+                            Heading { text: "Remove all data"; }
+                            BodyText {
+                                text: "Deletes the saved passwords of all accounts from Windows Credential Manager, then everything Komorebi keeps in the data folder (downloaded mail, drafts, the Outbox, settings and logs), and closes Komorebi. Mail on the server is not affected.";
+                                font-size: Theme.caption;
+                                color: Theme.text-3;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                IconButton {
+                                    property <int> last: root.last-seq;
+                                    changed last => { self.focus(); }
+                                    icon: Icons.delete;
+                                    icon-color: Theme.danger;
+                                    label: "Remove all data";
+                                    enabled: !root.busy;
+                                    clicked => { root.remove-all-data(); }
+                                }
+                            }
+                        }
+
+                        // ---- About
+                        if !root.form-open && root.section == 3: VerticalLayout {
+                            alignment: start;
+                            spacing: Theme.s3;
+                            Heading { text: "Komorebi " + root.about-version; }
+                            BodyText {
+                                text: "A free, open-source email client. No telemetry, no ads, and no remote content unless you choose to load a message's images. Passwords are kept in Windows Credential Manager.";
+                                color: Theme.text-2;
+                            }
+                            BodyText {
+                                text: "Licensed under the Apache License 2.0.";
+                                color: Theme.text-2;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                TextButton {
+                                    text: "github.com/RusticStack/komorebi";
+                                    label: "Open the Komorebi repository in the browser";
+                                    clicked => { root.open-repository(); }
+                                }
+                            }
+                            FieldLabel { text: "Data folder"; width: 160px; }
+                            TextInput {
+                                property <int> last: root.last-seq;
+                                changed last => { self.focus(); }
+                                text: root.about-data;
+                                read-only: true;
+                                wrap: char-wrap;
+                                font-size: Theme.body;
+                                color: Theme.text;
+                                accessible-label: "Data folder";
+                                selection-background-color: Theme.accent.with-alpha(0.35);
+                                selection-foreground-color: Theme.text;
+                            }
+                            AboutSlint { height: 160px; }
+                        }
                     }
-                    AboutSlint { height: 160px; }
                 }
             }
+            FocusTrap { entered => { root.first-seq += 1; } }
         }
     }
 }
@@ -236,7 +923,11 @@ component SettingsDialog inherits Rectangle {
 // ------------------------------------------------------------------ window
 
 export component AppWindow inherits Window {
-    title: "Komorebi";
+    // "Inbox (7) - Komorebi" while the inboxes hold unread mail.
+    in property <string> window-title: "Komorebi";
+    title: root.window-title;
+    // The list keys work from the start, before any click.
+    forward-focus: list-keys;
     min-width: 720px;
     min-height: 480px;
     preferred-width: 1280px;
@@ -245,7 +936,7 @@ export component AppWindow inherits Window {
     default-font-family: Theme.text-font;
     // Navigation
     in property <[NavItem]> nav-items;
-    in property <int> selected-folder: 0;     // folder id; 0 = all inboxes
+    in property <int> selected-folder: 0;     // folder id; 0 = all inboxes, -1 = local drafts, -2 = outbox
     in property <bool> has-accounts: true;
     callback nav-clicked(NavItem);
 
@@ -258,8 +949,32 @@ export component AppWindow inherits Window {
     in-out property <string> search-text;
     callback message-selected(int);
     callback select-offset(int);
+    // Multi-select: Ctrl+click, Shift+click, Shift+Up/Down, Ctrl+A, Esc.
+    // With more than one row selected (or one picked without opening it)
+    // the reader pane shows the "N selected" panel instead of a message.
+    in property <int> selected-count;
+    callback message-toggled(int);
+    callback message-extended(int);
+    callback select-extend(int);
+    callback select-all-rows();
     callback refresh();
     callback search-edited(string);
+    // List keys: Home / End, Enter (true when a message shows; the page
+    // then takes the focus), Esc (search, then selection and reader).
+    callback select-edge(/* end */ bool);
+    callback open-current() -> bool;
+    callback list-escape();
+    callback clear-search();
+    in-out property <bool> focus-page;
+    // 0 everything, 1 unread, 2 flagged; what an empty list says.
+    in property <int> list-filter;
+    in property <string> list-empty: "Nothing here";
+    callback set-filter(int);
+    callback mark-all-read();
+    // The search scope (shown while searching): this folder, or all of
+    // them.
+    in property <bool> search-all;
+    callback set-search-all(bool);
 
     // Reader
     in property <bool> has-message;
@@ -276,6 +991,95 @@ export component AppWindow inherits Window {
     in property <bool> r-flagged;
     in property <bool> r-unread;
     in property <[AttachmentRow]> r-attachments;
+    // The notice above the body: why to look twice at the sender
+    // (`r-notice-warn`), and/or that the message is encrypted.
+    in property <string> r-notice;
+    in property <bool> r-notice-warn;
+    // The message has a usable List-Unsubscribe address.
+    in property <bool> r-unsubscribe;
+    callback unsubscribe();
+    // The meeting invitation in the message (a card while `i-title` is
+    // set): its when/organizer/where/repeat lines, a state line (cancelled,
+    // updated, over, or the answer given), its description behind Details,
+    // and the actions it offers in two rows (`i-answers`, `i-tools`), as
+    // `invite` codes: 0 join, 1 accept, 2 tentative, 3 decline, 4 save
+    // .ics, 5 change the answer; 6 (Details) stays in the card.
+    in property <string> i-title;
+    in property <string> i-lines;
+    in property <string> i-state;
+    in property <string> i-details;
+    in property <bool> i-cancelled;
+    in property <[int]> i-answers;
+    in property <[int]> i-tools;
+    callback invite(int);
+    // HTML body: rendered off-thread into tiles on a paper card. While a
+    // render is pending (`r-waiting`) neither the tiles nor the text show.
+    in property <bool> r-html;
+    in property <bool> r-waiting;
+    in property <[Tile]> r-tiles;
+    in property <length> r-page-width;
+    in property <length> r-page-height;
+    in property <color> r-paper: white;
+    in property <bool> r-truncated;
+    // Shown above a text body that stands in for a failed HTML render.
+    in property <string> r-note;
+    // Remote images the page leaves out; a banner offers to load them once,
+    // or always for this sender (`true`).
+    in property <int> r-remote-blocked;
+    callback r-load-remote(bool);
+    // After loading them: the images that couldn't be loaded.
+    in property <int> r-remote-failed;
+    // "View as plain text": the text view instead of the page, for this
+    // message only.
+    in-out property <bool> r-plain;
+    // The page's colours are dimmed for the dark theme; "Show original
+    // colours" turns that off for this message (`r-original`).
+    in property <bool> r-dimmed;
+    in property <bool> r-original;
+    callback r-show-original(bool);
+    // Text selection on the page: gestures in page coordinates go to the
+    // controller, which answers with highlight rectangles.
+    in property <[SelRect]> r-selection;
+    callback r-press(length, length);
+    callback r-extend(length, length);
+    callback r-select-all();
+    callback r-clear-selection();
+    callback r-copy();
+    // Links: the page under the pointer is a link (pointer cursor), the
+    // href shown in the bottom strip (hovered, else focused), the focus
+    // ring, and the links for screen readers.
+    in property <bool> r-hover-link;
+    in property <string> r-hover-href;
+    in property <[SelRect]> r-focus;
+    in property <[LinkItem]> r-links;
+    callback r-hover(length, length);
+    callback r-release(length, length);
+    // Tab (or Shift+Tab with `true`): `false` once focus runs off the links.
+    callback r-focus-link(bool) -> bool;
+    callback r-activate-focused();
+    callback r-activate(int);
+    // The confirm prompt before a web link opens in the browser.
+    in-out property <bool> l-show;
+    in property <string> l-before;
+    in property <string> l-host;
+    in property <string> l-after;
+    in property <[string]> l-warnings;
+    callback l-open();
+    callback l-cancel();
+    in-out property <length> r-content-y;
+    // The sideways scroll of a page wider than the column (0 or less).
+    in-out property <length> r-page-x;
+    // Reported to the controller: the body column's width, and the visible
+    // band of the page in page coordinates.
+    out property <length> r-body-width;
+    out property <length> r-view-top;
+    out property <length> r-view-height;
+    // The lowest `r-content-y` (the body scrolled to its end).
+    out property <length> r-scroll-min;
+    // Device pixels per logical pixel; tiles are re-rendered when it changes.
+    out property <float> r-scale: 1px / 1phx;
+    callback r-body-resized();
+    callback r-view-changed();
     in property <[FolderOption]> move-targets;
     callback reply();
     callback reply-all();
@@ -284,8 +1088,37 @@ export component AppWindow inherits Window {
     callback delete();
     callback toggle-read();
     callback toggle-flag();
+    // The selection's buttons: read or unread, flag or unflag.
+    callback mark-read(bool);
+    callback mark-flagged(bool);
     callback move-to(int);
+    // The row menu (right-click a message) and the reader's More menu act
+    // on what is selected; their labels are set as they open.
+    in property <bool> menu-unread;
+    in property <bool> menu-unflagged;
+    in property <bool> menu-junk;
+    callback message-context(int) -> bool;
+    callback menu-opening();
+    // Reply (0), Reply all (1), Forward (2).
+    callback menu-respond(int);
+    // Report junk (true) or Not junk (false).
+    callback junk(bool);
     callback save-attachment(int);
+    // Opens a copy in the app for its type (programs and scripts refused).
+    callback open-attachment(int);
+    // The open message as the server sent it: saved as a .eml file (Ctrl+S),
+    // its header fields and source shown (Ctrl+U), its Message-ID copied,
+    // or attached whole to a new message.
+    callback save-eml();
+    callback show-original();
+    callback copy-message-id();
+    callback forward-attached();
+    // Show original: shown while `src-show` is set.
+    in-out property <bool> src-show;
+    in property <string> src-headers;
+    in property <string> src-body;
+    // `<id@host>`, or empty when the message has none.
+    in property <string> src-msgid;
 
     // Composer
     in-out property <bool> composing;
@@ -299,55 +1132,250 @@ export component AppWindow inherits Window {
     in-out property <string> c-body;
     in-out property <bool> c-show-cc;
     in property <[AttachmentRow]> c-attachments;
-    in property <bool> c-sending;
+    // "Attachments 18.4 MB of 25 MB" (sent size), and its level: 0 fine,
+    // 1 from 80%, 2 over the limit (Send is off).
+    in property <string> c-attach-total;
+    in property <int> c-attach-level;
+    // A file is dragged over the window.
+    in-out property <bool> file-hover;
+    // Ctrl+V: attaches the files copied in Explorer, if any (false: the
+    // field pastes text).
+    callback c-paste-files() -> bool;
+    // The send guards' question (empty: none); Send anyway goes ahead.
+    in-out property <string> c-guard;
+    callback c-send-anyway();
+    // Inline address errors, and why Send is off (empty: it is on).
+    in property <string> c-to-error;
+    in property <string> c-cc-error;
+    in property <string> c-bcc-error;
+    in property <string> c-send-reason;
+    // The field to focus, each time `c-focus-seq` changes (and when the
+    // composer or the Cc/Bcc rows appear).
+    in property <ComposeField> c-focus;
+    in property <int> c-focus-seq;
+    // Recipient suggestions for the address field being typed in (empty:
+    // none shown), the highlighted one, taking one and closing them. A
+    // taken suggestion puts the caret at byte `c-caret` of the `c-focus`
+    // field, each time `c-caret-seq` changes.
+    in property <[Suggestion]> c-suggestions;
+    in-out property <int> c-suggest-index;
+    callback c-suggest-accept(int);
+    callback c-suggest-close();
+    in property <int> c-caret;
+    in property <int> c-caret-seq;
     callback compose();
     callback send();
+    // Discard asks first when the draft has something written.
     callback discard();
+    in-out property <bool> c-confirm-discard;
+    callback discard-confirmed();
     callback attach();
     callback remove-attachment(int);
+    // The fields are a view of the draft held by the controller: typing,
+    // leaving a field and picking an account are reported back.
+    callback c-edited(ComposeField, string);
+    callback c-left(ComposeField);
+    callback c-from-changed(int);
+    // Show the Cc and Bcc rows and focus Cc or Bcc.
+    callback c-reveal(ComposeField);
+    // Esc: hide the composer, keeping the draft.
+    callback c-close();
+    // The formatting toolbar, on the body's selection (anchor, cursor):
+    // markers, a link to an address, and Ctrl+Z of the last such edit
+    // (`done` is false when there is none).
+    callback c-format(FormatAction, int, int) -> BodyEdit;
+    callback c-link(string, int, int) -> BodyEdit;
+    callback c-unformat() -> BodyEdit;
+
+    // Outbox: the selected message, where its send is, and what can be done.
+    in property <bool> o-show;
+    in property <string> o-subject;
+    in property <string> o-to;
+    in property <string> o-status;
+    in property <bool> o-problem;
+    in property <bool> o-can-edit;
+    in property <bool> o-can-retry;
+    in property <bool> o-can-discard;
+    callback o-edit();
+    callback o-retry();
+    callback o-discard();
+
+    // A yes/no prompt (shown while `q-title` is set).
+    in-out property <string> q-title;
+    in property <string> q-text;
+    in property <string> q-ok;
+    callback q-answer(bool);
+    // A third answer, when set (an invitation's "Don't send a reply").
+    in property <string> q-alt;
+    callback q-alt-answer();
 
     // Settings
     in-out property <bool> show-settings;
     in property <[AccountRow]> accounts;
     in property <bool> a-busy;
     in-out property <string> a-error;
-    callback add-account(AccountForm);
+    // The account the settings form edits (0: none), and its settings.
+    in-out property <int> a-edit-id;
+    in property <AccountForm> a-edit;
+    callback save-account(AccountForm);
+    callback edit-account(int);
     callback remove-account(int);
     callback settings-closed();
+    // Senders whose remote images always load.
+    in property <[string]> remote-senders;
+    callback settings-opened();
+    callback forget-remote(string);
+    callback forget-all-remote();
+    // The section shown: 0 Accounts, 1 General, 2 Privacy, 3 About.
+    in-out property <int> settings-section;
+    // Account housekeeping: Enabled, order, and Download again (asks first).
+    callback account-enabled(int, bool);
+    callback move-account(int, /* up */ bool);
+    callback redownload-account(int);
+    // Settings > Privacy > Remove all data (asks first).
+    callback remove-all-data();
+    // General: the theme (System, Light, Dark), the check interval, and
+    // the undo-send and mark-as-read delays, as indexes into the choices
+    // shown, and the taskbar flash. A change reports which one (0-3; 4 the
+    // flash) and its new index (the flash: 1 or 0).
+    in property <[int]> g-choices: [0, 0, 1, 1];
+    in property <bool> g-flash;
+    // The diagnostics log switch (Privacy), reported as which = 5.
+    in property <bool> g-diag;
+    callback general-changed(int, int);
+    // About: the version and the folder holding the cache.
+    in property <string> about-version;
+    in property <string> about-data;
+    callback open-repository();
 
     // Status toast
     in property <string> status;
     in property <bool> status-error;
     callback dismiss-status();
+    // An optional action button on the status line ("Resume draft", "Undo").
+    in property <string> status-action;
+    callback status-action-clicked();
 
     // Set from a change handler (not a binding) because labels shown in
     // wide mode feed back into the window's layout constraints.
     property <bool> compact: false;
-    property <bool> reading: !root.composing && !root.show-settings;
+    property <bool> reading: !root.composing && !root.show-settings && !root.src-show;
+    // Rows that fit in the list: what PageUp/PageDown move by.
+    property <int> page-rows: max(1, floor(list.visible-height / Theme.row-height));
     changed width => { root.compact = root.width < 1040px; }
     init => { root.compact = root.width < 1040px; }
 
     public function focus-list() {
-        keys.focus();
+        list-keys.focus();
+    }
+
+    // F6 and Shift+F6 move between the panes: folders, list, reader. The
+    // reader's first control (toolbar, composer field, selection or Outbox
+    // buttons) takes the focus each time `pane-seq` changes.
+    property <int> pane-seq;
+    property <bool> reader-target: root.composing || root.has-message || root.o-show || root.selected-count > 0;
+    function pane-of-focus() -> int {
+        if nav.has-focus || new-mail.has-focus || settings-btn.has-focus {
+            return 0;
+        }
+        if list-keys.has-focus || search.has-focus || refresh-btn.has-focus || list-more.has-focus {
+            return 1;
+        }
+        2
+    }
+    // A closed prompt hands the focus back: to Settings when it was over
+    // them, to the composer's body, else to the list.
+    property <int> settings-refocus;
+    property <int> body-refocus;
+    function after-prompt() {
+        if root.show-settings {
+            root.settings-refocus += 1;
+        } else if root.composing {
+            root.body-refocus += 1;
+        } else {
+            keys.focus();
+        }
+    }
+    changed q-title => { if root.q-title == "" { root.after-prompt(); } }
+    changed c-confirm-discard => { if !root.c-confirm-discard { root.after-prompt(); } }
+    function show-row-menu() {
+        root.menu-opening();
+        let below = (max(0, root.selected-index) + 1) * Theme.row-height + list.content-y;
+        row-menu.show({
+            x: list-keys.absolute-position.x + Theme.s6,
+            y: list-keys.absolute-position.y + clamp(below, 0px, list-keys.height),
+        });
+    }
+    function cycle-pane(back: bool) {
+        let p = root.pane-of-focus();
+        let next = back ? (p == 0 ? (root.reader-target ? 2 : 1) : p - 1)
+            : (p == 2 || (p == 1 && !root.reader-target) ? 0 : p + 1);
+        Focus.keyboard = true;
+        if next == 0 {
+            nav.focus();
+        } else if next == 1 {
+            list-keys.focus();
+        } else {
+            root.pane-seq += 1;
+        }
+    }
+
+    // Put `text` on the clipboard (the hidden buffer below; no extra crate).
+    public function r-copy-text(text: string) {
+        copy-buf.text = text;
+        copy-buf.select-all();
+        copy-buf.copy();
+        copy-buf.text = "";
     }
 
     function ensure-visible(index: int) {
         if index < 0 { return; }
-        if index * 76px + list.content-y < 0 {
-            list.content-y = -index * 76px;
-        } else if (index + 1) * 76px + list.content-y > list.visible-height {
-            list.content-y = list.visible-height - (index + 1) * 76px;
+        if index * Theme.row-height + list.content-y < 0 {
+            list.content-y = -index * Theme.row-height;
+        } else if (index + 1) * Theme.row-height + list.content-y > list.visible-height {
+            list.content-y = list.visible-height - (index + 1) * Theme.row-height;
         }
     }
 
     changed selected-index => { ensure-visible(selected-index); }
+    changed r-scale => { root.r-body-resized(); }
+    // A message with dark rules is laid out again when the app theme flips.
+    property <bool> dark: Theme.dark;
+    changed dark => { root.r-body-resized(); }
+    // Back from the plain-text view: fetch the tiles in view again.
+    changed r-plain => { root.r-view-changed(); }
     // A sign-in that failed after the dialog closed must not greet the next open.
-    changed show-settings => { if root.show-settings { root.a-error = ""; } }
+    changed show-settings => {
+        if root.show-settings {
+            root.a-error = "";
+            root.settings-opened();
+        } else {
+            // Closed from the controller too (an account added or saved).
+            keys.focus();
+        }
+    }
 
     keys := FocusScope {
+        // Not a Tab stop itself: the list below has the keys (see
+        // `list-keys`), and these see what the focused control leaves.
+        forward-focus: list-keys;
+        focus-on-tab-navigation: false;
+        // Keys that move the focus show where it is (rings on the list and
+        // folder rows); a click hides it again.
+        capture-key-pressed(e) => {
+            if e.text == Key.Tab || e.text == Key.Backtab || e.text == Key.F6 || e.text == Key.UpArrow || e.text == Key.DownArrow
+                || e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.Home || e.text == Key.End
+                || e.text == Key.PageUp || e.text == Key.PageDown {
+                Focus.keyboard = true;
+            }
+            reject
+        }
         // Keys reach these only when the focused widget doesn't use them
         // (text fields keep their own arrows, Delete and so on).
         KeyBinding { keys: @keys(F5); activated => { root.refresh(); } }
+        KeyBinding { keys: @keys(F6); activated => { root.cycle-pane(false); } }
+        KeyBinding { keys: @keys(Shift + F6); activated => { root.cycle-pane(true); } }
+        KeyBinding { keys: @keys(Control + ","); enabled: !root.show-settings; activated => { root.show-settings = true; } }
         KeyBinding { keys: @keys(Control + "n"); enabled: !root.show-settings; activated => { root.compose(); } }
         KeyBinding { keys: @keys(Control + "f"); enabled: !root.show-settings; activated => { search.focus(); } }
         // These act on the selected message; a draft must never be replaced
@@ -356,8 +1384,64 @@ export component AppWindow inherits Window {
         KeyBinding { keys: @keys(Control + Shift + "r"); enabled: root.reading; activated => { root.reply-all(); } }
         KeyBinding { keys: @keys(Control + "q"); enabled: root.reading; activated => { root.toggle-read(); } }
         KeyBinding { keys: @keys(Delete); enabled: root.reading; activated => { root.delete(); } }
-        KeyBinding { keys: @keys(Shift? + DownArrow); enabled: root.reading; activated => { root.select-offset(1); } }
-        KeyBinding { keys: @keys(Shift? + UpArrow); enabled: root.reading; activated => { root.select-offset(-1); } }
+        KeyBinding { keys: @keys(DownArrow); enabled: root.reading; activated => { root.select-offset(1); } }
+        KeyBinding { keys: @keys(UpArrow); enabled: root.reading; activated => { root.select-offset(-1); } }
+        KeyBinding { keys: @keys(Shift + DownArrow); enabled: root.reading; activated => { root.select-extend(1); } }
+        KeyBinding { keys: @keys(Shift + UpArrow); enabled: root.reading; activated => { root.select-extend(-1); } }
+        KeyBinding { keys: @keys(Home); enabled: root.reading; activated => { root.select-edge(false); } }
+        KeyBinding { keys: @keys(End); enabled: root.reading; activated => { root.select-edge(true); } }
+        KeyBinding { keys: @keys(PageDown); enabled: root.reading; activated => { root.select-offset(root.page-rows); } }
+        KeyBinding { keys: @keys(PageUp); enabled: root.reading; activated => { root.select-offset(-root.page-rows); } }
+        KeyBinding { keys: @keys(Return); enabled: root.reading; activated => { root.focus-page = root.open-current(); } }
+        KeyBinding { keys: @keys(Control + Shift + "u"); enabled: root.reading; activated => { root.toggle-read(); } }
+        KeyBinding { keys: @keys(Control + "s"); enabled: root.reading; activated => { root.save-eml(); } }
+        KeyBinding { keys: @keys(Control + "u"); enabled: root.reading; activated => { root.show-original(); } }
+        // Never while typing a search: these keys would reach the list.
+        KeyBinding { keys: @keys(Insert); enabled: root.reading && !search.has-focus; activated => { root.toggle-flag(); } }
+        KeyBinding { keys: @keys(Control + "e"); enabled: root.reading && !search.has-focus; activated => { root.archive(); } }
+        // The page and text fields take their own Ctrl+A and Esc first.
+        KeyBinding { keys: @keys(Control + "a"); enabled: root.reading; activated => { root.select-all-rows(); } }
+        KeyBinding { keys: @keys(Escape); enabled: root.reading; activated => { root.list-escape(); } }
+        KeyBinding { keys: @keys(Control + "z"); enabled: root.reading && root.status-action == "Undo"; activated => { root.status-action-clicked(); } }
+        // Shift+F10 or the Menu key: the row menu, under the current row.
+        KeyBinding { keys: @keys(Shift + F10); enabled: root.reading && (root.has-message || root.selected-count > 0); activated => { root.show-row-menu(); } }
+        KeyBinding { keys: @keys(Menu); enabled: root.reading && (root.has-message || root.selected-count > 0); activated => { root.show-row-menu(); } }
+
+        // The row menu and the More menu: shown by `show()` once the
+        // selection is up to date, never by a click of its own.
+        row-menu := ContextMenuArea {
+            enabled: false;
+            Menu {
+                MenuItem { title: "Reply"; enabled: root.has-message || root.selected-count == 1; activated => { root.menu-respond(0); } }
+                MenuItem { title: "Reply all"; enabled: root.has-message || root.selected-count == 1; activated => { root.menu-respond(1); } }
+                MenuItem { title: "Forward"; enabled: root.has-message || root.selected-count == 1; activated => { root.menu-respond(2); } }
+                MenuItem { title: "Forward as attachment"; enabled: root.has-message || root.selected-count == 1; activated => { root.forward-attached(); } }
+                MenuSeparator { }
+                MenuItem { title: root.menu-unread ? "Mark as read" : "Mark as unread"; activated => { root.mark-read(root.menu-unread); } }
+                MenuItem { title: root.menu-unflagged ? "Flag" : "Remove flag"; activated => { root.mark-flagged(root.menu-unflagged); } }
+                MenuSeparator { }
+                MenuItem { title: "Archive"; activated => { root.archive(); } }
+                MenuItem { title: "Delete"; activated => { root.delete(); } }
+                Menu {
+                    title: "Move to";
+                    enabled: root.move-targets.length > 0;
+                    for f in root.move-targets: MenuItem { title: f.label; activated => { root.move-to(f.id); } }
+                }
+                MenuItem { title: root.menu-junk ? "Not junk" : "Report junk"; activated => { root.junk(!root.menu-junk); } }
+                MenuSeparator { }
+                MenuItem { title: "Save as .eml"; enabled: root.has-message || root.selected-count == 1; activated => { root.save-eml(); } }
+                MenuItem { title: "Show original"; enabled: root.has-message || root.selected-count == 1; activated => { root.show-original(); } }
+                MenuItem { title: "Copy Message-ID"; enabled: root.has-message || root.selected-count == 1; activated => { root.copy-message-id(); } }
+            }
+        }
+
+        // The list's More menu: actions on the whole folder.
+        list-menu := ContextMenuArea {
+            enabled: false;
+            Menu {
+                MenuItem { title: "Mark all as read"; activated => { root.mark-all-read(); } }
+            }
+        }
 
         HorizontalLayout {
             padding: Theme.s2;
@@ -370,27 +1454,85 @@ export component AppWindow inherits Window {
                 padding-left: Theme.s2;
                 padding-top: Theme.s1;
                 spacing: Theme.s2;
-                AccentButton {
+                new-mail := AccentButton {
                     icon: Icons.compose;
                     label: root.compact ? "" : "New mail";
                     enabled: root.has-accounts;
                     clicked => { root.compose(); }
                 }
-                Flickable {
+                // One Tab stop: Up/Down (Home/End) move along the folders,
+                // Enter or Space opens one, Left/Right fold an account.
+                nav := FocusScope {
                     vertical-stretch: 1;
-                    content-height: nav-col.preferred-height;
-                    nav-col := VerticalLayout {
-                        alignment: start;
-                        spacing: 2px;
-                        for item in root.nav-items: NavRow {
-                            item: item;
-                            compact: root.compact;
-                            selected: (item.kind == 0 && root.selected-folder == 0) || (item.kind == 2 && item.id == root.selected-folder);
-                            clicked => { root.nav-clicked(item); keys.focus(); }
+                    // The row the keys are on; it follows the folder shown.
+                    property <int> cursor;
+                    accessible-role: AccessibleRole.list;
+                    accessible-label: "Folders";
+                    accessible-delegate-focus: self.cursor;
+                    // Move by `d` rows (the narrow rail's account lines are
+                    // passed over).
+                    function step(d: int) {
+                        let n = root.nav-items.length;
+                        let i = clamp(self.cursor + d, 0, n - 1);
+                        self.cursor = root.compact && root.nav-items[i].kind == 1 ? clamp(i + (d < 0 ? -1 : 1), 0, n - 1) : i;
+                    }
+                    function open() {
+                        root.nav-clicked(root.nav-items[self.cursor]);
+                        // Opening a folder hands the list the focus; the
+                        // keyboard stays here.
+                        self.focus();
+                    }
+                    function ensure-visible(y: length, h: length) {
+                        if y + nav-flick.content-y < 0 {
+                            nav-flick.content-y = -y;
+                        } else if y + h + nav-flick.content-y > nav-flick.height {
+                            nav-flick.content-y = nav-flick.height - y - h;
+                        }
+                    }
+                    key-pressed(e) => {
+                        if root.nav-items.length == 0 || e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
+                            return reject;
+                        }
+                        let item = root.nav-items[self.cursor];
+                        if e.text == Key.DownArrow {
+                            self.step(1);
+                        } else if e.text == Key.UpArrow {
+                            self.step(-1);
+                        } else if e.text == Key.Home {
+                            self.cursor = 0;
+                        } else if e.text == Key.End {
+                            self.cursor = root.nav-items.length - 1;
+                        } else if e.text == Key.Return || e.text == " " {
+                            self.open();
+                        } else if item.kind == 1 && ((e.text == Key.LeftArrow && item.expanded) || (e.text == Key.RightArrow && !item.expanded)) {
+                            self.open();
+                        } else {
+                            return reject;
+                        }
+                        accept
+                    }
+                    nav-flick := Flickable {
+                        width: 100%;
+                        height: 100%;
+                        content-height: nav-col.preferred-height;
+                        nav-col := VerticalLayout {
+                            alignment: start;
+                            spacing: 2px;
+                            for item[i] in root.nav-items: NavRow {
+                                property <bool> current: i == nav.cursor;
+                                item: item;
+                                compact: root.compact;
+                                selected: (item.kind == 0 && root.selected-folder == 0) || (item.kind == 2 && item.id == root.selected-folder) || (item.kind == 3 && root.selected-folder == -1) || (item.kind == 4 && root.selected-folder == -2);
+                                ring: nav.has-focus && Focus.keyboard && self.current;
+                                init => { if self.selected { nav.cursor = i; } }
+                                changed selected => { if self.selected { nav.cursor = i; } }
+                                changed current => { if self.current { nav.ensure-visible(self.y, self.height); } }
+                                clicked => { root.nav-clicked(item); keys.focus(); }
+                            }
                         }
                     }
                 }
-                IconButton {
+                settings-btn := IconButton {
                     icon: Icons.settings;
                     label: root.compact ? "" : "Settings";
                     tooltip: "Settings";
@@ -410,13 +1552,24 @@ export component AppWindow inherits Window {
                         spacing: Theme.s1;
                         Heading { text: root.list-title; horizontal-stretch: 1; }
                         if root.syncing: Spinner { indeterminate: true; width: 20px; height: 20px; y: 16px; }
-                        IconButton {
+                        refresh-btn := IconButton {
                             icon: Icons.refresh;
                             tooltip: "Refresh (F5)";
                             width: 32px;
                             y: 10px;
                             enabled: !root.syncing;
                             clicked => { root.refresh(); }
+                        }
+                        list-more := IconButton {
+                            icon: Icons.more;
+                            tooltip: "More";
+                            width: 32px;
+                            y: 10px;
+                            // Drafts and the Outbox have no folder actions.
+                            enabled: root.selected-folder >= 0;
+                            clicked => {
+                                list-menu.show({ x: self.absolute-position.x, y: self.absolute-position.y + self.height });
+                            }
                         }
                     }
                     HorizontalLayout {
@@ -425,30 +1578,93 @@ export component AppWindow inherits Window {
                         padding-bottom: Theme.s2;
                         search := LineEdit {
                             placeholder-text: "Search (Ctrl+F)";
+                            accessible-label: "Search mail";
                             text <=> root.search-text;
                             edited(t) => { root.search-edited(t); }
                         }
                     }
+                    if root.selected-folder >= 0: HorizontalLayout {
+                        padding-left: Theme.s3;
+                        padding-right: Theme.s3;
+                        padding-bottom: Theme.s2;
+                        spacing: Theme.s1;
+                        alignment: start;
+                        FilterToggle {
+                            label: "Unread";
+                            on: root.list-filter == 1;
+                            toggled => { root.set-filter(self.on ? 0 : 1); }
+                        }
+                        FilterToggle {
+                            label: "Flagged";
+                            on: root.list-filter == 2;
+                            toggled => { root.set-filter(self.on ? 0 : 2); }
+                        }
+                        // The search scope: off searches the view shown.
+                        if root.search-text != "": FilterToggle {
+                            label: "All folders";
+                            on: root.search-all;
+                            toggled => { root.set-search-all(!self.on); }
+                        }
+                    }
                     Divider { }
-                    list := ListView {
+                    // The list's Tab stop; its keys are the bindings above.
+                    list-keys := FocusScope {
                         vertical-stretch: 1;
-                        for row[i] in root.rows: MailItem {
-                            mail: row;
-                            selected: row.id == root.selected-id;
-                            clicked => {
-                                keys.focus();
-                                root.message-selected(row.id);
+                        accessible-role: AccessibleRole.list;
+                        accessible-label: "Messages";
+                        accessible-item-count: root.rows.length;
+                        // Screen readers follow the current row: an index among
+                        // the rows built, which start at the top one in view.
+                        accessible-delegate-focus: root.selected-index < 0 ? -1 : max(0, root.selected-index - floor(-list.content-y / Theme.row-height));
+                        list := ListView {
+                            width: 100%;
+                            height: 100%;
+                            accessible-role: none;
+                            for row[i] in root.rows: MailItem {
+                                mail: row;
+                                selected: row.selected || row.id == root.selected-id;
+                                ring: list-keys.has-focus && Focus.keyboard && i == root.selected-index;
+                                context(x, y) => {
+                                    if root.message-context(row.id) {
+                                        keys.focus();
+                                        row-menu.show({ x: x, y: y });
+                                    }
+                                }
+                                clicked(ctrl, shift) => {
+                                    keys.focus();
+                                    if ctrl {
+                                        root.message-toggled(row.id);
+                                    } else if shift {
+                                        root.message-extended(row.id);
+                                    } else {
+                                        root.message-selected(row.id);
+                                    }
+                                }
                             }
                         }
+                        // With no current row, the ring goes round the list.
+                        FocusRing { shown: list-keys.has-focus && Focus.keyboard && root.selected-index < 0; }
                     }
                     if root.rows.length == 0: VerticalLayout {
                         vertical-stretch: 1;
                         alignment: center;
+                        padding-left: Theme.s4;
+                        padding-right: Theme.s4;
+                        spacing: Theme.s2;
                         Text {
-                            text: root.search-text != "" ? "No matches" : root.syncing ? "Loading…" : "Nothing here";
+                            text: root.list-empty;
                             font-size: Theme.body;
                             color: Theme.text-3;
                             horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        if root.search-text != "": HorizontalLayout {
+                            alignment: center;
+                            IconButton {
+                                icon: Icons.dismiss;
+                                label: "Clear search";
+                                clicked => { root.clear-search(); }
+                            }
                         }
                     }
                 }
@@ -457,64 +1673,414 @@ export component AppWindow inherits Window {
             // ---- reader / composer
             Card {
                 horizontal-stretch: 1;
+                // Files dragged over the window drop into the composer.
+                border-width: root.composing && root.file-hover ? 2px : 1px;
+                border-color: root.composing && root.file-hover ? Theme.accent : Theme.stroke;
 
-                if root.composing: VerticalLayout {
-                    padding: Theme.s4;
-                    spacing: Theme.s2;
-                    HorizontalLayout {
-                        spacing: Theme.s2;
-                        Heading { text: root.c-title; horizontal-stretch: 1; }
-                        IconButton { icon: Icons.attach; label: root.compact ? "" : "Attach"; tooltip: "Attach"; enabled: !root.c-sending; clicked => { root.attach(); } }
-                        IconButton { icon: Icons.delete; label: root.compact ? "" : "Discard"; tooltip: "Discard"; enabled: !root.c-sending; clicked => { root.discard(); } }
-                        AccentButton {
-                            icon: Icons.send;
-                            label: root.c-sending ? "Sending…" : "Send";
-                            enabled: !root.c-sending;
-                            clicked => { root.send(); }
+                // Shortcuts a field would otherwise take (Ctrl+Enter in a
+                // line field, Alt+S typing an "s") are caught before the
+                // field sees them; Esc arrives after the field ignores it.
+                if root.composing: composer := FocusScope {
+                    // A click on its padding focuses it, so the keys still work.
+                    focus-on-tab-navigation: false;
+                    // The link field (Ctrl+K), and the body's selection when
+                    // it opened.
+                    property <bool> link-open;
+                    property <bool> link-error;
+                    property <int> link-anchor;
+                    property <int> link-cursor;
+                    function show(edit: BodyEdit) {
+                        if edit.done {
+                            body.set-selection-offsets(edit.anchor, edit.cursor);
                         }
+                        body.focus();
                     }
-                    HorizontalLayout {
+                    function format(action: FormatAction) {
+                        self.show(root.c-format(action, body.anchor, body.cursor));
+                    }
+                    function open-link() {
+                        self.link-anchor = body.anchor;
+                        self.link-cursor = body.cursor;
+                        self.link-error = false;
+                        self.link-open = true;
+                    }
+                    function close-link() {
+                        self.link-open = false;
+                        body.set-selection-offsets(self.link-anchor, self.link-cursor);
+                        body.focus();
+                    }
+                    function insert-link(url: string) {
+                        if url == "" {
+                            self.close-link();
+                            return;
+                        }
+                        let edit = root.c-link(url, self.link-anchor, self.link-cursor);
+                        if !edit.done {
+                            self.link-error = true;
+                            return;
+                        }
+                        self.link-open = false;
+                        self.show(edit);
+                    }
+                    // Formatting keys, while the body has focus. Shift+8 and
+                    // Shift+7 report their shifted character, which depends
+                    // on the keyboard layout (US "*" "&", Portuguese "(" "/").
+                    function format-key(e: KeyEvent) -> EventResult {
+                        if !e.modifiers.control || e.modifiers.alt {
+                            return reject;
+                        }
+                        if e.modifiers.shift {
+                            if e.text == "8" || e.text == "*" || e.text == "(" {
+                                self.format(FormatAction.bullets);
+                                return accept;
+                            }
+                            if e.text == "7" || e.text == "&" || e.text == "/" {
+                                self.format(FormatAction.numbers);
+                                return accept;
+                            }
+                            return reject;
+                        }
+                        if e.text == "b" || e.text == "B" {
+                            self.format(FormatAction.bold);
+                            return accept;
+                        }
+                        if e.text == "i" || e.text == "I" {
+                            self.format(FormatAction.italic);
+                            return accept;
+                        }
+                        if e.text == "k" || e.text == "K" {
+                            self.open-link();
+                            return accept;
+                        }
+                        // Toolbar edits replace the text, which clears the
+                        // field's own undo history: undo the last one here.
+                        if e.text == "z" || e.text == "Z" {
+                            let edit = root.c-unformat();
+                            if edit.done {
+                                self.show(edit);
+                                return accept;
+                            }
+                        }
+                        return reject;
+                    }
+                    // Up/Down, Enter, Tab and Esc work the recipient
+                    // suggestions while they show; moving the caret closes
+                    // them.
+                    function suggest-key(e: KeyEvent) -> EventResult {
+                        let n = root.c-suggestions.length;
+                        if n == 0 || e.modifiers.control || e.modifiers.alt {
+                            return reject;
+                        }
+                        if e.text == Key.DownArrow {
+                            root.c-suggest-index = mod(root.c-suggest-index + 1, n);
+                            return accept;
+                        }
+                        if e.text == Key.UpArrow {
+                            root.c-suggest-index = mod(root.c-suggest-index + n - 1, n);
+                            return accept;
+                        }
+                        if (e.text == Key.Return || e.text == Key.Tab) && !e.modifiers.shift {
+                            root.c-suggest-accept(root.c-suggest-index);
+                            return accept;
+                        }
+                        if e.text == Key.Escape {
+                            root.c-suggest-close();
+                            return accept;
+                        }
+                        if e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.Home || e.text == Key.End {
+                            root.c-suggest-close();
+                        }
+                        return reject;
+                    }
+                    function shortcut(e: KeyEvent) -> EventResult {
+                        if e.modifiers.control && !e.modifiers.alt && e.text == Key.Return {
+                            root.send();
+                            return accept;
+                        }
+                        if e.modifiers.alt && !e.modifiers.control && (e.text == "s" || e.text == "S") {
+                            root.send();
+                            return accept;
+                        }
+                        if e.modifiers.control && e.modifiers.shift && !e.modifiers.alt {
+                            if e.text == "c" || e.text == "C" {
+                                root.c-reveal(ComposeField.cc);
+                                return accept;
+                            }
+                            if e.text == "b" || e.text == "B" {
+                                root.c-reveal(ComposeField.bcc);
+                                return accept;
+                            }
+                            if e.text == "a" || e.text == "A" {
+                                root.attach();
+                                return accept;
+                            }
+                        }
+                        return reject;
+                    }
+                    capture-key-pressed(e) => {
+                        if self.suggest-key(e) == EventResult.accept {
+                            return accept;
+                        }
+                        // Files on the clipboard are attached; text pastes.
+                        if e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && (e.text == "v" || e.text == "V") && root.c-paste-files() {
+                            return accept;
+                        }
+                        self.shortcut(e)
+                    }
+                    key-pressed(e) => { self.shortcut(e) }
+                    KeyBinding { keys: @keys(Escape); activated => { root.c-close(); } }
+
+                    VerticalLayout {
+                        padding: Theme.s4;
                         spacing: Theme.s2;
-                        FieldLabel { text: "From"; }
-                        ComboBox { model: root.c-from-options; current-index <=> root.c-from-index; horizontal-stretch: 1; }
-                    }
-                    HorizontalLayout {
-                        spacing: Theme.s2;
-                        FieldLabel { text: "To"; }
-                        LineEdit { text <=> root.c-to; horizontal-stretch: 1; }
-                        if !root.c-show-cc: IconButton { label: "Cc/Bcc"; icon: Icons.add; clicked => { root.c-show-cc = true; } }
-                    }
-                    if root.c-show-cc: HorizontalLayout {
-                        spacing: Theme.s2;
-                        FieldLabel { text: "Cc"; }
-                        LineEdit { text <=> root.c-cc; }
-                    }
-                    if root.c-show-cc: HorizontalLayout {
-                        spacing: Theme.s2;
-                        FieldLabel { text: "Bcc"; }
-                        LineEdit { text <=> root.c-bcc; }
-                    }
-                    HorizontalLayout {
-                        spacing: Theme.s2;
-                        FieldLabel { text: "Subject"; }
-                        LineEdit { text <=> root.c-subject; }
-                    }
-                    for a in root.c-attachments: Chip {
-                        name: a.name;
-                        size: a.size;
-                        action-icon: Icons.dismiss;
-                        action-label: "Remove " + a.name;
-                        action => { root.remove-attachment(a.index); }
-                    }
-                    TextEdit {
-                        text <=> root.c-body;
-                        wrap: word-wrap;
-                        font-size: Theme.body;
-                        vertical-stretch: 1;
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            Heading { text: root.c-title; horizontal-stretch: 1; }
+                            IconButton { icon: Icons.attach; label: root.compact ? "" : "Attach"; tooltip: "Attach (Ctrl+Shift+A)"; clicked => { root.attach(); } }
+                            IconButton { icon: Icons.delete; label: root.compact ? "" : "Discard"; tooltip: "Discard"; clicked => { root.discard(); } }
+                            AccentButton {
+                                icon: Icons.send;
+                                label: "Send";
+                                enabled: root.c-send-reason == "";
+                                clicked => { root.send(); }
+                            }
+                        }
+                        if root.c-send-reason != "": Text {
+                            text: root.c-send-reason;
+                            font-size: Theme.caption;
+                            color: Theme.text-3;
+                            horizontal-alignment: right;
+                        }
+                        // The send guards ask once; editing the draft dismisses it.
+                        if root.c-guard != "": Rectangle {
+                            border-radius: Theme.radius;
+                            background: Theme.info-bg;
+                            border-width: 1px;
+                            border-color: Theme.stroke-strong;
+                            height: guard-row.preferred-height;
+                            guard-row := HorizontalLayout {
+                                padding: Theme.s2;
+                                padding-left: Theme.s3;
+                                spacing: Theme.s2;
+                                Icon { text: Icons.info; color: Theme.accent-text; width: 20px; }
+                                BodyText {
+                                    text: root.c-guard;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                IconButton { icon: Icons.send; label: "Send anyway"; clicked => { root.c-send-anyway(); } }
+                                IconButton { icon: Icons.dismiss; tooltip: "Keep editing"; width: 32px; clicked => { root.c-guard = ""; } }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            FieldLabel { text: "From"; }
+                            ComboBox {
+                                model: root.c-from-options;
+                                current-index <=> root.c-from-index;
+                                horizontal-stretch: 1;
+                                accessible-label: "From";
+                                selected => { root.c-from-changed(self.current-index); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            FieldLabel { text: "To"; }
+                            LineEdit {
+                                property <int> focus-seq: root.c-focus-seq;
+                                // F6 into the composer lands here.
+                                property <int> pane: root.pane-seq;
+                                changed pane => { self.focus(); }
+                                text <=> root.c-to;
+                                horizontal-stretch: 1;
+                                accessible-label: "To";
+                                accessible-description: root.c-to-error;
+                                edited(t) => { root.c-edited(ComposeField.to, t); }
+                                changed has-focus => { if !self.has-focus { root.c-left(ComposeField.to); } }
+                                changed focus-seq => { if root.c-focus == ComposeField.to { self.focus(); } }
+                                property <int> caret-seq: root.c-caret-seq;
+                                changed caret-seq => {
+                                    if root.c-focus == ComposeField.to {
+                                        self.focus();
+                                        self.set-selection-offsets(root.c-caret, root.c-caret);
+                                    }
+                                }
+                                init => { if root.c-focus == ComposeField.to { self.focus(); } }
+                            }
+                            if !root.c-show-cc: IconButton {
+                                label: "Cc/Bcc";
+                                tooltip: "Show Cc and Bcc (Ctrl+Shift+C)";
+                                icon: Icons.add;
+                                clicked => { root.c-reveal(ComposeField.cc); }
+                            }
+                        }
+                        if root.c-to-error != "": FieldError { text: root.c-to-error; }
+                        if root.c-show-cc: HorizontalLayout {
+                            spacing: Theme.s2;
+                            FieldLabel { text: "Cc"; }
+                            LineEdit {
+                                property <int> focus-seq: root.c-focus-seq;
+                                text <=> root.c-cc;
+                                accessible-label: "Cc";
+                                accessible-description: root.c-cc-error;
+                                edited(t) => { root.c-edited(ComposeField.cc, t); }
+                                changed has-focus => { if !self.has-focus { root.c-left(ComposeField.cc); } }
+                                changed focus-seq => { if root.c-focus == ComposeField.cc { self.focus(); } }
+                                property <int> caret-seq: root.c-caret-seq;
+                                changed caret-seq => {
+                                    if root.c-focus == ComposeField.cc {
+                                        self.focus();
+                                        self.set-selection-offsets(root.c-caret, root.c-caret);
+                                    }
+                                }
+                                init => { if root.c-focus == ComposeField.cc { self.focus(); } }
+                            }
+                        }
+                        if root.c-show-cc && root.c-cc-error != "": FieldError { text: root.c-cc-error; }
+                        if root.c-show-cc: HorizontalLayout {
+                            spacing: Theme.s2;
+                            FieldLabel { text: "Bcc"; }
+                            LineEdit {
+                                property <int> focus-seq: root.c-focus-seq;
+                                text <=> root.c-bcc;
+                                accessible-label: "Bcc";
+                                accessible-description: root.c-bcc-error;
+                                edited(t) => { root.c-edited(ComposeField.bcc, t); }
+                                changed has-focus => { if !self.has-focus { root.c-left(ComposeField.bcc); } }
+                                changed focus-seq => { if root.c-focus == ComposeField.bcc { self.focus(); } }
+                                property <int> caret-seq: root.c-caret-seq;
+                                changed caret-seq => {
+                                    if root.c-focus == ComposeField.bcc {
+                                        self.focus();
+                                        self.set-selection-offsets(root.c-caret, root.c-caret);
+                                    }
+                                }
+                                init => { if root.c-focus == ComposeField.bcc { self.focus(); } }
+                            }
+                        }
+                        if root.c-show-cc && root.c-bcc-error != "": FieldError { text: root.c-bcc-error; }
+                        if root.c-suggestions.length > 0: SuggestList {
+                            items: root.c-suggestions;
+                            current: root.c-suggest-index;
+                            picked(i) => { root.c-suggest-accept(i); }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            FieldLabel { text: "Subject"; }
+                            LineEdit {
+                                text <=> root.c-subject;
+                                accessible-label: "Subject";
+                                edited(t) => { root.c-edited(ComposeField.subject, t); }
+                            }
+                        }
+                        if root.c-attachments.length > 0: Text {
+                            text: root.c-attach-total;
+                            font-size: Theme.caption;
+                            color: root.c-attach-level == 2 ? Theme.danger : root.c-attach-level == 1 ? Theme.warning : Theme.text-3;
+                        }
+                        // The chips wrap, as many to a row as fit.
+                        if root.c-attachments.length > 0: Rectangle {
+                            property <length> gap: Theme.s2;
+                            property <int> cols: max(1, floor((self.width + self.gap) / (200px + self.gap)));
+                            property <length> cell: (self.width - (self.cols - 1) * self.gap) / self.cols;
+                            height: ceil(root.c-attachments.length / self.cols) * (40px + self.gap) - self.gap;
+                            for a[i] in root.c-attachments: Chip {
+                                x: mod(i, parent.cols) * (parent.cell + parent.gap);
+                                y: floor(i / parent.cols) * (40px + parent.gap);
+                                width: parent.cell;
+                                name: a.name;
+                                size: a.size;
+                                action-icon: Icons.dismiss;
+                                action-label: "Remove " + a.name;
+                                action => { root.remove-attachment(a.index); }
+                            }
+                        }
+                        // Formatting: Markdown-lite markers in the text, sent
+                        // as HTML too (see compose_html). One Tab stop between
+                        // Subject and the body; Left/Right move along it.
+                        fmt-bar := FocusScope {
+                            height: 32px;
+                            focus-on-click: false;
+                            focus-on-tab-navigation: false;
+                            // The button the arrows last reached (Tab returns to it).
+                            property <int> current;
+                            function go(i: int) {
+                                self.current = mod(i + 6, 6);
+                                if self.current == 0 { f-bold.focus(); }
+                                else if self.current == 1 { f-italic.focus(); }
+                                else if self.current == 2 { f-link.focus(); }
+                                else if self.current == 3 { f-bullets.focus(); }
+                                else if self.current == 4 { f-numbers.focus(); }
+                                else { f-quote.focus(); }
+                            }
+                            key-pressed(e) => {
+                                if e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
+                                    return reject;
+                                }
+                                if e.text == Key.LeftArrow || e.text == Key.RightArrow {
+                                    self.go(self.current + (e.text == Key.LeftArrow ? -1 : 1));
+                                    return accept;
+                                }
+                                reject
+                            }
+                            HorizontalLayout {
+                                spacing: 2px;
+                                alignment: start;
+                                f-bold := IconButton { icon: Icons.bold; tooltip: "Bold (Ctrl+B)"; width: 32px; tab-stop: fmt-bar.current == 0; clicked => { composer.format(FormatAction.bold); } }
+                                f-italic := IconButton { icon: Icons.italic; tooltip: "Italic (Ctrl+I)"; width: 32px; tab-stop: fmt-bar.current == 1; clicked => { composer.format(FormatAction.italic); } }
+                                f-link := IconButton { icon: Icons.link; tooltip: "Link (Ctrl+K)"; width: 32px; tab-stop: fmt-bar.current == 2; clicked => { composer.open-link(); } }
+                                Rectangle { width: 1px; height: 20px; y: 6px; background: Theme.stroke-strong; }
+                                f-bullets := IconButton { icon: Icons.bullets; tooltip: "Bulleted list (Ctrl+Shift+8)"; width: 32px; tab-stop: fmt-bar.current == 3; clicked => { composer.format(FormatAction.bullets); } }
+                                f-numbers := IconButton { icon: "1."; icon-font: Theme.text-font; tooltip: "Numbered list (Ctrl+Shift+7)"; width: 32px; tab-stop: fmt-bar.current == 4; clicked => { composer.format(FormatAction.numbers); } }
+                                f-quote := IconButton { icon: "\u{201C}"; icon-font: Theme.text-font; icon-size: 28px; tooltip: "Quote"; width: 32px; tab-stop: fmt-bar.current == 5; clicked => { composer.format(FormatAction.quote); } }
+                            }
+                        }
+                        if composer.link-open: HorizontalLayout {
+                            spacing: Theme.s2;
+                            FieldLabel { text: "Link"; }
+                            link-field := LineEdit {
+                                placeholder-text: "https://example.com or name@example.com";
+                                accessible-label: "Link address";
+                                accessible-description: composer.link-error ? "Not a web or e-mail address" : "";
+                                init => { self.focus(); }
+                                edited => { composer.link-error = false; }
+                                accepted(t) => { composer.insert-link(t); }
+                                key-pressed(e) => {
+                                    if e.text == Key.Escape {
+                                        composer.close-link();
+                                        return accept;
+                                    }
+                                    reject
+                                }
+                            }
+                            // The narrowest windows leave room for the icon only.
+                            IconButton { icon: Icons.link; label: root.width < 860px ? "" : "Insert"; tooltip: "Insert link"; clicked => { composer.insert-link(link-field.text); } }
+                            IconButton { icon: Icons.dismiss; tooltip: "Cancel"; width: 32px; clicked => { composer.close-link(); } }
+                        }
+                        if composer.link-open && composer.link-error: FieldError { text: "Not a web or e-mail address"; }
+                        body := ComposeBody {
+                            property <int> focus-seq: root.c-focus-seq;
+                            property <int> refocus: root.body-refocus;
+                            changed refocus => { self.focus(); }
+                            text <=> root.c-body;
+                            font-size: Theme.body;
+                            vertical-stretch: 1;
+                            accessible-label: "Message body";
+                            edited(t) => { root.c-edited(ComposeField.body, t); }
+                            key-pressed(e) => { composer.format-key(e) }
+                            // A reply starts typing above the quote.
+                            changed focus-seq => { if root.c-focus == ComposeField.body { body.focus-top(); } }
+                            init => { if root.c-focus == ComposeField.body { body.focus-top(); } }
+                            function focus-top() {
+                                self.focus();
+                                self.set-selection-offsets(0, 0);
+                                self.content-y = 0;
+                            }
+                        }
                     }
                 }
 
-                if !root.composing && !root.has-message: VerticalLayout {
+                if !root.composing && !root.has-message && !root.o-show && root.selected-count == 0: VerticalLayout {
                     alignment: center;
                     spacing: Theme.s2;
                     Icon { text: Icons.read; font-size: 40px; color: Theme.text-disabled; }
@@ -526,83 +2092,374 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                if !root.composing && root.has-message: VerticalLayout {
-                    // Command bar
-                    HorizontalLayout {
-                        height: 48px;
-                        padding-left: Theme.s2;
-                        padding-right: Theme.s2;
-                        spacing: 2px;
-                        alignment: start;
-                        IconButton { icon: Icons.reply; label: root.compact ? "" : "Reply"; tooltip: "Reply"; y: 8px; clicked => { root.reply(); } }
-                        IconButton { icon: Icons.reply-all; label: root.compact ? "" : "Reply all"; tooltip: "Reply all"; y: 8px; clicked => { root.reply-all(); } }
-                        IconButton { icon: Icons.forward; label: root.compact ? "" : "Forward"; tooltip: "Forward"; y: 8px; clicked => { root.forward(); } }
-                        Rectangle { width: 1px; height: 20px; y: 14px; background: Theme.stroke-strong; }
-                        IconButton { icon: Icons.archive; label: root.compact ? "" : "Archive"; tooltip: "Archive"; y: 8px; clicked => { root.archive(); } }
-                        IconButton { icon: Icons.delete; label: root.compact ? "" : "Delete"; tooltip: "Delete"; y: 8px; clicked => { root.delete(); } }
-                        move-btn := IconButton {
+                // ---- several messages selected: actions on all of them
+                if !root.composing && !root.has-message && !root.o-show && root.selected-count > 0: VerticalLayout {
+                    alignment: center;
+                    spacing: Theme.s3;
+                    Icon { text: Icons.multi-select; font-size: 40px; color: Theme.text-disabled; }
+                    Heading {
+                        text: root.selected-count == 1 ? "1 message selected" : root.selected-count + " messages selected";
+                        horizontal-alignment: center;
+                    }
+                    sel-row := HorizontalLayout {
+                        alignment: center;
+                        spacing: Theme.s1;
+                        IconButton {
+                            property <int> pane: root.pane-seq;
+                            changed pane => { self.focus(); }
+                            icon: Icons.archive;
+                            label: "Archive";
+                            clicked => { root.archive(); }
+                        }
+                        IconButton { icon: Icons.delete; label: "Delete"; clicked => { root.delete(); } }
+                        sel-move := IconButton {
                             icon: Icons.move;
-                            label: root.compact ? "" : "Move";
-                            tooltip: "Move";
-                            y: 8px;
+                            label: "Move";
                             enabled: root.move-targets.length > 0;
-                            clicked => { move-popup.show(); }
+                            tooltip: self.enabled ? "Move" : "Select messages of one account to move them";
+                            clicked => { sel-move-menu.show(); }
                         }
-                        IconButton {
-                            icon: root.r-unread ? Icons.read : Icons.mail;
-                            tooltip: root.r-unread ? "Mark as read" : "Mark as unread";
-                            width: 32px;
-                            y: 8px;
-                            clicked => { root.toggle-read(); }
+                    }
+                    sel-move-menu := PopupWindow {
+                        x: sel-row.x + sel-move.x;
+                        y: sel-row.y + sel-row.height;
+                        width: 240px;
+                        MoveList {
+                            targets: root.move-targets;
+                            picked(id) => { root.move-to(id); }
                         }
-                        IconButton {
-                            icon: root.r-flagged ? Icons.flag-filled : Icons.flag;
-                            icon-color: root.r-flagged ? Theme.danger : Theme.text-2;
-                            tooltip: root.r-flagged ? "Remove flag" : "Flag";
-                            width: 32px;
-                            y: 8px;
-                            clicked => { root.toggle-flag(); }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Theme.s1;
+                        IconButton { icon: Icons.read; label: "Mark read"; clicked => { root.mark-read(true); } }
+                        IconButton { icon: Icons.mail; label: "Mark unread"; clicked => { root.mark-read(false); } }
+                        IconButton { icon: Icons.flag-filled; icon-color: Theme.danger; label: "Flag"; clicked => { root.mark-flagged(true); } }
+                        IconButton { icon: Icons.flag; label: "Unflag"; clicked => { root.mark-flagged(false); } }
+                    }
+                    Text {
+                        text: "Esc clears the selection";
+                        font-size: Theme.caption;
+                        color: Theme.text-3;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                // ---- an outbox message: where its send is, and its actions
+                if !root.composing && root.o-show: VerticalLayout {
+                    padding: Theme.s6;
+                    spacing: Theme.s3;
+                    alignment: start;
+                    Heading { text: root.o-subject; }
+                    Text {
+                        text: "To: " + root.o-to;
+                        font-size: Theme.body;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.s2;
+                        Icon {
+                            text: root.o-problem ? Icons.error : Icons.send;
+                            color: root.o-problem ? Theme.danger : Theme.text-2;
+                            width: 20px;
+                        }
+                        BodyText {
+                            text: root.o-status;
+                            color: root.o-problem ? Theme.danger : Theme.text;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Theme.s2;
+                        // F6 lands on the first button shown.
+                        if root.o-can-edit: IconButton {
+                            property <int> pane: root.pane-seq;
+                            changed pane => { self.focus(); }
+                            icon: Icons.compose;
+                            label: "Edit";
+                            clicked => { root.o-edit(); }
+                        }
+                        if root.o-can-retry: IconButton {
+                            property <int> pane: root.pane-seq;
+                            changed pane => { if !root.o-can-edit { self.focus(); } }
+                            icon: Icons.send;
+                            label: "Retry";
+                            clicked => { root.o-retry(); }
+                        }
+                        if root.o-can-discard: IconButton {
+                            property <int> pane: root.pane-seq;
+                            changed pane => { if !root.o-can-edit && !root.o-can-retry { self.focus(); } }
+                            icon: Icons.delete;
+                            label: "Discard";
+                            clicked => { root.o-discard(); }
+                        }
+                    }
+                }
+
+                // The target of the hovered or focused link, over the
+                // bottom of the reader, as browsers show it.
+                if !root.composing && root.has-message && root.r-hover-href != "": Rectangle {
+                    x: Theme.s2;
+                    y: parent.height - self.height - Theme.s2;
+                    z: 1;
+                    width: min(hover-text.preferred-width + 2 * Theme.s2, parent.width - 2 * Theme.s2);
+                    height: hover-text.preferred-height + Theme.s1 * 2;
+                    background: Theme.card;
+                    border-radius: Theme.radius;
+                    border-width: 1px;
+                    border-color: Theme.stroke-strong;
+                    hover-text := Text {
+                        x: Theme.s2;
+                        width: parent.width - 2 * Theme.s2;
+                        text: root.r-hover-href;
+                        font-size: Theme.caption;
+                        color: Theme.text-2;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if !root.composing && root.has-message: VerticalLayout {
+                    // Command bar: one Tab stop, Left/Right move along it.
+                    cmd-bar := FocusScope {
+                        height: 48px;
+                        focus-on-click: false;
+                        focus-on-tab-navigation: false;
+                        // The button the arrows last reached (Tab returns to
+                        // it); Move and the plain-text and colour toggles
+                        // may be off.
+                        property <int> current;
+                        // Button labels while they fit (the colour toggle
+                        // takes room of its own); icons only otherwise.
+                        property <bool> labels: !root.compact && self.width >= (b-colors.visible ? 660px : 626px);
+                        property <int> stop: self.usable(self.current) ? self.current : 0;
+                        property <int> pane: root.pane-seq;
+                        changed pane => { self.go(self.stop, 1); }
+                        function usable(i: int) -> bool {
+                            i == 5 ? root.move-targets.length > 0 : i == 8 ? b-plain.visible : i == 9 ? b-colors.visible : true
+                        }
+                        // Focus button `i`, or the next usable one in
+                        // direction `d` (at most two unusable ones are
+                        // adjacent: the plain-text and colour toggles).
+                        function go(i: int, d: int) {
+                            let j = mod(i + 11, 11);
+                            let j2 = mod(j + d + 11, 11);
+                            let k = self.usable(j) ? j : self.usable(j2) ? j2 : mod(j2 + d + 11, 11);
+                            self.current = k;
+                            if k == 0 { b-reply.focus(); }
+                            else if k == 1 { b-reply-all.focus(); }
+                            else if k == 2 { b-forward.focus(); }
+                            else if k == 3 { b-archive.focus(); }
+                            else if k == 4 { b-delete.focus(); }
+                            else if k == 5 { move-btn.focus(); }
+                            else if k == 6 { b-read.focus(); }
+                            else if k == 7 { b-flag.focus(); }
+                            else if k == 8 { b-plain.focus(); }
+                            else if k == 9 { b-colors.focus(); }
+                            else { b-more.focus(); }
+                        }
+                        key-pressed(e) => {
+                            if e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
+                                return reject;
+                            }
+                            if e.text == Key.LeftArrow {
+                                self.go(self.current - 1, -1);
+                                return accept;
+                            }
+                            if e.text == Key.RightArrow {
+                                self.go(self.current + 1, 1);
+                                return accept;
+                            }
+                            reject
+                        }
+                        HorizontalLayout {
+                            padding-left: Theme.s2;
+                            padding-right: Theme.s2;
+                            spacing: 2px;
+                            alignment: start;
+                            b-reply := IconButton { icon: Icons.reply; label: !cmd-bar.labels ? "" : "Reply"; tooltip: "Reply"; y: 8px; tab-stop: cmd-bar.stop == 0; clicked => { root.reply(); } }
+                            b-reply-all := IconButton { icon: Icons.reply-all; label: !cmd-bar.labels ? "" : "Reply all"; tooltip: "Reply all"; y: 8px; tab-stop: cmd-bar.stop == 1; clicked => { root.reply-all(); } }
+                            b-forward := IconButton { icon: Icons.forward; label: !cmd-bar.labels ? "" : "Forward"; tooltip: "Forward"; y: 8px; tab-stop: cmd-bar.stop == 2; clicked => { root.forward(); } }
+                            Rectangle { width: 1px; height: 20px; y: 14px; background: Theme.stroke-strong; }
+                            b-archive := IconButton { icon: Icons.archive; label: !cmd-bar.labels ? "" : "Archive"; tooltip: "Archive"; y: 8px; tab-stop: cmd-bar.stop == 3; clicked => { root.archive(); } }
+                            b-delete := IconButton { icon: Icons.delete; label: !cmd-bar.labels ? "" : "Delete"; tooltip: "Delete"; y: 8px; tab-stop: cmd-bar.stop == 4; clicked => { root.delete(); } }
+                            move-btn := IconButton {
+                                icon: Icons.move;
+                                label: !cmd-bar.labels ? "" : "Move";
+                                tooltip: "Move";
+                                y: 8px;
+                                tab-stop: cmd-bar.stop == 5;
+                                enabled: root.move-targets.length > 0;
+                                clicked => { move-popup.show(); }
+                            }
+                            // Toggles: screen readers hear their state.
+                            b-read := IconButton {
+                                icon: root.r-unread ? Icons.read : Icons.mail;
+                                tooltip: "Unread";
+                                checkable: true;
+                                checked: root.r-unread;
+                                width: 32px;
+                                y: 8px;
+                                tab-stop: cmd-bar.stop == 6;
+                                clicked => { root.toggle-read(); }
+                            }
+                            b-flag := IconButton {
+                                icon: root.r-flagged ? Icons.flag-filled : Icons.flag;
+                                icon-color: root.r-flagged ? Theme.danger : Theme.text-2;
+                                tooltip: "Flag";
+                                checkable: true;
+                                checked: root.r-flagged;
+                                width: 32px;
+                                y: 8px;
+                                tab-stop: cmd-bar.stop == 7;
+                                clicked => { root.toggle-flag(); }
+                            }
+                            b-plain := IconButton {
+                                visible: root.r-html || root.r-plain;
+                                icon: Icons.document;
+                                icon-color: root.r-plain ? Theme.accent : Theme.text-2;
+                                tooltip: "View as plain text";
+                                checkable: true;
+                                checked: root.r-plain;
+                                width: self.visible ? 32px : 0;
+                                y: 8px;
+                                tab-stop: cmd-bar.stop == 8;
+                                clicked => { root.r-plain = !root.r-plain; }
+                            }
+                            // Dark theme: the page's colours are dimmed unless
+                            // this is checked (for this message only).
+                            b-colors := IconButton {
+                                visible: root.r-html && !root.r-plain && (root.r-dimmed || (root.r-original && Theme.dark));
+                                icon: Icons.colors;
+                                icon-color: root.r-original ? Theme.accent : Theme.text-2;
+                                tooltip: "Show original colours";
+                                checkable: true;
+                                checked: root.r-original;
+                                width: self.visible ? 32px : 0;
+                                y: 8px;
+                                tab-stop: cmd-bar.stop == 9;
+                                clicked => { root.r-show-original(!root.r-original); }
+                            }
+                            b-more := IconButton {
+                                icon: Icons.more;
+                                tooltip: "More actions";
+                                width: 32px;
+                                y: 8px;
+                                tab-stop: cmd-bar.stop == 10;
+                                clicked => {
+                                    root.menu-opening();
+                                    row-menu.show({ x: self.absolute-position.x, y: self.absolute-position.y + self.height });
+                                }
+                            }
                         }
                     }
                     move-popup := PopupWindow {
                         x: move-btn.x;
                         y: 44px;
                         width: 240px;
-                        Rectangle {
-                            background: Theme.card;
-                            border-radius: Theme.radius-lg;
-                            border-width: 1px;
-                            border-color: Theme.stroke-strong;
-                            drop-shadow-blur: 16px;
-                            drop-shadow-color: #00000033;
-                            VerticalLayout {
-                                padding: Theme.s1;
-                                for f in root.move-targets: Rectangle {
-                                    height: 32px;
-                                    border-radius: Theme.radius;
-                                    background: fta.has-hover ? Theme.hover : transparent;
-                                    fta := TouchArea { clicked => { root.move-to(f.id); } }
-                                    HorizontalLayout {
-                                        padding-left: Theme.s2;
-                                        spacing: Theme.s2;
-                                        Icon { text: Icons.folder; width: 20px; }
-                                        Text { text: f.label; font-family: Theme.text-font; font-size: Theme.body; color: Theme.text; vertical-alignment: center; overflow: elide; }
-                                    }
-                                }
-                            }
+                        MoveList {
+                            targets: root.move-targets;
+                            picked(id) => { root.move-to(id); }
                         }
                     }
                     Divider { }
-                    ScrollView {
+                    // Ctrl+A, Ctrl+C and Escape act on the page selection once a
+                    // click on the page focuses this. It sits outside the scroll
+                    // view, which would otherwise scroll to it on focus.
+                    page-keys := FocusScope {
+                        height: 0;
+                        // A Tab stop only while the page shows (its links).
+                        focus-on-tab-navigation: page.shown;
+                        // Enter in the list opens a message and focuses this.
+                        property <bool> wanted: root.focus-page;
+                        changed wanted => {
+                            if self.wanted {
+                                self.focus();
+                                root.focus-page = false;
+                            }
+                        }
+                        init => {
+                            if root.focus-page {
+                                self.focus();
+                                root.focus-page = false;
+                            }
+                        }
+                        KeyBinding { keys: @keys(Control + "a"); enabled: page.shown; activated => { root.r-select-all(); } }
+                        KeyBinding { keys: @keys(Control + "c"); enabled: page.shown; activated => { root.r-copy(); } }
+                        // With no selection or focused link on the page, Esc
+                        // reaches the list (and closes the message).
+                        KeyBinding { keys: @keys(Escape); enabled: page.shown && (root.r-selection.length > 0 || root.r-focus.length > 0); activated => { root.r-clear-selection(); } }
+                        function scroll-by(d: length) {
+                            root.r-content-y = clamp(root.r-content-y - d, root.r-scroll-min, 0px);
+                        }
+                        // Tab cycles the page's links and Enter follows the
+                        // focused one; the scroll keys act here only, so the
+                        // arrows still move through the message list.
+                        key-pressed(e) => {
+                            if !page.shown || e.modifiers.control || e.modifiers.alt || e.modifiers.meta {
+                                return reject;
+                            }
+                            if e.text == Key.Tab || e.text == Key.Backtab {
+                                return root.r-focus-link(e.text == Key.Backtab || e.modifiers.shift) ? accept : reject;
+                            }
+                            if e.text == Key.Return && root.r-focus.length > 0 {
+                                root.r-activate-focused();
+                                return accept;
+                            }
+                            if e.text == Key.PageDown || (e.text == " " && !e.modifiers.shift) {
+                                scroll-by(body-scroll.visible-height * 0.9);
+                            } else if e.text == Key.PageUp || (e.text == " " && e.modifiers.shift) {
+                                scroll-by(-body-scroll.visible-height * 0.9);
+                            } else if e.text == Key.Home {
+                                root.r-content-y = 0px;
+                            } else if e.text == Key.End {
+                                root.r-content-y = root.r-scroll-min;
+                            } else {
+                                return reject;
+                            }
+                            accept
+                        }
+                    }
+                    body-scroll := ScrollView {
                         vertical-stretch: 1;
                         content-height: body-col.preferred-height;
+                        content-y <=> root.r-content-y;
+                        // The page band in view; the header above the page
+                        // varies in height, so its offset is part of it.
+                        property <length> view-top: -self.content-y - body-area.y - page.y;
+                        property <length> scroll-min: min(0px, self.visible-height - self.content-height);
+                        init => {
+                            root.r-view-top = self.view-top;
+                            root.r-view-height = self.visible-height;
+                            root.r-scroll-min = self.scroll-min;
+                        }
+                        changed view-top => {
+                            root.r-view-top = self.view-top;
+                            root.r-view-changed();
+                        }
+                        changed visible-height => {
+                            root.r-view-height = self.visible-height;
+                            root.r-view-changed();
+                        }
+                        changed scroll-min => { root.r-scroll-min = self.scroll-min; }
                         body-col := VerticalLayout {
                             width: parent.visible-width;
+                            init => {
+                                root.r-body-width = self.width - 2 * Theme.s6;
+                                root.r-body-resized();
+                            }
+                            changed width => {
+                                root.r-body-width = self.width - 2 * Theme.s6;
+                                root.r-body-resized();
+                            }
                             padding: Theme.s6;
                             padding-top: Theme.s4;
                             spacing: Theme.s4;
                             Text {
                                 text: root.r-subject == "" ? "(no subject)" : root.r-subject;
+                                accessible-label: "Subject: " + self.text;
                                 font-size: Theme.title;
                                 font-weight: 600;
                                 color: Theme.text;
@@ -610,12 +2467,14 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: Theme.s3;
+                                // The avatar repeats the sender: hidden from screen readers.
                                 Rectangle {
                                     width: 40px;
                                     height: 40px;
                                     border-radius: 20px;
                                     background: root.r-avatar;
-                                    Text { text: root.r-initials; color: white; font-size: Theme.body; font-weight: 600; }
+                                    accessible-role: none;
+                                    Text { text: root.r-initials; color: white; font-size: Theme.body; font-weight: 600; accessible-role: none; }
                                 }
                                 VerticalLayout {
                                     alignment: center;
@@ -625,6 +2484,7 @@ export component AppWindow inherits Window {
                                         spacing: Theme.s2;
                                         Text {
                                             text: root.r-from-name;
+                                            accessible-label: "From: " + self.text;
                                             font-size: Theme.body;
                                             font-weight: 600;
                                             color: Theme.text;
@@ -632,6 +2492,7 @@ export component AppWindow inherits Window {
                                         }
                                         Text {
                                             text: "<" + root.r-from-addr + ">";
+                                            accessible-label: "Sender address: " + root.r-from-addr;
                                             font-size: Theme.caption + 1px;
                                             color: Theme.text-3;
                                             overflow: elide;
@@ -640,45 +2501,330 @@ export component AppWindow inherits Window {
                                         }
                                         Text {
                                             text: root.r-date;
+                                            accessible-label: "Date: " + self.text;
                                             font-size: Theme.caption;
                                             color: Theme.text-3;
                                             vertical-alignment: center;
                                         }
                                     }
-                                    Text {
-                                        text: "To: " + root.r-to + (root.r-cc != "" ? "   Cc: " + root.r-cc : "");
-                                        font-size: Theme.caption;
-                                        color: Theme.text-3;
-                                        wrap: word-wrap;
+                                    HorizontalLayout {
+                                        spacing: Theme.s3;
+                                        Text {
+                                            text: "To: " + root.r-to + (root.r-cc != "" ? "   Cc: " + root.r-cc : "");
+                                            font-size: Theme.caption;
+                                            color: Theme.text-3;
+                                            wrap: word-wrap;
+                                            horizontal-stretch: 1;
+                                        }
+                                        // A text button: List-Unsubscribe, never fetched by itself.
+                                        if root.r-unsubscribe: TextButton {
+                                            text: "Unsubscribe";
+                                            font-size: Theme.caption;
+                                            clicked => { root.unsubscribe(); }
+                                        }
                                     }
                                 }
                             }
                             for a in root.r-attachments: Chip {
+                                opens: true;
                                 name: a.name;
                                 size: a.size;
                                 action-icon: Icons.save;
                                 action-label: "Save " + a.name;
                                 action => { root.save-attachment(a.index); }
+                                clicked => { root.open-attachment(a.index); }
+                            }
+                            // A meeting invitation: drawn here, outside the page.
+                            if root.i-title != "": invite-card := Rectangle {
+                                property <bool> details;
+                                background: Theme.layer;
+                                border-radius: Theme.radius;
+                                border-width: 1px;
+                                border-color: Theme.stroke;
+                                VerticalLayout {
+                                    padding: Theme.s3;
+                                    spacing: Theme.s1;
+                                    Text {
+                                        text: root.i-title;
+                                        font-size: Theme.subtitle;
+                                        font-weight: 600;
+                                        color: root.i-cancelled ? Theme.text-3 : Theme.text;
+                                        wrap: word-wrap;
+                                        // Struck through when cancelled (its first line).
+                                        if root.i-cancelled: Rectangle {
+                                            x: 0;
+                                            y: 11px;
+                                            width: min(parent.width, parent.preferred-width);
+                                            height: 1px;
+                                            background: Theme.text-3;
+                                        }
+                                    }
+                                    if root.i-state != "": BodyText {
+                                        text: root.i-state;
+                                        font-weight: 600;
+                                        color: root.i-cancelled ? Theme.warning : Theme.text-2;
+                                    }
+                                    BodyText { text: root.i-lines; color: Theme.text-2; }
+                                    if invite-card.details: BodyText { text: root.i-details; color: Theme.text-3; }
+                                    // Two rows of actions (`i-actions`): the answers, then
+                                    // the rest; codes as `invite`, 6 shows the details.
+                                    for row in [root.i-answers, root.i-tools]: HorizontalLayout {
+                                        alignment: start;
+                                        for a in row: IconButton {
+                                            icon: a == 1 ? Icons.accept : a == 2 ? Icons.tentative : a == 3 ? Icons.dismiss
+                                                : a == 5 ? Icons.compose : a == 0 ? Icons.link : a == 4 ? Icons.save
+                                                : invite-card.details ? Icons.chevron-down : Icons.chevron-right;
+                                            label: a == 1 ? "Accept" : a == 2 ? "Tentative" : a == 3 ? "Decline"
+                                                : a == 5 ? "Change" : a == 0 ? "Join" : a == 4 ? "Save .ics" : "Details";
+                                            clicked => {
+                                                if a == 6 {
+                                                    invite-card.details = !invite-card.details;
+                                                } else {
+                                                    root.invite(a);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             if root.loading: HorizontalLayout {
                                 spacing: Theme.s2;
                                 Spinner { indeterminate: true; width: 20px; height: 20px; }
                                 Text { text: "Downloading message…"; font-size: Theme.body; color: Theme.text-3; vertical-alignment: center; }
                             }
-                            TextInput {
-                                text: root.r-body;
-                                read-only: true;
-                                single-line: false;
-                                wrap: word-wrap;
-                                font-size: Theme.body;
-                                color: Theme.text;
-                                selection-background-color: Theme.accent.with-alpha(0.35);
-                                selection-foreground-color: Theme.text;
+                            // Spacing 0 here: the page stays in the layout (it
+                            // anchors the scroll position) even in text mode.
+                            body-area := VerticalLayout {
+                                // The render note and the sender/encryption notice
+                                // share one slot.
+                                property <bool> note: root.r-note != "" && !root.r-html && !root.r-waiting;
+                                if body-area.note || root.r-notice != "": VerticalLayout {
+                                    padding-bottom: Theme.s3;
+                                    Text {
+                                        text: root.r-notice + (body-area.note && root.r-notice != "" ? "\n" : "") + (body-area.note ? root.r-note : "");
+                                        font-size: Theme.caption;
+                                        color: root.r-notice-warn ? Theme.warning : Theme.text-3;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                if root.r-remote-blocked > 0 && root.r-html && !root.r-plain: VerticalLayout {
+                                    padding-bottom: Theme.s3;
+                                    Rectangle {
+                                        background: Theme.layer;
+                                        border-radius: Theme.radius;
+                                        border-width: 1px;
+                                        border-color: Theme.stroke;
+                                        VerticalLayout {
+                                            padding: Theme.s2;
+                                            padding-left: Theme.s3;
+                                            spacing: Theme.s1;
+                                            HorizontalLayout {
+                                                spacing: Theme.s2;
+                                                Icon { text: Icons.picture; color: Theme.text-2; width: 20px; }
+                                                BodyText {
+                                                    text: (root.r-remote-blocked == 1 ? "1 remote image blocked." : root.r-remote-blocked + " remote images blocked.")
+                                                        + " The sender can see when you open this and your IP address if you load them.";
+                                                    font-size: Theme.caption;
+                                                    color: Theme.text-2;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: Theme.s2;
+                                                alignment: start;
+                                                IconButton {
+                                                    icon: Icons.picture;
+                                                    label: "Load once";
+                                                    min-width: self.preferred-width;
+                                                    clicked => { root.r-load-remote(false); }
+                                                }
+                                                if root.r-from-addr != "": IconButton {
+                                                    icon: Icons.person;
+                                                    label: "Always load from " + root.r-from-addr;
+                                                    label-overflow: elide;
+                                                    max-width: self.preferred-width;
+                                                    clicked => { root.r-load-remote(true); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // After Load: what could not be fetched (no HTTPS on
+                                // the host, not found, too large, too slow).
+                                if root.r-remote-failed > 0 && root.r-remote-blocked == 0 && root.r-html && !root.r-plain: VerticalLayout {
+                                    padding-bottom: Theme.s3;
+                                    Rectangle {
+                                        background: Theme.layer;
+                                        border-radius: Theme.radius;
+                                        border-width: 1px;
+                                        border-color: Theme.stroke;
+                                        HorizontalLayout {
+                                            padding: Theme.s2;
+                                            padding-left: Theme.s3;
+                                            spacing: Theme.s2;
+                                            Icon { text: Icons.picture; color: Theme.text-2; width: 20px; }
+                                            BodyText {
+                                                text: root.r-remote-failed == 1 ? "1 image couldn't be loaded." : root.r-remote-failed + " images couldn't be loaded.";
+                                                font-size: Theme.caption;
+                                                color: Theme.text-2;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                // The paper card: tiles sit at fixed offsets over
+                                // the page colour, so a tile not yet rasterized is
+                                // blank paper. Centred on a 4 px grid so tiles stay
+                                // on whole device pixels at 125%, 150% and 175%.
+                                // Screen readers get the message text (the tiles
+                                // are pixels).
+                                page := Rectangle {
+                                    property <bool> shown: root.r-html && !root.r-plain;
+                                    height: self.shown ? root.r-page-height : 0px;
+                                    visible: self.shown;
+                                    accessible-role: text;
+                                    accessible-label: "Message";
+                                    accessible-value: root.r-body;
+                                    // Fixed-width mail comes scaled to the column; at the
+                                    // smallest scale the page is wider and scrolls sideways
+                                    // (Shift+wheel or the bar). A drag still selects text.
+                                    ScrollView {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        vertical-scrollbar-policy: always-off;
+                                        content-width: max(self.visible-width, root.r-page-width);
+                                        content-height: self.visible-height;
+                                        content-x <=> root.r-page-x;
+                                        Rectangle {
+                                            x: max(0px, round((parent.width - root.r-page-width) / 8px) * 4px);
+                                            width: root.r-page-width;
+                                            background: root.r-paper;
+                                            clip: true;
+                                            for t[i] in root.r-tiles: Image {
+                                                y: i * 256px;
+                                                width: root.r-page-width;
+                                                height: t.h;
+                                                source: t.img;
+                                                image-fit: fill;
+                                            }
+                                            for r in root.r-selection: Rectangle {
+                                                x: r.x;
+                                                y: r.y;
+                                                width: r.w;
+                                                height: r.h;
+                                                background: Theme.accent.with-alpha(0.35);
+                                            }
+                                            for r in root.r-focus: Rectangle {
+                                                x: r.x;
+                                                y: r.y;
+                                                width: r.w;
+                                                height: r.h;
+                                                border-width: 2px;
+                                                border-radius: 2px;
+                                                border-color: Theme.accent;
+                                            }
+                                            // Screen readers reach the links here (the
+                                            // page itself is pixels).
+                                            for l[i] in root.r-links: Rectangle {
+                                                x: l.x;
+                                                y: l.y;
+                                                width: l.w;
+                                                height: l.h;
+                                                accessible-role: button;
+                                                accessible-label: l.text;
+                                                accessible-description: l.href;
+                                                accessible-action-default => { root.r-activate(i); }
+                                            }
+                                            ContextMenuArea {
+                                                Menu {
+                                                    MenuItem {
+                                                        title: "Copy";
+                                                        enabled: root.r-selection.length > 0;
+                                                        activated => { root.r-copy(); }
+                                                    }
+                                                    MenuItem {
+                                                        title: "Select all";
+                                                        activated => { root.r-select-all(); }
+                                                    }
+                                                }
+                                                TouchArea {
+                                                    mouse-cursor: root.r-hover-link ? pointer : text;
+                                                    changed mouse-x => { if self.has-hover && !self.pressed { root.r-hover(self.mouse-x, self.mouse-y); } }
+                                                    changed mouse-y => { if self.has-hover && !self.pressed { root.r-hover(self.mouse-x, self.mouse-y); } }
+                                                    changed has-hover => { if !self.has-hover { root.r-hover(-1px, -1px); } }
+                                                    pointer-event(e) => {
+                                                        // Any button focuses the page, so Ctrl+C works after the
+                                                        // context menu's Select all.
+                                                        if e.kind == PointerEventKind.down {
+                                                            Focus.keyboard = false;
+                                                            page-keys.focus();
+                                                        }
+                                                        if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                                                            if e.modifiers.shift {
+                                                                root.r-extend(self.mouse-x, self.mouse-y);
+                                                            } else {
+                                                                root.r-press(self.mouse-x, self.mouse-y);
+                                                            }
+                                                        }
+                                                        // A click on a link (no drag, no Shift) follows it.
+                                                        if e.button == PointerEventButton.left && e.kind == PointerEventKind.up && !e.modifiers.shift {
+                                                            root.r-release(self.mouse-x, self.mouse-y);
+                                                        }
+                                                    }
+                                                    moved => {
+                                                        if self.pressed {
+                                                            root.r-extend(self.mouse-x, self.mouse-y);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Tabbed to, before a link has the focus.
+                                    FocusRing { shown: page-keys.has-focus && Focus.keyboard && root.r-focus.length == 0; }
+                                }
+                                if page.shown && root.r-truncated: HorizontalLayout {
+                                    padding-top: Theme.s3;
+                                    spacing: Theme.s2;
+                                    alignment: start;
+                                    Text {
+                                        text: "[Message shortened for display]";
+                                        font-size: Theme.body;
+                                        color: Theme.text-3;
+                                    }
+                                    TextButton {
+                                        text: "View as plain text";
+                                        clicked => { root.r-plain = true; }
+                                    }
+                                }
+                                if root.r-plain || (!root.r-html && !root.r-waiting): TextInput {
+                                    text: root.r-body;
+                                    read-only: true;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    font-size: Theme.body;
+                                    color: Theme.text;
+                                    selection-background-color: Theme.accent.with-alpha(0.35);
+                                    selection-foreground-color: Theme.text;
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    // The clipboard path for text selected on an HTML page (see r-copy-text).
+    Rectangle {
+        width: 0;
+        height: 0;
+        clip: true;
+        copy-buf := TextInput {
+            read-only: true;
+            accessible-role: none;
         }
     }
 
@@ -731,17 +2877,159 @@ export component AppWindow inherits Window {
         border-color: root.status-error ? Theme.danger : Theme.stroke-strong;
         drop-shadow-blur: 16px;
         drop-shadow-color: #00000030;
-        toast-row := HorizontalLayout {
-            padding: Theme.s2;
-            padding-left: Theme.s3;
-            spacing: Theme.s2;
-            Icon {
-                text: root.status-error ? Icons.error : Icons.info;
-                color: root.status-error ? Theme.danger : Theme.accent-text;
-                width: 20px;
+        // Esc on its buttons dismisses it (in the list, Esc dismisses it
+        // once there is nothing else to close; see `list-escape`).
+        FocusScope {
+            focus-on-click: false;
+            focus-on-tab-navigation: false;
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.dismiss-status();
+                    keys.focus();
+                    return accept;
+                }
+                reject
             }
-            BodyText { text: root.status; horizontal-stretch: 1; vertical-alignment: center; }
-            IconButton { icon: Icons.dismiss; tooltip: "Dismiss"; width: 32px; clicked => { root.dismiss-status(); } }
+            toast-row := HorizontalLayout {
+                padding: Theme.s2;
+                padding-left: Theme.s3;
+                spacing: Theme.s2;
+                Icon {
+                    text: root.status-error ? Icons.error : Icons.info;
+                    color: root.status-error ? Theme.danger : Theme.accent-text;
+                    width: 20px;
+                }
+                // Screen readers announce it as it appears: at once for an
+                // error (there is no alert role), politely otherwise.
+                BodyText {
+                    text: root.status;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    accessible-label: (root.status-error ? "Error: " : "") + root.status;
+                    accessible-live-region: root.status-error ? AccessibleLiveness.assertive : AccessibleLiveness.polite;
+                }
+                if root.status-action != "": IconButton {
+                    icon: Icons.drafts;
+                    label: root.status-action;
+                    clicked => { root.status-action-clicked(); }
+                }
+                IconButton { icon: Icons.dismiss; tooltip: "Dismiss"; width: 32px; clicked => { root.dismiss-status(); } }
+            }
+        }
+    }
+
+    // ---- confirm before a web link opens in the browser
+    if root.l-show: Rectangle {
+        background: Theme.scrim;
+        TouchArea { }  // swallow clicks behind the prompt
+        // Open has the focus, or Cancel when there are warnings: Enter
+        // opens only a link with nothing to warn about.
+        FocusScope {
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.l-cancel();
+                    keys.focus();
+                    return accept;
+                }
+                if e.text == Key.Return && root.l-warnings.length == 0 {
+                    root.l-open();
+                    keys.focus();
+                    return accept;
+                }
+                reject
+            }
+            Card {
+                width: min(520px, root.width - 32px);
+                height: link-col.preferred-height;
+                FocusTrap { entered => { l-open-btn.focus(); } }
+                link-col := VerticalLayout {
+                    padding: Theme.s6;
+                    spacing: Theme.s3;
+                    Heading { text: "Open this link in your browser?"; }
+                    Text {
+                        text: root.l-host;
+                        font-size: Theme.subtitle;
+                        font-weight: 700;
+                        color: Theme.text;
+                        wrap: char-wrap;
+                    }
+                    Text {
+                        text: root.l-before + root.l-host + root.l-after;
+                        font-size: Theme.caption + 1px;
+                        color: Theme.text-2;
+                        wrap: char-wrap;
+                        max-lines: 8;
+                        overflow: elide;
+                    }
+                    for w in root.l-warnings: HorizontalLayout {
+                        spacing: Theme.s2;
+                        Icon { text: Icons.error; color: Theme.danger; width: 20px; }
+                        BodyText { text: w; color: Theme.danger; horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: Theme.s2;
+                        l-cancel-btn := IconButton {
+                            init => { if root.l-warnings.length > 0 { self.focus(); } }
+                            icon: Icons.dismiss;
+                            label: "Cancel";
+                            clicked => { root.l-cancel(); keys.focus(); }
+                        }
+                        l-open-btn := AccentButton {
+                            init => { if root.l-warnings.length == 0 { self.focus(); } }
+                            label: "Open";
+                            clicked => { root.l-open(); keys.focus(); }
+                        }
+                    }
+                }
+                FocusTrap { entered => { l-cancel-btn.focus(); } }
+            }
+        }
+    }
+
+    // ---- confirm before a draft with content is discarded
+    if root.c-confirm-discard: Rectangle {
+        background: Theme.scrim;
+        TouchArea { }  // swallow clicks behind the prompt
+        // Discard has the focus (Enter discards, as before); Esc cancels.
+        FocusScope {
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.c-confirm-discard = false;
+                    return accept;
+                }
+                if e.text == Key.Return {
+                    root.discard-confirmed();
+                    return accept;
+                }
+                reject
+            }
+            Card {
+                width: min(440px, root.width - 32px);
+                height: discard-col.preferred-height;
+                FocusTrap { entered => { discard-btn.focus(); } }
+                discard-col := VerticalLayout {
+                    padding: Theme.s6;
+                    spacing: Theme.s3;
+                    Heading { text: "Discard this draft?"; }
+                    BodyText {
+                        text: "It is deleted from this computer, with its attachments.";
+                        color: Theme.text-2;
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: Theme.s2;
+                        keep-btn := IconButton { icon: Icons.dismiss; label: "Cancel"; clicked => { root.c-confirm-discard = false; } }
+                        discard-btn := AccentButton {
+                            init => { self.focus(); }
+                            icon: Icons.delete;
+                            label: "Discard";
+                            clicked => { root.discard-confirmed(); }
+                        }
+                    }
+                }
+                FocusTrap { entered => { keep-btn.focus(); } }
+            }
         }
     }
 
@@ -752,8 +3040,179 @@ export component AppWindow inherits Window {
         accounts: root.accounts;
         busy: root.a-busy;
         error: root.a-error;
-        close => { root.show-settings = false; root.settings-closed(); }
-        add-account(form) => { root.add-account(form); }
+        edit-id <=> root.a-edit-id;
+        edit: root.a-edit;
+        remote-senders: root.remote-senders;
+        section <=> root.settings-section;
+        refocus: root.settings-refocus;
+        g-choices: root.g-choices;
+        g-flash: root.g-flash;
+        g-diag: root.g-diag;
+        about-version: root.about-version;
+        about-data: root.about-data;
+        general-changed(which, value) => { root.general-changed(which, value); }
+        open-repository => { root.open-repository(); }
+        forget-remote(a) => { root.forget-remote(a); }
+        forget-all-remote => { root.forget-all-remote(); }
+        close => {
+            root.show-settings = false;
+            root.settings-closed();
+            keys.focus();
+        }
+        save-account(form) => { root.save-account(form); }
+        edit-account(id) => { root.edit-account(id); }
         remove-account(id) => { root.remove-account(id); }
+        account-enabled(id, on) => { root.account-enabled(id, on); }
+        move-account(id, up) => { root.move-account(id, up); }
+        redownload(id) => { root.redownload-account(id); }
+        remove-all-data => { root.remove-all-data(); }
+    }
+
+    // ---- Show original: the open message's header fields and source
+    if root.src-show: Rectangle {
+        background: Theme.scrim;
+        TouchArea { }  // swallow clicks behind the dialog
+        // Close has the focus; Esc closes.
+        FocusScope {
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.src-show = false;
+                    keys.focus();
+                    return accept;
+                }
+                reject
+            }
+            Card {
+                width: min(760px, root.width - 32px);
+                height: root.height - 32px;
+                background: Theme.card;
+                drop-shadow-blur: 32px;
+                drop-shadow-color: #00000040;
+                drop-shadow-offset-y: 8px;
+                FocusTrap { entered => { src-copy-all.focus(); } }
+                VerticalLayout {
+                    padding: Theme.s6;
+                    spacing: Theme.s3;
+                    HorizontalLayout {
+                        Text {
+                            text: "Original message";
+                            font-size: Theme.title;
+                            font-weight: 600;
+                            color: Theme.text;
+                            horizontal-stretch: 1;
+                        }
+                        src-close := IconButton {
+                            init => { self.focus(); }
+                            icon: Icons.dismiss;
+                            tooltip: "Close";
+                            width: 32px;
+                            clicked => { root.src-show = false; keys.focus(); }
+                        }
+                    }
+                    if root.src-msgid != "": TextInput {
+                        text: "Message-ID: " + root.src-msgid;
+                        read-only: true;
+                        font-size: Theme.caption + 1px;
+                        color: Theme.text-2;
+                        wrap: char-wrap;
+                        selection-background-color: Theme.accent.with-alpha(0.35);
+                        selection-foreground-color: Theme.text;
+                    }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: Theme.s3;
+                            padding-right: Theme.s3;
+                            Heading { text: "Header fields"; }
+                            TextInput {
+                                text: root.src-headers;
+                                read-only: true;
+                                single-line: false;
+                                wrap: char-wrap;
+                                font-family: "Consolas";
+                                font-size: Theme.caption + 1px;
+                                color: Theme.text;
+                                accessible-label: "Header fields";
+                                selection-background-color: Theme.accent.with-alpha(0.35);
+                                selection-foreground-color: Theme.text;
+                            }
+                            Divider { }
+                            Heading { text: "Source"; }
+                            TextInput {
+                                text: root.src-body;
+                                read-only: true;
+                                single-line: false;
+                                wrap: char-wrap;
+                                font-family: "Consolas";
+                                font-size: Theme.caption + 1px;
+                                color: Theme.text;
+                                accessible-label: "Message source";
+                                selection-background-color: Theme.accent.with-alpha(0.35);
+                                selection-foreground-color: Theme.text;
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: Theme.s2;
+                        if root.src-msgid != "": IconButton {
+                            label: "Copy Message-ID";
+                            clicked => { root.r-copy-text(root.src-msgid); }
+                        }
+                        IconButton {
+                            label: "Copy headers";
+                            clicked => { root.r-copy-text(root.src-headers); }
+                        }
+                        src-copy-all := AccentButton {
+                            label: "Copy all";
+                            clicked => { root.r-copy-text(root.src-headers + "\n\n" + root.src-body); }
+                        }
+                    }
+                }
+                FocusTrap { entered => { src-close.focus(); } }
+            }
+        }
+    }
+
+    // ---- a yes/no prompt (over Settings too)
+    if root.q-title != "": Rectangle {
+        background: Theme.scrim;
+        TouchArea { }  // swallow clicks behind the prompt
+        // Cancel has the focus: a stray Enter never confirms (these ask
+        // before a resend, a removal or a reply).
+        FocusScope {
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.q-answer(false);
+                    return accept;
+                }
+                reject
+            }
+            Card {
+                width: min(440px, root.width - 32px);
+                height: q-col.preferred-height;
+                FocusTrap { entered => { q-ok-btn.focus(); } }
+                q-col := VerticalLayout {
+                    padding: Theme.s6;
+                    spacing: Theme.s3;
+                    Heading { text: root.q-title; }
+                    BodyText { text: root.q-text; color: Theme.text-2; }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: Theme.s2;
+                        q-cancel-btn := IconButton {
+                            init => { self.focus(); }
+                            icon: Icons.dismiss;
+                            label: "Cancel";
+                            clicked => { root.q-answer(false); }
+                        }
+                        if root.q-alt != "": IconButton { label: root.q-alt; clicked => { root.q-alt-answer(); } }
+                        q-ok-btn := AccentButton { label: root.q-ok; clicked => { root.q-answer(true); } }
+                    }
+                }
+                FocusTrap { entered => { q-cancel-btn.focus(); } }
+            }
+        }
     }
 }

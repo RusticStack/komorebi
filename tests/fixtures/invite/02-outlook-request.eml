@@ -1,0 +1,76 @@
+From: "Mendes, Rui" <rui.mendes@example.org>
+To: Seed Account <seed@komorebi.invalid>, Ana Silva <ana.silva@example.com>
+Subject: Design review
+Date: Thu, 8 Oct 2026 10:00:00 +0000
+Message-ID: <02-outlook-request@komorebi.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt02"
+
+--alt02
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Let us go through the new screens together.
+
+________________________________________________________________________________
+Microsoft Teams meeting
+Join on your computer, mobile app or room device
+Click here to join the meeting<https://teams.example.com/l/meetup-join/19%3ameeting_abc>
+________________________________________________________________________________
+
+--alt02
+Content-Type: text/calendar; charset="utf-8"; method=REQUEST
+Content-Transfer-Encoding: quoted-printable
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+PRODID:Microsoft Exchange Server 2010
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:W. Europe Standard Time
+BEGIN:STANDARD
+DTSTART:16010101T030000
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+RRULE:FREQ=3DYEARLY;INTERVAL=3D1;BYDAY=3D-1SU;BYMONTH=3D10
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:16010101T020000
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+RRULE:FREQ=3DYEARLY;INTERVAL=3D1;BYDAY=3D-1SU;BYMONTH=3D3
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+ORGANIZER;CN=3D"Mendes, Rui":mailto:rui.mendes@example.org
+ATTENDEE;ROLE=3DREQ-PARTICIPANT;PARTSTAT=3DNEEDS-ACTION;RSVP=3DTRUE;CN=3DSe=
+ed Account:mailto:seed@komorebi.invalid
+ATTENDEE;ROLE=3DOPT-PARTICIPANT;PARTSTAT=3DNEEDS-ACTION;RSVP=3DTRUE;CN=3DAn=
+a Silva:mailto:ana.silva@example.com
+DESCRIPTION;LANGUAGE=3Den-US:Let us go through the new screens together.\n\n=
+Microsoft Teams meeting\n
+UID:040000008200E00074C5B7101A82E00800000000A0B1C2D3E4F5A6010000000000000000=
+1000000011223344556677889900AABBCCDDEEFF
+SUMMARY;LANGUAGE=3Den-US:Design review
+DTSTART;TZID=3DW. Europe Standard Time:20270324T100000
+DTEND;TZID=3DW. Europe Standard Time:20270324T110000
+CLASS:PUBLIC
+PRIORITY:5
+DTSTAMP:20261008T100000Z
+TRANSP:OPAQUE
+STATUS:CONFIRMED
+SEQUENCE:0
+LOCATION;LANGUAGE=3Den-US:Microsoft Teams Meeting
+X-MICROSOFT-CDO-APPT-SEQUENCE:0
+X-MICROSOFT-SKYPETEAMSMEETINGURL:https://teams.example.com/l/meetup-join/1=
+9%3ameeting_abc
+X-MICROSOFT-ONLINEMEETINGCONFLINK:conf:sip:rui.mendes@example.org
+BEGIN:VALARM
+DESCRIPTION:REMINDER
+TRIGGER;RELATED=3DSTART:-PT15M
+ACTION:DISPLAY
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+
+--alt02--
