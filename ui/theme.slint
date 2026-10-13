@@ -1,5 +1,7 @@
-// Fluent 2 tokens (neutral palette, type ramp, spacing). Light and dark
-// follow the Windows app theme through Palette.color-scheme.
+// Fluent 2 / WinUI 3 tokens (colours, type ramp, spacing). The
+// Windows appearance settings come in from the Rust side (src/theme.rs,
+// docs/WINUI3.md "Inputs from Rust"); light and dark through
+// Palette.color-scheme, which the Rust side sets.
 import { Palette } from "std-widgets.slint";
 
 export global Theme {
@@ -7,55 +9,197 @@ export global Theme {
 
     // Fonts are picked at startup (Windows 11 vs 10) by the Rust side.
     in property <string> text-font: "Segoe UI";
+    // Headings of 20 px and up (Segoe UI Variable's Display optical size).
+    in property <string> display-font: "Segoe UI";
     in property <string> icon-font: "Segoe MDL2 Assets";
+    // Raw message source (Show original).
+    out property <string> mono-font: "Consolas";
 
-    // Surfaces
-    out property <color> layer: dark ? #202020 : #f3f3f3;          // window / nav pane
-    out property <color> card: dark ? #2b2b2b : #ffffff;           // list + reader
-    out property <color> stroke: dark ? #3b3b3b : #e5e5e5;
-    out property <color> stroke-strong: dark ? #4a4a4a : #d1d1d1;
-    out property <color> hover: dark ? #ffffff0f : #0000000a;
-    out property <color> pressed: dark ? #ffffff0a : #00000006;
-    out property <color> selected: dark ? #ffffff14 : #0000000f;
-    out property <color> row-selected: dark ? #2f3b4a : #e3eefb;
-    // A selected folder: `selected` over the layer.
-    out property <color> nav-selected: dark ? #313131 : #e4e4e4;
-    out property <color> scrim: #00000066;
-    // One message row (the list scrolls and pages by it).
-    out property <length> row-height: 76px;
+    // The Windows accent ramp, Dark3 to Light3 ([3] is the accent itself);
+    // WinUI's own blue until the Rust side sets it.
+    in property <[color]> ramp: [#002642, #004275, #005a9e, #0078d7, #429ce3, #76b9ed, #a6d8ff];
+    // A Windows contrast theme is on, with its colours (GetSysColor):
+    // every colour below then takes its contrast value, and only the smoke
+    // behind dialogs is translucent (docs/WINUI3.md "High contrast").
+    in property <bool> contrast: false;
+    in property <color> hc-window: #202020;
+    in property <color> hc-text: #ffffff;
+    in property <color> hc-highlight: #8ee3f0;
+    in property <color> hc-highlight-text: #263b50;
+    in property <color> hc-hotlight: #75e9fc;
+    in property <color> hc-gray: #a6a6a6;
+    in property <color> hc-button: #202020;
+    in property <color> hc-button-text: #ffffff;
+    // Windows animation effects are on; off, every duration is 0 ms.
+    in property <bool> animate: true;
+    out property <duration> fast: animate ? 167ms : 0ms;
+    out property <duration> faster: animate ? 83ms : 0ms;
 
-    // Text
-    out property <color> text: dark ? #ffffff : #242424;
-    out property <color> text-2: dark ? #c8c8c8 : #424242;
-    out property <color> text-3: dark ? #9e9e9e : #707070;
-    out property <color> text-disabled: dark ? #6e6e6e : #bdbdbd;
+    // WinUI 3 theme resources (docs/WINUI3.md "Mapping to Komorebi"), as
+    // `contrast ? high contrast : dark ? dark : light`. Translucent ones
+    // are drawn over the surface under them. Slint reads `#rrggbbaa`: the
+    // XAML `#AARRGGBB` values in the docs have their alpha moved last.
 
-    // Brand / status
-    // System accent (Windows settings), as Fluent apps do.
-    out property <color> accent: Palette.accent-background;
-    out property <color> on-accent: Palette.accent-foreground;
-    // Accent-coloured text, darkened (light) or lightened (dark) by the
-    // Rust side until it reads at 4.5:1 on the darkest (lightest) surface
-    // it sits on: a selected list row or folder.
+    // Surfaces: SolidBackgroundFillColorBase (the Mica fallback: window,
+    // folder pane); LayerFillColorAlt over it (list + reader);
+    // CardBackgroundFillColorDefault; the acrylic fallback (menus, tooltips).
+    out property <color> layer: contrast ? hc-window : dark ? #202020 : #f3f3f3;
+    out property <color> card: contrast ? hc-window : dark ? #2b2b2b : #ffffff;
+    out property <color> card-fill: contrast ? hc-window : dark ? #ffffff0d : #ffffffb3;
+    // CardBackgroundFillColorSecondary: an Expander's content.
+    out property <color> card-fill-2: contrast ? hc-window : dark ? #ffffff08 : #f6f6f680;
+    out property <color> flyout: contrast ? hc-window : dark ? #2c2c2c : #f9f9f9;
+    // SmokeFillColorDefault, behind dialogs.
+    out property <color> scrim: contrast ? hc-window.with-alpha(0.8) : #0000004d;
+
+    // Strokes: dividers (DividerStrokeColorDefault); the card's outline
+    // (CardStrokeColorDefault); ControlStrokeColorSecondary;
+    // ControlStrongStrokeColorDefault (input bottom edge, checkbox);
+    // ControlStrokeColorDefault and the bottom (light) or top (dark) edge
+    // of ControlElevationBorder; SurfaceStrokeColorFlyout;
+    // SurfaceStrokeColorDefault (dialogs).
+    out property <color> stroke: contrast ? hc-text : dark ? #ffffff15 : #0000000f;
+    // The card outline is precomposited on the layer (XAML #0F000000 /
+    // #19000000 over it): Slint draws a border over its own background,
+    // WinUI's content area over the layer behind it.
+    out property <color> card-stroke: contrast ? hc-text : dark ? #1d1d1d : #e5e5e5;
+    // CardStrokeColorDefault itself, over a fill of its own (InfoBar edge,
+    // the line above a dialog's button bar).
+    out property <color> card-edge: contrast ? hc-text : dark ? #00000019 : #0000000f;
+    out property <color> stroke-strong: contrast ? hc-button-text : dark ? #ffffff18 : #00000029;
+    out property <color> stroke-accessible: contrast ? hc-button-text : dark ? #ffffff8b : #00000072;
+    // ControlStrongStrokeColorDisabled.
+    out property <color> stroke-accessible-disabled: contrast ? hc-gray : dark ? #ffffff28 : #00000037;
+    out property <color> control-stroke: contrast ? hc-button-text : dark ? #ffffff12 : #0000000f;
+    out property <color> control-stroke-edge: contrast ? hc-button-text : dark ? #ffffff18 : #00000029;
+    out property <color> flyout-stroke: contrast ? hc-text : dark ? #00000033 : #0000000f;
+    out property <color> surface-stroke: contrast ? hc-text : #75757566;
+
+    // Subtle fills (SubtleFillColorSecondary / Tertiary): hovered, pressed
+    // and selected rows, folders and subtle buttons. Under a contrast theme
+    // they are Highlight, under HighlightText (`on-selected`, `on-fill`).
+    out property <color> hover: contrast ? hc-highlight : dark ? #ffffff0f : #00000009;
+    out property <color> pressed: contrast ? hc-highlight : dark ? #ffffff0a : #00000006;
+    out property <color> selected: contrast ? hc-highlight : dark ? #ffffff0f : #00000009;
+    // `selected` over the layer, opaque (a selected folder).
+    out property <color> nav-selected: contrast ? hc-highlight : dark ? #2d2d2d : #eaeaea;
+    out property <color> on-selected: contrast ? hc-highlight-text : text;
+    // The colour of text or an icon, `c`, on a `hover`, `pressed` or
+    // `selected` fill while that fill shows (`lit`).
+    public pure function on-fill(lit: bool, c: color) -> color {
+        lit && contrast ? hc-highlight-text : c
+    }
+
+    // Control fills: ControlFillColorDefault / Secondary / Tertiary,
+    // ControlAltFillColorSecondary (toggle and checkbox off),
+    // ControlFillColorInputActive (a focused text field).
+    out property <color> control: contrast ? hc-button : dark ? #ffffff0f : #ffffffb3;
+    out property <color> control-hover: contrast ? hc-button : dark ? #ffffff15 : #f9f9f980;
+    out property <color> control-pressed: contrast ? hc-button : dark ? #ffffff08 : #f9f9f94d;
+    out property <color> control-disabled: contrast ? hc-button : dark ? #ffffff0b : #f9f9f94d;
+    out property <color> control-alt: contrast ? hc-button : dark ? #00000019 : #00000006;
+    // ControlAltFillColorTertiary / Quarternary: a hovered and a pressed
+    // checkbox or toggle switch while off.
+    out property <color> control-alt-hover: contrast ? hc-button : dark ? #ffffff0b : #0000000f;
+    out property <color> control-alt-pressed: contrast ? hc-button : dark ? #ffffff12 : #00000018;
+    out property <color> input-active: contrast ? hc-button : dark ? #1e1e1eb3 : #ffffff;
+
+    // Text: TextFillColorPrimary / Secondary / Tertiary / Disabled / Inverse.
+    // Tertiary is 3.3:1 on the light card: only for what WinUI also puts
+    // there, never row metadata, labels, hints or placeholders (`text-2`).
+    out property <color> text: contrast ? hc-text : dark ? #ffffff : #000000e4;
+    out property <color> text-2: contrast ? hc-text : dark ? #ffffffc5 : #0000009e;
+    out property <color> text-3: contrast ? hc-text : dark ? #ffffff87 : #00000072;
+    out property <color> text-disabled: contrast ? hc-gray : dark ? #ffffff5d : #0000005c;
+    out property <color> text-inverse: contrast ? hc-text : dark ? #000000e4 : #ffffff;
+
+    // Brand, from the Windows accent ramp as WinUI uses it
+    // (docs/WINUI3.md "Accent ramp").
+    // AccentFillColorDefault (Dark1 / Light2), and Secondary / Tertiary for
+    // hovered and pressed accent buttons (lighter on the light theme).
+    out property <color> accent: contrast ? hc-highlight : dark ? ramp[5] : ramp[2];
+    out property <color> accent-hover: contrast ? hc-button-text : accent.with-alpha(0.9);
+    out property <color> accent-pressed: contrast ? hc-highlight : accent.with-alpha(0.8);
+    // TextOnAccentFillColorPrimary (ButtonFace on a hovered accent button
+    // under a contrast theme), Secondary (pressed) and Disabled.
+    out property <color> on-accent: contrast ? hc-highlight-text : dark ? #000000 : #ffffff;
+    out property <color> on-accent-hover: contrast ? hc-button : on-accent;
+    out property <color> on-accent-2: contrast ? hc-highlight-text : dark ? #00000080 : #ffffffb3;
+    out property <color> on-accent-disabled: contrast ? hc-gray : dark ? #ffffff87 : #ffffff;
+    // AccentFillColorDisabled.
+    out property <color> accent-disabled: contrast ? hc-button : dark ? #ffffff28 : #00000037;
+    // AccentControlElevationBorder: its sides, and its bottom edge.
+    out property <color> accent-edge: contrast ? hc-text : #ffffff14;
+    out property <color> accent-edge-bottom: contrast ? hc-text : dark ? #00000023 : #00000066;
+    // AccentTextFillColorPrimary (Dark2 / Light3), darkened (light) or
+    // lightened (dark) by the Rust side, for odd accents, until it reads at
+    // 4.5:1 on the card and a selected folder; Secondary and Tertiary for
+    // hovered and pressed links.
     pure callback readable(/* text */ color, /* background */ color) -> color;
-    out property <color> accent-text: readable(readable(accent, row-selected), nav-selected);
-    // The border of the selected rows (also seen without the fill).
-    out property <color> row-border: accent-text;
-    // A disabled accent button: a neutral fill whose label still reads.
-    out property <color> accent-disabled: dark ? #3d3d3d : #e0e0e0;
-    out property <color> on-accent-disabled: dark ? #8c8c8c : #757575;
-    // The keyboard focus ring (2 px).
-    out property <color> focus: text;
-    out property <color> danger: dark ? #dc626d : #c50f1f;
-    out property <color> danger-bg: dark ? #3f1011 : #fdf3f4;
-    out property <color> warning: dark ? #faa06b : #bc4b09;
-    out property <color> info-bg: dark ? #333333 : #ffffff;
+    out property <color> accent-text: contrast ? hc-text : readable(readable(dark ? ramp[6] : ramp[1], card), nav-selected);
+    out property <color> accent-text-hover: contrast ? hc-hotlight : dark ? ramp[6] : ramp[0];
+    out property <color> accent-text-pressed: contrast ? hc-hotlight : dark ? ramp[5] : ramp[2];
+    // A link at rest (HyperlinkButton): Hotlight under a contrast theme.
+    out property <color> link: contrast ? hc-hotlight : accent-text;
+    // Selected text: AccentFillColorSelectedTextBackground (the accent).
+    out property <color> selection-bg: contrast ? hc-highlight : ramp[3];
+    out property <color> selection-text: contrast ? hc-highlight-text : #ffffff;
+    // The keyboard focus ring: FocusStrokeColorOuter (2 px) and Inner (1 px).
+    out property <color> focus: contrast ? hc-text : dark ? #ffffff : #000000e4;
+    out property <color> focus-inner: contrast ? hc-window : dark ? #000000b3 : #ffffffb3;
+    // Initials on the sender's colour (format::avatar_color, Fluent 2
+    // persona colours); under a contrast theme a PersonPicture's text.
+    out property <color> on-avatar: contrast ? hc-text : #ffffff;
 
-    // Type ramp (Fluent 2)
-    out property <length> caption: 12px;
-    out property <length> body: 14px;
-    out property <length> subtitle: 16px;
-    out property <length> title: 20px;
+    // Status: SystemFillColorCritical / Caution / Success, their
+    // backgrounds, and SystemFillColorAttentionBackground (information).
+    out property <color> danger: contrast ? hc-text : dark ? #ff99a4 : #c42b1c;
+    out property <color> danger-bg: contrast ? hc-window : dark ? #442726 : #fde7e9;
+    out property <color> warning: contrast ? hc-text : dark ? #fce100 : #9d5d00;
+    out property <color> caution-bg: contrast ? hc-window : dark ? #433519 : #fff4ce;
+    out property <color> success: contrast ? hc-text : dark ? #6ccb5f : #0f7b0f;
+    out property <color> success-bg: contrast ? hc-window : dark ? #393d1b : #dff6dd;
+    out property <color> info-bg: contrast ? hc-window : dark ? #ffffff08 : #f6f6f680;
+    // SystemFillColorAttention: the informational InfoBar's icon.
+    out property <color> attention: contrast ? hc-text : dark ? ramp[5] : ramp[3];
+
+    // Type ramp (Fluent 2), scaled by the Rust side for the Windows text
+    // size (docs/WINUI3.md "Text size").
+    in property <length> caption: 12px;
+    in property <length> body: 14px;
+    in property <length> subtitle: 16px;
+    in property <length> title: 20px;
+    in property <length> title-large: 28px;
+    // One message row (the list scrolls and pages by it): 76 px, taller by
+    // the line heights (4/3 of the size) its two body lines and one caption
+    // line gain at larger text sizes.
+    out property <length> row-height: 76px + round((2 * (body - 14px) + (caption - 12px)) * 4 / 3 / 1px) * 1px;
+
+    // A folder pane item: 36 px (NavigationViewItemOnLeftMinHeight),
+    // taller by what a larger text size adds to its line.
+    out property <length> nav-row: max(36px, round(body * 4 / 3 / 1px) * 1px + 16px);
+    // The wide folder pane: NavigationView's 248 px (OpenPaneLength) plus
+    // the 16 px column of the folder tree's leading expanders.
+    out property <length> pane-width: 264px;
+    // A Caption line (4/3 of its size): the rail's names wrap on two.
+    out property <length> caption-line: round(caption * 4 / 3 / 1px) * 1px;
+    // A rail item (the narrow window's pane): its 24 px icon zone at 4,
+    // then its name on up to two Caption lines. 64 px at 100% text size
+    // (WinUI's 40 px item plus new Outlook's label under the icon).
+    out property <length> rail-row: max(56px, 30px + 2 * caption-line + 2px);
+    // The rail's width: 64 px, wider when the longest word of its fixed
+    // names needs it (AppWindow measures them, `rail-words`).
+    in-out property <length> rail-width: 64px;
+    // A folder tree level's indent.
+    out property <length> nav-indent: 12px;
+    // The space above an account line (its group's gap; not its plate).
+    out property <length> nav-gap: 8px;
+    // An account's initial tile (the folder pane's account line).
+    out property <length> tile: 20px;
+
+    // An attachment chip: 40 px, taller by what a larger text size adds
+    // to its name (Body) and size (Caption) lines.
+    out property <length> chip-height: max(40px, round((body + caption) * 4 / 3 / 1px) * 1px + 4px);
 
     // Spacing (4px grid) and radii
     out property <length> s1: 4px;
@@ -67,18 +211,32 @@ export global Theme {
     out property <length> radius-lg: 8px;
 }
 
+// The one tooltip (docs/WINUI3.md "ToolTip"): the control under the pointer
+// sets it after its delay (`TipTimer`), and AppWindow draws it over
+// everything, below or above that control (`at-*`: its window bounds).
+export global Tip {
+    in-out property <string> text;
+    in-out property <bool> shown;
+    in-out property <length> at-x;
+    in-out property <length> at-y;
+    in-out property <length> at-w;
+    in-out property <length> at-h;
+    // Which control set it, and the last number handed out.
+    in-out property <int> owner;
+    in-out property <int> seq;
+    // No tooltip while a teaching tip shows (docs/WINUI3.md "TeachingTip").
+    in-out property <bool> blocked;
+}
+
 // Segoe Fluent Icons / Segoe MDL2 Assets code points (shared by both fonts).
 export global Icons {
     out property <string> mail: "\u{E715}";
     out property <string> read: "\u{E8C3}";
     out property <string> compose: "\u{E70F}";
     out property <string> send: "\u{E724}";
-    out property <string> drafts: "\u{E70B}";
     out property <string> archive: "\u{E7B8}";
     out property <string> delete: "\u{E74D}";
-    out property <string> junk: "\u{E8C9}";
     out property <string> folder: "\u{E8B7}";
-    out property <string> inboxes: "\u{E8F1}";
     out property <string> refresh: "\u{E72C}";
     out property <string> search: "\u{E721}";
     out property <string> reply: "\u{E97A}";
@@ -97,17 +255,50 @@ export global Icons {
     out property <string> save: "\u{E74E}";
     out property <string> move: "\u{E8DE}";
     out property <string> more: "\u{E712}";
+    // GlobalNavigationButton: the folder pane's toggle.
+    out property <string> menu: "\u{E700}";
     out property <string> multi-select: "\u{E762}";
     out property <string> person: "\u{E77B}";
     out property <string> picture: "\u{E8B9}";
     out property <string> error: "\u{E783}";
+    out property <string> warning: "\u{E7BA}";
     out property <string> info: "\u{E946}";
     out property <string> document: "\u{E8A5}";
-    out property <string> colors: "\u{E790}";
+    // Attachment chips: Page (any file) and Calendar.
+    out property <string> page: "\u{E7C3}";
+    out property <string> calendar: "\u{E787}";
     out property <string> bold: "\u{E8DD}";
     out property <string> italic: "\u{E8DB}";
     out property <string> link: "\u{E71B}";
     out property <string> bullets: "\u{E8FD}";
+    out property <string> quote: "\u{E9B2}";
     out property <string> accept: "\u{E8FB}";
     out property <string> tentative: "\u{E9CE}";
+    out property <string> check-mark: "\u{E73E}";
+    out property <string> clear: "\u{E894}";
+    // The title bar's caption buttons (the same code points in Segoe Fluent
+    // Icons and Segoe MDL2 Assets).
+    out property <string> chrome-minimize: "\u{E921}";
+    out property <string> chrome-maximize: "\u{E922}";
+    out property <string> chrome-restore: "\u{E923}";
+    out property <string> chrome-close: "\u{E8BB}";
+    out property <string> reveal: "\u{E7B3}";
+    // Copy (the certificate prompt's fingerprint).
+    out property <string> copy: "\u{E8C8}";
+    // Code (Settings > About, Made with Slint).
+    out property <string> code: "\u{E943}";
+    // Settings > About: What's new (Lightbulb), Keyboard shortcuts
+    // (KeyboardClassic), Get help (Help), Report a problem (Feedback) and
+    // the Privacy statement (Shield).
+    out property <string> lightbulb: "\u{EA80}";
+    out property <string> keyboard: "\u{E765}";
+    out property <string> help: "\u{E897}";
+    out property <string> feedback: "\u{ED15}";
+    out property <string> shield: "\u{EA18}";
+    // InfoBar: a filled circle, and the glyphs drawn over it.
+    out property <string> status-circle: "\u{F136}";
+    out property <string> status-info: "\u{F13F}";
+    out property <string> status-success: "\u{F13E}";
+    out property <string> status-warning: "\u{F13C}";
+    out property <string> status-error: "\u{F13D}";
 }

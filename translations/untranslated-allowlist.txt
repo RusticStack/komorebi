@@ -1,0 +1,21 @@
+# String literals in ui/*.slint that are not translated text: ids compared in
+# the UI, product and provider names, example hosts, language names (each shown
+# in its own language) and font families. One unescaped literal per line;
+# the guard test (tests/i18n_catalog.rs) fails for any other literal outside
+# @tr() and for an entry here that no .slint file has any more.
+edit
+remove
+add
+download
+remove-all
+Komorebi
+Purelymail
+Postale.io
+imap.example.com
+smtp.example.com
+github.com/RusticStack/komorebi
+English
+Português (Portugal)
+Segoe UI
+Segoe MDL2 Assets
+Consolas

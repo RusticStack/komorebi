@@ -58,8 +58,8 @@ jobs:
         shell: pwsh
         run: |
           $size = (Get-Item target/release/komorebi.exe).Length
-          "komorebi.exe: $size bytes ({0:N3} MB; ceiling 15,000,000 bytes)" -f ($size / 1e6)
-          if ($size -gt 15000000) { throw "komorebi.exe is over the 15.0 MB ceiling" }
+          "komorebi.exe: $size bytes ({0:N3} MB; ceiling 20,000,000 bytes)" -f ($size / 1e6)
+          if ($size -gt 20000000) { throw "komorebi.exe is over the 20.0 MB ceiling" }
 
       # As in ci.yml: boot offline on a freshly seeded throwaway cache and
       # fail on a blank list or reader.

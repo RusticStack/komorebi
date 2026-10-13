@@ -1,6 +1,6 @@
 [package]
 name = "komorebi"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A small, fast, privacy-respecting email client for Windows"
 license = "Apache-2.0"
@@ -43,6 +43,9 @@ url = "=2.5.8"
 # The sender notice shows an xn-- domain in its Unicode form. Already linked
 # through url; pinned to the locked version.
 idna = "=1.1.0"
+# "Find settings" reads a provider's autoconfig file. Already linked through
+# Slint (resvg); pinned to the locked version.
+roxmltree = "=0.21.1"
 
 [target.'cfg(windows)'.dependencies]
 # Windows Credential Manager, the store `keyring` v4 used: pinned, so saved
@@ -53,9 +56,18 @@ windows-native-keyring-store = { version = "=1.1.0", default-features = false }
 # for one app per cache; GetClipboardData (DataExchange) and GlobalLock
 # (Memory) to paste copied files; EnumDisplayMonitors (Graphics_Gdi) to keep
 # a restored window on a monitor; FlashWindowEx for the opt-in taskbar flash;
-# DwmSetWindowAttribute (Graphics_Dwm) for a title bar that follows the theme
-# (ProcessStatus: examples/peak_memory only).
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# DwmSetWindowAttribute (Graphics_Dwm) for a title bar that follows the theme;
+# RegGetValueW (System_Registry), SystemParametersInfoW and HIGHCONTRASTW
+# (UI_Accessibility) and GetSysColor to follow the Windows appearance
+# settings (src/theme.rs) (ProcessStatus: examples/peak_memory only);
+# the DNS record types and LoadLibraryExW/GetProcAddress for the SRV lookup of
+# "Find settings" (src/mail/discover.rs), which loads dnsapi.dll on a click;
+# GetUserPreferredUILanguages (Globalization) for the display language
+# (src/i18n.rs); SetPropW/GetPropW (WindowsAndMessaging) mark the window of an
+# instance. The app-drawn title bar (src/chrome.rs): GetDpiForWindow,
+# GetSystemMetricsForDpi and AdjustWindowRectExForDpi (UI_HiDpi) and
+# TrackMouseEvent (UI_Input_KeyboardAndMouse).
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_Dns", "Win32_Security", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [features]
 # Honor KOMOREBI_PASSWORD (with KOMOREBI_DB) in release builds too.
@@ -82,6 +94,19 @@ panic = "abort"
 opt-level = 3
 
 [profile.release.package.i-slint-renderer-software]
+opt-level = 3
+
+# The reader's tile raster (fills, gradients, image blits) runs in tiny-skia;
+# docs/PERF.md 4.1.
+[profile.release.package.tiny-skia]
+opt-level = 3
+
+[profile.release.package.tiny-skia-path]
+opt-level = 3
+
+# The bundled SQLite C code answers the list, filter, unread and search
+# queries; docs/PERF.md 4.2.
+[profile.release.package.libsqlite3-sys]
 opt-level = 3
 
 # Slint's software renderer is unusably slow unoptimized; optimize

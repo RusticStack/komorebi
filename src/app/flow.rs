@@ -166,7 +166,7 @@ impl Flow {
         }
         match app.db.count_outbox() {
             Ok(0) => Some(Ok(status)),
-            Ok(_) if ui.get_status_error() => Some(Err(status)),
+            Ok(_) if ui.get_status_severity() == Severity::Critical => Some(Err(status)),
             Ok(_) => None,
             Err(e) => Some(Err(format!("{e:#}"))),
         }
@@ -388,7 +388,12 @@ impl Flow {
                 app.move_to(inbox);
                 app.flush_held();
                 self.note("moved it back to the Inbox");
-                app.set_view(View::AllInboxes);
+                // All inboxes is in the pane only with several accounts.
+                app.set_view(if app.accounts.len() > 1 {
+                    View::AllInboxes
+                } else {
+                    View::Folder(inbox)
+                });
                 Self::filter(app);
                 self.last_sync = Instant::now();
                 Next::Go(Step::WaitArrivals)

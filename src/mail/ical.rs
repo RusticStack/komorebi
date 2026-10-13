@@ -18,6 +18,7 @@
     clippy::panic
 )]
 
+use crate::i18n::Lang;
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, TimeDelta, TimeZone, Utc, Weekday};
 
 /// Larger calendar parts are not read.
@@ -713,29 +714,49 @@ impl Event {
     /// When, in `tz`: "Thu 2026-10-08 14:00-15:00", a date for an all-day
     /// event, and the zone's name when the instant is unknown.
     pub fn when_text<Tz: TimeZone>(&self, tz: &Tz) -> String {
-        const DAY: &str = "%a %Y-%m-%d";
+        self.when_text_in(Lang::En, tz)
+    }
+
+    /// `when_text` in the language shown: English `Thu 2026-10-08 14:00-15:00`,
+    /// pt-PT `qui. 08/10/2026 14:00-15:00`.
+    pub fn when_text_in<Tz: TimeZone>(&self, lang: Lang, tz: &Tz) -> String {
+        let day = |d: NaiveDate| match lang {
+            Lang::En => d.format("%a %Y-%m-%d").to_string(),
+            Lang::PtPt => format!(
+                "{} {}",
+                weekday_name(lang, d.weekday()),
+                d.format("%d/%m/%Y")
+            ),
+        };
+        let all_day = match lang {
+            Lang::En => "all day",
+            Lang::PtPt => "todo o dia",
+        };
         let s = &self.start;
         if s.all_day {
             let first = s.wall.date();
             // An all-day DTEND is the day after the last.
             let last = self.end.as_ref().and_then(|e| e.wall.date().pred_opt());
             return match last.filter(|l| *l > first) {
-                Some(l) => format!("{} - {}, all day", first.format(DAY), l.format(DAY)),
-                None => format!("{}, all day", first.format(DAY)),
+                Some(l) => format!("{} - {}, {all_day}", day(first), day(l)),
+                None => format!("{}, {all_day}", day(first)),
             };
         }
         let start = s.shown(tz);
-        let mut out = start.format("%a %Y-%m-%d %H:%M").to_string();
+        let mut out = format!("{} {}", day(start.date()), start.format("%H:%M"));
         if let Some(end) = self.end.as_ref().map(|e| e.shown(tz)) {
             if end.date() == start.date() {
                 out.push_str(&end.format("-%H:%M").to_string());
             } else {
-                out.push_str(&end.format(" - %a %Y-%m-%d %H:%M").to_string());
+                out.push_str(&format!(" - {} {}", day(end.date()), end.format("%H:%M")));
             }
         }
         if s.utc.is_none() {
             let zone = if s.zone.is_empty() {
-                "floating time"
+                match lang {
+                    Lang::En => "floating time",
+                    Lang::PtPt => "hora flutuante",
+                }
             } else {
                 &s.zone
             };
@@ -747,13 +768,23 @@ impl Event {
     /// The recurrence in a few words ("Repeats weekly on Mon, Wed until
     /// 2026-12-31"); "Repeats" for a rule beyond that; empty if none.
     pub fn repeats(&self) -> String {
+        self.repeats_in(Lang::En)
+    }
+
+    /// `repeats` in the language shown (pt-PT: "Repete-se semanalmente a
+    /// seg., qua. até 31/12/2026").
+    pub fn repeats_in(&self, lang: Lang) -> String {
         if self.rrule.is_empty() {
             return String::new();
         }
+        let plain = || match lang {
+            Lang::En => "Repeats".to_string(),
+            Lang::PtPt => "Repete-se".to_string(),
+        };
         let (mut freq, mut every, mut days, mut until) = ("", 1u32, Vec::new(), None);
         for kv in self.rrule.split(';') {
             let Some((k, v)) = kv.split_once('=') else {
-                return "Repeats".into();
+                return plain();
             };
             match k {
                 "FREQ" => freq = v,
@@ -761,36 +792,62 @@ impl Event {
                 "BYDAY" => days = v.split(',').map(weekday).collect(),
                 "UNTIL" => until = v.get(..8).and_then(date_time).map(|(u, _)| u.date()),
                 "COUNT" | "WKST" => {}
-                _ => return "Repeats".into(),
+                _ => return plain(),
             }
         }
-        let unit = match freq {
-            "DAILY" => ("daily", "days"),
-            "WEEKLY" => ("weekly", "weeks"),
-            "MONTHLY" => ("monthly", "months"),
-            "YEARLY" => ("yearly", "years"),
-            _ => return "Repeats".into(),
+        // (adverb, plural unit) for the interval of one and of several.
+        let (adverb, unit) = match (lang, freq) {
+            (Lang::En, "DAILY") => ("daily", "days"),
+            (Lang::En, "WEEKLY") => ("weekly", "weeks"),
+            (Lang::En, "MONTHLY") => ("monthly", "months"),
+            (Lang::En, "YEARLY") => ("yearly", "years"),
+            (Lang::PtPt, "DAILY") => ("diariamente", "dias"),
+            (Lang::PtPt, "WEEKLY") => ("semanalmente", "semanas"),
+            (Lang::PtPt, "MONTHLY") => ("mensalmente", "meses"),
+            (Lang::PtPt, "YEARLY") => ("anualmente", "anos"),
+            _ => return plain(),
         };
-        let mut out = match every {
-            0 => return "Repeats".into(),
-            1 => format!("Repeats {}", unit.0),
-            n => format!("Repeats every {n} {}", unit.1),
+        let mut out = match (every, lang) {
+            (0, _) => return plain(),
+            (1, Lang::En) => format!("Repeats {adverb}"),
+            (1, Lang::PtPt) => format!("Repete-se {adverb}"),
+            (n, Lang::En) => format!("Repeats every {n} {unit}"),
+            (n, Lang::PtPt) => format!("Repete-se a cada {n} {unit}"),
         };
         if !days.is_empty() {
-            let names: Option<Vec<String>> =
-                days.into_iter().map(|d| d.map(|d| d.to_string())).collect();
+            let names: Option<Vec<String>> = days
+                .into_iter()
+                .map(|d| d.map(|d| weekday_name(lang, d).to_string()))
+                .collect();
             match names {
                 Some(names) if freq == "WEEKLY" => {
-                    out.push_str(" on ");
+                    out.push_str(match lang {
+                        Lang::En => " on ",
+                        Lang::PtPt => " a ",
+                    });
                     out.push_str(&names.join(", "));
                 }
-                _ => return "Repeats".into(),
+                _ => return plain(),
             }
         }
         if let Some(u) = until {
-            out.push_str(&u.format(" until %Y-%m-%d").to_string());
+            match lang {
+                Lang::En => out.push_str(&u.format(" until %Y-%m-%d").to_string()),
+                Lang::PtPt => out.push_str(&u.format(" até %d/%m/%Y").to_string()),
+            }
         }
         out
+    }
+}
+
+/// A weekday abbreviated: `Mon`; pt-PT `seg.`.
+fn weekday_name(lang: Lang, d: Weekday) -> &'static str {
+    const EN: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const PT: [&str; 7] = ["seg.", "ter.", "qua.", "qui.", "sex.", "sáb.", "dom."];
+    let i = d.num_days_from_monday() as usize;
+    match lang {
+        Lang::En => EN.get(i).copied().unwrap_or_default(),
+        Lang::PtPt => PT.get(i).copied().unwrap_or_default(),
     }
 }
 
@@ -1010,6 +1067,43 @@ ORGANIZER:mailto:{bad}
         assert_eq!(d(2026, 12, Weekday::Thu, -1), "2026-12-31");
         assert_eq!(nth_weekday(2026, 2, Weekday::Mon, 5), None);
         assert_eq!(nth_weekday(2026, 2, Weekday::Mon, -5), None);
+    }
+
+    #[test]
+    fn when_and_repeats_in_portuguese() {
+        let lisbon = FixedOffset::east_opt(3600).unwrap();
+        let ev = parse(
+            cal("DTSTART:20261008T130000Z
+DTEND:20261008T140000Z
+")
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            ev.when_text_in(Lang::PtPt, &lisbon),
+            "qui. 08/10/2026 14:00-15:00"
+        );
+        let floating = parse(
+            cal("DTSTART:20261008T130000
+")
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            floating.when_text_in(Lang::PtPt, &lisbon),
+            "qui. 08/10/2026 13:00 (hora flutuante)"
+        );
+        assert_eq!(ev.when_text_in(Lang::En, &lisbon), ev.when_text(&lisbon));
+        let mut r = ev.clone();
+        r.rrule = "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;UNTIL=20261231T235959Z".into();
+        assert_eq!(
+            r.repeats_in(Lang::PtPt),
+            "Repete-se a cada 2 semanas a ter., qui. até 31/12/2026"
+        );
+        r.rrule = "FREQ=DAILY".into();
+        assert_eq!(r.repeats_in(Lang::PtPt), "Repete-se diariamente");
+        r.rrule = "FREQ=HOURLY".into();
+        assert_eq!(r.repeats_in(Lang::PtPt), "Repete-se");
     }
 
     #[test]

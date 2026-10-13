@@ -41,28 +41,35 @@ impl App {
             .filter(|&(seq, _)| seq >= ev.sequence)
             .and_then(|(_, code)| Answer::from_code(code));
         let state = if ev.cancelled() {
-            "Cancelled: this event will not take place.".to_string()
+            t!(invoke_invite_cancelled)
         } else if let Some(a) = answer {
-            format!("You {}.", a.done())
+            match a {
+                Answer::Accepted => t!(invoke_invite_accepted),
+                Answer::Tentative => t!(invoke_invite_tentative),
+                Answer::Declined => t!(invoke_invite_declined),
+            }
         } else if past {
-            "This event is over.".into()
+            t!(invoke_invite_over)
         } else if ev.sequence > 0 && ev.method == "REQUEST" {
-            "Updated invitation".into()
+            t!(invoke_invite_updated)
         } else {
             String::new()
         };
-        let mut lines = vec![ev.when_text(&chrono::Local)];
+        let mut lines = vec![ev.when_text_in(self.lang, &chrono::Local)];
         if let Some(o) = &ev.organizer {
-            lines.push(format!("Organizer: {}", smtp::mailbox(&o.name, &o.addr)));
+            lines.push(t!(
+                invoke_invite_organizer,
+                smtp::mailbox(&o.name, &o.addr).into()
+            ));
         }
         if !ev.location.is_empty() {
-            lines.push(format!("Where: {}", ev.location));
+            lines.push(t!(invoke_invite_where, ev.location.as_str().into()));
         }
-        lines.push(ev.repeats());
+        lines.push(ev.repeats_in(self.lang));
         let title = if ev.summary.is_empty() {
-            "(no title)"
+            t!(invoke_invite_no_title)
         } else {
-            &ev.summary
+            ev.summary.clone()
         };
         ui.set_i_title(title.into());
         ui.set_i_lines(lines.join("\n").trim_end().into());
@@ -85,6 +92,7 @@ impl App {
             tools.push(6);
         }
         tools.push(4);
+        ui.set_i_answer(answer.map_or(0, |a| a as i32));
         ui.set_i_answers(ModelRc::new(VecModel::from(answers.to_vec())));
         ui.set_i_tools(ModelRc::new(VecModel::from(tools)));
     }
@@ -113,7 +121,11 @@ impl App {
     /// a warning when the organizer is not in the sender's domain or the
     /// user is not an attendee.
     pub(super) fn rsvp_prompt(&self, answer: Answer) -> (String, String) {
-        let title = format!("Reply \u{201c}{}\u{201d}?", answer.label());
+        let title = match answer {
+            Answer::Accepted => t!(invoke_q_rsvp_title_accepted),
+            Answer::Tentative => t!(invoke_q_rsvp_title_tentative),
+            Answer::Declined => t!(invoke_q_rsvp_title_declined),
+        };
         let Some((m, ev)) = self.open_invite() else {
             return (title, String::new());
         };
@@ -122,9 +134,11 @@ impl App {
             .organizer
             .as_ref()
             .map_or(String::new(), |o| smtp::mailbox(&o.name, &o.addr));
-        let mut text = format!(
-            "The reply goes only to the organizer, {organizer}, from {account}. \
-             No one else gets it."
+        // Whole sentences, one after the other.
+        let mut text = t!(
+            invoke_q_rsvp_text,
+            organizer.as_str().into(),
+            account.as_str().into()
         );
         let domain = |a: &str| {
             let host = a
@@ -138,24 +152,26 @@ impl App {
             .as_ref()
             .map_or(String::new(), |o| domain(&o.addr));
         if theirs != domain(&m.from_addr) {
-            text.push_str(&format!(
-                " Check the address: the organizer's domain ({theirs}) is not the sender's ({}).",
-                domain(&m.from_addr)
+            text.push(' ');
+            text.push_str(&t!(
+                invoke_q_rsvp_domain,
+                theirs.as_str().into(),
+                domain(&m.from_addr).into()
             ));
         }
         match self.invite_me(m, ev) {
-            None => text.push_str(&format!(
-                " You are not listed as an attendee, so the reply answers as {account}."
-            )),
-            Some(p) if !p.addr.eq_ignore_ascii_case(&account) => text.push_str(&format!(
-                " The reply answers as {}, an address this message was sent to.",
-                p.addr
-            )),
+            None => {
+                text.push(' ');
+                text.push_str(&t!(invoke_q_rsvp_unlisted, account.as_str().into()));
+            }
+            Some(p) if !p.addr.eq_ignore_ascii_case(&account) => {
+                text.push(' ');
+                text.push_str(&t!(invoke_q_rsvp_alias, p.addr.as_str().into()));
+            }
             Some(_) => {}
         }
-        text.push_str(
-            " \u{201c}Don't send a reply\u{201d} keeps your answer on this computer only.",
-        );
+        text.push(' ');
+        text.push_str(&t!(invoke_q_rsvp_local));
         (title, text)
     }
 
@@ -189,7 +205,12 @@ impl App {
             };
             match smtp::build_raw(out).and_then(|raw| self.db.queue_reply(&draft, &raw)) {
                 Ok(row) => self.dispatch(row, account.id),
-                Err(e) => return self.set_status(&format!("Couldn't send the reply: {e:#}"), true),
+                Err(e) => {
+                    return self.set_status(
+                        &t!(invoke_could_not_send_reply, format!("{e:#}").into()),
+                        true,
+                    );
+                }
             }
         }
         let account_id = account.id;
@@ -197,14 +218,11 @@ impl App {
             .db
             .record_rsvp(account_id, &uid, &rid, seq, answer as i64)
         {
-            self.set_status(&format!("{e:#}"), true);
+            self.set_status(&text::detail(&e), true);
         } else if send {
-            self.set_status(
-                "Your reply is in the Outbox; only the organizer gets it.",
-                false,
-            );
+            self.set_status(&t!(invoke_reply_in_outbox), false);
         } else {
-            self.set_status("Answer kept on this computer; no reply was sent.", false);
+            self.set_status(&t!(invoke_answer_kept), false);
         }
         self.invite_change = false;
         if send {
@@ -218,6 +236,6 @@ impl App {
 pub(super) fn save_invite() {
     let data = with_app(|a| mime::calendar_file(a.open.as_ref()?.msg.raw.as_deref()?)).flatten();
     if let Some(data) = data {
-        save_file("Save invitation", "invite.ics", data);
+        save_file(&t!(invoke_dlg_save_invitation), "invite.ics", data);
     }
 }

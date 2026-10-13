@@ -25,6 +25,13 @@ when that development switch is set), except the passwords:
 Settings → Privacy → **Remove all data** removes every item above at
 once (see "Removing everything" below).
 
+To look like the rest of Windows, Komorebi reads Windows' appearance
+settings when it starts and when Windows says one changed: the accent
+colour, light or dark apps, contrast theme colours, text size, animation
+effects and whether title bars show the accent (from your user's
+registry, `HKCU`, and Windows' system settings). It only reads them,
+keeps them in memory while it runs, and sends them nowhere.
+
 Komorebi writes nothing else: no registry keys, no files elsewhere, no
 temporary files outside `cache.open` (Windows itself may remember the
 folder a file dialog last showed). Files you save (attachments, `.eml`,
@@ -71,9 +78,14 @@ The cache lives at `%LOCALAPPDATA%\komorebi\cache.sqlite3` and holds:
 
 - Account settings: email address, display name, IMAP/SMTP host, port and
   security mode, the "save sent mail" choice, and the account's signature.
-- App settings, as named values: the theme, the check interval, the
-  undo-send and mark-as-read delays, the taskbar flash choice, and where
-  the window was when it last closed (position and size on screen). Each
+- App settings, as named values: the theme, the display language (System,
+  English or Portuguese; Windows' display language is only read, never
+  stored or sent), the check interval, the
+  undo-send and mark-as-read delays, the taskbar flash choice, where
+  the window was when it last closed (position and size on screen), the
+  folder pane's folded lines, the view last open, the last folders
+  Move went to (folder ids), which teaching tips were seen, and the
+  version the What's new bar last told about. Each
   account also records whether it is switched on and its place in the
   account order.
 - Folder names and roles.
@@ -87,9 +99,10 @@ The cache lives at `%LOCALAPPDATA%\komorebi\cache.sqlite3` and holds:
   Message-ID they will be sent with. A reply to or forward of an HTML
   message also keeps the original's HTML as it will be quoted (with images,
   remote styles, scripts and forms removed). They are saved two seconds after you
-  stop typing and when the composer closes. A draft is deleted from the
-  cache when you discard it or when its account is removed, and it moves
-  to the Outbox when you send it. A copy of each saved draft is also kept
+  stop typing and when the composer closes (Close, Esc, or a click on a
+  message or an Outbox row). A draft is deleted from the cache when you
+  discard it (with its copy in your server's Drafts folder) or when its
+  account is removed, and it moves to the Outbox when you send it. A copy of each saved draft is also kept
   in the account's Drafts folder on your own mail server (see Network
   calls), so the cache also records where that copy is (folder, UID). The
   copy carries an `X-Komorebi-Draft-Id` header with the draft's local
@@ -124,7 +137,7 @@ An attachment you open is written to
 for its type can read it; these copies are deleted at the next start
 (a copy still open in another app stays until the start after that).
 
-Settings → Privacy → Download again deletes an account's cached
+Download again (on the account's page in Settings → Accounts) deletes an account's cached
 messages, their raw copies and its address index from the cache (in one
 step) and downloads the mail again; nothing on the server changes, and
 the account, its password, drafts, Outbox and the settings stay.
@@ -142,7 +155,8 @@ time. The next start shows a one-time note pointing to it (`crash.seen`
 beside it records that the note was shown).
 
 The **diagnostics log** is off unless you turn it on in Settings →
-Privacy. Then each server command adds one line to
+Privacy (Open logs folder there shows the files). Then each server
+command adds one line to
 `logs\komorebi.log` in the same folder: the time (UTC), the account's
 number in the cache, the command's name (`FETCH`, `STORE`, `SMTP SEND`,
 ...), its status or the server's response code (`OK`, `NO [OVERQUOTA]`)
@@ -170,6 +184,40 @@ replaces the saved one only after it signs in to both servers. Removing an
 account deletes its saved password first; if Credential Manager can't be
 reached, the account is not removed.
 
+## Certificates of your own server
+
+- Komorebi validates server certificates with Windows. For a self-signed or
+  private-CA server you can pin that server's certificate: "Review
+  certificate" (offered after a check failed on an untrusted certificate of
+  a manual server) connects to the server without sending any credentials,
+  only to read its certificate, and shows its SHA-256 fingerprint. Nothing is
+  saved until you confirm. Compare the fingerprint with the one your server
+  reports; the first trust decision is yours.
+- The certificate (public data) is stored in the local cache, per server
+  (host, port and role), and only used to recognise that server. It goes
+  with the account or with "Remove all data". A pinned server presenting
+  another certificate is refused before any password is sent, and a pin
+  never makes Windows' own trusted roots acceptable for that server.
+  Changing the host, port or security setting clears that server's pin.
+- A password is sent only after the TLS session is up and the certificate is
+  validated by Windows or is the pinned one. STARTTLS is never optional.
+- Windows checks revocation from its cache only; building a certificate chain
+  may still fetch a missing intermediate certificate from the address named in
+  the certificate (an unpinned public server or a CA-issued pinned one).
+- A pinned certificate must be reviewed again when the server renews it.
+- Before TLS, Komorebi asks an IMAP server only for its capabilities and
+  for STARTTLS; nothing the server lists then is trusted (they are asked for
+  again under TLS). A server that does not list STARTTLS, answers it with
+  anything but OK, greets with PREAUTH or BYE, or disables `LOGIN` under TLS
+  never receives the password.
+- The SMTP greeting is `EHLO [127.0.0.1]` on every connection, so a server
+  never learns the name of this computer from Komorebi.
+- When an account cannot connect for a reason only you can fix (a rejected
+  password, a changed or untrusted certificate, no STARTTLS), its sync,
+  IDLE and sending threads make one attempt and then stop asking until you
+  press Retry or Refresh or save the account, so no server sees repeated
+  sign-in attempts.
+
 ## Network calls
 
 Komorebi connects only to the servers you configure:
@@ -185,6 +233,22 @@ Komorebi connects only to the servers you configure:
   replaces, and the copy of a draft you send or discard, is removed.
   While the app runs, one read-only IMAP connection waits on the inbox
   (IDLE) so new mail shows up without waiting for the next sync.
+- "Find settings" in the manual account form, only when you press it (or
+  when you press Add account or Test connection with Other server chosen
+  and no server typed; never while you type): your
+  email domain (the part after the @, never the address or the password) goes
+  to your system's DNS resolver as SRV queries (`_imaps._tcp`,
+  `_submissions._tcp`, and their STARTTLS forms), in the clear unless your
+  system uses DNS over HTTPS, so your network and resolver can see it; and,
+  if those find nothing, over HTTPS to `autoconfig.<your domain>` and to
+  `<your domain>` (`/.well-known/autoconfig/mail/config-v1.1.xml`), your
+  domain's own web servers, which see your IP address and the domain. At most
+  four DNS queries and two web requests, never repeated by itself. Nothing
+  goes to Mozilla or any other third party. The answer only fills the form's
+  empty server fields: a server on another domain than your address is shown
+  but not filled in, and nothing is saved or signed in to until you press Add
+  or Test connection. Hosts that resolve to private addresses are refused, and
+  with `KOMOREBI_OFFLINE` nothing is looked up.
 - IMAP and SMTP sign-in checks when you add an account, or save a new
   password or other servers for one: the app signs in to each server and
   logs out (SMTP: greeting, sign-in, quit); nothing is sent.
@@ -215,8 +279,10 @@ above the message counts them and warns that loading them tells the sender
 when you opened it and your IP address. "Load once" loads them for that
 message while it stays open. "Always load from" adds the sender's exact
 From address (never its display name or domain) to a list kept in the
-local cache; Settings shows that list, where each sender can be removed or
-the whole list forgotten. Loading uses HTTPS only: an `http://` (or
+local cache; a bar then says so with Undo (which takes the address off the
+list again), and later messages from that sender carry the caption "Images
+load from this sender · Change". Settings → Privacy shows that list, where
+each sender can be removed or the whole list forgotten. Loading uses HTTPS only: an `http://` (or
 scheme-relative `//host`) image address is requested over HTTPS, a redirect
 to plain HTTP is refused, and plain HTTP is never used. It sends
 no cookies, Referer or credentials and a generic User-Agent, refuses

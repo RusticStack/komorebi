@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! cargo run --release --example seed -- <new.sqlite3> <count> [eml-dir] [--drafts] [--outbox] [--signature] [--html-reply]
+//!     [--accounts] [--folders N] [--fold a2,f117]
 //! $env:KOMOREBI_OFFLINE=1; $env:KOMOREBI_DB="<new.sqlite3>"; cargo run --release
 //! ```
 //!
@@ -22,6 +23,17 @@
 //! quote, built by `compose_html` and `smtp::build_raw`), received from
 //! its sender, to see the HTML part as a recipient would. It refuses
 //! the app's own cache directory and any existing non-empty file.
+//!
+//! For the folder pane: `--accounts` adds nested folders to the seed
+//! account (`INBOX/Receipts`, a `Projects` tree with a `Projects-old`
+//! sibling and a path deeper than the drawn level cap, Newsletters with
+//! unread mail, Drafts, Junk and Trash) and two more `.invalid` accounts
+//! ("Maria Gonçalves" with a 64-character address and a long folder name
+//! with 1234 unread, and "Work" with `Team/Standups`). `--folders N` adds
+//! N more folders (depths 0 to 3, about a third with unread mail) to the
+//! seed account, for scrolling and folding at scale. `--fold a2,f117`
+//! saves those folded lines (the `nav_folded` setting); the ids of the
+//! accounts and of the folders with subfolders are printed.
 
 use anyhow::{Context, Result, bail};
 use komorebi::db::{Db, DraftRow, NewAccount, NewHeader, Outbox};
@@ -64,18 +76,36 @@ const WORDS: &[&str] = &[
 ];
 
 fn main() -> Result<()> {
-    let all: Vec<String> = std::env::args().skip(1).collect();
+    let usage = "usage: seed <new.sqlite3> <count> [eml-dir] [--drafts] [--outbox] [--signature] [--html-reply] [--accounts] [--folders N] [--fold a2,f117]";
+    let mut all: Vec<String> = std::env::args().skip(1).collect();
+    // The flags with a value, taken out first.
+    let mut value = |flag: &str| -> Result<Option<String>> {
+        match all.iter().position(|a| a == flag) {
+            Some(i) if i + 1 < all.len() => {
+                let v = all.remove(i + 1);
+                all.remove(i);
+                Ok(Some(v))
+            }
+            Some(_) => bail!("{flag} needs a value; {usage}"),
+            None => Ok(None),
+        }
+    };
+    let extra_folders: usize = match value("--folders")? {
+        Some(n) => n.parse().context(usage)?,
+        None => 0,
+    };
+    let fold = value("--fold")?;
     let drafts = all.iter().any(|a| a == "--drafts");
     let outbox = all.iter().any(|a| a == "--outbox");
     let signature = all.iter().any(|a| a == "--signature");
     let html_reply = all.iter().any(|a| a == "--html-reply");
+    let accounts = all.iter().any(|a| a == "--accounts");
     let mut args = all.into_iter().filter(|a| {
         !matches!(
             a.as_str(),
-            "--drafts" | "--outbox" | "--signature" | "--html-reply"
+            "--drafts" | "--outbox" | "--signature" | "--html-reply" | "--accounts"
         )
     });
-    let usage = "usage: seed <new.sqlite3> <count> [eml-dir] [--drafts] [--outbox] [--signature] [--html-reply]";
     let path = PathBuf::from(args.next().context(usage)?);
     let count: u32 = args.next().context(usage)?.parse().context(usage)?;
     let eml_dir = args.next().map(PathBuf::from);
@@ -88,6 +118,8 @@ fn main() -> Result<()> {
         security: Security::Tls,
     };
     let account = db.add_account(&NewAccount {
+        imap_user: String::new(),
+        smtp_user: String::new(),
         email: "seed@komorebi.invalid".into(),
         name: "Seed Account".into(),
         imap: server(993),
@@ -303,6 +335,18 @@ fn main() -> Result<()> {
             ..Default::default()
         })?;
     }
+    if accounts {
+        add_accounts(&mut db, account)?;
+    }
+    if extra_folders > 0 {
+        add_folders(&mut db, account, extra_folders)?;
+    }
+    if let Some(fold) = &fold {
+        db.set_setting("nav_folded", fold)?;
+    }
+    if accounts || extra_folders > 0 || fold.is_some() {
+        print_tree(&db)?;
+    }
     println!(
         "seeded {count} messages and {added} .eml files into {}{}{}{}",
         path.display(),
@@ -358,6 +402,184 @@ fn html_reply_to(db: &Db, inbox: i64) -> Result<Vec<u8>> {
         in_reply_to: m.msgid.clone(),
         ..Default::default()
     })
+}
+
+/// Unread-count test mail: `n` messages in `folder`, the newest `unread`
+/// of them unread.
+fn folder_mail(
+    db: &mut Db,
+    (account, folder): (i64, i64),
+    n: u32,
+    unread: u32,
+    to: &str,
+    uid: &mut u32,
+) -> Result<()> {
+    let headers: Vec<NewHeader> = (0..n)
+        .map(|i| {
+            *uid += 1;
+            NewHeader {
+                uid: *uid,
+                msgid: format!("<m{}@sidebar.komorebi.invalid>", *uid),
+                subject: format!("Sidebar test message {}", *uid),
+                from_name: "Test Sender".into(),
+                from_addr: "sender@example.invalid".into(),
+                to: to.into(),
+                date: NEWEST - i64::from(i) * 3_600 - folder * 60,
+                size: 3_000,
+                seen: i >= unread,
+                ..NewHeader::default()
+            }
+        })
+        .collect();
+    db.insert_headers(account, folder, &headers)
+}
+
+/// The last part of a folder name, as a sync shows it.
+fn leaf(name: &str) -> &str {
+    name.rsplit('/').next().unwrap_or(name)
+}
+
+fn depth(name: &str) -> i64 {
+    name.matches('/').count() as i64
+}
+
+/// `--accounts`: nested folders for the seed account and two more
+/// `.invalid` accounts.
+fn add_accounts(db: &mut Db, seed: i64) -> Result<()> {
+    const DESIGN: &str = "Projects/Alpha/Design reviews and long folder names 2026";
+    let mut uid = 100_000;
+    let seed_to = "seed@komorebi.invalid";
+    let deep = |rest: &str| format!("{DESIGN}{rest}");
+    let nested: [(String, u32, u32); 11] = [
+        ("INBOX/Receipts".into(), 6, 2),
+        ("Projects".into(), 4, 0),
+        ("Projects/Alpha".into(), 8, 3),
+        (DESIGN.into(), 5, 5),
+        (deep("/Q1"), 2, 1),
+        (deep("/Q1/Notes"), 2, 0),
+        (deep("/Q1/Notes/Deep"), 1, 1),
+        // Deeper than the level drawn.
+        (deep("/Q1/Notes/Deep/Deeper"), 1, 0),
+        ("Projects/Beta".into(), 3, 0),
+        ("Projects-old".into(), 2, 0),
+        ("Newsletters".into(), 40, 27),
+    ];
+    for (name, n, unread) in &nested {
+        let f = db.upsert_folder(seed, name, leaf(name), depth(name), Role::Other)?;
+        folder_mail(db, (seed, f), *n, *unread, seed_to, &mut uid)?;
+    }
+    for (name, role) in [
+        ("Drafts", Role::Drafts),
+        ("Junk", Role::Junk),
+        ("Trash", Role::Trash),
+    ] {
+        let f = db.upsert_folder(seed, name, name, 0, role)?;
+        folder_mail(db, (seed, f), 3, 1, seed_to, &mut uid)?;
+    }
+    let server = |host: &str, port| Server {
+        host: host.into(),
+        port,
+        security: Security::Tls,
+    };
+    let new = |email: &str, name: &str| NewAccount {
+        imap_user: String::new(),
+        smtp_user: String::new(),
+        email: email.into(),
+        name: name.into(),
+        imap: server("imap.mail.invalid", 993),
+        smtp: server("smtp.mail.invalid", 465),
+        save_sent: true,
+    };
+    let maria = db.add_account(&new(
+        "maria.goncalves.long-address-for-testing@purelymail-example.invalid",
+        "Maria Gonçalves",
+    ))?;
+    let work = db.add_account(&new("work@postale.invalid", "Work"))?;
+    let role = |name: &str| match name {
+        "INBOX" => Role::Inbox,
+        "Sent" => Role::Sent,
+        "Drafts" => Role::Drafts,
+        "Archive" => Role::Archive,
+        "Junk" => Role::Junk,
+        "Trash" => Role::Trash,
+        _ => Role::Other,
+    };
+    let maria_folders: &[(&str, u32, u32)] = &[
+        ("INBOX", 60, 37),
+        ("Sent", 5, 0),
+        ("Drafts", 2, 0),
+        ("Archive", 10, 0),
+        ("Junk", 9, 5),
+        ("Trash", 4, 2),
+        ("Clientes", 3, 0),
+        (
+            "Clientes/Associação Mutualista de Lisboa - contratos",
+            1300,
+            1234,
+        ),
+        ("Clientes/Porto", 4, 1),
+        ("Faturas", 6, 0),
+    ];
+    let work_folders: &[(&str, u32, u32)] = &[
+        ("INBOX", 12, 4),
+        ("Sent", 3, 0),
+        ("Archive", 3, 0),
+        ("Trash", 1, 0),
+        ("Team", 5, 2),
+        ("Team/Standups", 4, 0),
+    ];
+    for (id, to, folders) in [
+        (maria, "maria@example.invalid", maria_folders),
+        (work, "work@postale.invalid", work_folders),
+    ] {
+        for &(name, n, unread) in folders {
+            let role = role(name);
+            let display = if role == Role::Inbox {
+                "Inbox"
+            } else {
+                leaf(name)
+            };
+            let f = db.upsert_folder(id, name, display, depth(name), role)?;
+            folder_mail(db, (id, f), n, unread, to, &mut uid)?;
+        }
+    }
+    Ok(())
+}
+
+/// `--folders N`: N more folders for the seed account, depths 0 to 3
+/// (each one under the folder before it a level up), every third with
+/// unread mail.
+fn add_folders(db: &mut Db, seed: i64, n: usize) -> Result<()> {
+    let mut uid = 500_000;
+    let mut path: Vec<String> = Vec::new();
+    for k in 0..n {
+        path.truncate(k % 4);
+        let name = match path.last() {
+            Some(parent) => format!("{parent}/Item {k:03}"),
+            None => format!("Bulk {k:03}"),
+        };
+        let f = db.upsert_folder(seed, &name, leaf(&name), depth(&name), Role::Other)?;
+        let unread = if k % 3 == 0 { 1 + (k % 5) as u32 } else { 0 };
+        let to = "seed@komorebi.invalid";
+        folder_mail(db, (seed, f), 2 + unread, unread, to, &mut uid)?;
+        path.push(name);
+    }
+    Ok(())
+}
+
+/// The ids `--fold` takes: every account, and every folder with subfolders.
+fn print_tree(db: &Db) -> Result<()> {
+    let folders = db.folders()?;
+    let tree = komorebi::tree::tree(&folders);
+    for a in db.accounts()? {
+        println!("a{}  {}", a.id, a.email);
+        for node in tree.iter().filter(|n| n.has_children) {
+            if let Some(f) = folders.get(node.index).filter(|f| f.account_id == a.id) {
+                println!("  f{}  {}", f.id, f.name);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Seed only throwaway files: never the app's cache directory, never a file

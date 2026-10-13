@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let body = mime::parse_body(&raw);
             let _ = body.preview();
-            let _ = komorebi::trust::notice(&body.auth, "example.com", "", "");
+            let _ = komorebi::trust::reasons(&body.auth, "example.com", "", "");
             for a in &body.attachments {
                 let _ = mime::attachment(&raw, a.index);
             }

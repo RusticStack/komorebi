@@ -28,6 +28,7 @@ fn main() -> Result<()> {
     };
     let mut imap = Imap::connect(
         &PRESETS[1].imap_server(),
+        None,
         &var("EMAIL")?,
         &var("PASSWORD_EMAIL")?,
     )?;

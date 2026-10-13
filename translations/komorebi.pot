@@ -1,0 +1,3198 @@
+# Komorebi message catalog (template). Generated from the @tr() calls in
+# ui/*.slint: run `KOMOREBI_UPDATE_POT=1 cargo test --test i18n_catalog template`.
+# Add a language as translations/<tag>/LC_MESSAGES/komorebi.po.
+msgid ""
+msgstr ""
+"Project-Id-Version: komorebi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ui/app.slint
+msgid "Filter folders"
+msgstr ""
+
+#: ui/app.slint
+msgid "No folders match"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Recent"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Undo"
+msgstr ""
+
+#: ui/app.slint
+msgid "Undo (Ctrl+Z)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Drop to attach"
+msgstr ""
+
+#: ui/app.slint
+msgid "Drop to attach to a new message"
+msgstr ""
+
+#: ui/app.slint
+msgid "Suggested recipients"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "suggestion"
+msgid "{0}, {1}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Find the incoming server"
+msgstr ""
+
+#: ui/app.slint
+msgid "Connect to the incoming server"
+msgstr ""
+
+#: ui/app.slint
+msgid "Secure the connection"
+msgstr ""
+
+#: ui/app.slint
+msgid "Sign in to incoming mail"
+msgstr ""
+
+#: ui/app.slint
+msgid "Read the folder list"
+msgstr ""
+
+#: ui/app.slint
+msgid "Connect to the sending server"
+msgstr ""
+
+#: ui/app.slint
+msgid "Sign in to sending mail"
+msgstr ""
+
+#: ui/app.slint
+msgid "{0}, waiting"
+msgstr ""
+
+#: ui/app.slint
+msgid "{0}, in progress"
+msgstr ""
+
+#: ui/app.slint
+msgid "{0}, passed"
+msgstr ""
+
+#: ui/app.slint
+msgid "{0}, failed"
+msgstr ""
+
+#: ui/app.slint
+msgid "{0}, skipped"
+msgstr ""
+
+#: ui/app.slint
+msgid "Forget certificate"
+msgstr ""
+
+#: ui/app.slint
+msgid "Find settings"
+msgstr ""
+
+#: ui/app.slint
+msgid "Looking up settings"
+msgstr ""
+
+#: ui/app.slint
+msgid "Looking up settings …"
+msgstr ""
+
+#: ui/app.slint
+msgid "Fills in the servers for your address. Only your domain name is looked up, and nothing is saved."
+msgstr ""
+
+#: ui/app.slint
+msgid "Enter your email address."
+msgstr ""
+
+#: ui/app.slint
+msgid "Enter an email address like ana@example.com."
+msgstr ""
+
+#: ui/app.slint
+msgid "Enter your password."
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Choose your provider."
+msgstr ""
+
+#: ui/app.slint
+msgid "Enter the incoming (IMAP) server."
+msgstr ""
+
+#: ui/app.slint
+msgid "Enter the sending (SMTP) server."
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Move up"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Move down"
+msgstr ""
+
+#: ui/app.slint
+msgid "Back"
+msgstr ""
+
+#: ui/app.slint
+msgid "Back to accounts"
+msgstr ""
+
+#: ui/app.slint
+msgid "Back to mail (Esc)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Accounts"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add an account"
+msgstr ""
+
+#: ui/app.slint
+msgid "Edit {0}"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Settings"
+msgstr ""
+
+#: ui/app.slint
+msgid "More options for this account"
+msgstr ""
+
+#: ui/app.slint
+msgid "General"
+msgstr ""
+
+#: ui/app.slint
+msgid "Privacy"
+msgstr ""
+
+#: ui/app.slint
+msgid "About"
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloading the mail of {0}"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Review certificate"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Update password"
+msgstr ""
+
+#: ui/app.slint
+msgid "Review the certificate of {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Update password for {0}"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "account switched off"
+msgid "Off"
+msgstr ""
+
+#: ui/app.slint
+msgid "No accounts yet"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add another account"
+msgstr ""
+
+#: ui/app.slint
+msgid "Purelymail, Postale.io or any IMAP and SMTP server."
+msgstr ""
+
+#: ui/app.slint
+msgid "Add account"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "account page group"
+msgid "Account"
+msgstr ""
+
+#: ui/app.slint
+msgid "Sync this account"
+msgstr ""
+
+#: ui/app.slint
+msgid "When this is off, Komorebi doesn't connect to the account: no new mail comes in and nothing is sent. Its downloaded mail stays readable."
+msgstr ""
+
+#: ui/app.slint
+msgid "Sync {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Name"
+msgstr ""
+
+#: ui/app.slint
+msgid "Shown to recipients"
+msgstr ""
+
+#: ui/app.slint
+msgid "Email"
+msgstr ""
+
+#: ui/app.slint
+msgid "you@yourdomain.com"
+msgstr ""
+
+#: ui/app.slint
+msgid "The address can't be changed. To use another one, add another account."
+msgstr ""
+
+#: ui/app.slint
+msgid "Password"
+msgstr ""
+
+#: ui/app.slint
+msgid "Password or app password"
+msgstr ""
+
+#: ui/app.slint
+msgid "Leave empty to keep the current one"
+msgstr ""
+
+#: ui/app.slint
+msgid "Saved in Windows Credential Manager, never in Komorebi's files."
+msgstr ""
+
+#: ui/app.slint
+msgid "Username"
+msgstr ""
+
+#: ui/app.slint
+msgid "Same as email address"
+msgstr ""
+
+#: ui/app.slint
+msgid "The name you sign in with, if it isn't your email address."
+msgstr ""
+
+#: ui/app.slint
+msgid "Provider"
+msgstr ""
+
+#: ui/app.slint
+msgid "Any domain hosted at Purelymail"
+msgstr ""
+
+#: ui/app.slint
+msgid "Any domain hosted at Postale"
+msgstr ""
+
+#: ui/app.slint
+msgid "Other server"
+msgstr ""
+
+#: ui/app.slint
+msgid "Any other IMAP and SMTP server"
+msgstr ""
+
+#: ui/app.slint
+msgid "Signature"
+msgstr ""
+
+#: ui/app.slint
+msgid "Added below new mail, replies and forwards"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Folders"
+msgstr ""
+
+#: ui/app.slint
+msgid "Where sent mail and drafts are saved, and where Delete, Archive and Report junk move mail. Automatic follows what the server marks. Nothing is created on the server."
+msgstr ""
+
+#: ui/app.slint
+msgid "Save a copy of sent mail in the Sent folder"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Sent"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Drafts"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Trash"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgctxt "folder"
+msgid "Archive"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Junk"
+msgstr ""
+
+#: ui/app.slint
+msgid "Not filled in: the form changed while Komorebi looked."
+msgstr ""
+
+#: ui/app.slint
+msgid "Server settings"
+msgstr ""
+
+#: ui/app.slint
+msgid "Incoming and sending servers, ports and security"
+msgstr ""
+
+#: ui/app.slint
+msgid "IMAP server"
+msgstr ""
+
+#: ui/app.slint
+msgid "Port"
+msgstr ""
+
+#: ui/app.slint
+msgid "IMAP port"
+msgstr ""
+
+#: ui/app.slint
+msgid "IMAP security"
+msgstr ""
+
+#: ui/app.slint
+msgid "SSL/TLS (port 993)"
+msgstr ""
+
+#: ui/app.slint
+msgid "STARTTLS (port 143)"
+msgstr ""
+
+#: ui/app.slint
+msgid "IMAP username"
+msgstr ""
+
+#: ui/app.slint
+msgid "SMTP server"
+msgstr ""
+
+#: ui/app.slint
+msgid "SMTP port"
+msgstr ""
+
+#: ui/app.slint
+msgid "SMTP security"
+msgstr ""
+
+#: ui/app.slint
+msgid "SSL/TLS (port 465)"
+msgstr ""
+
+#: ui/app.slint
+msgid "STARTTLS (port 587)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Same sign-in as incoming"
+msgstr ""
+
+#: ui/app.slint
+msgid "SMTP username"
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi always signs in to the sending server."
+msgstr ""
+
+#: ui/app.slint
+msgid "Your name (optional)"
+msgstr ""
+
+#: ui/app.slint
+msgid "e.g. Ana Silva"
+msgstr ""
+
+#: ui/app.slint
+msgid "Shown to the people you write to."
+msgstr ""
+
+#: ui/app.slint
+msgid "Set username"
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloaded mail"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Download again"
+msgstr ""
+
+#: ui/app.slint
+msgid "Forgets the copy of this account's mail on this computer and downloads it once more. Mail on the server is not affected."
+msgstr ""
+
+#: ui/app.slint
+msgid "Download the mail of {0} again"
+msgstr ""
+
+#: ui/app.slint
+msgid "Remove this account"
+msgstr ""
+
+#: ui/app.slint
+msgid "Removes the account and its downloaded mail from this computer. Mail on the server is not affected."
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Remove"
+msgstr ""
+
+#: ui/app.slint
+msgid "Remove {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Theme"
+msgstr ""
+
+#: ui/app.slint
+msgid "System follows your Windows app mode."
+msgstr ""
+
+#: ui/app.slint
+msgctxt "settings theme"
+msgid "System"
+msgstr ""
+
+#: ui/app.slint
+msgid "Light"
+msgstr ""
+
+#: ui/app.slint
+msgid "Dark"
+msgstr ""
+
+#: ui/app.slint
+msgid "Check for new mail"
+msgstr ""
+
+#: ui/app.slint
+msgid "Servers that push new mail show it within seconds whatever the interval."
+msgstr ""
+
+#: ui/app.slint
+msgid "Every minute"
+msgstr ""
+
+#: ui/app.slint
+msgid "Every 2 minutes"
+msgstr ""
+
+#: ui/app.slint
+msgid "Every 5 minutes"
+msgstr ""
+
+#: ui/app.slint
+msgid "Every 15 minutes"
+msgstr ""
+
+#: ui/app.slint
+msgid "Undo send"
+msgstr ""
+
+#: ui/app.slint
+msgid "Holds a sent message this long so it can be taken back."
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Off"
+msgstr ""
+
+#: ui/app.slint
+msgid "5 seconds"
+msgstr ""
+
+#: ui/app.slint
+msgid "10 seconds"
+msgstr ""
+
+#: ui/app.slint
+msgid "20 seconds"
+msgstr ""
+
+#: ui/app.slint
+msgid "30 seconds"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Mark as read"
+msgstr ""
+
+#: ui/app.slint
+msgid "When a message opens in the reader."
+msgstr ""
+
+#: ui/app.slint
+msgid "Right away"
+msgstr ""
+
+#: ui/app.slint
+msgid "After 1 second"
+msgstr ""
+
+#: ui/app.slint
+msgid "After 3 seconds"
+msgstr ""
+
+#: ui/app.slint
+msgid "Never"
+msgstr ""
+
+#: ui/app.slint
+msgid "Flash the taskbar button"
+msgstr ""
+
+#: ui/app.slint
+msgid "When new mail arrives while Komorebi is in the background."
+msgstr ""
+
+#: ui/app.slint
+msgid "Flash the taskbar button when new mail arrives"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "settings language"
+msgid "Language"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "settings language"
+msgid "The language of menus and messages. System follows your Windows display language."
+msgstr ""
+
+#: ui/app.slint
+msgctxt "settings language"
+msgid "System"
+msgstr ""
+
+#: ui/app.slint
+msgid "Some text changes after Komorebi restarts."
+msgstr ""
+
+#: ui/app.slint
+msgid "Remote images"
+msgstr ""
+
+#: ui/app.slint
+msgid "Senders whose images always load"
+msgstr ""
+
+#: ui/app.slint
+msgid "None yet. Everyone else's images stay blocked until you load them, and tracking pixels never load."
+msgstr ""
+
+#: ui/app.slint
+msgid "Everyone else's images stay blocked until you load them, and tracking pixels never load."
+msgstr ""
+
+#: ui/app.slint
+msgid "Forget all"
+msgstr ""
+
+#: ui/app.slint
+msgid "Diagnostics"
+msgstr ""
+
+#: ui/app.slint
+msgid "Diagnostics log"
+msgstr ""
+
+#: ui/app.slint
+msgid "Records only server commands, response codes and timings on this PC, never mail, addresses or passwords; nothing is sent."
+msgstr ""
+
+#: ui/app.slint
+msgid "Keep a diagnostics log"
+msgstr ""
+
+#: ui/app.slint
+msgid "Logs folder"
+msgstr ""
+
+#: ui/app.slint
+msgid "The log files, in the data folder."
+msgstr ""
+
+#: ui/app.slint
+msgid "Open logs folder"
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the logs folder in File Explorer"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "settings group"
+msgid "Reset"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Remove all data"
+msgstr ""
+
+#: ui/app.slint
+msgid "Deletes the saved passwords of all accounts from Windows Credential Manager, then everything Komorebi keeps in the data folder (downloaded mail, drafts, the Outbox, settings and logs), and closes Komorebi. Mail on the server is not affected."
+msgstr ""
+
+#: ui/app.slint
+msgid "Version {0} · Apache License 2.0"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "about group"
+msgid "Help"
+msgstr ""
+
+#: ui/app.slint
+msgid "What's new in {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "The changes in this version, in the changelog."
+msgstr ""
+
+#: ui/app.slint
+msgctxt "about"
+msgid "Open"
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the changelog in the browser"
+msgstr ""
+
+#: ui/app.slint
+msgid "Show tips again"
+msgstr ""
+
+#: ui/app.slint
+msgid "Shows the short tips about folders, search and help again."
+msgstr ""
+
+#: ui/app.slint
+msgid "Show tips"
+msgstr ""
+
+#: ui/app.slint
+msgid "Keyboard shortcuts"
+msgstr ""
+
+#: ui/app.slint
+msgid "Every key, by group. Press F1 or Ctrl+/ anywhere."
+msgstr ""
+
+#: ui/app.slint
+msgctxt "about"
+msgid "Show"
+msgstr ""
+
+#: ui/app.slint
+msgid "Show the keyboard shortcuts"
+msgstr ""
+
+#: ui/app.slint
+msgid "Get help"
+msgstr ""
+
+#: ui/app.slint
+msgid "The Komorebi guide: adding an account, the keys and the settings."
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the Komorebi guide in the browser"
+msgstr ""
+
+#: ui/app.slint
+msgid "Report a problem"
+msgstr ""
+
+#: ui/app.slint
+msgid "Opens the issues page in the browser. No data is attached."
+msgstr ""
+
+#: ui/app.slint
+msgid "Report"
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the issues page in the browser"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "about group"
+msgid "About"
+msgstr ""
+
+#: ui/app.slint
+msgid "Privacy statement"
+msgstr ""
+
+#: ui/app.slint
+msgid "What Komorebi keeps on this PC, and what it sends where."
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the privacy statement in the browser"
+msgstr ""
+
+#: ui/app.slint
+msgid "Data folder"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Copy"
+msgstr ""
+
+#: ui/app.slint
+msgid "Copy the data folder's path"
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the data folder in File Explorer"
+msgstr ""
+
+#: ui/app.slint
+msgid "Source code"
+msgstr ""
+
+#: ui/app.slint
+msgid "Free and open source, with no telemetry and no ads. Passwords are kept in Windows Credential Manager."
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the Komorebi repository in the browser"
+msgstr ""
+
+#: ui/app.slint
+msgid "Made with Slint"
+msgstr ""
+
+#: ui/app.slint
+msgid "The toolkit Komorebi's window is built with."
+msgstr ""
+
+#: ui/app.slint
+msgid "Save"
+msgstr ""
+
+#: ui/app.slint
+msgid "Test connection"
+msgstr ""
+
+#: ui/app.slint
+msgid "Checks the servers and the sign-in without saving anything"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Cancel"
+msgstr ""
+
+#: ui/app.slint
+msgid "Stops the check; the form stays as typed"
+msgstr ""
+
+#: ui/app.slint
+msgid "Reading the certificate"
+msgstr ""
+
+#: ui/app.slint
+msgid "Signing in"
+msgstr ""
+
+#: ui/app.slint
+msgid "Reading the certificate …"
+msgstr ""
+
+#: ui/app.slint
+msgid "Still signing in … You can cancel and check the server name."
+msgstr ""
+
+#: ui/app.slint
+msgid "Signing in …"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "All inboxes"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Nothing here"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "New message"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Move to"
+msgstr ""
+
+#: ui/app.slint
+msgid "Open"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Discard"
+msgstr ""
+
+#: ui/app.slint
+msgid "Search scope"
+msgstr ""
+
+#: ui/app.slint
+msgid "Minimize"
+msgstr ""
+
+#: ui/app.slint
+msgid "Restore"
+msgstr ""
+
+#: ui/app.slint
+msgid "Maximize"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Close"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Syncing …"
+msgstr ""
+
+#: ui/app.slint
+msgid "Refresh (F5)"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "More actions"
+msgstr ""
+
+#: ui/app.slint
+msgid "Mark all as read, Select messages"
+msgstr ""
+
+#: ui/app.slint
+msgid "All"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Unread"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Flagged"
+msgstr ""
+
+#: ui/app.slint
+msgid "Search all folders"
+msgstr ""
+
+#: ui/app.slint
+msgid "Clear search"
+msgstr ""
+
+#: ui/app.slint
+msgid "Messages"
+msgstr ""
+
+#: ui/app.slint
+msgid "Show all"
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloading your mail"
+msgstr ""
+
+#: ui/app.slint
+msgid "Searches subject, people and preview of downloaded mail."
+msgstr ""
+
+#: ui/app.slint
+msgid "Subject"
+msgstr ""
+
+#: ui/app.slint
+msgid "Link"
+msgstr ""
+
+#: ui/app.slint
+msgid "Attach"
+msgstr ""
+
+#: ui/app.slint
+msgid "Attach (Ctrl+Shift+A)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Send"
+msgstr ""
+
+#: ui/app.slint
+msgid "Send (Ctrl+Enter)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Close (Esc)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Saves the draft in Drafts"
+msgstr ""
+
+#: ui/app.slint
+msgid "Send anyway"
+msgstr ""
+
+#: ui/app.slint
+msgid "Keep editing"
+msgstr ""
+
+#: ui/app.slint
+msgid "From"
+msgstr ""
+
+#: ui/app.slint
+msgid "To"
+msgstr ""
+
+#: ui/app.slint
+msgid "Cc"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add Cc (Ctrl+Shift+C)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Bcc"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add Bcc (Ctrl+Shift+B)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Bold (Ctrl+B)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Italic (Ctrl+I)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Link (Ctrl+K)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Bulleted list (Ctrl+Shift+8)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Numbered list (Ctrl+Shift+7)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Quote (Ctrl+Shift+Q)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Preview"
+msgstr ""
+
+#: ui/app.slint
+msgid "Preview the message as it is sent"
+msgstr ""
+
+#: ui/app.slint
+msgid "Marks like **bold**, _italic_ and “- ” lists are sent as formatting. Preview shows how the message looks."
+msgstr ""
+
+#: ui/app.slint
+msgid "https://example.com or name@example.com"
+msgstr ""
+
+#: ui/app.slint
+msgid "Link address"
+msgstr ""
+
+#: ui/app.slint
+msgid "Not a web or e-mail address"
+msgstr ""
+
+#: ui/app.slint
+msgid "Insert"
+msgstr ""
+
+#: ui/app.slint
+msgid "Insert link (Enter)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Cancel (Esc)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Write your message"
+msgstr ""
+
+#: ui/app.slint
+msgid "Message body"
+msgstr ""
+
+#: ui/app.slint
+msgid "Couldn't draw the preview. The message is sent as written."
+msgstr ""
+
+#: ui/app.slint
+msgid "The preview shows the beginning of the message."
+msgstr ""
+
+#: ui/app.slint
+msgid "Show quoted text"
+msgstr ""
+
+#: ui/app.slint
+msgid "Select a draft to keep writing"
+msgstr ""
+
+#: ui/app.slint
+msgid "Select a message to read"
+msgstr ""
+
+#: ui/app.slint
+msgid "{n} message selected"
+msgid_plural "{n} messages selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Archive"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Archive (Backspace)"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Delete"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Delete (Del)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Move"
+msgstr ""
+
+#: ui/app.slint
+msgid "Move (Ctrl+Shift+V)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Select messages of one account to move them"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Mark as read (Ctrl+Q)"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Mark as unread"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Mark as unread (Ctrl+U)"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Flag"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Flag (Insert)"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Remove flag"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Select all"
+msgstr ""
+
+#: ui/app.slint
+msgid "Clear selection"
+msgstr ""
+
+#: ui/app.slint
+msgid "Back to list (Esc)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Edit"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Retry"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "To: {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Details"
+msgstr ""
+
+#: ui/app.slint
+msgid "The server's reply, as it came"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Reply"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Reply all"
+msgstr ""
+
+#: ui/app.slint
+msgid "Forward as new draft"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Forward"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Load images"
+msgstr ""
+
+#: ui/app.slint
+msgid "Always load from this sender"
+msgstr ""
+
+#: ui/app.slint
+msgid "Reply (Ctrl+R)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Reply all (Ctrl+Shift+R)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Forward as new draft (Ctrl+Shift+F)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Forward (Ctrl+Shift+F)"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Remove flag (Insert)"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint ui/widgets.slint
+msgid "(no subject)"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Subject: {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Unsubscribe"
+msgstr ""
+
+#: ui/app.slint
+msgid "From: {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Sender address: {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Date: {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "To: {0}   Cc: {1}"
+msgstr ""
+
+#: ui/app.slint
+msgid "This draft was saved on another device or in webmail. To keep writing it here, use Forward as new draft."
+msgstr ""
+
+#: ui/app.slint
+msgid "You started a reply to this message."
+msgstr ""
+
+#: ui/app.slint
+msgid "Resume"
+msgstr ""
+
+#: ui/app.slint
+msgid "This message may not be from who it says"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Not junk"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Report junk"
+msgstr ""
+
+#: ui/app.slint
+msgid "Why?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Accept"
+msgstr ""
+
+#: ui/app.slint
+msgid "Tentative"
+msgstr ""
+
+#: ui/app.slint
+msgid "Decline"
+msgstr ""
+
+#: ui/app.slint
+msgid "Change"
+msgstr ""
+
+#: ui/app.slint
+msgid "Join"
+msgstr ""
+
+#: ui/app.slint
+msgid "Save .ics"
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloading message …"
+msgstr ""
+
+#: ui/app.slint
+msgid "This message hasn't been downloaded yet. It downloads when Komorebi can reach the server."
+msgstr ""
+
+#: ui/app.slint
+msgid "Save {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Images from {0} will always load."
+msgstr ""
+
+#: ui/app.slint
+msgid "Privacy settings"
+msgstr ""
+
+#: ui/app.slint
+msgid "Images load from this sender"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "remote images"
+msgid "Change"
+msgstr ""
+
+#: ui/app.slint
+msgid "Change which senders' images load"
+msgstr ""
+
+#: ui/app.slint
+msgid "{n} image couldn't be loaded."
+msgid_plural "{n} images couldn't be loaded."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/app.slint
+msgid "{n} remote image from {0} blocked. If you load them, the sender can see when you open this message and your IP address."
+msgid_plural "{n} remote images from {0} blocked. If you load them, the sender can see when you open this message and your IP address."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/app.slint
+msgid "{n} remote image blocked. If you load them, the sender can see when you open this message and your IP address."
+msgid_plural "{n} remote images blocked. If you load them, the sender can see when you open this message and your IP address."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/app.slint
+msgid "Message"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "[Message shortened for display]"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "View as plain text"
+msgstr ""
+
+#: ui/app.slint
+msgid "Welcome to Komorebi"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add your Purelymail, Postale.io or other IMAP account. You need your email address and password; it takes about a minute."
+msgstr ""
+
+#: ui/app.slint
+msgid "Your mail stays on this PC and on your server. No ads, no tracking."
+msgstr ""
+
+#: ui/app.slint
+msgid "Need help?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Need help? How to add an account"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "New mail"
+msgstr ""
+
+#: ui/app.slint
+msgid "New mail (Ctrl+N)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Settings (Ctrl+,)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Folders (Close navigation)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Folders (Open navigation)"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "teaching tip"
+msgid "Your folders"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "teaching tip"
+msgid "Search"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "teaching tip"
+msgid "Keys and help"
+msgstr ""
+
+#: ui/app.slint
+msgid "Accounts and folders are behind this button when the window is narrow."
+msgstr ""
+
+#: ui/app.slint
+msgid "Search this folder or all folders. Ctrl+E or Ctrl+F opens it."
+msgstr ""
+
+#: ui/app.slint
+msgid "Keyboard shortcuts and help are in Settings › About, or press F1."
+msgstr ""
+
+#: ui/app.slint
+msgctxt "teaching tip"
+msgid "{0} of {1}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Every key, by group. Up and Down scroll the list; Esc closes."
+msgstr ""
+
+#: ui/app.slint
+msgid "Open this link in your browser?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Discard this draft?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Original message"
+msgstr ""
+
+#: ui/app.slint
+msgid "Message-ID: {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Header fields"
+msgstr ""
+
+#: ui/app.slint
+msgid "Source"
+msgstr ""
+
+#: ui/app.slint
+msgid "Message source"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Copy Message-ID"
+msgstr ""
+
+#: ui/app.slint
+msgid "Copy headers"
+msgstr ""
+
+#: ui/app.slint
+msgid "Copy all"
+msgstr ""
+
+#: ui/app.slint
+msgid "Why am I seeing this?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi looks at the checks your mail server made when this message arrived, and at the sender's name and address. When they don't add up, someone may be pretending to be the sender."
+msgstr ""
+
+#: ui/app.slint
+msgid "Don't open its links or attachments, reply, or enter a password unless you're sure. If you know the sender, check with them another way. Report junk moves it to your Junk folder."
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut group"
+msgid "Anywhere"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+N"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "New mail"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+E, F3 or Ctrl+F"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Search"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+I"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Go to the Inbox"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "F5"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Refresh"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+,"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Open or close Settings"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "F1 or Ctrl+/"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Keyboard shortcuts"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "F6 / Shift+F6"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Next / previous pane"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Tab / Shift+Tab"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Next / previous control"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Space or Enter"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Press the focused button"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Left / Right"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Move along a toolbar"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Esc"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Close the folder pane, clear the search or the selection"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut group"
+msgid "Folders"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Up / Down, Home / End, Enter or Space"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Move through the folders and open one"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Shift+F10 or Menu"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Folder menu"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut group"
+msgid "Messages"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Up / Down"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Previous / next message"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Home / End"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "First / last message"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "PageUp / PageDown"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Up / down a page"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Enter"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Open the message"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+click / Shift+click"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Add to the selection / select a range"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Shift+Up / Shift+Down"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Extend the selection"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+A"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Select all messages"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+R / Ctrl+Shift+R"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Reply / Reply all"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+F"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Forward"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+V"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Move to a folder"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Q / Ctrl+U"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Mark as read / Mark as unread"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Insert"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Flag / Remove flag"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Backspace"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Archive"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Delete"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Delete"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Message menu"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+S"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Save as a .eml file"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Z"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Undo the last archive, delete, move or send"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut group"
+msgid "Writing"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Enter or Alt+S"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Send"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Close, keeping the draft"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+C / Ctrl+Shift+B"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Show Cc / Bcc"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+A"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Attach files"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+V"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Attach the files copied in File Explorer"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+B / Ctrl+I"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Bold / italic"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+K"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Link to an address"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+8 / Ctrl+Shift+7"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Bulleted / numbered list"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+Q"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Quote"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Up / Down, Enter or Tab, Esc"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Pick, take or close a suggested address"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "window title"
+msgid "Inbox ({0}) - Komorebi"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi couldn't start.\n\n{0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi closed unexpectedly last time; see crash.log"
+msgstr ""
+
+#: ui/tr.slint
+msgid "The mail cache was damaged, so Komorebi started a new one; the old file is kept as {0}. Add your accounts again in Settings."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The passwords were deleted, but these files are still in use and were not removed. Delete them by hand:\n\n{0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Can't reach the server. Komorebi tries again by itself; check your internet connection."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server rejected the sign-in. Update the password in Settings, or press Refresh to retry."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't make a secure connection to the server. Check the server name in Settings; its certificate may not be trusted."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server says this message is too large. Remove an attachment or share it another way."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The mailbox is full on the server. Delete or archive some mail, then try again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server is busy or has too many connections open. Komorebi tries again shortly; close other mail apps if this keeps happening."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't find {0}. Check the spelling of the server name and your internet connection."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} didn't answer on port {1}. SSL/TLS usually uses 993 (IMAP) or 465 (SMTP); STARTTLS uses 143 or 587 (some servers use 25, 2525 or 1143)."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The connection to {0} was lost. Try again, and if it keeps happening, check the server."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} rejected the password for {1}. If sign-in uses two steps, create an app password. If the login isn't your email address, set the username."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} rejected the password for {1}. If sign-in uses two steps, create an app password."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Is your mail at {0}? Change Provider."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The secure connection to {0} failed. Its certificate isn't trusted or doesn't match the server name. Check the name, or if you run this server yourself, review its certificate."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} didn't accept the connection on port {1}. Check the server name and port."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't set up a secure connection to {0}. Check the port and the security setting."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} wouldn't let {1} sign in. Check the username, the password and the server's settings."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Signed in, but {0} didn't list its folders. Try again, or check the server."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} doesn't offer STARTTLS, so Komorebi won't sign in (your password would travel unencrypted). Ask the administrator to enable it, or use the SSL/TLS port."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This port answered without encryption. Komorebi only connects securely; choose STARTTLS or the SSL/TLS port."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} doesn't offer sign-in. Komorebi can't send through servers without sign-in yet."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} didn't greet Komorebi like an IMAP server (it said goodbye, or signed in by itself). Check the server name, the port and the security setting."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} doesn't allow signing in with a password over this connection (LOGINDISABLED). Ask the administrator to allow it on secure connections."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} only works in UTF-8 mode (UTF8=ONLY), which Komorebi doesn't support yet. Ask the administrator to also allow the standard mode."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The certificate of {0} changed. If you didn't expect that, don't sign in: review the new certificate and compare its fingerprint before you trust it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The certificate of {0} changed. Review it before you connect again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} refused to send as {1}. Check that this account may send from that address, or set the SMTP username."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Sign-in rejected. Update the password in Settings, or press Refresh to retry."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0}. The message may or may not have been sent; check Sent before you retry it from the Outbox."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server says this message is too large ({0})"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Removed here; the server keeps it flagged as deleted."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Already gone from the server, so there was nothing to move."
+msgstr ""
+
+#: ui/tr.slint
+msgid "There is no Drafts folder on the server, so drafts are only saved on this PC."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account has no Sent folder on the server, so sent mail isn't saved there. You can choose one in Settings: Accounts, Edit."
+msgstr ""
+
+#: ui/tr.slint
+msgid "A draft saved to the server couldn't be found there, so drafts are only saved on this PC."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't save drafts to the server ({0}); they are kept on this PC."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0}: {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Something went wrong. {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Not saved. {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Not removed. {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Not reset. {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Stopped, no files removed. {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't save: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't save {0}: {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't open {0}: {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't attach the files: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't open the draft: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't save the draft: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't send: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't send: {0}. It is back in Drafts."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't undo: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't send the reply: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't download this message: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't download this message.\n\n{0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Saved {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "No app on this computer opens {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} can run programs, so Komorebi doesn't open it. Save it to check it first."
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "status"
+msgid "Sent"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Message sent, but {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Not sent yet: {0}. It stays in the Outbox and is tried again shortly."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Not sent: {0}. It is in the Outbox."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Message discarded."
+msgstr ""
+
+#: ui/tr.slint
+msgid "A message sent as Komorebi closed couldn't be prepared again; it is back in Drafts."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Sending in {0} s"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Sending “{0}” in {1} s"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Sending …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Sending in a few seconds"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Waiting to send"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} Trying again at {1}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} doesn't exist. Check the address and send again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "One of the addresses doesn't exist. Check the addresses and send again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server says an address isn't written correctly. Check the addresses and send again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The recipient's mailbox is full. Try again later, or reach them another way."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The message is too large for the server. Remove an attachment, then send again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server won't send from this address. Check the account's address and SMTP username in Settings."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server refused the message under its rules, for example as spam. Change the message, or ask your provider."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server rejected the sign-in. Update the password in Settings, then send again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't make a secure connection to the server. Check the account in Settings, then send again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server couldn't take the message right now."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server couldn't take the message, and Komorebi stopped trying. Select Retry to send it again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't reach the server."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't reach the server, and Komorebi stopped trying. Check your internet connection, then select Retry."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server refused the message. Details says why."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The connection broke while sending, so it may have gone out. Check Sent before you send it again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Too late to undo: the message is being sent."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Your reply is in the Outbox; only the organizer gets it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Answer kept on this computer; no reply was sent."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Try now"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Can't reach {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi was updated to {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "What's new"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter your full email address."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter your full email address first."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account is already added."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account was removed."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter the password to test."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Offline: a password or server change can't be checked."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Offline: a certificate can't be reviewed."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Offline: settings can't be looked up."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi couldn't read the saved password. Type the password to test."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter the IMAP and SMTP server names."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter the server name only, such as mail.example.com."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Zone identifiers such as %eth0 aren't supported. Remove the part after the % sign."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Use the ASCII (xn--) form of the server name, such as xn--mail-example.com."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter a valid {0} port."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Enter a valid {0} username."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every step passed. Nothing was saved; use Add account or Save to keep these settings."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Added {0}. Downloading mail …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Saved {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Off: no connections; its downloaded mail stays"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Downloading {0} of {1} …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Sign-in rejected"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Secure connection failed"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Up to date, checked {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Up to date"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Last sync failed: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0}: downloading {1} of {2} in {3} …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Downloading the mail of {0} again …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "The mail of {0} downloads again at its next sync."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Outbox"
+msgstr ""
+
+#: ui/tr.slint
+msgid "All folders"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Search {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "This folder"
+msgstr ""
+
+#: ui/tr.slint
+msgid "These inboxes"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Search results"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{n} result in {0}"
+msgid_plural "{n} results in {0}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "{n} result in all folders"
+msgid_plural "{n} results in all folders"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Show in folder"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "tag"
+msgid "{0} · {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Mark all as read"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Collapse all"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Collapse all folders"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Refresh"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Account settings"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Select messages"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Forward as attachment"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Save as .eml"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Show original"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Show original colours"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Stop loading images from this sender"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "key"
+msgid "Backspace"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "rail"
+msgid "All inboxes"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Inbox"
+msgstr ""
+
+#: ui/tr.slint
+msgid "No matches"
+msgstr ""
+
+#: ui/tr.slint
+msgid "No drafts. Select New mail to start one."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Outbox is empty. Messages wait here while they are sent."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No unread messages"
+msgstr ""
+
+#: ui/tr.slint
+msgid "No flagged messages"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Loading …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Can't reach the server, so this list may be incomplete"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't check for new mail, so this list may be incomplete"
+msgstr ""
+
+#: ui/tr.slint
+msgid "This folder is empty"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Downloading your mail … {0} of {1}. Newest messages arrive first."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Downloading your mail … Newest messages arrive first."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Deleted"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Moved to {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{n} message deleted"
+msgid_plural "{n} messages deleted"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "{n} message moved to {0}"
+msgid_plural "{n} messages moved to {0}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint ui/widgets.slint
+msgid "{0}. {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account has no Archive folder. You can choose one in Settings: Accounts, Edit."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account has no Trash folder, so nothing was deleted. You can choose one in Settings: Accounts, Edit."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account has no Junk folder, so nothing was moved. You can choose one in Settings: Accounts, Edit."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This account has no Inbox folder."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Automatic ({0})"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Automatic (none found)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "(no recipient)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "This message is encrypted ({0}). Komorebi cannot decrypt it; save the encrypted file to open it in a program that has the key."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This message is too large to show formatted, so it is shown as plain text."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This message took too long to lay out, so it is shown as plain text."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The link text says “{0}”, but it opens {1}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} is an international name, which can imitate the letters of another site."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The address puts a user name before the real site, which is {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} is a bare IP address, not a site name."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Reason: {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Reasons: {0}; {1}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "it failed your server's sender check (DMARC)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "it failed your server's sender checks (SPF and DKIM)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "the name shows {0}, but the address is at {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} is the international name “{1}”"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} mixes Latin and {1} letters"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Cyrillic"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Greek"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Fetching message …"
+msgstr ""
+
+#: ui/tr.slint
+msgid "This message isn't downloaded yet."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This message has no Message-ID."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Message-ID copied."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Cancelled: this event will not take place."
+msgstr ""
+
+#: ui/tr.slint
+msgid "You accepted."
+msgstr ""
+
+#: ui/tr.slint
+msgid "You tentatively accepted."
+msgstr ""
+
+#: ui/tr.slint
+msgid "You declined."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This event is over."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Updated invitation"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Organizer: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Where: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "(no title)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Fix the To address to send."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Fix the Cc address to send."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Fix the Bcc address to send."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Add a recipient to send."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Attachments are over 25 MB; remove some to send."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No subject, and the text mentions an attachment but nothing is attached."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This message has no subject."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The text mentions an attachment, but nothing is attached."
+msgstr ""
+
+#: ui/tr.slint
+msgid "“{0}” is not a valid address"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Earlier draft saved in Drafts."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Add an account to write messages."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Add an account to send messages."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The message is still downloading."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This draft is no longer saved."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't load {0}; left out of this draft."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Draft saved"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Draft saved {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "On {0}, {1} wrote:"
+msgstr ""
+
+#: ui/tr.slint
+msgid "---------- Forwarded message ----------"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "forwarded header"
+msgid "From"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "forwarded header"
+msgid "Date"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "forwarded header"
+msgid "Subject"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "forwarded header"
+msgid "To"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Attachments {0} of 25 MB"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0}: folders can't be attached"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0}: over Komorebi's 100 MB attachment limit"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Certificate: pinned (SHA-256 {0})"
+msgstr ""
+
+#: ui/tr.slint
+msgid "The saved certificate for {0} is damaged. Forget it and review the certificate again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Certificate: checked by Windows"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn't read the certificate of {0}. Check the server name, the port and the security setting, then try again."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Certificate trusted for {0}. Press Test connection, or Add account or Save, to continue."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Names: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Self-signed"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Issued by {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Valid from {0} to {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "SHA-256 fingerprint"
+msgstr ""
+
+#: ui/tr.slint
+msgid "New certificate (SHA-256)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Saved before (SHA-256)"
+msgstr ""
+
+#: ui/tr.slint
+msgid "This isn't the certificate you saved. If you didn't expect a new one, cancel."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No settings found, enter them by hand."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi has settings built in for this provider."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Found in your domain's DNS records."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Found by your provider's autoconfig."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Found in your domain's DNS records and by your provider's autoconfig."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No incoming server found, enter it by hand."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No sending server found, enter it by hand."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The provider's settings point to {0}, a different domain. Not filled in."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Kept the server settings you typed."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Send this message again?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "It may already have been sent. Check your Sent folder first, or the recipients may get it twice."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Send again"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Discard this message?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "It is deleted here and from your Drafts folder on the server, with its attachments."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Delete {n} message for good?"
+msgid_plural "Delete {n} messages for good?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "{n} message is deleted from Trash on the server. Once the Undo offer goes, it can't be brought back."
+msgid_plural "{n} messages are deleted from Trash on the server. Once the Undo offer goes, they can't be brought back."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Delete {n} message from Junk?"
+msgid_plural "Delete {n} messages from Junk?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "{n} message moves to Trash."
+msgid_plural "{n} messages move to Trash."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Remove {0}?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Removes this account and its downloaded mail from this computer. Mail on the server is not affected."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Its {n} unsent draft or Outbox message will be lost."
+msgid_plural "Its {n} unsent drafts and Outbox messages will be lost."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Reply “Accepted”?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Reply “Tentative”?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Reply “Declined”?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "The reply goes only to the organizer, {0}, from {1}. No one else gets it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Check the address: the organizer's domain ({0}) is not the sender's ({1})."
+msgstr ""
+
+#: ui/tr.slint
+msgid "You are not listed as an attendee, so the reply answers as {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The reply answers as {0}, an address this message was sent to."
+msgstr ""
+
+#: ui/tr.slint
+msgid "“Don't send a reply” keeps your answer on this computer only."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Send reply"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Don't send a reply"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Download the mail of {0} again?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi forgets the mail it downloaded for this account and downloads it again. Mail on the server is not affected; drafts, the Outbox and settings stay."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Remove all of Komorebi's data?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Deletes the saved passwords of all accounts, then the downloaded mail, drafts, Outbox, settings and logs on this computer, and closes Komorebi. Mail on the server is not affected."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{n} unsent draft or Outbox message will be lost."
+msgid_plural "{n} unsent drafts and Outbox messages will be lost."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Trust this certificate?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} presented a certificate that Windows doesn't trust. Trust this certificate for {1} only?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Trust this certificate"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Ask whoever runs the server for its fingerprint, or run openssl x509 -noout -fingerprint -sha256 on its certificate, and compare every byte. Only trust it on a network you control. A saved certificate has to be reviewed again when the server renews it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Save attachment"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Save invitation"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Save message"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Attach files"
+msgstr ""
+
+#: ui/widgets.slint
+msgctxt "rail account tooltip"
+msgid "{0} - {1} ({2} unread)"
+msgstr ""
+
+#: ui/widgets.slint
+msgctxt "rail account tooltip"
+msgid "{0} - {1}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "switched off"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "sign-in rejected"
+msgstr ""
+
+#: ui/widgets.slint
+msgid ", level {0}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0} unread"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Collapse"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Expand"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0} ({1} unread)"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Draft"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Has attachment"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Replied"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "in {0}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Open {0}, {1}"
+msgstr ""
+
+#: ui/widgets.slint
+msgctxt "attachment"
+msgid "{0}, {1}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Clear"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Cut"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Paste"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Hide password"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Show password"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Search"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Search mail"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Clear search (Esc)"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Search (Ctrl+E)"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "On"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Error: {0}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Warning: {0}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Copy fingerprint"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "How do I check this?"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Skip tips"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Got it"
+msgstr ""
+
+#: ui/widgets.slint
+msgctxt "percent"
+msgid "{0}%"
+msgstr ""

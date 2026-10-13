@@ -1,7 +1,7 @@
 ; Komorebi's per-user installer (Inno Setup 6). Built by
 ; .github/workflows/release.yml:
 ;
-;   ISCC /DAppVersion=0.2.0 installer\komorebi.iss
+;   ISCC /DAppVersion=0.3.0 installer\komorebi.iss
 ;   (/DBinDir=<folder> takes komorebi.exe from elsewhere; default target\release)
 ;
 ; No administrator rights: the app goes to %LOCALAPPDATA%\Programs\Komorebi

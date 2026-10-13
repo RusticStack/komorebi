@@ -6,7 +6,7 @@
 //! never fails halfway because another connection committed first.
 //! Passwords are never stored here (see `secrets`).
 
-use crate::fold::fold as search_fold;
+use crate::fold::{fold as search_fold, fold_into, needs_fold};
 use crate::mail::smtp;
 use crate::providers::{Security, Server};
 use crate::role::Role;
@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 /// How long a sync worker waits for another connection's write lock.
 const WORKER_BUSY: Duration = Duration::from_secs(10);
@@ -54,7 +54,13 @@ CREATE TABLE accounts (
     -- (`backfill_addresses`); NULL: none.
     addr_backfill INTEGER,
     -- 0: switched off in Settings (its cache stays; no connections).
-    enabled INTEGER NOT NULL DEFAULT 1
+    enabled INTEGER NOT NULL DEFAULT 1,
+    -- Sign-in names; '' means the email address (`Account::imap_login`).
+    imap_user TEXT NOT NULL DEFAULT '',
+    smtp_user TEXT NOT NULL DEFAULT '',
+    -- DER of the pinned server certificates (public data); NULL: none.
+    imap_pin BLOB,
+    smtp_pin BLOB
 );
 
 -- App settings by key; a missing key takes its default (`Settings`).
@@ -75,6 +81,8 @@ CREATE TABLE folders (
     sync_uidnext INTEGER,
     sync_messages INTEGER,
     sync_hms INTEGER,
+    -- A role the user chose for this folder; '' follows the detected `role`.
+    role_override TEXT NOT NULL DEFAULT '',
     UNIQUE(account_id, name)
 );
 
@@ -315,6 +323,17 @@ const MIGRATE_V10_TO_V11: &str = r#"
 ALTER TABLE accounts ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
 "#;
 
+/// v12 adds separate sign-in names and pinned certificates per account,
+/// and a per-folder role the user chose (all unused columns default to
+/// "same as before"; one bump for the whole self-hosting work).
+const MIGRATE_V11_TO_V12: &str = r#"
+ALTER TABLE accounts ADD COLUMN imap_user TEXT NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN smtp_user TEXT NOT NULL DEFAULT '';
+ALTER TABLE accounts ADD COLUMN imap_pin BLOB;
+ALTER TABLE accounts ADD COLUMN smtp_pin BLOB;
+ALTER TABLE folders ADD COLUMN role_override TEXT NOT NULL DEFAULT '';
+"#;
+
 /// The cache was made by a newer Komorebi (its schema version is higher):
 /// it is left as it is, never deleted or migrated down.
 #[derive(Debug)]
@@ -396,6 +415,30 @@ pub struct Account {
     pub signature: String,
     /// False: switched off in Settings (no workers, no connections).
     pub enabled: bool,
+    /// IMAP sign-in name; empty: the address (`imap_login`).
+    pub imap_user: String,
+    /// SMTP sign-in name; empty: the address (`smtp_login`).
+    pub smtp_user: String,
+    /// DER of the pinned certificate of the IMAP / SMTP server.
+    pub imap_pin: Option<Vec<u8>>,
+    pub smtp_pin: Option<Vec<u8>>,
+}
+
+impl Account {
+    /// The name to sign in to the IMAP server with.
+    pub fn imap_login(&self) -> &str {
+        login_or(&self.imap_user, &self.email)
+    }
+
+    /// The name to sign in to the SMTP server with.
+    pub fn smtp_login(&self) -> &str {
+        login_or(&self.smtp_user, &self.email)
+    }
+}
+
+/// `user`, or `email` when no separate sign-in name is set.
+pub fn login_or<'a>(user: &'a str, email: &'a str) -> &'a str {
+    if user.is_empty() { email } else { user }
 }
 
 /// A new account; its signature starts empty (set with `update_account`).
@@ -406,6 +449,8 @@ pub struct NewAccount {
     pub imap: Server,
     pub smtp: Server,
     pub save_sent: bool,
+    pub imap_user: String,
+    pub smtp_user: String,
 }
 
 #[derive(Debug, Clone)]
@@ -429,7 +474,12 @@ pub struct Fp {
     pub hms: u64,
 }
 
-const FOLDER_COLUMNS: &str = "id, account_id, name, display, depth, role, uidvalidity";
+/// A folder's role as the app uses it: the one the user chose
+/// (`role_override`) or else the one detected from the server.
+const ROLE_SQL: &str = "CASE WHEN role_override <> '' THEN role_override ELSE role END";
+
+const FOLDER_COLUMNS: &str = "id, account_id, name, display, depth,
+     CASE WHEN role_override <> '' THEN role_override ELSE role END, uidvalidity";
 
 impl Folder {
     fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Self> {
@@ -574,6 +624,31 @@ pub struct Settings {
     /// Keep the diagnostics log (`crate::diag`; key `diagnostics_log`:
     /// `1` or `0`). Off by default.
     pub diagnostics_log: bool,
+    /// The display language (key `language`: `system`, `en` or `pt-PT`).
+    pub language: crate::i18n::LangSetting,
+    /// The folder pane's folded accounts and folders (key `nav_folded`:
+    /// `a<account id>` and `f<folder id>` tokens, comma separated; see
+    /// [`crate::tree::parse_folds`]).
+    pub nav_folded: String,
+    /// The view the window showed when it last closed (key `last_view`:
+    /// `all`, `drafts`, `outbox` or `f<folder id>`; empty: none saved).
+    pub last_view: String,
+    /// The accounts whose folders have had their default folds (key
+    /// `nav_folds_init`: account ids, comma separated; see
+    /// [`crate::tree::default_folds`]).
+    pub nav_folds_init: String,
+    /// The folders Move went to last, the last first (key `move_recent`:
+    /// folder ids, comma separated).
+    pub move_recent: String,
+    /// The teaching tips already seen (key `tips_seen`: `folders`,
+    /// `search`, `help`, comma separated; see [`crate::onboard::Seen`]).
+    pub tips_seen: String,
+    /// The version the What's new bar last told about (key
+    /// `whats_new_version`; `None`: never, a version from before the bar).
+    pub whats_new_version: Option<String>,
+    /// The composer's one-time caption about the formatting marks was
+    /// shown (key `format_hint_seen`).
+    pub format_hint_seen: bool,
 }
 
 /// The new-mail check intervals Settings offers, in seconds.
@@ -656,6 +731,14 @@ impl Default for Settings {
             flash_taskbar: false,
             window: None,
             diagnostics_log: false,
+            language: crate::i18n::LangSetting::System,
+            nav_folded: String::new(),
+            last_view: String::new(),
+            nav_folds_init: String::new(),
+            move_recent: String::new(),
+            tips_seen: String::new(),
+            whats_new_version: None,
+            format_hint_seen: false,
         }
     }
 }
@@ -705,6 +788,18 @@ impl Settings {
                 "0" => self.diagnostics_log = false,
                 _ => {}
             },
+            "language" => {
+                if let Some(language) = crate::i18n::LangSetting::from_key(value) {
+                    self.language = language;
+                }
+            }
+            "nav_folded" => self.nav_folded = value.to_string(),
+            "last_view" => self.last_view = value.trim().to_string(),
+            "nav_folds_init" => self.nav_folds_init = value.to_string(),
+            "move_recent" => self.move_recent = value.to_string(),
+            "tips_seen" => self.tips_seen = value.to_string(),
+            "whats_new_version" => self.whats_new_version = Some(value.trim().to_string()),
+            "format_hint_seen" => self.format_hint_seen = value == "1",
             _ => {}
         }
     }
@@ -866,6 +961,8 @@ pub struct OutboxEntry {
     pub has_attach: bool,
     /// An invitation's reply: it can't go back to Drafts.
     pub invite_reply: bool,
+    /// The text as typed (its first lines show in the Outbox).
+    pub body: String,
 }
 
 const DRAFT_COLUMNS: &str = "id, account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,     cc_addrs, bcc_addrs, subject, body, message_id, updated, quoted_html";
@@ -993,6 +1090,7 @@ impl Db {
             (8, MIGRATE_V8_TO_V9),
             (9, RSVP),
             (10, MIGRATE_V10_TO_V11),
+            (11, MIGRATE_V11_TO_V12),
         ] {
             if version != from {
                 continue;
@@ -1042,7 +1140,8 @@ impl Db {
     pub fn accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT id, email, name, imap_host, imap_port, imap_tls, smtp_host, smtp_port,
-                    smtp_tls, save_sent, signature, enabled
+                    smtp_tls, save_sent, signature, enabled, imap_user, smtp_user,
+                    imap_pin, smtp_pin
              FROM accounts ORDER BY position, id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -1063,6 +1162,10 @@ impl Db {
                 save_sent: r.get(9)?,
                 signature: r.get(10)?,
                 enabled: r.get(11)?,
+                imap_user: r.get(12)?,
+                smtp_user: r.get(13)?,
+                imap_pin: r.get(14)?,
+                smtp_pin: r.get(15)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1073,7 +1176,8 @@ impl Db {
     pub fn update_account(&self, a: &Account) -> Result<bool> {
         let n = self.conn.execute(
             "UPDATE accounts SET name = ?2, imap_host = ?3, imap_port = ?4, imap_tls = ?5,
-                smtp_host = ?6, smtp_port = ?7, smtp_tls = ?8, save_sent = ?9, signature = ?10
+                smtp_host = ?6, smtp_port = ?7, smtp_tls = ?8, save_sent = ?9, signature = ?10,
+                imap_user = ?11, smtp_user = ?12, imap_pin = ?13, smtp_pin = ?14
              WHERE id = ?1",
             params![
                 a.id,
@@ -1086,6 +1190,10 @@ impl Db {
                 a.smtp.security.as_i64(),
                 a.save_sent,
                 a.signature,
+                a.imap_user,
+                a.smtp_user,
+                a.imap_pin,
+                a.smtp_pin,
             ],
         )?;
         Ok(n == 1)
@@ -1095,8 +1203,8 @@ impl Db {
         self.conn
             .execute(
                 "INSERT INTO accounts (email, name, imap_host, imap_port, imap_tls,
-                    smtp_host, smtp_port, smtp_tls, save_sent, position)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                    smtp_host, smtp_port, smtp_tls, save_sent, imap_user, smtp_user, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
                     (SELECT COALESCE(MAX(position), 0) + 1 FROM accounts))",
                 params![
                     a.email,
@@ -1108,6 +1216,8 @@ impl Db {
                     a.smtp.port,
                     a.smtp.security.as_i64(),
                     a.save_sent,
+                    a.imap_user,
+                    a.smtp_user,
                 ],
             )
             .context("saving account (is it already added?)")?;
@@ -1249,11 +1359,78 @@ impl Db {
         Ok(self
             .conn
             .prepare_cached(&format!(
-                "SELECT {FOLDER_COLUMNS} FROM folders WHERE account_id = ?1 AND role = ?2
-                 ORDER BY id LIMIT 1"
+                "SELECT {FOLDER_COLUMNS} FROM folders WHERE account_id = ?1 AND {ROLE_SQL} = ?2
+                 ORDER BY (role_override <> '') DESC, id LIMIT 1"
             ))?
             .query_row(params![account_id, role.key()], Folder::from_row)
             .optional()?)
+    }
+
+    /// The folder the server's own marks and names make `role`, whatever
+    /// the user chose.
+    pub fn detected_folder(&self, account_id: i64, role: Role) -> Result<Option<Folder>> {
+        Ok(self
+            .conn
+            .prepare_cached(&format!(
+                "SELECT {FOLDER_COLUMNS} FROM folders WHERE account_id = ?1 AND role = ?2
+                 ORDER BY id LIMIT 1"
+            ))?
+            .query_row(params![account_id, role.key()], |r| {
+                let mut f = Folder::from_row(r)?;
+                f.role = role;
+                Ok(f)
+            })
+            .optional()?)
+    }
+
+    /// The folder the user chose for `role` in an account, if they did.
+    pub fn chosen_folder(&self, account_id: i64, role: Role) -> Result<Option<Folder>> {
+        Ok(self
+            .conn
+            .prepare_cached(&format!(
+                "SELECT {FOLDER_COLUMNS} FROM folders
+                 WHERE account_id = ?1 AND role_override = ?2 ORDER BY id LIMIT 1"
+            ))?
+            .query_row(params![account_id, role.key()], Folder::from_row)
+            .optional()?)
+    }
+
+    /// Make folder `folder_id` the account's `role` (Sent, Drafts, Trash,
+    /// Archive or Junk) whatever the server marked; any folder chosen for it
+    /// before stops being. `None` gives the role back to what the server
+    /// marks. Nothing changes on the server, and nothing is created.
+    pub fn set_role_override(
+        &self,
+        account_id: i64,
+        role: Role,
+        folder_id: Option<i64>,
+    ) -> Result<()> {
+        if matches!(role, Role::Inbox | Role::Other) {
+            anyhow::bail!("the inbox and ordinary folders can't be chosen");
+        }
+        let tx = self.write()?;
+        tx.execute(
+            "UPDATE folders SET role_override = '' WHERE account_id = ?1 AND role_override = ?2",
+            params![account_id, role.key()],
+        )?;
+        if let Some(id) = folder_id {
+            let inbox: bool = tx.query_row(
+                &format!(
+                    "SELECT {ROLE_SQL} = 'inbox' FROM folders WHERE id = ?1 AND account_id = ?2"
+                ),
+                params![id, account_id],
+                |r| r.get(0),
+            )?;
+            if inbox {
+                anyhow::bail!("the inbox can't be used as another folder");
+            }
+            tx.execute(
+                "UPDATE folders SET role_override = ?1 WHERE id = ?2 AND account_id = ?3",
+                params![role.key(), id, account_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Insert or update a folder by its server name and return its id.
@@ -1373,6 +1550,32 @@ impl Db {
             .query_row([folder_id], |r| r.get(0))?)
     }
 
+    /// The messages of these folders that are the server copies of local
+    /// drafts (a draft's `server_folder`, `server_uid`, and a
+    /// `server_uidvalidity` still the folder's: after a UIDVALIDITY change
+    /// the uid may name another message). The Drafts entry lists the draft
+    /// itself, so its copy is left out of the server's Drafts folder and a
+    /// draft never shows twice.
+    pub fn draft_copies(&self, folder_ids: &[i64]) -> Result<HashSet<i64>> {
+        if folder_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let ids = folder_ids
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut stmt = self.conn.prepare_cached(&format!(
+            "SELECT m.id FROM drafts d
+             JOIN folders f ON f.id = d.server_folder
+             JOIN messages m ON m.folder_id = d.server_folder AND m.uid = d.server_uid
+             WHERE d.server_folder IN ({ids}) AND d.server_uid IS NOT NULL
+               AND d.server_uidvalidity = f.uidvalidity"
+        ))?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn unread_counts(&self) -> Result<HashMap<i64, i64>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT folder_id, COUNT(*) FROM messages WHERE seen = 0 GROUP BY folder_id",
@@ -1410,7 +1613,7 @@ impl Db {
             stmt.query_map([], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?
         } else {
-            stmt.query_map([search_pattern(search)], |r| r.get(0))?
+            stmt.query_map([search_needle(search)], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?
         };
         Ok(rows)
@@ -1535,7 +1738,7 @@ impl Db {
             };
             let me = email.to_lowercase();
             let mut stmt = tx.prepare_cached(
-                "SELECT m.id, f.role, m.from_name, m.from_addr, m.to_addrs, m.cc_addrs, m.date
+                "SELECT m.id, CASE WHEN f.role_override <> '' THEN f.role_override ELSE f.role END, m.from_name, m.from_addr, m.to_addrs, m.cc_addrs, m.date
                  FROM messages m JOIN folders f ON f.id = m.folder_id
                  WHERE m.account_id = ?1 AND m.id <= ?2
                  ORDER BY m.id DESC LIMIT ?3",
@@ -1759,6 +1962,31 @@ impl Db {
         Ok(())
     }
 
+    /// Store several fetched bodies (`id`, raw, preview, has attachment) in
+    /// one transaction: one write-lock acquisition and one commit for the
+    /// batch (docs/PERF.md 3.2, 5.1). All or nothing, so a failure leaves
+    /// every message still `has_body = 0` and the next prefetch pass retries.
+    pub fn set_bodies(&mut self, items: &[(i64, &[u8], &str, bool)]) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let tx = self.write()?;
+        {
+            let mut put = tx.prepare_cached(
+                "INSERT OR REPLACE INTO bodies (message_id, raw) VALUES (?1, ?2)",
+            )?;
+            let mut mark = tx.prepare_cached(
+                "UPDATE messages SET preview = ?2, has_attach = ?3, has_body = 1 WHERE id = ?1",
+            )?;
+            for (id, raw, preview, has_attach) in items {
+                put.execute(params![id, raw])?;
+                mark.execute(params![id, preview, has_attach])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_seen(&self, id: i64, seen: bool) -> Result<()> {
         self.conn.execute(
             "UPDATE messages SET seen = ?2 WHERE id = ?1",
@@ -1962,7 +2190,7 @@ impl Db {
             "SELECT id FROM drafts WHERE state = 0 AND {DRAFT_MATCH}
              ORDER BY updated DESC, id DESC"
         ))?;
-        let rows = stmt.query_map(params![search, search_pattern(search)], |r| r.get(0))?;
+        let rows = stmt.query_map(params![search, search_needle(search)], |r| r.get(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -2309,7 +2537,7 @@ impl Db {
             "SELECT id FROM drafts WHERE state > 0 AND {DRAFT_MATCH}
              ORDER BY updated DESC, id DESC"
         ))?;
-        let rows = stmt.query_map(params![search, search_pattern(search)], |r| r.get(0))?;
+        let rows = stmt.query_map(params![search, search_needle(search)], |r| r.get(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -2319,7 +2547,7 @@ impl Db {
             .prepare_cached(
                 "SELECT account_id, to_addrs, subject, state, next_try, last_error, updated,
                         EXISTS(SELECT 1 FROM draft_attachments WHERE draft_id = drafts.id),
-                        kind = 4
+                        kind = 4, body
                  FROM drafts WHERE id = ?1 AND state > 0",
             )?
             .query_row([id], |r| {
@@ -2333,6 +2561,7 @@ impl Db {
                     updated: r.get(6)?,
                     has_attach: r.get(7)?,
                     invite_reply: r.get(8)?,
+                    body: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
                 })
             })
             .optional()?)
@@ -2512,7 +2741,8 @@ fn fold(s: &str) -> String {
 fn index_context(conn: &Connection, folder_id: i64) -> rusqlite::Result<(Role, String)> {
     let found = conn
         .query_row(
-            "SELECT f.role, a.email FROM folders f JOIN accounts a ON a.id = f.account_id
+            "SELECT CASE WHEN f.role_override <> '' THEN f.role_override ELSE f.role END, a.email
+             FROM folders f JOIN accounts a ON a.id = f.account_id
              WHERE f.id = ?1",
             [folder_id],
             |r| {
@@ -2574,7 +2804,8 @@ fn configure(conn: &Connection) -> Result<()> {
         "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;
          PRAGMA journal_size_limit = 16777216;",
     )?;
-    // `fold(text)`: the search form of a column (`crate::fold`).
+    // `fold(text)`: the search form of a column (`crate::fold`). Searches use
+    // `fold_has`; this one stays for the oracle in the differential test.
     conn.create_scalar_function(
         "fold",
         1,
@@ -2588,33 +2819,71 @@ fn configure(conn: &Connection) -> Result<()> {
             })
         },
     )?;
+    // `fold_has(needle, col...)`: 1 when the folded needle is inside the
+    // folded form of any text column. Same match as `fold(col) LIKE
+    // '%needle%'`, without building a folded copy of every column of every
+    // row: a column with no capital or non-ASCII byte is searched in place,
+    // others fold into a reused buffer, and the first hit ends the row.
+    conn.create_scalar_function(
+        "fold_has",
+        -1,
+        FunctionFlags::SQLITE_UTF8
+            | FunctionFlags::SQLITE_DETERMINISTIC
+            | FunctionFlags::SQLITE_INNOCUOUS,
+        |ctx| {
+            let ValueRef::Text(needle) = ctx.get_raw(0) else {
+                return Ok(false);
+            };
+            let needle = String::from_utf8_lossy(needle);
+            FOLD_BUF.with(|buf| {
+                let buf = &mut *buf.borrow_mut();
+                Ok((1..ctx.len()).any(|i| match ctx.get_raw(i) {
+                    ValueRef::Text(t) => folded_contains(t, &needle, buf),
+                    _ => false,
+                }))
+            })
+        },
+    )?;
     Ok(())
+}
+
+thread_local! {
+    /// The scratch buffer of `fold_has`, one per thread that runs queries.
+    static FOLD_BUF: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Whether the folded form of the text `hay` contains `needle` (already
+/// folded). Invalid UTF-8 is read as `fold` read it: lossily.
+fn folded_contains(hay: &[u8], needle: &str, buf: &mut String) -> bool {
+    match std::str::from_utf8(hay) {
+        Ok(s) if !needs_fold(s) => s.contains(needle),
+        Ok(s) => {
+            fold_into(s, buf);
+            buf.contains(needle)
+        }
+        Err(_) => {
+            fold_into(&String::from_utf8_lossy(hay), buf);
+            buf.contains(needle)
+        }
+    }
 }
 
 fn user_version(conn: &Connection) -> Result<i64> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
-fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
-
-/// The LIKE pattern of a search: folded like the columns it is matched
-/// against (`fold()`), with its LIKE characters escaped.
-fn search_pattern(search: &str) -> String {
-    format!("%{}%", escape_like(&search_fold(search.trim())))
+/// The needle of a search: folded like the columns it is matched against
+/// (`fold_has`).
+fn search_needle(search: &str) -> String {
+    search_fold(search.trim()).into_owned()
 }
 
 /// The search clause of the Drafts and Outbox views: `?1` is the search
-/// (matching everything when empty), `?2` its pattern.
-const DRAFT_MATCH: &str = "(?1 = '' OR fold(subject) LIKE ?2 ESCAPE '\\'
-    OR fold(to_addrs) LIKE ?2 ESCAPE '\\' OR fold(cc_addrs) LIKE ?2 ESCAPE '\\'
-    OR fold(bcc_addrs) LIKE ?2 ESCAPE '\\' OR fold(body) LIKE ?2 ESCAPE '\\')";
+/// (matching everything when empty), `?2` its folded needle.
+const DRAFT_MATCH: &str = "(?1 = '' OR fold_has(?2, subject, to_addrs, cc_addrs, bcc_addrs, body))";
 
 /// The list query of [`Db::message_ids_filtered`]; a search binds its
-/// pattern to `?1`.
+/// folded needle to `?1`.
 fn list_query(folder_ids: &[i64], search: &str, filter: Filter) -> String {
     let ids = folder_ids
         .iter()
@@ -2631,9 +2900,7 @@ fn list_query(folder_ids: &[i64], search: &str, filter: Filter) -> String {
     let matching = if search.trim().is_empty() {
         ""
     } else {
-        "AND (fold(subject) LIKE ?1 ESCAPE '\\' OR fold(from_name) LIKE ?1 ESCAPE '\\'
-              OR fold(from_addr) LIKE ?1 ESCAPE '\\' OR fold(preview) LIKE ?1 ESCAPE '\\'
-              OR fold(to_addrs) LIKE ?1 ESCAPE '\\' OR fold(cc_addrs) LIKE ?1 ESCAPE '\\')"
+        "AND fold_has(?1, subject, from_name, from_addr, preview, to_addrs, cc_addrs)"
     };
     format!(
         "SELECT id FROM messages {index} WHERE folder_id IN ({ids}) {flags} {matching}
@@ -2644,6 +2911,210 @@ fn list_query(folder_ids: &[i64], search: &str, filter: Filter) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The search clause before `fold_has`, kept as the oracle: six
+    /// `fold(col) LIKE` terms.
+    fn like_ids(db: &Db, cols: &[&str], table_where: &str, query: &str) -> Vec<i64> {
+        let pattern = format!(
+            "%{}%",
+            search_fold(query.trim())
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let terms = cols
+            .iter()
+            .map(|c| format!("fold({c}) LIKE ?1 ESCAPE '\\'"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let sql = format!("SELECT id FROM {table_where} AND ({terms}) ORDER BY id");
+        let mut stmt = db.conn.prepare(&sql).unwrap();
+        stmt.query_map([pattern], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    /// Known divergence, decided: SQLite's LIKE reads a text as a C string,
+    /// so the old terms never saw past an embedded NUL; `fold_has` does. The
+    /// old ids must all be found, and any extra id has a NUL in a column.
+    fn same_but_after_nul(db: &Db, table: &str, cols: &[&str], got: &[i64], want: &[i64], q: &str) {
+        assert!(
+            want.iter().all(|i| got.contains(i)),
+            "{table}, query {q:?}: lost a match"
+        );
+        let blob = cols
+            .iter()
+            .map(|c| format!("CAST({c} AS BLOB)"))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        for id in got.iter().filter(|i| !want.contains(i)) {
+            let nul: bool = db
+                .conn
+                .query_row(
+                    &format!("SELECT instr({blob}, X'00') > 0 FROM {table} WHERE id = ?1"),
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(nul, "{table}, query {q:?}: extra match {id} without a NUL");
+        }
+    }
+
+    /// `fold_has` finds the rows the old `fold(col) LIKE` terms did:
+    /// accents, case, LIKE metacharacters, NUL, invalid UTF-8, non-text
+    /// columns, NULL and the empty needle (docs/PERF.md 3.1, 3.7).
+    #[test]
+    fn fold_has_matches_the_like_terms() {
+        let db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let f = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        let pieces = [
+            "a",
+            "A",
+            "\u{e9}",
+            "\u{c9}",
+            "e\u{301}",
+            "\u{df}",
+            "SS",
+            "ss",
+            "\u{130}",
+            "i",
+            "_",
+            "%",
+            "\\",
+            "x",
+            "\u{0}",
+            "Jo\u{e3}o",
+            "joao",
+            " ",
+            "@",
+            "\u{6771}",
+            "\u{3a3}",
+            "\u{3c3}",
+            "\u{1f642}",
+        ];
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move |n: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(seed >> 33).unwrap_or(0) % n
+        };
+        let word = |next: &mut dyn FnMut(usize) -> usize| -> String {
+            (0..next(6)).map(|_| pieces[next(pieces.len())]).collect()
+        };
+        for uid in 1..=300_i64 {
+            let cols: Vec<String> = (0..6).map(|_| word(&mut next)).collect();
+            db.conn
+                .execute(
+                    "INSERT INTO messages (account_id, folder_id, uid, subject, from_name, from_addr,
+                                           preview, to_addrs, cc_addrs)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![acc, f, uid, cols[0], cols[1], cols[2], cols[3], cols[4], cols[5]],
+                )
+                .unwrap();
+            db.conn
+                .execute(
+                    "INSERT INTO drafts (account_id, subject, to_addrs, cc_addrs, bcc_addrs, body,
+                                         message_id, state, created, updated)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'm', ?7, 0, ?3)",
+                    params![acc, cols[0], cols[1], cols[2], cols[3], cols[4], uid % 2],
+                )
+                .unwrap();
+        }
+        // Invalid UTF-8 text, a blob, an integer and a real in searched columns.
+        db.conn
+            .execute_batch(
+                "UPDATE messages SET subject = CAST(X'61ff4a6f' AS TEXT) WHERE uid = 1;
+                 UPDATE messages SET from_name = X'6a6f616f' WHERE uid = 2;
+                 UPDATE messages SET from_addr = 12345 WHERE uid = 3;
+                 UPDATE messages SET preview = 2.5 WHERE uid = 4;
+                 UPDATE drafts SET body = CAST(X'c4b0ff' AS TEXT) WHERE id = 1;",
+            )
+            .unwrap();
+        let mut queries: Vec<String> = [
+            "",
+            " ",
+            "a",
+            "A",
+            "joao",
+            "JO\u{c3}O",
+            "\u{e9}",
+            "e",
+            "ss",
+            "STRASSE",
+            "_",
+            "%",
+            "\\",
+            "a_",
+            "%a",
+            "\u{0}",
+            "x",
+            "i",
+            "\u{130}",
+            "12345",
+            "2.5",
+            "\u{fffd}",
+            "@",
+            "zzzz",
+            "\u{3c3}\u{3c3}",
+            "\u{1f642}",
+        ]
+        .iter()
+        .map(|q| q.to_string())
+        .collect();
+        for _ in 0..80 {
+            queries.push(word(&mut next));
+        }
+        let msg_cols = [
+            "subject",
+            "from_name",
+            "from_addr",
+            "preview",
+            "to_addrs",
+            "cc_addrs",
+        ];
+        let draft_cols = ["subject", "to_addrs", "cc_addrs", "bcc_addrs", "body"];
+        let mut hits = 0;
+        for q in queries.iter().filter(|q| !q.contains(' ')) {
+            let want = like_ids(&db, &msg_cols, "messages WHERE 1", q);
+            let mut got = db.message_ids(&[f], q).unwrap();
+            got.sort_unstable();
+            if q.trim().is_empty() {
+                assert_eq!(got.len(), 300, "empty search lists everything");
+            } else {
+                same_but_after_nul(&db, "messages", &msg_cols, &got, &want, q);
+                hits += want.len();
+            }
+            for (state, ids) in [
+                ("= 0", db.draft_ids(q).unwrap()),
+                ("> 0", db.outbox_ids(q).unwrap()),
+            ] {
+                let mut got = ids;
+                got.sort_unstable();
+                if q.trim().is_empty() {
+                    assert_eq!(got.len(), 150);
+                } else {
+                    let want =
+                        like_ids(&db, &draft_cols, &format!("drafts WHERE state {state}"), q);
+                    same_but_after_nul(&db, "drafts", &draft_cols, &got, &want, q);
+                }
+            }
+        }
+        assert!(
+            hits > 100,
+            "the corpus must actually match something: {hits}"
+        );
+        // NULL and non-text arguments never match; no columns match nothing.
+        let one = |sql: &str| -> i64 { db.conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(one("SELECT fold_has('a', NULL, 7, X'61')"), 0);
+        assert_eq!(one("SELECT fold_has('a', NULL, 'bAb')"), 1);
+        assert_eq!(one("SELECT fold_has('a')"), 0);
+        assert_eq!(one("SELECT fold_has(NULL, 'a')"), 0);
+    }
 
     fn account(db: &Db) -> i64 {
         db.add_account(&NewAccount {
@@ -2660,6 +3131,8 @@ mod tests {
                 security: Security::StartTls,
             },
             save_sent: true,
+            imap_user: String::new(),
+            smtp_user: String::new(),
         })
         .unwrap()
     }
@@ -2695,7 +3168,71 @@ mod tests {
             imap: a.imap.clone(),
             smtp: a.smtp.clone(),
             save_sent: a.save_sent,
+            imap_user: a.imap_user.clone(),
+            smtp_user: a.smtp_user.clone(),
         }
+    }
+
+    #[test]
+    fn server_copies_of_drafts_are_found_by_folder_uid_and_validity() {
+        let mut db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let drafts = db
+            .upsert_folder(acc, "Drafts", "Drafts", 0, Role::Drafts)
+            .unwrap();
+        let inbox = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        db.set_uidvalidity(drafts, 7).unwrap();
+        db.insert_headers(
+            acc,
+            drafts,
+            &[header(1, 10, "mine"), header(2, 20, "webmail")],
+        )
+        .unwrap();
+        db.insert_headers(acc, inbox, &[header(1, 30, "same uid, other folder")])
+            .unwrap();
+        let ids = db.message_ids(&[drafts], "").unwrap();
+        let (webmail, mine) = (ids[0], ids[1]);
+        assert!(db.draft_copies(&[drafts]).unwrap().is_empty());
+        let row = db
+            .insert_draft(&DraftRow {
+                account_id: acc,
+                subject: "mine".into(),
+                message_id: "<m@x>".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let copy = |uidvalidity| ServerCopy {
+            account_id: acc,
+            folder_id: drafts,
+            uidvalidity,
+            uid: 1,
+        };
+        db.record_server_copy(row, 1, Some(&copy(7))).unwrap();
+        // Its copy, never the webmail draft nor the Inbox's uid 1.
+        assert_eq!(
+            db.draft_copies(&[drafts, inbox]).unwrap(),
+            HashSet::from([mine])
+        );
+        assert!(db.draft_copies(&[inbox]).unwrap().is_empty());
+        assert!(!db.draft_copies(&[drafts]).unwrap().contains(&webmail));
+        // A copy recorded under another UIDVALIDITY names nothing here.
+        db.record_server_copy(row, 2, Some(&copy(6))).unwrap();
+        assert!(db.draft_copies(&[drafts]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn view_and_fold_settings_round_trip() {
+        let db = Db::in_memory().unwrap();
+        assert_eq!(db.settings().unwrap().last_view, "");
+        db.set_setting("last_view", "f12").unwrap();
+        db.set_setting("nav_folds_init", "1,3").unwrap();
+        let s = db.settings().unwrap();
+        assert_eq!(
+            (s.last_view.as_str(), s.nav_folds_init.as_str()),
+            ("f12", "1,3")
+        );
     }
 
     #[test]
@@ -3069,7 +3606,11 @@ mod tests {
     const DROP_V7: &str = "ALTER TABLE accounts DROP COLUMN signature; DROP TABLE settings;";
     /// Undo v8 (after v9).
     const DROP_V8: &str = "DROP TABLE addresses; ALTER TABLE accounts DROP COLUMN addr_backfill;";
-    /// Undo v11 (run first: it is the newest).
+    /// Undo v12 (run first: it is the newest).
+    const DROP_V12: &str = "ALTER TABLE accounts DROP COLUMN imap_user;
+        ALTER TABLE accounts DROP COLUMN smtp_user; ALTER TABLE accounts DROP COLUMN imap_pin;
+        ALTER TABLE accounts DROP COLUMN smtp_pin; ALTER TABLE folders DROP COLUMN role_override;";
+    /// Undo v11 (after v12).
     const DROP_V11: &str = "ALTER TABLE accounts DROP COLUMN enabled;";
     /// Undo v10 (after v11).
     const DROP_V10: &str = "DROP TABLE rsvp;";
@@ -3081,7 +3622,7 @@ mod tests {
     /// Turn a current database back into v2 (no fingerprint columns).
     fn downgrade_to_v2(conn: &Connection) {
         conn.execute_batch(&format!(
-            "{DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
+            "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
              ALTER TABLE folders DROP COLUMN sync_uidnext;
              ALTER TABLE folders DROP COLUMN sync_messages;
              ALTER TABLE folders DROP COLUMN sync_hms;
@@ -3194,7 +3735,7 @@ mod tests {
         db.set_body(id, b"raw", "preview", false).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
+                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
             ))
             .unwrap();
 
@@ -3417,6 +3958,28 @@ mod tests {
         assert_eq!(shape(&migrated.conn), shape(&new.conn));
     }
 
+    #[test]
+    fn a_v11_cache_migrates_to_the_new_shape() {
+        let old = Db::in_memory().unwrap();
+        old.conn
+            .execute_batch(&format!("{DROP_V12} PRAGMA user_version = 11;"))
+            .unwrap();
+        let migrated = Db::init(old.conn).unwrap();
+        let new = Db::in_memory().unwrap();
+        let columns = |db: &Db, table: &str| -> Vec<String> {
+            db.conn
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(columns(&migrated, "accounts"), columns(&new, "accounts"));
+        assert_eq!(columns(&migrated, "folders"), columns(&new, "folders"));
+        assert_eq!(shape(&migrated.conn), shape(&new.conn));
+    }
+
     /// A cache as v1 wrote it (bodies inline in `messages`).
     const V1_CACHE: &str =
         "CREATE TABLE accounts (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE,
@@ -3538,7 +4101,7 @@ mod tests {
         db.allow_remote("news@shop.example").unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
+                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
             ))
             .unwrap();
 
@@ -3647,6 +4210,8 @@ mod tests {
         let acc = account(&db);
         let other = db
             .add_account(&NewAccount {
+                imap_user: String::new(),
+                smtp_user: String::new(),
                 email: "other@example.com".into(),
                 ..a_to_new(&db.accounts().unwrap()[0])
             })
@@ -3755,7 +4320,7 @@ mod tests {
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
+                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
                  ALTER TABLE drafts DROP COLUMN next_try; ALTER TABLE drafts DROP COLUMN last_error;
                  PRAGMA user_version = 5;"
             ))
@@ -3782,7 +4347,7 @@ mod tests {
         let acc = account(&db);
         db.conn
             .execute_batch(&format!(
-                "{DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
+                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
             ))
             .unwrap();
 
@@ -3814,6 +4379,19 @@ mod tests {
         assert!(db.settings().unwrap().diagnostics_log);
         db.set_setting("diagnostics_log", "yes").unwrap();
         assert!(!db.settings().unwrap().diagnostics_log);
+        // The language follows Windows until one is chosen; junk is ignored.
+        use crate::i18n::LangSetting;
+        assert_eq!(db.settings().unwrap().language, LangSetting::System);
+        db.set_setting("language", "pt-PT").unwrap();
+        assert_eq!(
+            db.settings().unwrap().language,
+            LangSetting::PortuguesePortugal
+        );
+        // Brazilian Portuguese is not offered: it reads as the default.
+        db.set_setting("language", "pt-BR").unwrap();
+        assert_eq!(db.settings().unwrap().language, LangSetting::System);
+        db.set_setting("language", "en").unwrap();
+        assert_eq!(db.settings().unwrap().language, LangSetting::English);
     }
 
     #[test]
@@ -4078,7 +4656,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
+                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
             ))
             .unwrap();
 
@@ -4107,7 +4685,9 @@ example.com"
         let acc = account(&db);
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
-            .execute_batch(&format!("{DROP_V11} {DROP_V10} PRAGMA user_version = 9;"))
+            .execute_batch(&format!(
+                "{DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
+            ))
             .unwrap();
 
         let db = Db::init(db.conn).unwrap();
@@ -4124,7 +4704,7 @@ example.com"
         let acc = account(&db);
         db.set_setting("undo_send_secs", "10").unwrap();
         db.conn
-            .execute_batch(&format!("{DROP_V11} PRAGMA user_version = 10;"))
+            .execute_batch(&format!("{DROP_V12} {DROP_V11} PRAGMA user_version = 10;"))
             .unwrap();
 
         let db = Db::init(db.conn).unwrap();
@@ -4138,10 +4718,78 @@ example.com"
     }
 
     #[test]
+    fn migrates_v11_to_v12() {
+        let db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        db.conn
+            .execute_batch(&format!("{DROP_V12} PRAGMA user_version = 11;"))
+            .unwrap();
+
+        let db = Db::init(db.conn).unwrap();
+        assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
+        assert_eq!(SCHEMA_VERSION, 12);
+        let a = db.accounts().unwrap().remove(0);
+        assert_eq!(
+            (a.id, a.email.as_str(), a.name.as_str()),
+            (acc, "me@example.com", "Me")
+        );
+        assert_eq!(a.imap.host, "imap.example.com");
+        assert_eq!((a.imap_user.as_str(), a.smtp_user.as_str()), ("", ""));
+        assert!(a.imap_pin.is_none() && a.smtp_pin.is_none());
+        assert_eq!(a.imap_login(), "me@example.com");
+        assert_eq!(a.smtp_login(), "me@example.com");
+        // The folder role column starts as "follow the detected role".
+        let f = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        let over: String = db
+            .conn
+            .query_row(
+                "SELECT role_override FROM folders WHERE id = ?1",
+                [f],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(over, "");
+        // A second init changes nothing.
+        let db = Db::init(db.conn).unwrap();
+        assert_eq!(user_version(&db.conn).unwrap(), 12);
+        assert_eq!(db.accounts().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn logins_and_pins_round_trip() {
+        let db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let a = db.accounts().unwrap().remove(0);
+        db.update_account(&Account {
+            imap_user: "alice".into(),
+            smtp_user: "alice@smtp".into(),
+            imap_pin: Some(vec![1, 2, 3]),
+            ..a
+        })
+        .unwrap();
+        let a = db.accounts().unwrap().remove(0);
+        assert_eq!(a.id, acc);
+        assert_eq!((a.imap_login(), a.smtp_login()), ("alice", "alice@smtp"));
+        assert_eq!(a.imap_pin.as_deref(), Some(&[1u8, 2, 3][..]));
+        assert!(a.smtp_pin.is_none());
+        // Blanking a login goes back to the address.
+        db.update_account(&Account {
+            imap_user: String::new(),
+            ..a
+        })
+        .unwrap();
+        assert_eq!(db.accounts().unwrap()[0].imap_login(), "me@example.com");
+    }
+
+    #[test]
     fn accounts_reorder_and_switch_off() {
         let db = Db::in_memory().unwrap();
         let add = |email: &str| {
             db.add_account(&NewAccount {
+                imap_user: String::new(),
+                smtp_user: String::new(),
                 email: email.into(),
                 name: String::new(),
                 imap: Server {
@@ -4271,6 +4919,14 @@ example.com"
         assert_eq!(db.settings().unwrap().check_interval_secs, 60);
         db.set_setting("flash_taskbar", "1").unwrap();
         assert!(db.settings().unwrap().flash_taskbar);
+        // The onboarding's: the tips seen, and the version What's new told.
+        assert_eq!(db.settings().unwrap().tips_seen, "");
+        assert_eq!(db.settings().unwrap().whats_new_version, None);
+        db.set_setting("tips_seen", "search,help").unwrap();
+        db.set_setting("whats_new_version", "0.2.0").unwrap();
+        let s = db.settings().unwrap();
+        assert_eq!(s.tips_seen, "search,help");
+        assert_eq!(s.whats_new_version.as_deref(), Some("0.2.0"));
         let g = Geometry {
             x: -1900,
             y: 20,
@@ -4381,7 +5037,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
+                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
             ))
             .unwrap();
 

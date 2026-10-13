@@ -1,0 +1,2441 @@
+# European Portuguese (Portugal) translation of Komorebi. Never pt-BR.
+# Terms follow Windows and Outlook in Portugal (ficheiro, ecrã, definições,
+# palavra-passe, utilizador) and AO90 spelling.
+msgid ""
+msgstr ""
+"Project-Id-Version: komorebi\n"
+"Language: pt-PT\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Suggested recipients"
+msgstr "Destinatários sugeridos"
+
+msgctxt "suggestion"
+msgid "{0}, {1}"
+msgstr "{0}, {1}"
+
+msgid "Forget certificate"
+msgstr "Esquecer certificado"
+
+msgid "Back to accounts"
+msgstr "Voltar às contas"
+
+msgid "Accounts"
+msgstr "Contas"
+
+msgid "Settings"
+msgstr "Definições"
+
+msgid "Add an account"
+msgstr "Adicionar uma conta"
+
+msgid "Edit {0}"
+msgstr "Editar {0}"
+
+msgid "General"
+msgstr "Geral"
+
+msgid "Privacy"
+msgstr "Privacidade"
+
+msgid "About"
+msgstr "Acerca de"
+
+msgid "Downloading the mail of {0}"
+msgstr "A transferir o correio de {0}"
+
+msgid "Update password"
+msgstr "Atualizar palavra-passe"
+
+msgid "Update password for {0}"
+msgstr "Atualizar a palavra-passe de {0}"
+
+msgid "Move up"
+msgstr "Mover para cima"
+
+msgid "Move down"
+msgstr "Mover para baixo"
+
+msgid "Edit"
+msgstr "Editar"
+
+msgid "Remove"
+msgstr "Remover"
+
+msgid "Remove {0}"
+msgstr "Remover {0}"
+
+msgid "No accounts yet"
+msgstr "Ainda sem contas"
+
+msgid "Add another account"
+msgstr "Adicionar outra conta"
+
+msgid "Purelymail, Postale.io or any IMAP and SMTP server."
+msgstr "Purelymail, Postale.io ou qualquer servidor IMAP e SMTP."
+
+msgid "Add account"
+msgstr "Adicionar conta"
+
+msgid "Provider"
+msgstr "Fornecedor"
+
+msgid "Name"
+msgstr "Nome"
+
+msgid "Shown to recipients"
+msgstr "Apresentado aos destinatários"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "you@yourdomain.com"
+msgstr "nome@exemplo.pt"
+
+msgid "Password"
+msgstr "Palavra-passe"
+
+msgid "Password or app password"
+msgstr "Palavra-passe ou palavra-passe de aplicação"
+
+msgid "Leave empty to keep the current one"
+msgstr "Deixe vazio para manter a atual"
+
+msgid "Find settings"
+msgstr "Procurar definições"
+
+msgid "Looking up settings"
+msgstr "A procurar definições"
+
+msgid "Looking up settings …"
+msgstr "A procurar definições …"
+
+msgid "Not filled in: the form changed while Komorebi looked."
+msgstr "Não preenchido: o formulário mudou enquanto o Komorebi procurava."
+
+msgid "IMAP server"
+msgstr "Servidor IMAP"
+
+msgid "Port"
+msgstr "Porta"
+
+msgid "IMAP port"
+msgstr "Porta IMAP"
+
+msgid "IMAP security"
+msgstr "Segurança IMAP"
+
+msgid "SSL/TLS (port 993)"
+msgstr "SSL/TLS (porta 993)"
+
+msgid "STARTTLS (port 143)"
+msgstr "STARTTLS (porta 143)"
+
+msgid "IMAP username"
+msgstr "Nome de utilizador IMAP"
+
+msgid "Same as email address"
+msgstr "Igual ao endereço de e-mail"
+
+msgid "SMTP server"
+msgstr "Servidor SMTP"
+
+msgid "SMTP port"
+msgstr "Porta SMTP"
+
+msgid "SMTP security"
+msgstr "Segurança SMTP"
+
+msgid "SSL/TLS (port 465)"
+msgstr "SSL/TLS (porta 465)"
+
+msgid "STARTTLS (port 587)"
+msgstr "STARTTLS (porta 587)"
+
+msgid "Same sign-in as incoming"
+msgstr "Mesmo início de sessão que o de receção"
+
+msgid "SMTP username"
+msgstr "Nome de utilizador SMTP"
+
+msgid "Komorebi always signs in to the sending server."
+msgstr "O Komorebi inicia sempre sessão no servidor de envio."
+
+msgid "Save a copy of sent mail in the Sent folder"
+msgstr "Guardar uma cópia do correio enviado na pasta Itens enviados"
+
+msgid "Folders"
+msgstr "Pastas"
+
+msgid "Where sent mail and drafts are saved, and where Delete, Archive and Report junk move mail. Automatic follows what the server marks. Nothing is created on the server."
+msgstr "Onde o correio enviado e os rascunhos são guardados e para onde Eliminar, Arquivar e Marcar como lixo eletrónico movem o correio. Automático segue o que o servidor indica. Nada é criado no servidor."
+
+msgid "Sent"
+msgstr "Itens enviados"
+
+msgid "Drafts"
+msgstr "Rascunhos"
+
+msgid "Trash"
+msgstr "Itens eliminados"
+
+msgctxt "folder"
+msgid "Archive"
+msgstr "Arquivo"
+
+msgid "Junk"
+msgstr "Lixo eletrónico"
+
+msgid "Signature"
+msgstr "Assinatura"
+
+msgid "Added below new mail, replies and forwards"
+msgstr "Adicionada abaixo das novas mensagens, das respostas e dos reencaminhamentos"
+
+msgid "Review certificate"
+msgstr "Rever certificado"
+
+msgid "Save"
+msgstr "Guardar"
+
+msgid "Test connection"
+msgstr "Testar ligação"
+
+msgid "Checks the servers and the sign-in without saving anything"
+msgstr "Verifica os servidores e o início de sessão sem guardar nada"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Reading the certificate"
+msgstr "A ler o certificado"
+
+msgid "Signing in"
+msgstr "A iniciar sessão"
+
+msgid "Reading the certificate …"
+msgstr "A ler o certificado …"
+
+msgid "Signing in …"
+msgstr "A iniciar sessão …"
+
+msgid "Find the incoming server"
+msgstr "Localizar o servidor de receção"
+
+msgid "Connect to the incoming server"
+msgstr "Ligar ao servidor de receção"
+
+msgid "Secure the connection"
+msgstr "Proteger a ligação"
+
+msgid "Sign in to incoming mail"
+msgstr "Iniciar sessão no correio de receção"
+
+msgid "Read the folder list"
+msgstr "Ler a lista de pastas"
+
+msgid "Connect to the sending server"
+msgstr "Ligar ao servidor de envio"
+
+msgid "Sign in to sending mail"
+msgstr "Iniciar sessão no correio de envio"
+
+msgid "{0}, waiting"
+msgstr "{0}, em espera"
+
+msgid "{0}, in progress"
+msgstr "{0}, em curso"
+
+msgid "{0}, passed"
+msgstr "{0}, bem-sucedido"
+
+msgid "{0}, failed"
+msgstr "{0}, falhou"
+
+msgid "{0}, skipped"
+msgstr "{0}, ignorado"
+
+msgid "Theme"
+msgstr "Tema"
+
+msgid "System follows your Windows app mode."
+msgstr "«Sistema» segue o modo de aplicações do Windows."
+
+msgctxt "settings theme"
+msgid "System"
+msgstr "Sistema"
+
+msgid "Light"
+msgstr "Claro"
+
+msgid "Dark"
+msgstr "Escuro"
+
+msgid "Check for new mail"
+msgstr "Verificar se há correio novo"
+
+msgid "Servers that push new mail show it within seconds whatever the interval."
+msgstr "Os servidores que notificam de imediato o correio novo mostram-no em segundos, qualquer que seja o intervalo."
+
+msgid "Every minute"
+msgstr "Todos os minutos"
+
+msgid "Every 2 minutes"
+msgstr "De 2 em 2 minutos"
+
+msgid "Every 5 minutes"
+msgstr "De 5 em 5 minutos"
+
+msgid "Every 15 minutes"
+msgstr "De 15 em 15 minutos"
+
+msgid "Undo send"
+msgstr "Desfazer envio"
+
+msgid "Holds a sent message this long so it can be taken back."
+msgstr "Retém uma mensagem enviada durante este tempo para que possa ser recuperada."
+
+msgid "Off"
+msgstr "Desativado"
+
+msgid "5 seconds"
+msgstr "5 segundos"
+
+msgid "10 seconds"
+msgstr "10 segundos"
+
+msgid "20 seconds"
+msgstr "20 segundos"
+
+msgid "30 seconds"
+msgstr "30 segundos"
+
+msgid "Mark as read"
+msgstr "Marcar como lida"
+
+msgid "When a message opens in the reader."
+msgstr "Quando uma mensagem é aberta no leitor."
+
+msgid "Right away"
+msgstr "De imediato"
+
+msgid "After 1 second"
+msgstr "Após 1 segundo"
+
+msgid "After 3 seconds"
+msgstr "Após 3 segundos"
+
+msgid "Never"
+msgstr "Nunca"
+
+msgid "Flash the taskbar button"
+msgstr "Fazer piscar o botão da barra de tarefas"
+
+msgid "When new mail arrives while Komorebi is in the background."
+msgstr "Quando chega correio novo e o Komorebi está em segundo plano."
+
+msgid "Flash the taskbar button when new mail arrives"
+msgstr "Fazer piscar o botão da barra de tarefas quando chega correio novo"
+
+msgctxt "settings language"
+msgid "Language"
+msgstr "Idioma"
+
+msgctxt "settings language"
+msgid "The language of menus and messages. System follows your Windows display language."
+msgstr "O idioma dos menus e das mensagens. «Sistema» segue o idioma de apresentação do Windows."
+
+msgctxt "settings language"
+msgid "System"
+msgstr "Sistema"
+
+msgid "Remote images"
+msgstr "Imagens remotas"
+
+msgid "Senders whose images always load"
+msgstr "Remetentes cujas imagens são sempre transferidas"
+
+msgid "None yet. Everyone else's images stay blocked until you load them, and tracking pixels never load."
+msgstr "Nenhum por enquanto. As imagens de todos os outros ficam bloqueadas até as transferir e os pixels de rastreio nunca são transferidos."
+
+msgid "Everyone else's images stay blocked until you load them, and tracking pixels never load."
+msgstr "As imagens de todos os outros ficam bloqueadas até as transferir e os pixels de rastreio nunca são transferidos."
+
+msgid "Forget all"
+msgstr "Esquecer todos"
+
+msgid "Diagnostics"
+msgstr "Diagnóstico"
+
+msgid "Diagnostics log"
+msgstr "Registo de diagnóstico"
+
+msgid "Keep a diagnostics log"
+msgstr "Manter um registo de diagnóstico"
+
+msgid "Downloaded mail"
+msgstr "Correio transferido"
+
+msgid "Download again"
+msgstr "Transferir novamente"
+
+msgid "Download the mail of {0} again"
+msgstr "Transferir novamente o correio de {0}"
+
+msgid "Remove all data"
+msgstr "Remover todos os dados"
+
+msgid "Deletes the saved passwords of all accounts from Windows Credential Manager, then everything Komorebi keeps in the data folder (downloaded mail, drafts, the Outbox, settings and logs), and closes Komorebi. Mail on the server is not affected."
+msgstr "Elimina as palavras-passe guardadas de todas as contas do Gestor de Credenciais do Windows e, depois, tudo o que o Komorebi mantém na pasta de dados (correio transferido, rascunhos, Caixa de saída, definições e registos), e fecha o Komorebi. O correio no servidor não é afetado."
+
+msgid "Version {0} · Apache License 2.0"
+msgstr "Versão {0} · Licença Apache 2.0"
+
+msgid "Data folder"
+msgstr "Pasta de dados"
+
+msgid "Copy"
+msgstr "Copiar"
+
+msgid "Copy the data folder's path"
+msgstr "Copiar o caminho da pasta de dados"
+
+msgid "Open"
+msgstr "Abrir"
+
+msgid "Open the data folder in File Explorer"
+msgstr "Abrir a pasta de dados no Explorador de Ficheiros"
+
+msgid "Source code"
+msgstr "Código-fonte"
+
+msgid "Free and open source, with no telemetry and no ads. Passwords are kept in Windows Credential Manager."
+msgstr "Gratuito e de código aberto, sem telemetria nem anúncios. As palavras-passe são guardadas no Gestor de Credenciais do Windows."
+
+msgid "Open the Komorebi repository in the browser"
+msgstr "Abrir o repositório do Komorebi no navegador"
+
+msgid "All inboxes"
+msgstr "Todas as caixas de entrada"
+
+msgid "Nothing here"
+msgstr "Nada aqui"
+
+msgid "New message"
+msgstr "Nova mensagem"
+
+msgid "Reply"
+msgstr "Responder"
+
+msgid "Reply all"
+msgstr "Responder a todos"
+
+msgid "Forward"
+msgstr "Reencaminhar"
+
+msgid "Forward as attachment"
+msgstr "Reencaminhar como anexo"
+
+msgid "Mark as unread"
+msgstr "Marcar como não lida"
+
+msgid "Flag"
+msgstr "Sinalizar"
+
+msgid "Remove flag"
+msgstr "Remover sinalização"
+
+msgid "Archive"
+msgstr "Arquivar"
+
+msgid "Delete"
+msgstr "Eliminar"
+
+msgid "Move to"
+msgstr "Mover para"
+
+msgid "Not junk"
+msgstr "Não é lixo eletrónico"
+
+msgid "Report junk"
+msgstr "Marcar como lixo eletrónico"
+
+msgid "Save as .eml"
+msgstr "Guardar como .eml"
+
+msgid "Show original"
+msgstr "Mostrar original"
+
+msgid "Copy Message-ID"
+msgstr "Copiar Message-ID"
+
+msgid "View as plain text"
+msgstr "Ver como texto simples"
+
+msgid "Show original colours"
+msgstr "Mostrar cores originais"
+
+msgid "Mark all as read"
+msgstr "Marcar todas como lidas"
+
+msgid "Syncing …"
+msgstr "A sincronizar …"
+
+msgid "Refresh (F5)"
+msgstr "Atualizar (F5)"
+
+msgid "All folders"
+msgstr "Todas as pastas"
+
+msgid "All"
+msgstr "Todas"
+
+msgid "Unread"
+msgstr "Não lidas"
+
+msgid "Flagged"
+msgstr "Sinalizadas"
+
+msgid "Messages"
+msgstr "Mensagens"
+
+msgid "Search all folders"
+msgstr "Pesquisar em todas as pastas"
+
+msgid "Clear search"
+msgstr "Limpar pesquisa"
+
+msgid "Show all"
+msgstr "Mostrar tudo"
+
+msgid "Subject"
+msgstr "Assunto"
+
+msgid "Attach"
+msgstr "Anexar"
+
+msgid "Attach (Ctrl+Shift+A)"
+msgstr "Anexar (Ctrl+Shift+A)"
+
+msgid "Discard"
+msgstr "Descartar"
+
+msgid "Send"
+msgstr "Enviar"
+
+msgid "Send (Ctrl+Enter)"
+msgstr "Enviar (Ctrl+Enter)"
+
+msgid "Send anyway"
+msgstr "Enviar mesmo assim"
+
+msgid "Keep editing"
+msgstr "Continuar a editar"
+
+msgid "From"
+msgstr "De"
+
+msgid "To"
+msgstr "Para"
+
+msgid "Cc"
+msgstr "Cc"
+
+msgid "Add Cc (Ctrl+Shift+C)"
+msgstr "Adicionar Cc (Ctrl+Shift+C)"
+
+msgid "Bcc"
+msgstr "Cco"
+
+msgid "Add Bcc (Ctrl+Shift+B)"
+msgstr "Adicionar Cco (Ctrl+Shift+B)"
+
+msgid "Bold (Ctrl+B)"
+msgstr "Negrito (Ctrl+B)"
+
+msgid "Italic (Ctrl+I)"
+msgstr "Itálico (Ctrl+I)"
+
+msgid "Link (Ctrl+K)"
+msgstr "Hiperligação (Ctrl+K)"
+
+msgid "Bulleted list (Ctrl+Shift+8)"
+msgstr "Lista com marcas (Ctrl+Shift+8)"
+
+msgid "Numbered list (Ctrl+Shift+7)"
+msgstr "Lista numerada (Ctrl+Shift+7)"
+
+msgid "Link"
+msgstr "Hiperligação"
+
+msgid "https://example.com or name@example.com"
+msgstr "https://example.com ou nome@example.com"
+
+msgid "Link address"
+msgstr "Endereço da hiperligação"
+
+msgid "Not a web or e-mail address"
+msgstr "Não é um endereço Web nem de e-mail"
+
+msgid "Insert"
+msgstr "Inserir"
+
+msgid "Insert link (Enter)"
+msgstr "Inserir hiperligação (Enter)"
+
+msgid "Cancel (Esc)"
+msgstr "Cancelar (Esc)"
+
+msgid "Message body"
+msgstr "Corpo da mensagem"
+
+msgid "Select a draft to keep writing"
+msgstr "Selecione um rascunho para continuar a escrever"
+
+msgid "Select a message to read"
+msgstr "Selecione uma mensagem para ler"
+
+msgid "{n} message selected"
+msgid_plural "{n} messages selected"
+msgstr[0] "{n} mensagem selecionada"
+msgstr[1] "{n} mensagens selecionadas"
+
+msgid "Move"
+msgstr "Mover"
+
+msgid "Select messages of one account to move them"
+msgstr "Selecione mensagens de uma só conta para as mover"
+
+msgid "Retry"
+msgstr "Tentar novamente"
+
+msgid "To: {0}"
+msgstr "Para: {0}"
+
+msgid "Load images"
+msgstr "Transferir imagens"
+
+msgid "Always load from this sender"
+msgstr "Transferir sempre deste remetente"
+
+msgid "More actions"
+msgstr "Mais ações"
+
+msgid "(no subject)"
+msgstr "(sem assunto)"
+
+msgid "Subject: {0}"
+msgstr "Assunto: {0}"
+
+msgid "Unsubscribe"
+msgstr "Anular subscrição"
+
+msgid "From: {0}"
+msgstr "De: {0}"
+
+msgid "Sender address: {0}"
+msgstr "Endereço do remetente: {0}"
+
+msgid "Date: {0}"
+msgstr "Data: {0}"
+
+msgid "To: {0}   Cc: {1}"
+msgstr "Para: {0}   Cc: {1}"
+
+msgid "Accept"
+msgstr "Aceitar"
+
+msgid "Tentative"
+msgstr "Provisório"
+
+msgid "Decline"
+msgstr "Recusar"
+
+msgid "Change"
+msgstr "Alterar"
+
+msgid "Join"
+msgstr "Participar"
+
+msgid "Save .ics"
+msgstr "Guardar .ics"
+
+msgid "Details"
+msgstr "Detalhes"
+
+msgid "Downloading message …"
+msgstr "A transferir mensagem …"
+
+msgid "Save {0}"
+msgstr "Guardar {0}"
+
+msgid "{n} image couldn't be loaded."
+msgid_plural "{n} images couldn't be loaded."
+msgstr[0] "Não foi possível transferir {n} imagem."
+msgstr[1] "Não foi possível transferir {n} imagens."
+
+msgid "{n} remote image from {0} blocked. If you load them, the sender can see when you open this message and your IP address."
+msgid_plural "{n} remote images from {0} blocked. If you load them, the sender can see when you open this message and your IP address."
+msgstr[0] "{n} imagem remota de {0} bloqueada. Se a transferir, o remetente pode ver quando abre esta mensagem e o seu endereço IP."
+msgstr[1] "{n} imagens remotas de {0} bloqueadas. Se as transferir, o remetente pode ver quando abre esta mensagem e o seu endereço IP."
+
+msgid "{n} remote image blocked. If you load them, the sender can see when you open this message and your IP address."
+msgid_plural "{n} remote images blocked. If you load them, the sender can see when you open this message and your IP address."
+msgstr[0] "{n} imagem remota bloqueada. Se a transferir, o remetente pode ver quando abre esta mensagem e o seu endereço IP."
+msgstr[1] "{n} imagens remotas bloqueadas. Se as transferir, o remetente pode ver quando abre esta mensagem e o seu endereço IP."
+
+msgid "Message"
+msgstr "Mensagem"
+
+msgid "Select all"
+msgstr "Selecionar tudo"
+
+msgid "[Message shortened for display]"
+msgstr "[Mensagem encurtada para apresentação]"
+
+msgid "Welcome to Komorebi"
+msgstr "Bem-vindo ao Komorebi"
+
+msgid "Add your Purelymail, Postale.io or other IMAP account. You need your email address and password; it takes about a minute."
+msgstr "Adicione a sua conta Purelymail, Postale.io ou outra conta IMAP. Precisa do seu endereço de e-mail e da palavra-passe; demora cerca de um minuto."
+
+msgid "New mail"
+msgstr "Novo correio"
+
+msgid "New mail (Ctrl+N)"
+msgstr "Novo correio (Ctrl+N)"
+
+msgid "Settings (Ctrl+,)"
+msgstr "Definições (Ctrl+,)"
+
+msgid "Open this link in your browser?"
+msgstr "Abrir esta hiperligação no navegador?"
+
+msgid "Discard this draft?"
+msgstr "Descartar este rascunho?"
+
+msgid "Original message"
+msgstr "Mensagem original"
+
+msgid "Message-ID: {0}"
+msgstr "Message-ID: {0}"
+
+msgid "Header fields"
+msgstr "Campos de cabeçalho"
+
+msgid "Source"
+msgstr "Origem"
+
+msgid "Message source"
+msgstr "Origem da mensagem"
+
+msgid "Copy headers"
+msgstr "Copiar cabeçalhos"
+
+msgid "Copy all"
+msgstr "Copiar tudo"
+
+msgid "Close"
+msgstr "Fechar"
+
+msgctxt "window title"
+msgid "Inbox ({0}) - Komorebi"
+msgstr "Caixa de entrada ({0}) - Komorebi"
+
+msgid "Komorebi couldn't start.\n\n{0}"
+msgstr "Não foi possível iniciar o Komorebi.\n\n{0}"
+
+msgid "Komorebi closed unexpectedly last time; see crash.log"
+msgstr "O Komorebi foi encerrado inesperadamente da última vez; consulte crash.log"
+
+msgid "The mail cache was damaged, so Komorebi started a new one; the old file is kept as {0}. Add your accounts again in Settings."
+msgstr "A cache de correio estava danificada, por isso o Komorebi iniciou uma nova; o ficheiro antigo foi guardado como {0}. Adicione novamente as suas contas nas Definições."
+
+msgid "The passwords were deleted, but these files are still in use and were not removed. Delete them by hand:\n\n{0}"
+msgstr "As palavras-passe foram eliminadas, mas estes ficheiros ainda estão em utilização e não foram removidos. Elimine-os manualmente:\n\n{0}"
+
+msgid "Can't reach the server. Komorebi tries again by itself; check your internet connection."
+msgstr "Não foi possível contactar o servidor. O Komorebi tenta novamente de forma automática; verifique a ligação à Internet."
+
+msgid "The server rejected the sign-in. Update the password in Settings, or press Refresh to retry."
+msgstr "O servidor rejeitou o início de sessão. Atualize a palavra-passe nas Definições ou prima Atualizar para tentar novamente."
+
+msgid "Couldn't make a secure connection to the server. Check the server name in Settings; its certificate may not be trusted."
+msgstr "Não foi possível estabelecer uma ligação segura ao servidor. Verifique o nome do servidor nas Definições; o certificado pode não ser de confiança."
+
+msgid "The server says this message is too large. Remove an attachment or share it another way."
+msgstr "O servidor indica que esta mensagem é demasiado grande. Remova um anexo ou partilhe-a de outra forma."
+
+msgid "The mailbox is full on the server. Delete or archive some mail, then try again."
+msgstr "A caixa de correio está cheia no servidor. Elimine ou arquive algum correio e tente novamente."
+
+msgid "The server is busy or has too many connections open. Komorebi tries again shortly; close other mail apps if this keeps happening."
+msgstr "O servidor está ocupado ou tem demasiadas ligações abertas. O Komorebi tenta novamente em breve; feche outras aplicações de correio se isto continuar a acontecer."
+
+msgid "Couldn't find {0}. Check the spelling of the server name and your internet connection."
+msgstr "Não foi possível encontrar {0}. Verifique a ortografia do nome do servidor e a ligação à Internet."
+
+msgid "{0} didn't answer on port {1}. SSL/TLS usually uses 993 (IMAP) or 465 (SMTP); STARTTLS uses 143 or 587 (some servers use 25, 2525 or 1143)."
+msgstr "{0} não respondeu na porta {1}. O SSL/TLS costuma usar 993 (IMAP) ou 465 (SMTP); o STARTTLS usa 143 ou 587 (alguns servidores usam 25, 2525 ou 1143)."
+
+msgid "The connection to {0} was lost. Try again, and if it keeps happening, check the server."
+msgstr "A ligação a {0} perdeu-se. Tente novamente e, se continuar a acontecer, verifique o servidor."
+
+msgid "{0} rejected the password for {1}. If sign-in uses two steps, create an app password. If the login isn't your email address, set the username."
+msgstr "{0} rejeitou a palavra-passe de {1}. Se o início de sessão usa dois passos, crie uma palavra-passe de aplicação. Se o nome de início de sessão não for o seu endereço de e-mail, defina o nome de utilizador."
+
+msgid "The secure connection to {0} failed. Its certificate isn't trusted or doesn't match the server name. Check the name, or if you run this server yourself, review its certificate."
+msgstr "A ligação segura a {0} falhou. O certificado não é de confiança ou não corresponde ao nome do servidor. Verifique o nome ou, se gere este servidor, reveja o certificado."
+
+msgid "{0} didn't accept the connection on port {1}. Check the server name and port."
+msgstr "{0} não aceitou a ligação na porta {1}. Verifique o nome do servidor e a porta."
+
+msgid "Couldn't set up a secure connection to {0}. Check the port and the security setting."
+msgstr "Não foi possível estabelecer uma ligação segura a {0}. Verifique a porta e a definição de segurança."
+
+msgid "{0} wouldn't let {1} sign in. Check the username, the password and the server's settings."
+msgstr "{0} não permitiu o início de sessão de {1}. Verifique o nome de utilizador, a palavra-passe e as definições do servidor."
+
+msgid "Signed in, but {0} didn't list its folders. Try again, or check the server."
+msgstr "Sessão iniciada, mas {0} não listou as respetivas pastas. Tente novamente ou verifique o servidor."
+
+msgid "{0} doesn't offer STARTTLS, so Komorebi won't sign in (your password would travel unencrypted). Ask the administrator to enable it, or use the SSL/TLS port."
+msgstr "{0} não oferece STARTTLS, por isso o Komorebi não inicia sessão (a sua palavra-passe seguiria sem cifragem). Peça ao administrador que o ative ou utilize a porta SSL/TLS."
+
+msgid "This port answered without encryption. Komorebi only connects securely; choose STARTTLS or the SSL/TLS port."
+msgstr "Esta porta respondeu sem cifragem. O Komorebi só se liga de forma segura; escolha STARTTLS ou a porta SSL/TLS."
+
+msgid "{0} doesn't offer sign-in. Komorebi can't send through servers without sign-in yet."
+msgstr "{0} não oferece início de sessão. O Komorebi ainda não consegue enviar através de servidores sem início de sessão."
+
+msgid "{0} didn't greet Komorebi like an IMAP server (it said goodbye, or signed in by itself). Check the server name, the port and the security setting."
+msgstr "{0} não cumprimentou o Komorebi como um servidor IMAP (despediu-se ou iniciou a sessão sozinho). Verifique o nome do servidor, a porta e a definição de segurança."
+
+msgid "{0} doesn't allow signing in with a password over this connection (LOGINDISABLED). Ask the administrator to allow it on secure connections."
+msgstr "{0} não permite iniciar sessão com palavra-passe nesta ligação (LOGINDISABLED). Peça ao administrador que o permita em ligações seguras."
+
+msgid "{0} only works in UTF-8 mode (UTF8=ONLY), which Komorebi doesn't support yet. Ask the administrator to also allow the standard mode."
+msgstr "{0} só funciona no modo UTF-8 (UTF8=ONLY), que o Komorebi ainda não suporta. Peça ao administrador que permita também o modo padrão."
+
+msgid "The certificate of {0} changed. If you didn't expect that, don't sign in: review the new certificate and compare its fingerprint before you trust it."
+msgstr "O certificado de {0} foi alterado. Se não estava à espera, não inicie sessão: reveja o novo certificado e compare a impressão digital antes de confiar nele."
+
+msgid "{0} refused to send as {1}. Check that this account may send from that address, or set the SMTP username."
+msgstr "{0} recusou enviar como {1}. Verifique se esta conta pode enviar a partir desse endereço ou defina o nome de utilizador SMTP."
+
+msgid "Sign-in rejected. Update the password in Settings, or press Refresh to retry."
+msgstr "Início de sessão rejeitado. Atualize a palavra-passe nas Definições ou prima Atualizar para tentar novamente."
+
+msgid "{0}. The message may or may not have been sent; check Sent before you retry it from the Outbox."
+msgstr "{0}. A mensagem pode ou não ter sido enviada; verifique Itens enviados antes de tentar novamente a partir da Caixa de saída."
+
+msgid "The server says this message is too large ({0})"
+msgstr "O servidor indica que esta mensagem é demasiado grande ({0})"
+
+msgid "Removed here; the server keeps it flagged as deleted."
+msgstr "Removida daqui; o servidor mantém-na marcada como eliminada."
+
+msgid "Already gone from the server, so there was nothing to move."
+msgstr "Já não existe no servidor, por isso não havia nada a mover."
+
+msgid "There is no Drafts folder on the server, so drafts are only saved on this PC."
+msgstr "Não existe uma pasta Rascunhos no servidor, por isso os rascunhos só são guardados neste PC."
+
+msgid "This account has no Sent folder on the server, so sent mail isn't saved there. You can choose one in Settings: Accounts, Edit."
+msgstr "Esta conta não tem uma pasta Itens enviados no servidor, por isso o correio enviado não é guardado aí. Pode escolher uma em Definições: Contas, Editar."
+
+msgid "A draft saved to the server couldn't be found there, so drafts are only saved on this PC."
+msgstr "Não foi possível encontrar no servidor um rascunho que lá foi guardado, por isso os rascunhos só são guardados neste PC."
+
+msgid "Couldn't save drafts to the server ({0}); they are kept on this PC."
+msgstr "Não foi possível guardar os rascunhos no servidor ({0}); ficam guardados neste PC."
+
+msgid "{0}: {1}"
+msgstr "{0}: {1}"
+
+msgid "Something went wrong. {0}"
+msgstr "Ocorreu um erro. {0}"
+
+msgid "Not saved. {0}"
+msgstr "Não guardado. {0}"
+
+msgid "Not removed. {0}"
+msgstr "Não removido. {0}"
+
+msgid "Not reset. {0}"
+msgstr "Não reposto. {0}"
+
+msgid "Stopped, no files removed. {0}"
+msgstr "Interrompido, nenhum ficheiro removido. {0}"
+
+msgid "Couldn't save: {0}"
+msgstr "Não foi possível guardar: {0}"
+
+msgid "Couldn't save {0}: {1}"
+msgstr "Não foi possível guardar {0}: {1}"
+
+msgid "Couldn't open {0}: {1}"
+msgstr "Não foi possível abrir {0}: {1}"
+
+msgid "Couldn't attach the files: {0}"
+msgstr "Não foi possível anexar os ficheiros: {0}"
+
+msgid "Couldn't open the draft: {0}"
+msgstr "Não foi possível abrir o rascunho: {0}"
+
+msgid "Couldn't save the draft: {0}"
+msgstr "Não foi possível guardar o rascunho: {0}"
+
+msgid "Couldn't send: {0}"
+msgstr "Não foi possível enviar: {0}"
+
+msgid "Couldn't send: {0}. It is back in Drafts."
+msgstr "Não foi possível enviar: {0}. Voltou aos Rascunhos."
+
+msgid "Couldn't undo: {0}"
+msgstr "Não foi possível desfazer: {0}"
+
+msgid "Couldn't send the reply: {0}"
+msgstr "Não foi possível enviar a resposta: {0}"
+
+msgid "Couldn't download this message: {0}"
+msgstr "Não foi possível transferir esta mensagem: {0}"
+
+msgid "Couldn't download this message.\n\n{0}"
+msgstr "Não foi possível transferir esta mensagem.\n\n{0}"
+
+msgid "Saved {0}"
+msgstr "Guardado: {0}"
+
+msgid "No app on this computer opens {0}."
+msgstr "Nenhuma aplicação neste computador abre {0}."
+
+msgid "{0} can run programs, so Komorebi doesn't open it. Save it to check it first."
+msgstr "{0} pode executar programas, por isso o Komorebi não o abre. Guarde-o para o verificar primeiro."
+
+msgctxt "status"
+msgid "Sent"
+msgstr "Enviada"
+
+msgid "Message sent, but {0}"
+msgstr "Mensagem enviada, mas {0}"
+
+msgid "Not sent yet: {0}. It stays in the Outbox and is tried again shortly."
+msgstr "Ainda não enviada: {0}. Fica na Caixa de saída e é novamente tentada em breve."
+
+msgid "Not sent: {0}. It is in the Outbox."
+msgstr "Não enviada: {0}. Está na Caixa de saída."
+
+msgid "Message discarded."
+msgstr "Mensagem descartada."
+
+msgid "A message sent as Komorebi closed couldn't be prepared again; it is back in Drafts."
+msgstr "Uma mensagem enviada quando o Komorebi fechou não pôde ser preparada novamente; voltou aos Rascunhos."
+
+msgid "Sending in {0} s"
+msgstr "A enviar dentro de {0} s"
+
+msgid "Sending …"
+msgstr "A enviar …"
+
+msgid "Sending in a few seconds"
+msgstr "A enviar dentro de instantes"
+
+msgid "Waiting to send"
+msgstr "A aguardar o envio"
+
+msgid "Too late to undo: the message is being sent."
+msgstr "Tarde demais para desfazer: a mensagem está a ser enviada."
+
+msgid "Your reply is in the Outbox; only the organizer gets it."
+msgstr "A sua resposta está na Caixa de saída; só o organizador a recebe."
+
+msgid "Answer kept on this computer; no reply was sent."
+msgstr "Resposta guardada neste computador; não foi enviada nenhuma resposta."
+
+msgid "Undo"
+msgstr "Desfazer"
+
+msgid "Enter your full email address."
+msgstr "Introduza o seu endereço de e-mail completo."
+
+msgid "Enter your full email address first."
+msgstr "Introduza primeiro o seu endereço de e-mail completo."
+
+msgid "This account is already added."
+msgstr "Esta conta já foi adicionada."
+
+msgid "This account was removed."
+msgstr "Esta conta foi removida."
+
+msgid "Enter the password to test."
+msgstr "Introduza a palavra-passe para testar."
+
+msgid "Offline: a password or server change can't be checked."
+msgstr "Offline: não é possível verificar uma alteração de palavra-passe ou de servidor."
+
+msgid "Offline: a certificate can't be reviewed."
+msgstr "Offline: não é possível rever um certificado."
+
+msgid "Offline: settings can't be looked up."
+msgstr "Offline: não é possível procurar definições."
+
+msgid "Komorebi couldn't read the saved password. Type the password to test."
+msgstr "O Komorebi não conseguiu ler a palavra-passe guardada. Escreva a palavra-passe para testar."
+
+msgid "Enter the IMAP and SMTP server names."
+msgstr "Introduza os nomes dos servidores IMAP e SMTP."
+
+msgid "Enter the server name only, such as mail.example.com."
+msgstr "Introduza apenas o nome do servidor, como mail.example.com."
+
+msgid "Zone identifiers such as %eth0 aren't supported. Remove the part after the % sign."
+msgstr "Os identificadores de zona, como %eth0, não são suportados. Remova a parte a seguir ao sinal %."
+
+msgid "Use the ASCII (xn--) form of the server name, such as xn--mail-example.com."
+msgstr "Utilize a forma ASCII (xn--) do nome do servidor, como xn--mail-example.com."
+
+msgid "Enter a valid {0} port."
+msgstr "Introduza uma porta {0} válida."
+
+msgid "Enter a valid {0} username."
+msgstr "Introduza um nome de utilizador {0} válido."
+
+msgid "Every step passed. Nothing was saved; use Add account or Save to keep these settings."
+msgstr "Todos os passos foram bem-sucedidos. Nada foi guardado; utilize Adicionar conta ou Guardar para manter estas definições."
+
+msgid "Added {0}. Downloading mail …"
+msgstr "Conta {0} adicionada. A transferir correio …"
+
+msgid "Saved {0}."
+msgstr "Conta {0} guardada."
+
+msgid "Off: no connections; its downloaded mail stays"
+msgstr "Desativada: sem ligações; o correio transferido mantém-se"
+
+msgid "Downloading {0} of {1} …"
+msgstr "A transferir {0} de {1} …"
+
+msgid "Sign-in rejected"
+msgstr "Início de sessão rejeitado"
+
+msgid "Secure connection failed"
+msgstr "Falha na ligação segura"
+
+msgid "Up to date, checked {0}"
+msgstr "Atualizado, verificado às {0}"
+
+msgid "Up to date"
+msgstr "Atualizado"
+
+msgid "Can't reach {0}"
+msgstr "Não foi possível contactar {0}"
+
+msgid "Last sync failed: {0}"
+msgstr "A última sincronização falhou: {0}"
+
+msgid "{0}: downloading {1} of {2} in {3} …"
+msgstr "{0}: a transferir {1} de {2} em {3} …"
+
+msgid "Downloading the mail of {0} again …"
+msgstr "A transferir novamente o correio de {0} …"
+
+msgid "The mail of {0} downloads again at its next sync."
+msgstr "O correio de {0} é transferido novamente na próxima sincronização."
+
+msgid "Outbox"
+msgstr "Caixa de saída"
+
+msgid "Inbox"
+msgstr "Caixa de entrada"
+
+msgid "No matches"
+msgstr "Sem resultados"
+
+msgid "Outbox is empty. Messages wait here while they are sent."
+msgstr "A Caixa de saída está vazia. As mensagens aguardam aqui enquanto são enviadas."
+
+msgid "No unread messages"
+msgstr "Sem mensagens não lidas"
+
+msgid "No flagged messages"
+msgstr "Sem mensagens sinalizadas"
+
+msgid "Loading …"
+msgstr "A carregar …"
+
+msgid "Can't reach the server, so this list may be incomplete"
+msgstr "Não foi possível contactar o servidor, por isso esta lista pode estar incompleta"
+
+msgid "Couldn't check for new mail, so this list may be incomplete"
+msgstr "Não foi possível verificar se há correio novo, por isso esta lista pode estar incompleta"
+
+msgid "Deleted"
+msgstr "Mensagem eliminada"
+
+msgid "Moved to {0}"
+msgstr "Mensagem movida para {0}"
+
+msgid "{n} message deleted"
+msgid_plural "{n} messages deleted"
+msgstr[0] "{n} mensagem eliminada"
+msgstr[1] "{n} mensagens eliminadas"
+
+msgid "{n} message moved to {0}"
+msgid_plural "{n} messages moved to {0}"
+msgstr[0] "{n} mensagem movida para {0}"
+msgstr[1] "{n} mensagens movidas para {0}"
+
+msgid "{0}. {1}"
+msgstr "{0}. {1}"
+
+msgid "This account has no Archive folder. You can choose one in Settings: Accounts, Edit."
+msgstr "Esta conta não tem uma pasta Arquivo. Pode escolher uma em Definições: Contas, Editar."
+
+msgid "This account has no Trash folder, so nothing was deleted. You can choose one in Settings: Accounts, Edit."
+msgstr "Esta conta não tem uma pasta Itens eliminados, por isso nada foi eliminado. Pode escolher uma em Definições: Contas, Editar."
+
+msgid "This account has no Junk folder, so nothing was moved. You can choose one in Settings: Accounts, Edit."
+msgstr "Esta conta não tem uma pasta Lixo eletrónico, por isso nada foi movido. Pode escolher uma em Definições: Contas, Editar."
+
+msgid "This account has no Inbox folder."
+msgstr "Esta conta não tem uma pasta Caixa de entrada."
+
+msgid "Automatic ({0})"
+msgstr "Automático ({0})"
+
+msgid "Automatic (none found)"
+msgstr "Automático (nenhuma encontrada)"
+
+msgid "(no recipient)"
+msgstr "(sem destinatário)"
+
+msgid "This message is encrypted ({0}). Komorebi cannot decrypt it; save the encrypted file to open it in a program that has the key."
+msgstr "Esta mensagem está cifrada ({0}). O Komorebi não a consegue decifrar; guarde o ficheiro cifrado para o abrir num programa que tenha a chave."
+
+msgid "This message is too large to show formatted, so it is shown as plain text."
+msgstr "Esta mensagem é demasiado grande para ser apresentada formatada, por isso é apresentada como texto simples."
+
+msgid "This message took too long to lay out, so it is shown as plain text."
+msgstr "Esta mensagem demorou demasiado a ser composta, por isso é apresentada como texto simples."
+
+msgid "The link text says “{0}”, but it opens {1}."
+msgstr "O texto da hiperligação indica «{0}», mas abre {1}."
+
+msgid "{0} is an international name, which can imitate the letters of another site."
+msgstr "{0} é um nome internacional, que pode imitar as letras de outro site."
+
+msgid "The address puts a user name before the real site, which is {0}."
+msgstr "O endereço coloca um nome de utilizador antes do site real, que é {0}."
+
+msgid "{0} is a bare IP address, not a site name."
+msgstr "{0} é um endereço IP simples, não um nome de site."
+
+msgid "it failed your server's sender check (DMARC)"
+msgstr "falhou a verificação de remetente do seu servidor (DMARC)"
+
+msgid "it failed your server's sender checks (SPF and DKIM)"
+msgstr "falhou as verificações de remetente do seu servidor (SPF e DKIM)"
+
+msgid "the name shows {0}, but the address is at {1}"
+msgstr "o nome mostra {0}, mas o endereço pertence a {1}"
+
+msgid "{0} is the international name “{1}”"
+msgstr "{0} é o nome internacional «{1}»"
+
+msgid "{0} mixes Latin and {1} letters"
+msgstr "{0} mistura letras latinas e letras do alfabeto {1}"
+
+msgid "Cyrillic"
+msgstr "cirílico"
+
+msgid "Greek"
+msgstr "grego"
+
+msgid "Fetching message …"
+msgstr "A obter a mensagem …"
+
+msgid "This message isn't downloaded yet."
+msgstr "Esta mensagem ainda não foi transferida."
+
+msgid "This message has no Message-ID."
+msgstr "Esta mensagem não tem Message-ID."
+
+msgid "Message-ID copied."
+msgstr "Message-ID copiado."
+
+msgid "Cancelled: this event will not take place."
+msgstr "Cancelado: este evento não se vai realizar."
+
+msgid "You accepted."
+msgstr "Aceitou."
+
+msgid "You tentatively accepted."
+msgstr "Aceitou provisoriamente."
+
+msgid "You declined."
+msgstr "Recusou."
+
+msgid "This event is over."
+msgstr "Este evento já terminou."
+
+msgid "Updated invitation"
+msgstr "Convite atualizado"
+
+msgid "Organizer: {0}"
+msgstr "Organizador: {0}"
+
+msgid "Where: {0}"
+msgstr "Local: {0}"
+
+msgid "(no title)"
+msgstr "(sem título)"
+
+msgid "Fix the To address to send."
+msgstr "Corrija o endereço em Para para enviar."
+
+msgid "Fix the Cc address to send."
+msgstr "Corrija o endereço em Cc para enviar."
+
+msgid "Fix the Bcc address to send."
+msgstr "Corrija o endereço em Cco para enviar."
+
+msgid "Add a recipient to send."
+msgstr "Adicione um destinatário para enviar."
+
+msgid "Attachments are over 25 MB; remove some to send."
+msgstr "Os anexos excedem 25 MB; remova alguns para enviar."
+
+msgid "No subject, and the text mentions an attachment but nothing is attached."
+msgstr "Sem assunto, e o texto menciona um anexo, mas não há nada anexado."
+
+msgid "This message has no subject."
+msgstr "Esta mensagem não tem assunto."
+
+msgid "The text mentions an attachment, but nothing is attached."
+msgstr "O texto menciona um anexo, mas não há nada anexado."
+
+msgid "“{0}” is not a valid address"
+msgstr "«{0}» não é um endereço válido"
+
+msgid "Earlier draft saved in Drafts."
+msgstr "Rascunho anterior guardado em Rascunhos."
+
+msgid "Add an account to write messages."
+msgstr "Adicione uma conta para escrever mensagens."
+
+msgid "Add an account to send messages."
+msgstr "Adicione uma conta para enviar mensagens."
+
+msgid "The message is still downloading."
+msgstr "A mensagem ainda está a ser transferida."
+
+msgid "This draft is no longer saved."
+msgstr "Este rascunho já não está guardado."
+
+msgid "Couldn't load {0}; left out of this draft."
+msgstr "Não foi possível carregar {0}; ficou de fora deste rascunho."
+
+msgid "Draft saved"
+msgstr "Rascunho guardado"
+
+msgid "Attachments {0} of 25 MB"
+msgstr "Anexos: {0} de 25 MB"
+
+msgid "{0}: folders can't be attached"
+msgstr "{0}: as pastas não podem ser anexadas"
+
+msgid "{0}: over Komorebi's 100 MB attachment limit"
+msgstr "{0}: excede o limite de 100 MB de anexos do Komorebi"
+
+msgid "Certificate: pinned (SHA-256 {0})"
+msgstr "Certificado: fixado (SHA-256 {0})"
+
+msgid "The saved certificate for {0} is damaged. Forget it and review the certificate again."
+msgstr "O certificado guardado para {0} está danificado. Esqueça-o e reveja novamente o certificado."
+
+msgid "Certificate: checked by Windows"
+msgstr "Certificado: verificado pelo Windows"
+
+msgid "Couldn't read the certificate of {0}. Check the server name, the port and the security setting, then try again."
+msgstr "Não foi possível ler o certificado de {0}. Verifique o nome do servidor, a porta e a definição de segurança e tente novamente."
+
+msgid "Certificate trusted for {0}. Press Test connection, or Add account or Save, to continue."
+msgstr "Certificado considerado de confiança para {0}. Prima Testar ligação, Adicionar conta ou Guardar para continuar."
+
+msgid "Names: {0}"
+msgstr "Nomes: {0}"
+
+msgid "Self-signed"
+msgstr "Autoassinado"
+
+msgid "Issued by {0}"
+msgstr "Emitido por {0}"
+
+msgid "Valid from {0} to {1}"
+msgstr "Válido de {0} a {1}"
+
+msgid "No settings found, enter them by hand."
+msgstr "Não foram encontradas definições; introduza-as manualmente."
+
+msgid "Komorebi has settings built in for this provider."
+msgstr "O Komorebi tem definições integradas para este fornecedor."
+
+msgid "Found in your domain's DNS records."
+msgstr "Encontradas nos registos DNS do seu domínio."
+
+msgid "Found by your provider's autoconfig."
+msgstr "Encontradas através da deteção automática do seu fornecedor."
+
+msgid "Found in your domain's DNS records and by your provider's autoconfig."
+msgstr "Encontradas nos registos DNS do seu domínio e através da deteção automática do seu fornecedor."
+
+msgid "No incoming server found, enter it by hand."
+msgstr "Não foi encontrado nenhum servidor de receção; introduza-o manualmente."
+
+msgid "No sending server found, enter it by hand."
+msgstr "Não foi encontrado nenhum servidor de envio; introduza-o manualmente."
+
+msgid "The provider's settings point to {0}, a different domain. Not filled in."
+msgstr "As definições do fornecedor apontam para {0}, um domínio diferente. Não preenchido."
+
+msgid "Kept the server settings you typed."
+msgstr "Mantidas as definições do servidor que escreveu."
+
+msgid "Send this message again?"
+msgstr "Enviar esta mensagem novamente?"
+
+msgid "It may already have been sent. Check your Sent folder first, or the recipients may get it twice."
+msgstr "Pode já ter sido enviada. Verifique primeiro a pasta Itens enviados, ou os destinatários podem recebê-la duas vezes."
+
+msgid "Send again"
+msgstr "Enviar novamente"
+
+msgid "Discard this message?"
+msgstr "Descartar esta mensagem?"
+
+msgid "Remove {0}?"
+msgstr "Remover {0}?"
+
+msgid "Removes this account and its downloaded mail from this computer. Mail on the server is not affected."
+msgstr "Remove esta conta e o respetivo correio transferido deste computador. O correio no servidor não é afetado."
+
+msgid "Its {n} unsent draft or Outbox message will be lost."
+msgid_plural "Its {n} unsent drafts and Outbox messages will be lost."
+msgstr[0] "Será perdida {n} mensagem por enviar desta conta (rascunho ou Caixa de saída)."
+msgstr[1] "Serão perdidas {n} mensagens por enviar desta conta (rascunhos e Caixa de saída)."
+
+msgid "Reply “Accepted”?"
+msgstr "Responder «Aceite»?"
+
+msgid "Reply “Tentative”?"
+msgstr "Responder «Provisório»?"
+
+msgid "Reply “Declined”?"
+msgstr "Responder «Recusado»?"
+
+msgid "The reply goes only to the organizer, {0}, from {1}. No one else gets it."
+msgstr "A resposta vai apenas para o organizador, {0}, a partir de {1}. Mais ninguém a recebe."
+
+msgid "Check the address: the organizer's domain ({0}) is not the sender's ({1})."
+msgstr "Verifique o endereço: o domínio do organizador ({0}) não é o do remetente ({1})."
+
+msgid "You are not listed as an attendee, so the reply answers as {0}."
+msgstr "Não consta como participante, por isso a resposta é dada como {0}."
+
+msgid "The reply answers as {0}, an address this message was sent to."
+msgstr "A resposta é dada como {0}, um endereço a que esta mensagem foi enviada."
+
+msgid "“Don't send a reply” keeps your answer on this computer only."
+msgstr "«Não enviar resposta» mantém a sua resposta apenas neste computador."
+
+msgid "Send reply"
+msgstr "Enviar resposta"
+
+msgid "Don't send a reply"
+msgstr "Não enviar resposta"
+
+msgid "Download the mail of {0} again?"
+msgstr "Transferir novamente o correio de {0}?"
+
+msgid "Komorebi forgets the mail it downloaded for this account and downloads it again. Mail on the server is not affected; drafts, the Outbox and settings stay."
+msgstr "O Komorebi esquece o correio que transferiu para esta conta e transfere-o novamente. O correio no servidor não é afetado; os rascunhos, a Caixa de saída e as definições mantêm-se."
+
+msgid "Remove all of Komorebi's data?"
+msgstr "Remover todos os dados do Komorebi?"
+
+msgid "Deletes the saved passwords of all accounts, then the downloaded mail, drafts, Outbox, settings and logs on this computer, and closes Komorebi. Mail on the server is not affected."
+msgstr "Elimina as palavras-passe guardadas de todas as contas e, depois, o correio transferido, os rascunhos, a Caixa de saída, as definições e os registos neste computador, e fecha o Komorebi. O correio no servidor não é afetado."
+
+msgid "{n} unsent draft or Outbox message will be lost."
+msgid_plural "{n} unsent drafts and Outbox messages will be lost."
+msgstr[0] "Será perdida {n} mensagem por enviar (rascunho ou Caixa de saída)."
+msgstr[1] "Serão perdidas {n} mensagens por enviar (rascunhos e Caixa de saída)."
+
+msgid "Trust this certificate?"
+msgstr "Confiar neste certificado?"
+
+msgid "{0} presented a certificate that Windows doesn't trust. Trust this certificate for {1} only?"
+msgstr "{0} apresentou um certificado em que o Windows não confia. Confiar neste certificado apenas para {1}?"
+
+msgid "Trust this certificate"
+msgstr "Confiar neste certificado"
+
+msgid "Copy fingerprint"
+msgstr "Copiar impressão digital"
+
+msgid "Save attachment"
+msgstr "Guardar anexo"
+
+msgid "Save invitation"
+msgstr "Guardar convite"
+
+msgid "Save message"
+msgstr "Guardar mensagem"
+
+msgid "Attach files"
+msgstr "Anexar ficheiros"
+
+msgid "switched off"
+msgstr "desativada"
+
+msgid "sign-in rejected"
+msgstr "início de sessão rejeitado"
+
+msgid "{0} unread"
+msgstr "{0} por ler"
+
+msgid "{0} ({1} unread)"
+msgstr "{0} ({1} por ler)"
+
+msgid "Draft"
+msgstr "Rascunho"
+
+msgid "Has attachment"
+msgstr "Tem anexo"
+
+msgid "Replied"
+msgstr "Respondida"
+
+msgid "in {0}"
+msgstr "em {0}"
+
+msgid "Open {0}, {1}"
+msgstr "Abrir {0}, {1}"
+
+msgctxt "attachment"
+msgid "{0}, {1}"
+msgstr "{0}, {1}"
+
+msgid "Cut"
+msgstr "Cortar"
+
+msgid "Paste"
+msgstr "Colar"
+
+msgid "Clear"
+msgstr "Limpar"
+
+msgid "Hide password"
+msgstr "Ocultar palavra-passe"
+
+msgid "Show password"
+msgstr "Mostrar palavra-passe"
+
+msgid "Search"
+msgstr "Pesquisar"
+
+msgid "Search mail"
+msgstr "Pesquisar correio"
+
+msgid "Search (Ctrl+E)"
+msgstr "Pesquisar (Ctrl+E)"
+
+msgid "Clear search (Esc)"
+msgstr "Limpar pesquisa (Esc)"
+
+msgid "Search scope"
+msgstr "Âmbito da pesquisa"
+
+msgid "Search {0}"
+msgstr "Pesquisar em {0}"
+
+msgid "This folder"
+msgstr "Esta pasta"
+
+msgid "These inboxes"
+msgstr "Estas caixas"
+
+msgid "Search results"
+msgstr "Resultados da pesquisa"
+
+msgid "{n} result in {0}"
+msgid_plural "{n} results in {0}"
+msgstr[0] "{n} resultado em {0}"
+msgstr[1] "{n} resultados em {0}"
+
+msgid "{n} result in all folders"
+msgid_plural "{n} results in all folders"
+msgstr[0] "{n} resultado em todas as pastas"
+msgstr[1] "{n} resultados em todas as pastas"
+
+msgid "Searches subject, people and preview of downloaded mail."
+msgstr "Pesquisa no assunto, nas pessoas e na pré-visualização do correio transferido."
+
+msgid "Show in folder"
+msgstr "Mostrar na pasta"
+
+msgctxt "tag"
+msgid "{0} · {1}"
+msgstr "{0} · {1}"
+
+msgid "Minimize"
+msgstr "Minimizar"
+
+msgid "Maximize"
+msgstr "Maximizar"
+
+msgid "Restore"
+msgstr "Restaurar"
+
+msgid "On"
+msgstr "Ativado"
+
+msgid "Error: {0}"
+msgstr "Erro: {0}"
+
+msgid "Warning: {0}"
+msgstr "Aviso: {0}"
+
+msgctxt "percent"
+msgid "{0}%"
+msgstr "{0}%"
+
+msgid ", level {0}"
+msgstr ", nível {0}"
+
+msgid "Expand"
+msgstr "Expandir"
+
+msgid "Collapse"
+msgstr "Fechar"
+
+msgid "Refresh"
+msgstr "Atualizar"
+
+msgid "Collapse all"
+msgstr "Fechar tudo"
+
+msgid "Account settings"
+msgstr "Definições da conta"
+
+msgctxt "rail account tooltip"
+msgid "{0} - {1} ({2} unread)"
+msgstr "{0} - {1} ({2} por ler)"
+
+msgctxt "rail account tooltip"
+msgid "{0} - {1}"
+msgstr "{0} - {1}"
+
+msgid "Back to mail (Esc)"
+msgstr "Voltar ao correio (Esc)"
+
+msgid "Back to list (Esc)"
+msgstr "Voltar à lista (Esc)"
+
+msgid "Forward as new draft"
+msgstr "Reencaminhar como novo rascunho"
+
+msgid "This draft was saved on another device or in webmail. To keep writing it here, use Forward as new draft."
+msgstr "Este rascunho foi guardado noutro dispositivo ou no webmail. Para continuar a escrevê-lo aqui, utilize Reencaminhar como novo rascunho."
+
+msgid "Folders (Close navigation)"
+msgstr "Pastas (Fechar navegação)"
+
+msgid "Folders (Open navigation)"
+msgstr "Pastas (Abrir navegação)"
+
+msgid "Collapse all folders"
+msgstr "Fechar todas as pastas"
+
+msgid "No drafts. Select New mail to start one."
+msgstr "Sem rascunhos. Selecione Novo correio para começar um."
+
+msgctxt "rail"
+msgid "All inboxes"
+msgstr "Caixas de entrada"
+
+msgid "Filter folders"
+msgstr "Filtrar pastas"
+
+msgid "No folders match"
+msgstr "Nenhuma pasta corresponde"
+
+msgid "Recent"
+msgstr "Recentes"
+
+msgid "Mark all as read, Select messages"
+msgstr "Marcar todas como lidas, Selecionar mensagens"
+
+msgid "Undo (Ctrl+Z)"
+msgstr "Desfazer (Ctrl+Z)"
+
+msgid "Archive (Backspace)"
+msgstr "Arquivar (Retrocesso)"
+
+msgid "Delete (Del)"
+msgstr "Eliminar (Del)"
+
+msgid "Move (Ctrl+Shift+V)"
+msgstr "Mover (Ctrl+Shift+V)"
+
+msgid "Mark as read (Ctrl+Q)"
+msgstr "Marcar como lida (Ctrl+Q)"
+
+msgid "Mark as unread (Ctrl+U)"
+msgstr "Marcar como não lida (Ctrl+U)"
+
+msgid "Flag (Insert)"
+msgstr "Sinalizar (Insert)"
+
+msgid "Clear selection"
+msgstr "Limpar seleção"
+
+msgid "Reply (Ctrl+R)"
+msgstr "Responder (Ctrl+R)"
+
+msgid "Reply all (Ctrl+Shift+R)"
+msgstr "Responder a todos (Ctrl+Shift+R)"
+
+msgid "Forward as new draft (Ctrl+Shift+F)"
+msgstr "Reencaminhar como novo rascunho (Ctrl+Shift+F)"
+
+msgid "Forward (Ctrl+Shift+F)"
+msgstr "Reencaminhar (Ctrl+Shift+F)"
+
+msgid "Remove flag (Insert)"
+msgstr "Remover sinalização (Insert)"
+
+msgid "This message hasn't been downloaded yet. It downloads when Komorebi can reach the server."
+msgstr "Esta mensagem ainda não foi transferida. Será transferida quando o Komorebi conseguir contactar o servidor."
+
+msgid "Select messages"
+msgstr "Selecionar mensagens"
+
+msgid "Stop loading images from this sender"
+msgstr "Deixar de transferir imagens deste remetente"
+
+msgctxt "key"
+msgid "Backspace"
+msgstr "Retrocesso"
+
+msgid "{n} message is deleted from Trash on the server. Once the Undo offer goes, it can't be brought back."
+msgid_plural "{n} messages are deleted from Trash on the server. Once the Undo offer goes, they can't be brought back."
+msgstr[0] "{n} mensagem é eliminada dos Itens eliminados no servidor. Quando a opção Desfazer desaparecer, já não pode ser recuperada."
+msgstr[1] "{n} mensagens são eliminadas dos Itens eliminados no servidor. Quando a opção Desfazer desaparecer, já não podem ser recuperadas."
+
+msgid "{n} message moves to Trash."
+msgid_plural "{n} messages move to Trash."
+msgstr[0] "{n} mensagem é movida para Itens eliminados."
+msgstr[1] "{n} mensagens são movidas para Itens eliminados."
+
+msgid "Delete {n} message for good?"
+msgid_plural "Delete {n} messages for good?"
+msgstr[0] "Eliminar {n} mensagem definitivamente?"
+msgstr[1] "Eliminar {n} mensagens definitivamente?"
+
+msgid "Delete {n} message from Junk?"
+msgid_plural "Delete {n} messages from Junk?"
+msgstr[0] "Eliminar {n} mensagem do Lixo eletrónico?"
+msgstr[1] "Eliminar {n} mensagens do Lixo eletrónico?"
+
+msgid "Enter your email address."
+msgstr "Introduza o seu endereço de e-mail."
+
+msgid "Enter an email address like ana@example.com."
+msgstr "Introduza um endereço de e-mail como ana@exemplo.pt."
+
+msgid "Enter your password."
+msgstr "Introduza a sua palavra-passe."
+
+msgid "Choose your provider."
+msgstr "Escolha o seu fornecedor."
+
+msgid "Enter the incoming (IMAP) server."
+msgstr "Introduza o servidor de receção (IMAP)."
+
+msgid "Enter the sending (SMTP) server."
+msgstr "Introduza o servidor de envio (SMTP)."
+
+msgid "Back"
+msgstr "Voltar"
+
+msgid "Saved in Windows Credential Manager, never in Komorebi's files."
+msgstr "Guardada no Gestor de Credenciais do Windows, nunca nos ficheiros do Komorebi."
+
+msgid "Username"
+msgstr "Nome de utilizador"
+
+msgid "The name you sign in with, if it isn't your email address."
+msgstr "O nome com que inicia sessão, se não for o seu endereço de e-mail."
+
+msgid "Any domain hosted at Purelymail"
+msgstr "Qualquer domínio alojado na Purelymail"
+
+msgid "Any domain hosted at Postale"
+msgstr "Qualquer domínio alojado na Postale"
+
+msgid "Other server"
+msgstr "Outro servidor"
+
+msgid "Any other IMAP and SMTP server"
+msgstr "Qualquer outro servidor IMAP e SMTP"
+
+msgid "Fills in the servers for your address. Only your domain name is looked up, and nothing is saved."
+msgstr "Preenche os servidores do seu endereço. Só é procurado o nome do seu domínio, e nada é guardado."
+
+msgid "Server settings"
+msgstr "Definições do servidor"
+
+msgid "Incoming and sending servers, ports and security"
+msgstr "Servidores de receção e de envio, portas e segurança"
+
+msgid "Your name (optional)"
+msgstr "O seu nome (opcional)"
+
+msgid "e.g. Ana Silva"
+msgstr "p. ex., Ana Silva"
+
+msgid "Shown to the people you write to."
+msgstr "Mostrado às pessoas a quem escreve."
+
+msgid "Set username"
+msgstr "Definir nome de utilizador"
+
+msgid "Stops the check; the form stays as typed"
+msgstr "Para a verificação; o formulário fica como o escreveu"
+
+msgid "Still signing in … You can cancel and check the server name."
+msgstr "Ainda a iniciar sessão … Pode cancelar e verificar o nome do servidor."
+
+msgid "Downloading your mail"
+msgstr "A transferir o seu correio"
+
+msgid "Your mail stays on this PC and on your server. No ads, no tracking."
+msgstr "O seu correio fica neste PC e no seu servidor. Sem anúncios, sem rastreio."
+
+msgid "Need help?"
+msgstr "Precisa de ajuda?"
+
+msgid "Need help? How to add an account"
+msgstr "Precisa de ajuda? Como adicionar uma conta"
+
+msgid "Privacy statement"
+msgstr "Declaração de privacidade"
+
+msgid "{0} rejected the password for {1}. If sign-in uses two steps, create an app password."
+msgstr "{0} rejeitou a palavra-passe de {1}. Se o início de sessão usa dois passos, crie uma palavra-passe de aplicação."
+
+msgid "Is your mail at {0}? Change Provider."
+msgstr "O seu correio está na {0}? Altere o Fornecedor."
+
+msgid "This folder is empty"
+msgstr "Esta pasta está vazia"
+
+msgid "Downloading your mail … {0} of {1}. Newest messages arrive first."
+msgstr "A transferir o seu correio … {0} de {1}. As mensagens mais recentes chegam primeiro."
+
+msgid "Downloading your mail … Newest messages arrive first."
+msgstr "A transferir o seu correio … As mensagens mais recentes chegam primeiro."
+
+# Stage 5: teaching tips, What's new, About, Keyboard shortcuts
+msgid "What's new in {0}"
+msgstr "Novidades da versão {0}"
+
+msgid "The changes in this version, in the changelog."
+msgstr "As alterações desta versão, no registo de alterações."
+
+msgctxt "about"
+msgid "Open"
+msgstr "Abrir"
+
+msgid "Open the changelog in the browser"
+msgstr "Abrir o registo de alterações no navegador"
+
+msgid "Show tips again"
+msgstr "Mostrar novamente as dicas"
+
+msgid "Shows the short tips about folders, search and help again."
+msgstr "Mostra novamente as dicas breves sobre pastas, pesquisa e ajuda."
+
+msgid "Show tips"
+msgstr "Mostrar dicas"
+
+msgid "Keyboard shortcuts"
+msgstr "Atalhos de teclado"
+
+msgid "Every key, by group. Press F1 or Ctrl+/ anywhere."
+msgstr "Todas as teclas, por grupo. Prima F1 ou Ctrl+/ em qualquer lado."
+
+msgid "Every key, by group. Up and Down scroll the list; Esc closes."
+msgstr "Todas as teclas, por grupo. As setas para cima e para baixo percorrem a lista; Esc fecha."
+
+msgctxt "about"
+msgid "Show"
+msgstr "Mostrar"
+
+msgid "Show the keyboard shortcuts"
+msgstr "Mostrar os atalhos de teclado"
+
+msgid "Get help"
+msgstr "Obter ajuda"
+
+msgid "The Komorebi guide: adding an account, the keys and the settings."
+msgstr "O guia do Komorebi: adicionar uma conta, as teclas e as definições."
+
+msgid "Open the Komorebi guide in the browser"
+msgstr "Abrir o guia do Komorebi no navegador"
+
+msgid "Report a problem"
+msgstr "Comunicar um problema"
+
+msgid "Opens the issues page in the browser. No data is attached."
+msgstr "Abre a página de problemas no browser. Não são anexados dados."
+
+msgid "Report"
+msgstr "Comunicar"
+
+msgid "Open the issues page in the browser"
+msgstr "Abrir a página de problemas no navegador"
+
+msgid "What Komorebi keeps on this PC, and what it sends where."
+msgstr "O que o Komorebi guarda neste PC e o que envia, e para onde."
+
+msgid "Open the privacy statement in the browser"
+msgstr "Abrir a declaração de privacidade no navegador"
+
+msgctxt "teaching tip"
+msgid "Your folders"
+msgstr "As suas pastas"
+
+msgctxt "teaching tip"
+msgid "Search"
+msgstr "Pesquisar"
+
+msgctxt "teaching tip"
+msgid "Keys and help"
+msgstr "Teclas e ajuda"
+
+msgid "Accounts and folders are behind this button when the window is narrow."
+msgstr "As contas e as pastas ficam atrás deste botão quando a janela é estreita."
+
+msgid "Search this folder or all folders. Ctrl+E or Ctrl+F opens it."
+msgstr "Pesquise nesta pasta ou em todas as pastas. Ctrl+E ou Ctrl+F abre a pesquisa."
+
+msgid "Keyboard shortcuts and help are in Settings › About, or press F1."
+msgstr "Os atalhos de teclado e a ajuda estão em Definições › Acerca de, ou prima F1."
+
+msgctxt "teaching tip"
+msgid "{0} of {1}"
+msgstr "{0} de {1}"
+
+msgctxt "shortcut group"
+msgid "Anywhere"
+msgstr "Em qualquer lado"
+
+msgctxt "shortcut key"
+msgid "Ctrl+N"
+msgstr "Ctrl+N"
+
+msgctxt "shortcut"
+msgid "New mail"
+msgstr "Novo correio"
+
+msgctxt "shortcut key"
+msgid "Ctrl+E, F3 or Ctrl+F"
+msgstr "Ctrl+E, F3 ou Ctrl+F"
+
+msgctxt "shortcut"
+msgid "Search"
+msgstr "Pesquisar"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+I"
+msgstr "Ctrl+Shift+I"
+
+msgctxt "shortcut"
+msgid "Go to the Inbox"
+msgstr "Ir para a Caixa de entrada"
+
+msgctxt "shortcut key"
+msgid "F5"
+msgstr "F5"
+
+msgctxt "shortcut"
+msgid "Refresh"
+msgstr "Atualizar"
+
+msgctxt "shortcut key"
+msgid "Ctrl+,"
+msgstr "Ctrl+,"
+
+msgctxt "shortcut"
+msgid "Open or close Settings"
+msgstr "Abrir ou fechar as Definições"
+
+msgctxt "shortcut key"
+msgid "F1 or Ctrl+/"
+msgstr "F1 ou Ctrl+/"
+
+msgctxt "shortcut"
+msgid "Keyboard shortcuts"
+msgstr "Atalhos de teclado"
+
+msgctxt "shortcut key"
+msgid "F6 / Shift+F6"
+msgstr "F6 / Shift+F6"
+
+msgctxt "shortcut"
+msgid "Next / previous pane"
+msgstr "Painel seguinte / anterior"
+
+msgctxt "shortcut key"
+msgid "Tab / Shift+Tab"
+msgstr "Tab / Shift+Tab"
+
+msgctxt "shortcut"
+msgid "Next / previous control"
+msgstr "Controlo seguinte / anterior"
+
+msgctxt "shortcut key"
+msgid "Space or Enter"
+msgstr "Espaço ou Enter"
+
+msgctxt "shortcut"
+msgid "Press the focused button"
+msgstr "Premir o botão com o foco"
+
+msgctxt "shortcut key"
+msgid "Left / Right"
+msgstr "Seta para a esquerda / direita"
+
+msgctxt "shortcut"
+msgid "Move along a toolbar"
+msgstr "Percorrer uma barra de ferramentas"
+
+msgctxt "shortcut key"
+msgid "Esc"
+msgstr "Esc"
+
+msgctxt "shortcut"
+msgid "Close the folder pane, clear the search or the selection"
+msgstr "Fechar o painel de pastas, limpar a pesquisa ou a seleção"
+
+msgctxt "shortcut group"
+msgid "Folders"
+msgstr "Pastas"
+
+msgctxt "shortcut key"
+msgid "Up / Down, Home / End, Enter or Space"
+msgstr "Seta para cima / baixo, Home / End, Enter ou Espaço"
+
+msgctxt "shortcut"
+msgid "Move through the folders and open one"
+msgstr "Percorrer as pastas e abrir uma"
+
+msgctxt "shortcut key"
+msgid "Shift+F10 or Menu"
+msgstr "Shift+F10 ou Menu"
+
+msgctxt "shortcut"
+msgid "Folder menu"
+msgstr "Menu da pasta"
+
+msgctxt "shortcut group"
+msgid "Messages"
+msgstr "Mensagens"
+
+msgctxt "shortcut key"
+msgid "Up / Down"
+msgstr "Seta para cima / baixo"
+
+msgctxt "shortcut"
+msgid "Previous / next message"
+msgstr "Mensagem anterior / seguinte"
+
+msgctxt "shortcut key"
+msgid "Home / End"
+msgstr "Home / End"
+
+msgctxt "shortcut"
+msgid "First / last message"
+msgstr "Primeira / última mensagem"
+
+msgctxt "shortcut key"
+msgid "PageUp / PageDown"
+msgstr "Page Up / Page Down"
+
+msgctxt "shortcut"
+msgid "Up / down a page"
+msgstr "Subir / descer uma página"
+
+msgctxt "shortcut key"
+msgid "Enter"
+msgstr "Enter"
+
+msgctxt "shortcut"
+msgid "Open the message"
+msgstr "Abrir a mensagem"
+
+msgctxt "shortcut key"
+msgid "Ctrl+click / Shift+click"
+msgstr "Ctrl+clique / Shift+clique"
+
+msgctxt "shortcut"
+msgid "Add to the selection / select a range"
+msgstr "Adicionar à seleção / selecionar um intervalo"
+
+msgctxt "shortcut key"
+msgid "Shift+Up / Shift+Down"
+msgstr "Shift+Seta para cima / baixo"
+
+msgctxt "shortcut"
+msgid "Extend the selection"
+msgstr "Alargar a seleção"
+
+msgctxt "shortcut key"
+msgid "Ctrl+A"
+msgstr "Ctrl+A"
+
+msgctxt "shortcut"
+msgid "Select all messages"
+msgstr "Selecionar todas as mensagens"
+
+msgctxt "shortcut key"
+msgid "Ctrl+R / Ctrl+Shift+R"
+msgstr "Ctrl+R / Ctrl+Shift+R"
+
+msgctxt "shortcut"
+msgid "Reply / Reply all"
+msgstr "Responder / Responder a todos"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+F"
+msgstr "Ctrl+Shift+F"
+
+msgctxt "shortcut"
+msgid "Forward"
+msgstr "Reencaminhar"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+V"
+msgstr "Ctrl+Shift+V"
+
+msgctxt "shortcut"
+msgid "Move to a folder"
+msgstr "Mover para uma pasta"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Q / Ctrl+U"
+msgstr "Ctrl+Q / Ctrl+U"
+
+msgctxt "shortcut"
+msgid "Mark as read / Mark as unread"
+msgstr "Marcar como lida / Marcar como não lida"
+
+msgctxt "shortcut key"
+msgid "Insert"
+msgstr "Insert"
+
+msgctxt "shortcut"
+msgid "Flag / Remove flag"
+msgstr "Sinalizar / Remover sinalização"
+
+msgctxt "shortcut key"
+msgid "Backspace"
+msgstr "Retrocesso"
+
+msgctxt "shortcut"
+msgid "Archive"
+msgstr "Arquivar"
+
+msgctxt "shortcut key"
+msgid "Delete"
+msgstr "Delete"
+
+msgctxt "shortcut"
+msgid "Delete"
+msgstr "Eliminar"
+
+msgctxt "shortcut"
+msgid "Message menu"
+msgstr "Menu da mensagem"
+
+msgctxt "shortcut key"
+msgid "Ctrl+S"
+msgstr "Ctrl+S"
+
+msgctxt "shortcut"
+msgid "Save as a .eml file"
+msgstr "Guardar como ficheiro .eml"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Z"
+msgstr "Ctrl+Z"
+
+msgctxt "shortcut"
+msgid "Undo the last archive, delete, move or send"
+msgstr "Desfazer a última ação de arquivar, eliminar, mover ou enviar"
+
+msgctxt "shortcut group"
+msgid "Writing"
+msgstr "Escrever"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Enter or Alt+S"
+msgstr "Ctrl+Enter ou Alt+S"
+
+msgctxt "shortcut"
+msgid "Send"
+msgstr "Enviar"
+
+msgctxt "shortcut"
+msgid "Close, keeping the draft"
+msgstr "Fechar, mantendo o rascunho"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+C / Ctrl+Shift+B"
+msgstr "Ctrl+Shift+C / Ctrl+Shift+B"
+
+msgctxt "shortcut"
+msgid "Show Cc / Bcc"
+msgstr "Mostrar Cc / Cco"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+A"
+msgstr "Ctrl+Shift+A"
+
+msgctxt "shortcut"
+msgid "Attach files"
+msgstr "Anexar ficheiros"
+
+msgctxt "shortcut key"
+msgid "Ctrl+V"
+msgstr "Ctrl+V"
+
+msgctxt "shortcut"
+msgid "Attach the files copied in File Explorer"
+msgstr "Anexar os ficheiros copiados no Explorador de Ficheiros"
+
+msgctxt "shortcut key"
+msgid "Ctrl+B / Ctrl+I"
+msgstr "Ctrl+B / Ctrl+I"
+
+msgctxt "shortcut"
+msgid "Bold / italic"
+msgstr "Negrito / itálico"
+
+msgctxt "shortcut key"
+msgid "Ctrl+K"
+msgstr "Ctrl+K"
+
+msgctxt "shortcut"
+msgid "Link to an address"
+msgstr "Ligar a um endereço"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+8 / Ctrl+Shift+7"
+msgstr "Ctrl+Shift+8 / Ctrl+Shift+7"
+
+msgctxt "shortcut"
+msgid "Bulleted / numbered list"
+msgstr "Lista com marcas / numerada"
+
+msgctxt "shortcut key"
+msgid "Up / Down, Enter or Tab, Esc"
+msgstr "Seta para cima / baixo, Enter ou Tab, Esc"
+
+msgctxt "shortcut"
+msgid "Pick, take or close a suggested address"
+msgstr "Escolher, aceitar ou fechar um endereço sugerido"
+
+msgid "Komorebi was updated to {0}."
+msgstr "O Komorebi foi atualizado para a versão {0}."
+
+msgid "What's new"
+msgstr "Novidades"
+
+msgid "Skip tips"
+msgstr "Ignorar dicas"
+
+msgid "Got it"
+msgstr "Entendido"
+
+# Stage 6: composer, drafts and Outbox
+msgid "Close (Esc)"
+msgstr "Fechar (Esc)"
+
+msgid "Saves the draft in Drafts"
+msgstr "Guarda o rascunho em Rascunhos"
+
+msgid "Quote (Ctrl+Shift+Q)"
+msgstr "Citação (Ctrl+Shift+Q)"
+
+msgid "Preview"
+msgstr "Pré-visualizar"
+
+msgid "Preview the message as it is sent"
+msgstr "Pré-visualizar a mensagem tal como é enviada"
+
+msgid "Marks like **bold**, _italic_ and “- ” lists are sent as formatting. Preview shows how the message looks."
+msgstr "Marcas como **negrito**, _itálico_ e listas com “- ” são enviadas como formatação. Pré-visualizar mostra o aspeto da mensagem."
+
+msgid "Couldn't draw the preview. The message is sent as written."
+msgstr "Não foi possível mostrar a pré-visualização. A mensagem é enviada tal como foi escrita."
+
+msgid "The preview shows the beginning of the message."
+msgstr "A pré-visualização mostra o início da mensagem."
+
+msgid "Write your message"
+msgstr "Escreva a sua mensagem"
+
+msgid "Show quoted text"
+msgstr "Mostrar texto citado"
+
+msgid "The server's reply, as it came"
+msgstr "A resposta do servidor, tal como chegou"
+
+msgid "Drop to attach"
+msgstr "Largue para anexar"
+
+msgid "Drop to attach to a new message"
+msgstr "Largue para anexar a uma nova mensagem"
+
+msgid "You started a reply to this message."
+msgstr "Começou uma resposta a esta mensagem."
+
+msgid "Resume"
+msgstr "Retomar"
+
+msgid "Sending “{0}” in {1} s"
+msgstr "A enviar “{0}” dentro de {1} s"
+
+msgid "{0} Trying again at {1}."
+msgstr "{0} Nova tentativa às {1}."
+
+msgid "{0} doesn't exist. Check the address and send again."
+msgstr "{0} não existe. Verifique o endereço e envie novamente."
+
+msgid "One of the addresses doesn't exist. Check the addresses and send again."
+msgstr "Um dos endereços não existe. Verifique os endereços e envie novamente."
+
+msgid "The server says an address isn't written correctly. Check the addresses and send again."
+msgstr "O servidor indica que um endereço não está bem escrito. Verifique os endereços e envie novamente."
+
+msgid "The recipient's mailbox is full. Try again later, or reach them another way."
+msgstr "A caixa de correio do destinatário está cheia. Tente mais tarde ou contacte-o de outra forma."
+
+msgid "The message is too large for the server. Remove an attachment, then send again."
+msgstr "A mensagem é demasiado grande para o servidor. Remova um anexo e envie novamente."
+
+msgid "The server won't send from this address. Check the account's address and SMTP username in Settings."
+msgstr "O servidor não envia a partir deste endereço. Verifique o endereço da conta e o nome de utilizador SMTP nas Definições."
+
+msgid "The server refused the message under its rules, for example as spam. Change the message, or ask your provider."
+msgstr "O servidor recusou a mensagem pelas suas regras, por exemplo como spam. Altere a mensagem ou contacte o seu fornecedor."
+
+msgid "The server rejected the sign-in. Update the password in Settings, then send again."
+msgstr "O servidor rejeitou o início de sessão. Atualize a palavra-passe nas Definições e envie novamente."
+
+msgid "Couldn't make a secure connection to the server. Check the account in Settings, then send again."
+msgstr "Não foi possível estabelecer uma ligação segura ao servidor. Verifique a conta nas Definições e envie novamente."
+
+msgid "The server couldn't take the message right now."
+msgstr "O servidor não pôde aceitar a mensagem neste momento."
+
+msgid "The server couldn't take the message, and Komorebi stopped trying. Select Retry to send it again."
+msgstr "O servidor não pôde aceitar a mensagem e o Komorebi deixou de tentar. Selecione Tentar novamente para a enviar de novo."
+
+msgid "Couldn't reach the server."
+msgstr "Não foi possível contactar o servidor."
+
+msgid "Couldn't reach the server, and Komorebi stopped trying. Check your internet connection, then select Retry."
+msgstr "Não foi possível contactar o servidor e o Komorebi deixou de tentar. Verifique a ligação à Internet e selecione Tentar novamente."
+
+msgid "The server refused the message. Details says why."
+msgstr "O servidor recusou a mensagem. Os Detalhes indicam o motivo."
+
+msgid "The connection broke while sending, so it may have gone out. Check Sent before you send it again."
+msgstr "A ligação caiu durante o envio, por isso a mensagem pode ter sido enviada. Verifique os Itens enviados antes de a enviar novamente."
+
+msgid "Draft saved {0}"
+msgstr "Rascunho guardado às {0}"
+
+msgid "On {0}, {1} wrote:"
+msgstr "Em {0}, {1} escreveu:"
+
+msgid "---------- Forwarded message ----------"
+msgstr "---------- Mensagem reencaminhada ----------"
+
+msgctxt "forwarded header"
+msgid "From"
+msgstr "De"
+
+msgctxt "forwarded header"
+msgid "Date"
+msgstr "Data"
+
+msgctxt "forwarded header"
+msgid "Subject"
+msgstr "Assunto"
+
+msgctxt "forwarded header"
+msgid "To"
+msgstr "Para"
+
+msgid "It is deleted here and from your Drafts folder on the server, with its attachments."
+msgstr "O conteúdo e os anexos são eliminados aqui e da sua pasta Rascunhos no servidor."
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+Q"
+msgstr "Ctrl+Shift+Q"
+
+msgctxt "shortcut"
+msgid "Quote"
+msgstr "Citação"
+
+
+msgid "More options for this account"
+msgstr "Mais opções para esta conta"
+
+msgid "Review the certificate of {0}"
+msgstr "Rever o certificado de {0}"
+
+msgctxt "account switched off"
+msgid "Off"
+msgstr "Desativada"
+
+msgctxt "account page group"
+msgid "Account"
+msgstr "Conta"
+
+msgid "Sync this account"
+msgstr "Sincronizar esta conta"
+
+msgid "When this is off, Komorebi doesn't connect to the account: no new mail comes in and nothing is sent. Its downloaded mail stays readable."
+msgstr "Quando está desativada, o Komorebi não se liga à conta: não chega correio novo e nada é enviado. O correio transferido continua legível."
+
+msgid "Sync {0}"
+msgstr "Sincronizar {0}"
+
+msgid "The address can't be changed. To use another one, add another account."
+msgstr "O endereço não pode ser alterado. Para utilizar outro, adicione outra conta."
+
+msgid "Forgets the copy of this account's mail on this computer and downloads it once more. Mail on the server is not affected."
+msgstr "Esquece a cópia do correio desta conta neste computador e transfere-o novamente. O correio no servidor não é afetado."
+
+msgid "Remove this account"
+msgstr "Remover esta conta"
+
+msgid "Removes the account and its downloaded mail from this computer. Mail on the server is not affected."
+msgstr "Remove a conta e o respetivo correio transferido deste computador. O correio no servidor não é afetado."
+
+msgid "Some text changes after Komorebi restarts."
+msgstr "Algum texto só muda depois de reiniciar o Komorebi."
+
+msgid "Records only server commands, response codes and timings on this PC, never mail, addresses or passwords; nothing is sent."
+msgstr "Regista apenas comandos do servidor, códigos de resposta e tempos neste PC, nunca correio, endereços nem palavras-passe; nada é enviado."
+
+msgid "Logs folder"
+msgstr "Pasta de registos"
+
+msgid "The log files, in the data folder."
+msgstr "Os ficheiros de registo, na pasta de dados."
+
+msgid "Open logs folder"
+msgstr "Abrir pasta de registos"
+
+msgid "Open the logs folder in File Explorer"
+msgstr "Abrir a pasta de registos no Explorador de Ficheiros"
+
+msgctxt "settings group"
+msgid "Reset"
+msgstr "Repor"
+
+msgctxt "about group"
+msgid "Help"
+msgstr "Ajuda"
+
+msgctxt "about group"
+msgid "About"
+msgstr "Acerca de"
+
+msgid "Made with Slint"
+msgstr "Feito com Slint"
+
+msgid "The toolkit Komorebi's window is built with."
+msgstr "A biblioteca com que a janela do Komorebi é feita."
+
+msgid "This message may not be from who it says"
+msgstr "Esta mensagem pode não ser de quem diz ser"
+
+msgid "Why?"
+msgstr "Porquê?"
+
+msgid "Images from {0} will always load."
+msgstr "As imagens de {0} vão ser sempre transferidas."
+
+msgid "Privacy settings"
+msgstr "Definições de privacidade"
+
+msgid "Images load from this sender"
+msgstr "As imagens deste remetente são transferidas"
+
+msgctxt "remote images"
+msgid "Change"
+msgstr "Alterar"
+
+msgid "Change which senders' images load"
+msgstr "Alterar os remetentes cujas imagens são transferidas"
+
+msgid "Why am I seeing this?"
+msgstr "Porque estou a ver isto?"
+
+msgid "Komorebi looks at the checks your mail server made when this message arrived, and at the sender's name and address. When they don't add up, someone may be pretending to be the sender."
+msgstr "O Komorebi analisa as verificações que o seu servidor de correio fez quando esta mensagem chegou, bem como o nome e o endereço do remetente. Quando não batem certo, alguém pode estar a fazer-se passar pelo remetente."
+
+msgid "Don't open its links or attachments, reply, or enter a password unless you're sure. If you know the sender, check with them another way. Report junk moves it to your Junk folder."
+msgstr "Não abra as ligações nem os anexos, não responda e não introduza uma palavra-passe, a menos que tenha a certeza. Se conhece o remetente, confirme com ele de outra forma. Marcar como lixo eletrónico move a mensagem para a pasta Lixo eletrónico."
+
+msgid "The certificate of {0} changed. Review it before you connect again."
+msgstr "O certificado de {0} mudou. Reveja-o antes de voltar a ligar."
+
+msgid "Try now"
+msgstr "Tentar agora"
+
+msgid "Reason: {0}."
+msgstr "Motivo: {0}."
+
+msgid "Reasons: {0}; {1}."
+msgstr "Motivos: {0}; {1}."
+
+msgid "SHA-256 fingerprint"
+msgstr "Impressão digital SHA-256"
+
+msgid "New certificate (SHA-256)"
+msgstr "Certificado novo (SHA-256)"
+
+msgid "Saved before (SHA-256)"
+msgstr "Guardado antes (SHA-256)"
+
+msgid "This isn't the certificate you saved. If you didn't expect a new one, cancel."
+msgstr "Este não é o certificado que guardou. Se não esperava um novo, cancele."
+
+msgid "Ask whoever runs the server for its fingerprint, or run openssl x509 -noout -fingerprint -sha256 on its certificate, and compare every byte. Only trust it on a network you control. A saved certificate has to be reviewed again when the server renews it."
+msgstr "Peça a impressão digital a quem gere o servidor, ou execute openssl x509 -noout -fingerprint -sha256 no respetivo certificado, e compare todos os bytes. Só confie nele numa rede que controle. Um certificado guardado tem de ser revisto novamente quando o servidor o renovar."
+
+msgid "How do I check this?"
+msgstr "Como posso verificar isto?"

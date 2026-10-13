@@ -8,6 +8,7 @@
 use super::mime::HEADER_FIELDS;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 pub enum Step {
@@ -195,6 +196,8 @@ pub enum SmtpEnd {
     RejectAuth,
     /// Refuse the sign-in for now with 454 (temporary failure).
     TempRejectAuth,
+    /// Refuse the sender (MAIL FROM) with 553: not owned by the login.
+    RejectSender,
 }
 
 /// A fake SMTP server for one client: answers 250 to everything except as
@@ -203,12 +206,15 @@ pub enum SmtpEnd {
 pub struct FakeSmtp {
     pub port: u16,
     handle: JoinHandle<(String, String, Vec<String>)>,
+    auth: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeSmtp {
     pub fn start(end: SmtpEnd) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("binding the fake SMTP server");
         let port = listener.local_addr().expect("fake SMTP address").port();
+        let auth = Arc::new(Mutex::new(Vec::new()));
+        let recorded = auth.clone();
         let handle = thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
             let mut r = BufReader::new(s.try_clone().unwrap());
@@ -242,6 +248,9 @@ impl FakeSmtp {
                 if up.starts_with("RCPT") {
                     rcpt.push(line.trim_end().to_string());
                 }
+                if up.starts_with("AUTH") {
+                    recorded.lock().unwrap().push(line.trim_end().to_string());
+                }
                 // Write errors are ignored: the client may hang up first.
                 let reply: &[u8] = if up.starts_with("EHLO") {
                     b"250-fake\r\n250 AUTH PLAIN LOGIN\r\n"
@@ -254,6 +263,8 @@ impl FakeSmtp {
                 } else if up.starts_with("DATA") {
                     in_data = true;
                     b"354 go\r\n"
+                } else if up.starts_with("MAIL") && end == SmtpEnd::RejectSender {
+                    b"553 5.7.1 Sender address rejected: not owned by user\r\n"
                 } else if up.starts_with("RCPT") && end == SmtpEnd::RejectRcpt {
                     b"550 no such user\r\n"
                 } else if up.starts_with("RCPT") && end == SmtpEnd::TempRejectRcpt {
@@ -268,13 +279,20 @@ impl FakeSmtp {
             }
             (first.unwrap_or_default(), data, rcpt)
         });
-        Self { port, handle }
+        Self { port, handle, auth }
     }
 
     /// Wait for the client to finish; returns its first line and the data.
     pub fn finish(self) -> (String, String) {
         let (first, data, _) = self.finish_with_rcpt();
         (first, data)
+    }
+
+    /// Wait for the client to finish; returns the `AUTH` lines it sent
+    /// (`AUTH PLAIN <base64>`).
+    pub fn finish_with_auth(self) -> Vec<String> {
+        self.handle.join().expect("fake SMTP server panicked");
+        self.auth.lock().unwrap().clone()
     }
 
     /// [`FakeSmtp::finish`], with the `RCPT` lines the client sent.

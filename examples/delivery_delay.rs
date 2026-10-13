@@ -23,7 +23,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("{k} missing"))
     };
     let (email, password) = (var("EMAIL")?, var("PASSWORD_EMAIL")?);
-    let mut imap = Imap::connect(&PRESETS[1].imap_server(), &email, &password)?;
+    let mut imap = Imap::connect(&PRESETS[1].imap_server(), None, &email, &password)?;
     imap.set_read_only(true);
     let folder = std::env::args().nth(2).unwrap_or_else(|| "INBOX".into());
     imap.select(&folder)?;

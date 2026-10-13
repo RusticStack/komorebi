@@ -1,7 +1,8 @@
 //! Outgoing mail: building RFC 5322 messages and sending them over SMTP.
 
+use super::errors::{Class, Special, Step, StepError};
 use crate::providers::{Security, Server};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use lettre::Transport;
 use lettre::address::{Address, Envelope};
 use lettre::message::header::{self, ContentTransferEncoding, ContentType, Headers};
@@ -9,9 +10,10 @@ use lettre::message::{
     Attachment, Body, Mailbox, Mailboxes, Message, MessageBuilder, MultiPart, SinglePart,
 };
 use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::client::Tls;
 use lettre::transport::smtp::extension::ClientId;
 use lettre::transport::smtp::{SmtpTransport, SmtpTransportBuilder};
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -102,6 +104,14 @@ fn mailboxes(field: &str) -> Result<Vec<Mailbox>> {
 /// Validate one To, Cc or Bcc field as typed (an empty field is valid).
 pub fn check_addresses(field: &str) -> Result<()> {
     mailboxes(field).map(drop)
+}
+
+/// The first address of a To, Cc or Bcc field as typed that isn't valid
+/// (none: all are, or the field is empty).
+pub fn first_invalid_address(field: &str) -> Option<String> {
+    split_addresses(field)
+        .into_iter()
+        .find(|a| a.parse::<Mailbox>().is_err())
 }
 
 /// Validate sender and recipients without building the message (cheap enough
@@ -323,28 +333,45 @@ fn configure(builder: SmtpTransportBuilder) -> SmtpTransportBuilder {
 }
 
 pub fn send(server: &Server, username: &str, password: &str, msg: &Message) -> Result<()> {
-    send_raw(server, username, password, msg.envelope(), &msg.formatted())
+    send_raw(
+        server,
+        None,
+        username,
+        password,
+        msg.envelope(),
+        &msg.formatted(),
+    )
 }
 
 /// Send the built bytes `raw` (see [`build_raw`]) to `envelope`.
 pub fn send_raw(
     server: &Server,
+    pin: Option<&[u8]>,
     username: &str,
     password: &str,
     envelope: &Envelope,
     raw: &[u8],
 ) -> Result<()> {
-    transport(server, username, password)?
+    transport(server, pin, username, password)?
         .send_raw(envelope, raw)
+        .map_err(|e| pinned_failure(anyhow::Error::new(e), server, pin))
         .context("sending failed")?;
     Ok(())
 }
 
-fn transport(server: &Server, username: &str, password: &str) -> Result<SmtpTransport> {
-    let builder = match server.security {
-        Security::Tls => SmtpTransport::relay(&server.host)?,
-        Security::StartTls => SmtpTransport::starttls_relay(&server.host)?,
+fn transport(
+    server: &Server,
+    pin: Option<&[u8]>,
+    username: &str,
+    password: &str,
+) -> Result<SmtpTransport> {
+    // SSL/TLS wraps the connection; STARTTLS is required, never optional.
+    let params = super::pin::smtp_tls_parameters(&server.host, pin)?;
+    let tls = match server.security {
+        Security::Tls => Tls::Wrapper(params),
+        Security::StartTls => Tls::Required(params),
     };
+    let builder = SmtpTransport::builder_dangerous(&server.host).tls(tls);
     Ok(configure(builder)
         .port(server.port)
         .credentials(Credentials::new(username.into(), password.into()))
@@ -353,28 +380,185 @@ fn transport(server: &Server, username: &str, password: &str) -> Result<SmtpTran
 
 /// Check that the SMTP server takes this sign-in before an account is
 /// saved: connect (TLS or STARTTLS), EHLO, AUTH, NOOP and QUIT. No message
-/// is sent.
-pub fn verify_smtp(server: &Server, username: &str, password: &str) -> Result<()> {
-    check_sign_in(&transport(server, username, password)?)
-}
-
-fn check_sign_in(mailer: &SmtpTransport) -> Result<()> {
-    if mailer.test_connection().context("SMTP sign-in failed")? {
-        Ok(())
-    } else {
-        bail!("SMTP sign-in failed: the server stopped answering")
+/// is sent. `report` hears each step that passed; a failure names its step.
+pub fn verify_smtp(
+    server: &Server,
+    pin: Option<&[u8]>,
+    username: &str,
+    password: &str,
+    report: &mut dyn FnMut(Step),
+) -> Result<(), StepError> {
+    let fail = |special, source: anyhow::Error| StepError {
+        step: Step::SmtpConnect,
+        class: Class::Offline,
+        special,
+        host: server.host.clone(),
+        port: server.port,
+        login: username.to_string(),
+        source,
+    };
+    let found = (server.host.as_str(), server.port)
+        .to_socket_addrs()
+        .map_err(|e| anyhow::Error::new(e).context(format!("resolving {}", server.host)))
+        .and_then(|mut a| a.next().map(drop).ok_or_else(|| anyhow!("no address")));
+    if let Err(e) = found {
+        return Err(fail(Special::SmtpResolve, e));
     }
+    let mailer = transport(server, pin, username, password).map_err(|e| StepError {
+        class: Class::Other,
+        ..fail(Special::None, e)
+    })?;
+    check_steps(
+        &mailer,
+        server,
+        super::pin::usable(pin).is_some(),
+        username,
+        report,
+    )
 }
 
-/// [`verify_smtp`] over plain TCP to a local fake server.
+fn check_steps(
+    mailer: &SmtpTransport,
+    server: &Server,
+    pinned: bool,
+    username: &str,
+    report: &mut dyn FnMut(Step),
+) -> Result<(), StepError> {
+    let (step, class, special, source) = match mailer.test_connection() {
+        Ok(true) => {
+            report(Step::SmtpConnect);
+            report(Step::SmtpSignIn);
+            return Ok(());
+        }
+        Ok(false) => (
+            Step::SmtpConnect,
+            Class::Offline,
+            Special::None,
+            anyhow!("SMTP sign-in failed: the server stopped answering"),
+        ),
+        Err(e) => {
+            let source = anyhow::Error::new(e).context("SMTP sign-in failed");
+            let (step, class, special) =
+                step_of(&source).unwrap_or((Step::SmtpConnect, Class::Other, Special::None));
+            // The server speaking plain text where TLS was expected.
+            let plain = class == Class::TlsCert
+                && special == Special::None
+                && server.security == Security::Tls
+                && super::imap::answers_plain(&server.host, server.port);
+            let special = if plain { Special::PlainAnswer } else { special };
+            // A pinned server whose certificate no longer validates: it changed.
+            if pinned && class == Class::TlsCert && special == Special::None {
+                (
+                    step,
+                    class,
+                    Special::CertChanged,
+                    anyhow::Error::new(super::pin::PinMismatch(server.host.clone())),
+                )
+            } else {
+                (step, class, special, source)
+            }
+        }
+    };
+    if step == Step::SmtpSignIn {
+        report(Step::SmtpConnect);
+    }
+    Err(StepError {
+        step,
+        class,
+        special,
+        host: server.host.clone(),
+        port: server.port,
+        login: username.to_string(),
+        source,
+    })
+}
+
+/// Where a failed SMTP session stopped, how to call it, and whether it has
+/// a sentence of its own; `None` if `e` has no SMTP error in it. Only the
+/// sign-in refusals (535, 534, 530, 538), a temporary one (454) and a
+/// busy server (421) get a class beyond [`Class::Other`] besides TLS and
+/// the network.
+pub(crate) fn step_of(e: &anyhow::Error) -> Option<(Step, Class, Special)> {
+    let se = smtp_error(e)?;
+    let detail = std::error::Error::source(se)
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let code = se.status().map(|c| c.to_string());
+    Some(if se.is_tls() || tls_in_chain(se) {
+        (Step::SmtpConnect, Class::TlsCert, Special::None)
+    } else if se.is_client() && detail.contains("STARTTLS is not supported") {
+        (Step::SmtpConnect, Class::TlsCert, Special::NoStartTls)
+    } else if se.is_client() && detail.contains("No compatible authentication") {
+        (Step::SmtpSignIn, Class::Auth, Special::NoAuth)
+    } else if se.is_permanent() && matches!(code.as_deref(), Some("535" | "534" | "530" | "538")) {
+        (Step::SmtpSignIn, Class::Auth, Special::None)
+    } else if se.is_transient() && code.as_deref() == Some("454") {
+        (Step::SmtpSignIn, Class::TooManyConnections, Special::None)
+    } else if se.is_transient() && code.as_deref() == Some("421") {
+        (Step::SmtpConnect, Class::TooManyConnections, Special::None)
+    } else if se.is_permanent() || se.is_transient() || se.is_client() || se.is_response() {
+        (Step::SmtpConnect, Class::Other, Special::None)
+    } else {
+        // Connection error, network error, a timeout: nothing answered.
+        (Step::SmtpConnect, Class::Offline, Special::None)
+    })
+}
+
+/// Whether a TLS error is behind `e`: on an SSL/TLS port a failed handshake
+/// comes back as a connection error that wraps it.
+fn tls_in_chain(e: &(dyn std::error::Error + 'static)) -> bool {
+    let mut next = Some(e);
+    while let Some(err) = next {
+        if err.is::<native_tls::Error>() {
+            return true;
+        }
+        next = err.source();
+    }
+    false
+}
+
+/// [`verify_smtp`]'s check over plain TCP to a local fake server.
 #[cfg(test)]
 pub(crate) fn verify_plain(port: u16, username: &str, password: &str) -> Result<()> {
-    check_sign_in(
+    verify_plain_steps(port, username, password, &mut |_| {}).map_err(|e| e.source)
+}
+
+/// [`verify_plain`] with the step that failed.
+#[cfg(test)]
+pub(crate) fn verify_plain_steps(
+    port: u16,
+    username: &str,
+    password: &str,
+    report: &mut dyn FnMut(Step),
+) -> Result<(), StepError> {
+    let server = Server {
+        host: "127.0.0.1".into(),
+        port,
+        // Plain TCP: no TLS port to take for a plain answer.
+        security: Security::StartTls,
+    };
+    check_steps(
         &configure(SmtpTransport::builder_dangerous("127.0.0.1"))
             .port(port)
             .credentials(Credentials::new(username.into(), password.into()))
             .build(),
+        &server,
+        false,
+        username,
+        report,
     )
+}
+
+/// `e`, a failed send or check, marked as the changed certificate of a pinned
+/// server when TLS is what failed.
+fn pinned_failure(e: anyhow::Error, server: &Server, pin: Option<&[u8]>) -> anyhow::Error {
+    let changed = super::pin::usable(pin).is_some()
+        && matches!(step_of(&e), Some((_, Class::TlsCert, Special::None)));
+    if changed {
+        anyhow::Error::new(super::pin::PinMismatch(server.host.clone()))
+    } else {
+        e
+    }
 }
 
 /// Whether a failed [`send`] may still have delivered the message: the
@@ -404,11 +588,233 @@ pub fn retryable(e: &anyhow::Error) -> bool {
     !too_large(e) && (se.is_transient() || se.is_tls() || connect_failed)
 }
 
+/// The server refused the sender: 553 or 550 with a reply that speaks of
+/// the sender or the From address ("Sender address rejected: not owned by
+/// user"), not of a recipient.
+pub fn sender_refused(e: &anyhow::Error) -> bool {
+    let Some(se) = smtp_error(e) else {
+        return false;
+    };
+    let code = se.status().map(|c| c.to_string());
+    let text = std::error::Error::source(se)
+        .map(|s| s.to_string().to_ascii_lowercase())
+        .unwrap_or_default();
+    se.is_permanent()
+        && matches!(code.as_deref(), Some("550" | "553"))
+        && (text.contains("sender") || text.contains("not owned") || text.contains("from address"))
+        && !text.contains("recipient")
+}
+
 /// The server refused the message for its size (552, or 452 for storage).
 pub fn too_large(e: &anyhow::Error) -> bool {
     smtp_error(e)
         .and_then(|e| e.status())
         .is_some_and(|code| matches!(code.to_string().as_str(), "552" | "452"))
+}
+
+/// What kind of failure an Outbox row's record is, for the plain
+/// sentence the Outbox shows (the record itself sits behind Details).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendClass {
+    /// 5.1.1 / 5.1.10, or 550 that speaks of an unknown user or recipient.
+    NoSuchRecipient,
+    /// 5.1.3, or 501/553 about a recipient's syntax.
+    BadAddress,
+    /// 5.2.2: the recipient's mailbox is full.
+    MailboxFull,
+    /// 552 or 5.3.4 / 5.2.3: the message is too large.
+    TooLarge,
+    /// The server refused the sender (553, 5.7.1 about the sender, 5.1.7,
+    /// 5.1.8, or the [`super::errors::Say::SenderRefused`] record).
+    SenderRefused,
+    /// Another 5.7.x: policy, spam or relaying refused.
+    Policy,
+    /// 530/534/535/538 or 5.7.8, or the rejected sign-in record.
+    SignIn,
+    /// A temporary refusal (4xx): the server will take it later.
+    Busy,
+    /// Nothing answered: no connection, a timeout, a name not found.
+    Unreachable,
+    /// The secure connection failed (an untrusted or changed certificate).
+    Certificate,
+    /// Anything else, said as it is behind Details.
+    Other,
+}
+
+/// An Outbox record read back: its class, the SMTP reply code and the
+/// enhanced status code if the server gave them, and the address the
+/// reply names, if any.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SendFailure {
+    pub class: SendClass,
+    pub code: Option<u16>,
+    pub enhanced: Option<String>,
+    pub address: Option<String>,
+}
+
+impl SendFailure {
+    /// A refusal that sending again unchanged can't fix (the user has to
+    /// edit the message or the account): Edit is the main action then,
+    /// and Retry the main one otherwise.
+    pub fn permanent(&self) -> bool {
+        !matches!(
+            self.class,
+            SendClass::Busy | SendClass::Unreachable | SendClass::Other
+        )
+    }
+}
+
+/// Read an Outbox row's `last_error` record (lettre's words kept as they
+/// came, `permanent error (550): 5.1.1 <a@b> ...`, or one of the English
+/// records of `Say::record`) back into a [`SendFailure`]. Pure; the
+/// record is server text, so it is only scanned, never trusted for more.
+pub fn classify(record: &str) -> SendFailure {
+    let lower = record.to_ascii_lowercase();
+    let code = reply_code(&lower);
+    let enhanced = enhanced_code(record);
+    let address = named_address(record);
+    let has = |words: &[&str]| words.iter().any(|w| lower.contains(w));
+    let en = enhanced.as_deref().unwrap_or("");
+    let class = if has(&["certificate", "secure connection", "tls error"]) {
+        SendClass::Certificate
+    } else if has(&["refused to send as"]) {
+        SendClass::SenderRefused
+    } else if has(&["sign-in rejected"])
+        || matches!(code, Some(530 | 534 | 535 | 538))
+        || en == "5.7.8"
+    {
+        SendClass::SignIn
+    } else if code == Some(552) || matches!(en, "5.3.4" | "5.2.3") || has(&["too large"]) {
+        if en == "5.2.2" {
+            SendClass::MailboxFull
+        } else {
+            SendClass::TooLarge
+        }
+    } else if en == "5.2.2"
+        || (code.is_some_and(|c| c >= 500)
+            && has(&["mailbox full", "over quota", "quota exceeded"]))
+    {
+        SendClass::MailboxFull
+    } else if matches!(en, "5.1.1" | "5.1.10" | "5.1.6")
+        || (code == Some(550)
+            && has(&[
+                "no such user",
+                "user unknown",
+                "unknown user",
+                "does not exist",
+                "doesn't exist",
+                "recipient not found",
+                "no mailbox",
+                "mailbox unavailable",
+                "invalid recipient",
+                "recipient rejected",
+            ]))
+    {
+        SendClass::NoSuchRecipient
+    } else if matches!(en, "5.1.3" | "5.1.2")
+        || (matches!(code, Some(501 | 553)) && has(&["syntax", "invalid address", "bad address"]))
+    {
+        SendClass::BadAddress
+    } else if matches!(en, "5.1.7" | "5.1.8")
+        || code == Some(553)
+        || (code == Some(550) && has(&["sender", "not owned", "from address"]))
+    {
+        SendClass::SenderRefused
+    } else if en.starts_with("5.7.")
+        || (code.is_some_and(|c| c >= 500) && has(&["spam", "policy", "relay", "blocked"]))
+    {
+        SendClass::Policy
+    } else if code.is_some_and(|c| (400..500).contains(&c)) || en.starts_with("4.") {
+        SendClass::Busy
+    } else if code.is_none()
+        && has(&[
+            "connection error",
+            "network error",
+            "timed out",
+            "timeout",
+            "resolving",
+            "connection refused",
+            "connection reset",
+            "unreachable",
+        ])
+    {
+        SendClass::Unreachable
+    } else {
+        SendClass::Other
+    };
+    SendFailure {
+        class,
+        code,
+        enhanced,
+        address,
+    }
+}
+
+/// The 3-digit reply code of `permanent error (550)` / `transient error
+/// (421)` in a lowercased record.
+fn reply_code(lower: &str) -> Option<u16> {
+    for key in ["permanent error (", "transient error ("] {
+        if let Some(at) = lower.find(key) {
+            let rest = lower.get(at + key.len()..)?;
+            let digits = rest.get(..3)?;
+            if rest.get(3..4) == Some(")") {
+                return digits.parse().ok().filter(|c| (200..600).contains(c));
+            }
+        }
+    }
+    None
+}
+
+/// The first enhanced status code (RFC 3463, `5.1.1`) in `text`: class 2,
+/// 4 or 5, a subject of 1-3 digits and a detail of 1-3, standing alone.
+fn enhanced_code(text: &str) -> Option<String> {
+    let b = text.as_bytes();
+    let digits = |from: usize| {
+        b.iter()
+            .skip(from)
+            .take_while(|c| c.is_ascii_digit())
+            .count()
+    };
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        let alone = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'.');
+        if alone && matches!(c, b'2' | b'4' | b'5') && b.get(i + 1) == Some(&b'.') {
+            let s = digits(i + 2);
+            if (1..=3).contains(&s) && b.get(i + 2 + s) == Some(&b'.') {
+                let d = digits(i + 3 + s);
+                let end = i + 3 + s + d;
+                let after = b.get(end).copied().unwrap_or(b' ');
+                if (1..=3).contains(&d) && !after.is_ascii_alphanumeric() && after != b'.' {
+                    return text.get(i..end).map(str::to_string);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The first `<local@domain>` the reply names (or a bare `local@domain`
+/// word), for "{address} doesn't exist".
+fn named_address(text: &str) -> Option<String> {
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        let after = rest.get(open + 1..)?;
+        let close = after.find('>')?;
+        let inner = after.get(..close)?.trim();
+        if inner.contains('@') && !inner.contains(char::is_whitespace) {
+            return Some(inner.to_string());
+        }
+        rest = after.get(close..)?;
+    }
+    text.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '"' | '\''))
+        .map(|w| w.trim_end_matches(['.', ':']))
+        .find(|w| {
+            w.split_once('@')
+                .is_some_and(|(l, d)| !l.is_empty() && d.contains('.') && !d.starts_with('.'))
+        })
+        .map(str::to_string)
 }
 
 fn smtp_error(e: &anyhow::Error) -> Option<&lettre::transport::smtp::Error> {
@@ -545,6 +951,21 @@ pub fn content_type(filename: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::mail::fake::{FakeSmtp, SmtpEnd};
+
+    /// A server that offers AUTH but not STARTTLS never sees a password: the
+    /// transport requires TLS before it signs in.
+    #[test]
+    fn auth_offered_without_starttls_gets_no_sign_in() {
+        let smtp = FakeSmtp::start(SmtpEnd::Accept);
+        let params = crate::mail::pin::smtp_tls_parameters("127.0.0.1", None).unwrap();
+        let transport = configure(SmtpTransport::builder_dangerous("127.0.0.1"))
+            .tls(Tls::Required(params))
+            .port(smtp.port)
+            .credentials(Credentials::new("alice".into(), "secret".into()))
+            .build();
+        assert!(transport.test_connection().is_err());
+        assert!(smtp.finish_with_auth().is_empty());
+    }
 
     fn sample() -> Outgoing {
         Outgoing {
@@ -718,6 +1139,137 @@ mod tests {
         // No SMTP at all (e.g. no saved password).
         let no_password = anyhow::anyhow!("no password");
         assert!(!may_have_sent(&no_password) && !retryable(&no_password));
+    }
+
+    #[test]
+    fn outbox_records_map_to_their_smtp_class() {
+        // What the fake server's refusals leave in the row, as stored.
+        let record = |end| format!("{:#}", send_to_fake(end).unwrap_err());
+        let refused = classify(&record(SmtpEnd::RejectRcpt));
+        assert_eq!(
+            (refused.class, refused.code),
+            (SendClass::NoSuchRecipient, Some(550))
+        );
+        assert!(refused.permanent());
+        let busy = classify(&record(SmtpEnd::TempRejectRcpt));
+        assert_eq!(busy.class, SendClass::Busy);
+        assert!(!busy.permanent());
+        assert_eq!(
+            classify(&record(SmtpEnd::TooLarge)).class,
+            SendClass::TooLarge
+        );
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let unreachable = format!(
+            "{:#}",
+            send_msg(port, &build(sample()).unwrap()).unwrap_err()
+        );
+        assert_eq!(classify(&unreachable).class, SendClass::Unreachable);
+
+        // Real-world replies, by their codes first and their words second.
+        let cases = [
+            (
+                "permanent error (550): 5.1.1 <bob@example.org>: Recipient address rejected: User unknown",
+                SendClass::NoSuchRecipient,
+                Some("5.1.1"),
+                Some("bob@example.org"),
+            ),
+            (
+                "permanent error (550): 5.2.2 mailbox full",
+                SendClass::MailboxFull,
+                Some("5.2.2"),
+                None,
+            ),
+            (
+                "permanent error (552): 5.3.4 Message size exceeds fixed limit",
+                SendClass::TooLarge,
+                Some("5.3.4"),
+                None,
+            ),
+            (
+                "permanent error (553): 5.7.1 <me@x.org>: Sender address rejected: not owned by user",
+                SendClass::SenderRefused,
+                Some("5.7.1"),
+                Some("me@x.org"),
+            ),
+            (
+                "permanent error (554): 5.7.1 Message rejected as spam",
+                SendClass::Policy,
+                Some("5.7.1"),
+                None,
+            ),
+            (
+                "permanent error (535): 5.7.8 Authentication credentials invalid",
+                SendClass::SignIn,
+                Some("5.7.8"),
+                None,
+            ),
+            (
+                "permanent error (501): 5.1.3 Bad recipient address syntax",
+                SendClass::BadAddress,
+                Some("5.1.3"),
+                None,
+            ),
+            (
+                "transient error (421): 4.7.0 Try again later",
+                SendClass::Busy,
+                Some("4.7.0"),
+                None,
+            ),
+            (
+                "transient error (452): 4.2.2 Over quota, try later",
+                SendClass::Busy,
+                Some("4.2.2"),
+                None,
+            ),
+            (
+                "Connection error: Connection refused (os error 10061)",
+                SendClass::Unreachable,
+                None,
+                None,
+            ),
+            (
+                "Couldn't make a secure connection to the server. Check the server name in Settings; its certificate may not be trusted.",
+                SendClass::Certificate,
+                None,
+                None,
+            ),
+            (
+                "smtp.example.org refused to send as me@x.org. Check that this account may send from that address, or set the SMTP username.",
+                SendClass::SenderRefused,
+                None,
+                Some("me@x.org"),
+            ),
+            (
+                "Sign-in rejected. Update the password in Settings, or press Refresh to retry.",
+                SendClass::SignIn,
+                None,
+                None,
+            ),
+            (
+                "permanent error (554): Transaction failed",
+                SendClass::Other,
+                None,
+                None,
+            ),
+            // Version numbers and IPs are not status codes.
+            (
+                "permanent error (554): server 5.10.2.3 said no in v4.1.2b",
+                SendClass::Other,
+                None,
+                None,
+            ),
+        ];
+        for (record, class, enhanced, address) in cases {
+            let f = classify(record);
+            assert_eq!(f.class, class, "{record}");
+            assert_eq!(f.enhanced.as_deref(), enhanced, "{record}");
+            assert_eq!(f.address.as_deref(), address, "{record}");
+        }
+        assert!(!classify("").permanent());
     }
 
     #[test]

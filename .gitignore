@@ -9,3 +9,6 @@ test-results
 # Local secrets (test account credentials) must never be committed.
 .env
 .env.*
+
+# Screenshots of real mail, never committed
+/screenshots/

@@ -46,24 +46,6 @@ pub enum Reason {
     },
 }
 
-impl Reason {
-    fn text(&self) -> String {
-        match self {
-            Reason::Dmarc => "it failed your server's sender check (DMARC)".into(),
-            Reason::SpfDkim => "it failed your server's sender checks (SPF and DKIM)".into(),
-            Reason::NameDomain { shown, real } => {
-                format!("the name shows {shown}, but the address is at {real}")
-            }
-            Reason::Punycode { ascii, unicode } => {
-                format!("{ascii} is the international name \u{201c}{unicode}\u{201d}")
-            }
-            Reason::MixedScript { domain, script } => {
-                format!("{domain} mixes Latin and {script} letters")
-            }
-        }
-    }
-}
-
 /// The reasons to look twice at a message from `name <addr>`, received by
 /// an account on `imap_host`, given its `Authentication-Results` headers
 /// (topmost first). At most two, the server's verdict first.
@@ -101,16 +83,6 @@ pub fn reasons(auth: &[String], imap_host: &str, name: &str, addr: &str) -> Vec<
     }
     out.truncate(2);
     out
-}
-
-/// The notice line for [`reasons`], or an empty string.
-pub fn notice(auth: &[String], imap_host: &str, name: &str, addr: &str) -> String {
-    let reasons = reasons(auth, imap_host, name, addr);
-    if reasons.is_empty() {
-        return String::new();
-    }
-    let text: Vec<String> = reasons.iter().map(Reason::text).collect();
-    format!("Be careful with this sender: {}.", text.join("; "))
 }
 
 /// The verdict of the topmost `Authentication-Results` header added by the
@@ -427,15 +399,20 @@ mod tests {
     }
 
     #[test]
-    fn notice_lists_at_most_two_reasons() {
+    fn at_most_two_reasons_are_given() {
         let auth = h(&["mx.example.net; dmarc=fail"]);
         assert_eq!(
-            notice(&auth, HOST, "PayPal", "service@xn--pypal-4ve.com"),
-            "Be careful with this sender: it failed your server's sender check (DMARC); \
-             xn--pypal-4ve.com is the international name \u{201c}pаypal.com\u{201d}."
+            reasons(&auth, HOST, "PayPal", "service@xn--pypal-4ve.com"),
+            [
+                Reason::Dmarc,
+                Reason::Punycode {
+                    ascii: "xn--pypal-4ve.com".into(),
+                    unicode: "pаypal.com".into()
+                }
+            ]
         );
-        assert_eq!(notice(&[], HOST, "Ana", "ana@example.com"), "");
-        assert_eq!(notice(&auth, "", "Ana", "ana@example.com"), "");
+        assert!(reasons(&[], HOST, "Ana", "ana@example.com").is_empty());
+        assert!(reasons(&auth, "", "Ana", "ana@example.com").is_empty());
     }
 
     #[test]

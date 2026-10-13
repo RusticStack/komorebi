@@ -31,20 +31,20 @@ fn main() -> Result<()> {
     let (email, password) = (var("EMAIL")?, var("PASSWORD_EMAIL")?);
     let server = PRESETS[1].imap_server();
 
-    let mut writer = Imap::connect(&server, &email, &password)?;
+    let mut writer = Imap::connect(&server, None, &email, &password)?;
     let uidvalidity = writer.select("INBOX")?.uidvalidity;
     let Some(&uid) = writer.search(r#"SUBJECT "[komorebi-test]""#)?.iter().max() else {
         bail!("no [komorebi-test] message to flag");
     };
 
-    let mut idler = Imap::connect(&server, &email, &password)?;
+    let mut idler = Imap::connect(&server, None, &email, &password)?;
     idler.set_read_only(true);
     idler.select("INBOX")?;
     if std::env::args().any(|a| a == "--mail") {
         // An observer polls STATUS (nothing selected, so it is safe) to see
         // when the server has the message; the idler waits in 50 s chunks
         // because the crate's timeout restarts on every keepalive line.
-        let mut observer = Imap::connect(&server, &email, &password)?;
+        let mut observer = Imap::connect(&server, None, &email, &password)?;
         observer.set_read_only(true);
         let count =
             |o: &mut Imap| -> Result<u32> { Ok(o.status("INBOX")?.context("no STATUS")?.messages) };

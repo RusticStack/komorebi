@@ -12,9 +12,11 @@
 //! are a set of ids beside the list, so selecting a whole folder still
 //! reads only the rows in view.
 
-use crate::db::Db;
+use crate::db::{Db, Outbox};
+use crate::tr::t;
 use crate::{MailRow, format, mail};
 use chrono::{DateTime, Local};
+use komorebi::i18n::Lang;
 use slint::{Model, ModelNotify, ModelTracker, SharedString};
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -148,10 +150,12 @@ pub struct Rows {
     /// What [`Kind::Mixed`] rows read by folder id: the folder's tag and
     /// whether its mail is outgoing.
     folders: RefCell<HashMap<i64, (SharedString, bool)>>,
-    /// Account dot colours by account id (empty: no dots).
-    dots: RefCell<HashMap<i64, slint::Color>>,
+    /// Account names by account id, tagging each row (empty: no tags).
+    accounts: RefCell<HashMap<i64, SharedString>>,
     /// Reference time for relative dates, fixed per reload.
     now: Cell<DateTime<Local>>,
+    /// The language dates are written in.
+    lang: Cell<Lang>,
     notify: ModelNotify,
 }
 
@@ -163,10 +167,16 @@ impl Rows {
             selection: RefCell::default(),
             kind: Cell::new(Kind::Received),
             folders: RefCell::default(),
-            dots: RefCell::default(),
+            accounts: RefCell::default(),
             now: Cell::new(Local::now()),
+            lang: Cell::new(Lang::default()),
             notify: ModelNotify::default(),
         }
+    }
+
+    /// Write dates in `lang` from now on (rows are drawn again by [`Rows::redraw`]).
+    pub fn set_lang(&self, lang: Lang) {
+        self.lang.set(lang);
     }
 
     /// Show `ids`. When the list is unchanged (a sync touched flags or
@@ -196,10 +206,10 @@ impl Rows {
         *self.folders.borrow_mut() = folders;
     }
 
-    /// The account dots of message rows, by account id (set before
+    /// The account tags of message rows, by account id (set before
     /// [`Rows::set`]; empty: none).
-    pub fn set_dots(&self, dots: HashMap<i64, slint::Color>) {
-        *self.dots.borrow_mut() = dots;
+    pub fn set_account_tags(&self, tags: HashMap<i64, SharedString>) {
+        *self.accounts.borrow_mut() = tags;
     }
 
     pub fn len(&self) -> usize {
@@ -212,6 +222,14 @@ impl Rows {
 
     pub fn index_of(&self, id: i64) -> Option<usize> {
         self.ids.borrow().iter().position(|&x| x == id)
+    }
+
+    /// Re-read every row from the cache (the language changed: dates and
+    /// labels read differently).
+    pub fn redraw(&self) {
+        for i in 0..self.len() {
+            self.notify.row_changed(i);
+        }
     }
 
     /// Re-read one row from the cache.
@@ -299,13 +317,18 @@ impl Model for Rows {
             return Some(MailRow {
                 id: id as i32,
                 sender: if d.to.trim().is_empty() {
-                    "(no recipient)".into()
+                    t!(invoke_row_no_recipient).into()
                 } else {
-                    format!("To: {}", format::recipients(&d.to)).into()
+                    t!(invoke_row_to, format::recipients(&d.to).into()).into()
                 },
                 subject: d.subject.into(),
-                preview: mail::mime::preview(&d.preview).into(),
-                date: format::list_date(d.updated, self.now.get()).into(),
+                // The text above the quote, without the marks the HTML
+                // part converts.
+                preview: mail::mime::preview(&mail::compose_html::plain(crate::app::above_quote(
+                    &d.preview,
+                )))
+                .into(),
+                date: format::list_date(self.lang.get(), d.updated, self.now.get()).into(),
                 attach: d.has_attach,
                 ..Default::default()
             });
@@ -315,16 +338,17 @@ impl Model for Rows {
             let to = format::recipients(&e.to);
             return Some(MailRow {
                 id: id as i32,
-                sender: format!("To: {to}").into(),
+                sender: t!(invoke_row_to, to.into()).into(),
                 subject: e.subject.as_str().into(),
                 preview: format::outbox_status(&e, self.now.get().timestamp()).into(),
-                date: format::list_date(e.updated, self.now.get()).into(),
+                date: format::list_date(self.lang.get(), e.updated, self.now.get()).into(),
                 attach: e.has_attach,
+                problem: matches!(e.state, Outbox::Failed | Outbox::Unconfirmed),
                 ..Default::default()
             });
         }
         let h = self.db.header(id).ok()??;
-        let (folder, outgoing) = match self.kind.get() {
+        let (mut tag, outgoing) = match self.kind.get() {
             Kind::Mixed => self
                 .folders
                 .borrow()
@@ -335,7 +359,7 @@ impl Model for Rows {
         };
         let sender = if outgoing {
             let to = mail::smtp::split_addresses(&h.to);
-            format!("To: {}", to.first().map_or("", String::as_str)).into()
+            t!(invoke_row_to, to.first().map_or("", String::as_str).into()).into()
         } else {
             format::sender(&h.from_name, &h.from_addr).into()
         };
@@ -344,20 +368,23 @@ impl Model for Rows {
             sender,
             subject: h.subject.into(),
             preview: h.preview.into(),
-            date: format::list_date(h.date, self.now.get()).into(),
-            unread: !h.seen,
+            date: format::list_date(self.lang.get(), h.date, self.now.get()).into(),
+            // Sent mail and server drafts are the user's own: never bold.
+            unread: !h.seen && !outgoing,
             flagged: h.flagged,
             attach: h.has_attach,
             answered: h.answered,
             draft: h.has_draft,
             selected: self.selection.borrow().contains(id),
-            folder,
-            dot: self
-                .dots
-                .borrow()
-                .get(&h.account_id)
-                .copied()
-                .unwrap_or_default(),
+            tag: {
+                if tag.is_empty()
+                    && let Some(name) = self.accounts.borrow().get(&h.account_id)
+                {
+                    tag = name.clone();
+                }
+                tag
+            },
+            problem: false,
         })
     }
 

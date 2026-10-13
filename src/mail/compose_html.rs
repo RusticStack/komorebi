@@ -50,6 +50,15 @@ pub fn alternative(body: &str, quoted: Option<&str>) -> (String, Option<String>)
     (body.to_string(), None)
 }
 
+/// The composer's Preview: the HTML part a draft sends ([`alternative`]),
+/// or for plain text the same text as HTML, so Preview always shows how
+/// the message reads.
+pub fn preview_html(body: &str, quoted: Option<&str>) -> String {
+    alternative(body, quoted)
+        .1
+        .unwrap_or_else(|| document(&to_html(body)))
+}
+
 /// Whether `text` uses a marker that needs HTML: bold, italic, a list or a
 /// `[label](url)` link outside `> ` quoted lines. Bare URLs and quotes
 /// alone don't count: every client shows those well in plain text.
@@ -59,29 +68,22 @@ pub fn has_formatting(text: &str) -> bool {
         .any(|l| list_item(l, false).is_some() || inline(l, &mut String::new(), 0))
 }
 
-/// The text/plain part of a message that also has HTML: `[label](url)`
-/// links read `label (url)`; everything else stays as typed.
+/// The text/plain part of a message that also has HTML, and the text of
+/// a draft's previews: the inline marks the HTML part converts are taken
+/// out (`**bold**` reads `bold`, `_it_` reads `it`) and `[label](url)`
+/// links read `label (url)`, by the same scan as [`to_html`], so a lone
+/// `*` or `snake_case` stays. Lists, `> ` quotes and line breaks stay as
+/// typed: they read well as text.
 pub fn plain(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find('[') {
-        let (before, from) = rest.split_at(at);
-        out.push_str(before);
-        match md_link(from) {
-            Some((label, url, len)) => {
-                out.push_str(label);
-                out.push_str(" (");
-                out.push_str(&url);
-                out.push(')');
-                rest = from.get(len..).unwrap_or_default();
-            }
-            None => {
-                out.push('[');
-                rest = from.get(1..).unwrap_or_default();
-            }
-        }
+    for line in text.split_inclusive('\n') {
+        let (body, end) = match line.strip_suffix('\n') {
+            Some(b) => (b, "\n"),
+            None => (line, ""),
+        };
+        inline_to(body, &mut out, 0, Sink::Plain);
+        out.push_str(end);
     }
-    out.push_str(rest);
     out
 }
 
@@ -328,9 +330,23 @@ fn list_item(line: &str, in_ordered: bool) -> Option<(usize, bool, &str)> {
     (!item.trim().is_empty()).then_some((indent, true, item))
 }
 
+/// Where [`inline_to`] writes: HTML, or text with the marks taken out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sink {
+    Html,
+    Plain,
+}
+
 /// Append `s` with its inline markers converted; true if it had any
 /// (bold, italic or a `[label](url)` link; bare URLs don't count).
 fn inline(s: &str, out: &mut String, depth: usize) -> bool {
+    inline_to(s, out, depth, Sink::Html)
+}
+
+/// [`inline`] into `sink`: HTML tags and escapes, or for [`Sink::Plain`]
+/// the same text without the marks (links as `label (url)`).
+fn inline_to(s: &str, out: &mut String, depth: usize, sink: Sink) -> bool {
+    let html = sink == Sink::Html;
     let b = s.as_bytes();
     let at = |i: usize| b.get(i).copied().unwrap_or(b' ');
     let mut found = false;
@@ -338,8 +354,14 @@ fn inline(s: &str, out: &mut String, depth: usize) -> bool {
     let mut i = 0;
     // Markers with no closer from here on (each search fails only once).
     let (mut no_bold, mut no_star, mut no_under) = (false, false, false);
-    let flush =
-        |out: &mut String, from: usize, to: usize| escape(s.get(from..to).unwrap_or(""), out);
+    let flush = |out: &mut String, from: usize, to: usize| {
+        let text = s.get(from..to).unwrap_or("");
+        if html {
+            escape(text, out);
+        } else {
+            out.push_str(text);
+        }
+    };
     while i < b.len() {
         let c = at(i);
         let prev = if i == 0 { b' ' } else { at(i - 1) };
@@ -347,11 +369,18 @@ fn inline(s: &str, out: &mut String, depth: usize) -> bool {
         if c == b'[' {
             if let Some((label, url, len)) = s.get(i..).and_then(md_link) {
                 flush(out, lit, i);
-                out.push_str("<a href=\"");
-                escape(&url, out);
-                out.push_str("\">");
-                escape(label, out);
-                out.push_str("</a>");
+                if html {
+                    out.push_str("<a href=\"");
+                    escape(&url, out);
+                    out.push_str("\">");
+                    escape(label, out);
+                    out.push_str("</a>");
+                } else {
+                    out.push_str(label);
+                    out.push_str(" (");
+                    out.push_str(&url);
+                    out.push(')');
+                }
                 found = true;
                 done = Some(i.saturating_add(len));
             }
@@ -361,11 +390,15 @@ fn inline(s: &str, out: &mut String, depth: usize) -> bool {
                 let raw = s.get(i..end).unwrap_or("");
                 if let Some(url) = links::sanitize(raw) {
                     flush(out, lit, i);
-                    out.push_str("<a href=\"");
-                    escape(&url, out);
-                    out.push_str("\">");
-                    escape(raw, out);
-                    out.push_str("</a>");
+                    if html {
+                        out.push_str("<a href=\"");
+                        escape(&url, out);
+                        out.push_str("\">");
+                        escape(raw, out);
+                        out.push_str("</a>");
+                    } else {
+                        out.push_str(raw);
+                    }
                     done = Some(end);
                 } else {
                     // Not a link: text, never scanned again.
@@ -395,13 +428,18 @@ fn inline(s: &str, out: &mut String, depth: usize) -> bool {
                     Some(end) => {
                         flush(out, lit, i);
                         let tag = if bold { "b" } else { "i" };
-                        out.push('<');
-                        out.push_str(tag);
-                        out.push('>');
-                        inline(s.get(from..end).unwrap_or(""), out, depth + 1);
-                        out.push_str("</");
-                        out.push_str(tag);
-                        out.push('>');
+                        let inner = s.get(from..end).unwrap_or("");
+                        if html {
+                            out.push('<');
+                            out.push_str(tag);
+                            out.push('>');
+                        }
+                        inline_to(inner, out, depth + 1, sink);
+                        if html {
+                            out.push_str("</");
+                            out.push_str(tag);
+                            out.push('>');
+                        }
                         found = true;
                         done = Some(end.saturating_add(width));
                     }
@@ -771,8 +809,34 @@ mod tests {
         assert_eq!(plain("[click](javascript:x)"), "[click](javascript:x)");
         assert_eq!(
             plain("**Hi** see [the doc](https://x.org/d) [x](ftp://y)"),
-            "**Hi** see the doc (https://x.org/d) [x](ftp://y)"
+            "Hi see the doc (https://x.org/d) [x](ftp://y)"
         );
+    }
+
+    #[test]
+    fn text_plain_has_no_markers() {
+        let body = "Hi Ana,\n\nThe **report** is _ready_ and *final*. Notes:\n\n\
+                    - **totals** checked\n1. [the sheet](https://example.org/sheet)\n\n\
+                    > _Can_ you send it today?\n\n-- \n**Ana**";
+        let (text, html) = alternative(body, None);
+        assert!(html.is_some(), "formatting needs the HTML part");
+        assert_eq!(
+            text,
+            "Hi Ana,\n\nThe report is ready and final. Notes:\n\n\
+             - totals checked\n1. the sheet (https://example.org/sheet)\n\n\
+             > Can you send it today?\n\n-- \nAna"
+        );
+        assert!(!text.contains("**") && !text.contains("_r"), "{text}");
+        // Only marks the HTML part converts go: a lone star, an
+        // unclosed mark, snake_case and a product name keep theirs.
+        assert_eq!(
+            plain("2 * 3 = 6, snake_case_name, **open, a_b_c, C*"),
+            "2 * 3 = 6, snake_case_name, **open, a_b_c, C*"
+        );
+        // Line breaks and a last line without one stay as typed.
+        assert_eq!(plain("**a**\n\n_b_"), "a\n\nb");
+        // Plain text with no marks goes out byte for byte.
+        assert_eq!(alternative("2 * 3\n", None), ("2 * 3\n".to_string(), None));
     }
 
     #[test]

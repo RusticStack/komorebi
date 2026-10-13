@@ -18,7 +18,7 @@ impl App {
     pub(super) fn resume_outbox(&mut self) {
         let pending = match self.db.outbox_pending() {
             Ok(rows) => rows,
-            Err(e) => return self.set_status(&format!("{e:#}"), true),
+            Err(e) => return self.set_status(&text::detail(&e), true),
         };
         for (row, built) in pending {
             if self.pending_sends.contains_key(&row) {
@@ -26,7 +26,7 @@ impl App {
             }
             if built {
                 if let Err(e) = self.db.outbox_queue(row) {
-                    self.set_status(&format!("{e:#}"), true);
+                    self.set_status(&text::detail(&e), true);
                 }
                 continue;
             }
@@ -45,10 +45,7 @@ impl App {
                 None => {
                     // Never sent half: it goes back to Drafts as it was.
                     self.db.outbox_unsend(row).ok();
-                    self.set_status(
-                        "A message sent as Komorebi closed couldn't be prepared again; it is back in Drafts.",
-                        true,
-                    );
+                    self.set_status(&t!(invoke_rebuild_failed), true);
                     self.drafts_changed(None, true);
                 }
             }
@@ -66,7 +63,7 @@ impl App {
                     self.dispatch(row, account);
                 }
             }
-            Err(e) => self.set_status(&format!("{e:#}"), true),
+            Err(e) => self.set_status(&text::detail(&e), true),
         }
     }
 
@@ -83,7 +80,7 @@ impl App {
     pub(super) fn refresh_outbox_count(&mut self) {
         match self.db.count_outbox() {
             Ok(n) => self.outbox_count = n,
-            Err(e) => self.set_status(&format!("{e:#}"), true),
+            Err(e) => self.set_status(&text::detail(&e), true),
         }
     }
 
@@ -91,9 +88,7 @@ impl App {
     pub(super) fn open_outbox(&mut self, row: i64) {
         let ui = self.ui();
         if ui.get_composing() {
-            if let Some(id) = self.drafts.active_id() {
-                self.save_draft(id);
-            }
+            self.park_composer();
             ui.set_composing(false);
         }
         self.outbox_open = Some(row);
@@ -115,13 +110,18 @@ impl App {
         use db::Outbox::*;
         ui.set_o_show(true);
         ui.set_o_subject(if e.subject.trim().is_empty() {
-            "(no subject)".into()
+            t!(invoke_no_subject).into()
         } else {
             e.subject.as_str().into()
         });
         ui.set_o_to(format::recipients(&e.to).into());
         ui.set_o_status(format::outbox_status(&e, chrono::Utc::now().timestamp()).into());
         ui.set_o_problem(matches!(e.state, Failed | Unconfirmed));
+        // The server's own words, behind Details (while there are any).
+        ui.set_o_detail(e.last_error.as_str().into());
+        // A refusal that sending again can't fix: Edit leads, Retry follows.
+        ui.set_o_permanent(e.state == Failed && mail::smtp::classify(&e.last_error).permanent());
+        ui.set_o_body(outbox_excerpt(&e.body).into());
         ui.set_o_can_edit(e.state != Sending && !e.invite_reply);
         ui.set_o_can_retry(matches!(e.state, Failed | Unconfirmed));
         ui.set_o_can_discard(matches!(e.state, Queued | Failed | Unconfirmed));
@@ -143,7 +143,7 @@ impl App {
             Ok(Some(e)) if e.state == db::Outbox::Unconfirmed => self.ask(Question::Resend(row)),
             Ok(Some(_)) => self.retry_now(row),
             Ok(None) => self.outbox_changed(),
-            Err(e) => self.set_status(&format!("{e:#}"), true),
+            Err(e) => self.set_status(&text::detail(&e), true),
         }
     }
 
@@ -155,7 +155,7 @@ impl App {
                 }
             }
             Ok(false) => {}
-            Err(e) => self.set_status(&format!("{e:#}"), true),
+            Err(e) => self.set_status(&text::detail(&e), true),
         }
         self.outbox_changed();
     }
@@ -171,10 +171,10 @@ impl App {
         match self.db.discard_outbox(row) {
             Ok((true, copy)) => {
                 self.remove_server_copy(copy);
-                self.set_status("Message discarded.", false);
+                self.set_status(&t!(invoke_message_discarded), false);
             }
             Ok((false, _)) => {}
-            Err(e) => self.set_status(&format!("{e:#}"), true),
+            Err(e) => self.set_status(&text::detail(&e), true),
         }
         self.outbox_changed();
     }
@@ -185,19 +185,35 @@ impl App {
         if let Some(m) = reply_to {
             self.rows.changed(m);
         }
-        match outcome {
-            Outcome::Delivered => self.set_status("Message sent.", false),
-            Outcome::DeliveredNotSaved(e) => {
-                self.set_status(&format!("Message sent, but {e}"), true)
-            }
-            Outcome::Retry(e) => self.set_status(
-                &format!("Not sent yet: {e}. It stays in the Outbox and is tried again shortly."),
-                true,
-            ),
-            Outcome::Failed(e) => {
-                self.set_status(&format!("Not sent: {e}. It is in the Outbox."), true)
-            }
-            Outcome::Unconfirmed(e) => self.set_status(&e, true),
+        let error = !matches!(outcome, Outcome::Delivered);
+        if let Some(text) = text::outcome(&outcome) {
+            self.set_status(&text, error);
         }
+        // A send that failed for good stays said until it is dismissed.
+        if matches!(outcome, Outcome::Failed(_) | Outcome::Unconfirmed(_)) {
+            self.status_timer.stop();
+        }
+    }
+}
+
+/// Lines of an Outbox message's text shown under its sentence.
+const EXCERPT_LINES: usize = 3;
+const EXCERPT_CHARS: usize = 280;
+
+/// The first lines of what was written (formatting marks taken out, no
+/// quote or signature), for the open Outbox entry.
+pub(super) fn outbox_excerpt(body: &str) -> String {
+    let plain = mail::compose_html::plain(body);
+    let lines: Vec<&str> = plain
+        .lines()
+        .take_while(|l| *l != "-- " && !l.trim_start().starts_with('>'))
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .take(EXCERPT_LINES)
+        .collect();
+    let text = lines.join("\n");
+    match text.char_indices().nth(EXCERPT_CHARS) {
+        Some((i, _)) => format!("{}\u{2026}", text[..i].trim_end()),
+        None => text,
     }
 }

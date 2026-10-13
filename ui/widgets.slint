@@ -1,5 +1,5 @@
-import { Theme, Icons } from "theme.slint";
-import { ScrollView, Palette } from "std-widgets.slint";
+import { Theme, Icons, Tip } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
 
 // Where the keyboard focus came from last: the list and the folders show
 // their current row only after a key moved it, not after a click.
@@ -7,19 +7,47 @@ export global Focus {
     in-out property <bool> keyboard;
 }
 
-// The 2 px keyboard focus ring, drawn over its control.
+// The keyboard focus ring (docs/WINUI3.md "Control metrics"): 2 px
+// FocusStrokeColorOuter around 1 px FocusStrokeColorInner, shown only
+// while the keyboard moved the focus. It fills its control and sits
+// outside it (`inset` -3 px: buttons, menu items) or inside it (+1 px:
+// list and folder rows, and where a clipping card would cut it).
 export component FocusRing inherits Rectangle {
     in property <bool> shown;
-    border-width: root.shown ? 2px : 0;
-    border-color: Theme.focus;
-    border-radius: Theme.radius;
+    in property <length> inset: -3px;
+    in property <length> radius: Theme.radius;
+    Rectangle {
+        visible: root.shown && Focus.keyboard;
+        x: root.inset;
+        y: root.inset;
+        width: root.width - 2 * root.inset;
+        height: root.height - 2 * root.inset;
+        border-width: 2px;
+        border-color: Theme.focus;
+        border-radius: max(0px, root.radius - root.inset);
+        Rectangle {
+            x: 2px;
+            y: 2px;
+            width: parent.width - 4px;
+            height: parent.height - 4px;
+            border-width: 1px;
+            border-color: Theme.focus-inner;
+            border-radius: max(0px, parent.border-radius - 2px);
+        }
+    }
 }
 
 // A Tab stop for a custom control: Space or Enter presses it. A click
-// doesn't take the focus (the list keeps the keys).
+// doesn't take the focus (the list keeps the keys); reaching it with Tab
+// shows the focus ring.
 export component PressKeys inherits FocusScope {
     callback pressed;
     focus-on-click: false;
+    focus-gained(reason) => {
+        if reason == FocusReason.tab-navigation {
+            Focus.keyboard = true;
+        }
+    }
     key-pressed(e) => {
         if (e.text == " " || e.text == Key.Return) && !e.modifiers.control && !e.modifiers.alt {
             root.pressed();
@@ -31,15 +59,20 @@ export component PressKeys inherits FocusScope {
 
 // The edges of a dialog: Tab past its last control (or Shift+Tab before
 // its first) lands here, and `entered` sends the focus round to the other
-// end, so the keyboard stays in the dialog. It runs from a change handler,
-// after the focus change is done.
+// end, so the keyboard stays in the dialog (and the focus ring shows
+// there). It runs from a change handler, after the focus change is done.
 export component FocusTrap inherits FocusScope {
     callback entered;
     property <int> hits;
     width: 0;
     height: 0;
     focus-on-click: false;
-    focus-gained(reason) => { self.hits += 1; }
+    focus-gained(reason) => {
+        if reason == FocusReason.tab-navigation {
+            Focus.keyboard = true;
+        }
+        self.hits += 1;
+    }
     changed hits => { root.entered(); }
 }
 
@@ -50,11 +83,32 @@ export struct NavItem {
     icon: string,
     unread: int,
     count: int,       // items, shown quietly (local drafts, outbox)
-    depth: int,
-    expanded: bool,
+    level: int,       // folder: its level in the tree (0 to 5)
+    expanded: bool,   // account header, or a folder with subfolders: open
+    has-children: bool, // folder: it has subfolders (an expander)
+    parent: int,      // the model row of the parent line (a level-0 folder: its account's), or -1
+    account: int,     // account header and folder: the account id
+    initial: string,  // account header: the letter of its tile
+    sub: string,      // account header: its address; folder: its full path when deeper than shown
     warn: bool,       // account header: its sign-in is rejected
     off: bool,        // its account is switched off (shown greyed)
     dot: color,       // account header: its colour (transparent: none)
+    caution: bool,    // account header: its server can't be reached (until a sync goes through)
+    note: string,     // account header: what `caution` says ("Can't reach {server}")
+}
+
+// An entry of a menu built by the Rust side (the folder pane's row menu,
+// the list's "..." menu, the row menu, the reader's More menu): its text
+// (with its accelerator text after a tab, which Windows draws
+// right-aligned), whether it can run now, the command it runs, the folder
+// it is for (a rail tile's Inbox, Sent or Archive) and its check mark.
+export struct MenuCommand {
+    title: string,
+    enabled: bool,
+    command: int,
+    id: int,
+    checkable: bool,
+    checked: bool,
 }
 
 export struct MailRow {
@@ -69,14 +123,17 @@ export struct MailRow {
     answered: bool,
     draft: bool,      // a local draft replies to it
     selected: bool,   // in the multi-selection
-    folder: string,   // its folder, in a search of all folders
-    dot: color,       // its account's colour in All inboxes (transparent: none)
+    // Its text tag on line 3: its account in All inboxes (with more than
+    // one account), "Account · Folder" in a search of all folders.
+    tag: string,
+    problem: bool,    // an Outbox message that failed or may not have gone
 }
 
 export struct AttachmentRow {
     index: int,
     name: string,
     size: string,
+    kind: int,        // its icon (format::file_kind): 0 file, 1 picture, 2 document, 3 calendar, 4 message
 }
 
 export struct AccountRow {
@@ -84,16 +141,23 @@ export struct AccountRow {
     email: string,
     detail: string,
     status: string,   // its last sync, from this session only
-    warn: bool,       // the sign-in is rejected
+    warn: bool,       // the sign-in is rejected, or its certificate needs a review
+    review: bool,     // its saved certificate changed: "Review certificate" (else "Update password")
+    caution: bool,    // its server can't be reached (until a sync goes through)
+    name: string,     // its display name (empty: none)
     enabled: bool,    // switched on (off: no connections, shown greyed)
     dot: color,       // its colour (All inboxes rows, navigation)
     first: bool,      // first and last in the account order
     last: bool,
+    done: int,        // its download: headers cached of `total` (0: none)
+    total: int,
 }
 
 export struct FolderOption {
     id: int,
     label: string,
+    level: int,       // its depth in the folder tree (indented by it)
+    recent: bool,     // one of the last folders used (listed first)
 }
 
 export component Icon inherits Text {
@@ -105,271 +169,821 @@ export component Icon inherits Text {
     accessible-role: none;
 }
 
-// Fluent "subtle" button: transparent until hovered. Icon and optional label.
+// Shows `text` as the tooltip once the pointer has rested 500 ms on its
+// control (`hover`), until the pointer leaves or presses (docs/WINUI3.md
+// "ToolTip"). It fills its control, whose bounds place the tooltip.
+export component TipTimer inherits Rectangle {
+    in property <string> text;
+    in property <bool> hover;
+    in property <bool> pressed;
+    property <int> id;
+    // Pressed: no tooltip again until the pointer leaves.
+    property <bool> done;
+    property <bool> mine: Tip.shown && Tip.owner == root.id;
+    init => {
+        Tip.seq += 1;
+        root.id = Tip.seq;
+    }
+    changed hover => {
+        if !root.hover {
+            root.done = false;
+            if root.mine {
+                Tip.shown = false;
+            }
+        }
+    }
+    changed pressed => {
+        if root.pressed {
+            root.done = true;
+            if root.mine {
+                Tip.shown = false;
+            }
+        }
+    }
+    changed text => {
+        if root.mine {
+            Tip.text = root.text;
+            Tip.shown = root.text != "";
+        }
+    }
+    Timer {
+        interval: 500ms;
+        running: root.hover && !root.done && root.text != "" && !root.mine && !Tip.blocked;
+        triggered => {
+            Tip.text = root.text;
+            Tip.at-x = root.absolute-position.x;
+            Tip.at-y = root.absolute-position.y;
+            Tip.at-w = root.width;
+            Tip.at-h = root.height;
+            Tip.owner = root.id;
+            Tip.shown = true;
+        }
+    }
+}
+
+// A WinUI button (docs/WINUI3.md "Button", "ToggleButton"): standard,
+// accent (`accent`: the primary action, as "New mail", "Send" or a
+// dialog's default answer; not a component of its own, which would copy
+// all of this), or a toggle that is accent-filled while
+// `checked`. Lighter when hovered and pressed; under a contrast theme
+// ButtonFace with a ButtonText border, Highlight when hovered.
+export component Button inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> enabled: true;
+    in property <bool> accent;
+    in property <bool> checkable;
+    in property <bool> checked;
+    // A standard button whose action destroys data: its label at rest in
+    // SystemFillColorCritical ("Remove all data").
+    in property <bool> danger;
+    // Shown after the pointer rests on it (also while it is off), and its
+    // accessible name when it has no label.
+    in property <string> tooltip;
+    in property <string> description;
+    // Each change takes the keyboard focus (focus given back after a
+    // prompt or a sub-page it opened closes).
+    in property <int> focus-seq;
+    changed focus-seq => { fs.focus(); }
+    out property <bool> has-focus: fs.has-focus;
+    // The width its icon and label need (a dialog's equal buttons never
+    // get narrower than this).
+    out property <length> natural-width: row.preferred-width;
+    out property <length> natural-height: max(32px, row.preferred-height);
+    callback clicked;
+
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.label != "" ? root.label : root.tooltip;
+    accessible-description: root.description;
+    accessible-checkable: root.checkable;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.press(); }
+
+    function press() {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+    property <bool> filled: root.accent || (root.checkable && root.checked);
+    property <bool> hover: root.enabled && ta.has-hover;
+    property <bool> down: root.enabled && ta.pressed;
+    // A hovered or pressed standard button under a contrast theme.
+    property <bool> lit: Theme.contrast && !root.filled && (root.hover || root.down);
+    property <color> fg: root.filled
+        ? (!root.enabled ? Theme.on-accent-disabled : root.down ? Theme.on-accent-2 : root.hover ? Theme.on-accent-hover : Theme.on-accent)
+        : (!root.enabled ? Theme.text-disabled : root.lit ? Theme.hc-highlight : root.down ? Theme.text-2 : root.danger ? Theme.danger : Theme.text);
+
+    min-width: 32px;
+    height: root.natural-height;
+    border-radius: Theme.radius;
+    background: root.filled
+        ? (!root.enabled ? Theme.accent-disabled : root.down ? Theme.accent-pressed : root.hover ? Theme.accent-hover : Theme.accent)
+        : (root.lit ? Theme.hc-highlight-text : !root.enabled ? Theme.control-disabled : root.down ? Theme.control-pressed : root.hover ? Theme.control-hover : Theme.control);
+    border-width: 1px;
+    border-color: root.lit ? Theme.hc-highlight
+        : !root.filled ? Theme.control-stroke
+        : Theme.contrast ? (root.enabled ? Theme.accent-edge : Theme.text-disabled)
+        : root.enabled && !root.down ? Theme.accent-edge : transparent;
+
+    // The elevation edge: the bottom one (light, and every accent fill) or
+    // the top one (dark); pressed and disabled buttons have none.
+    if !Theme.contrast && root.enabled && !root.down: Rectangle {
+        x: Theme.radius;
+        y: root.filled || !Theme.dark ? root.height - 1px : 0;
+        width: root.width - 2 * Theme.radius;
+        height: 1px;
+        background: root.filled ? Theme.accent-edge-bottom : Theme.control-stroke-edge;
+    }
+    fs := PressKeys {
+        enabled: root.enabled;
+        pressed => { root.press(); }
+    }
+    ta := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.press(); }
+    }
+    row := HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        padding-top: 5px;
+        padding-bottom: 6px;
+        spacing: Theme.s2;
+        alignment: center;
+        if root.icon != "": Icon {
+            text: root.icon;
+            color: root.fg;
+            width: 16px;
+        }
+        if root.label != "": Text {
+            text: root.label;
+            font-size: Theme.body;
+            color: root.fg;
+            vertical-alignment: center;
+        }
+    }
+    TipTimer {
+        text: root.tooltip != root.label ? root.tooltip : "";
+        hover: ta.has-hover;
+        pressed: ta.pressed;
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+// WinUI's subtle button: transparent until hovered (docs/WINUI3.md
+// "Button"), an icon and an optional label; a toggle (`checkable`) is
+// accent-filled while `checked`.
 export component IconButton inherits Rectangle {
     in property <string> icon;
     in property <string> label;
     in property <string> tooltip;
+    in property <string> description;
     in property <bool> enabled: true;
-    in property <color> icon-color: Theme.text-2;
     // A text glyph ("1.") instead of an icon-font one.
     in property <string> icon-font: Theme.icon-font;
     in property <length> icon-size: 16px;
+    in property <int> icon-weight: 400;
     in property <LayoutAlignment> alignment: center;
     // `elide` lets a long label shrink with its row.
     in property <TextOverflow> label-overflow: clip;
     // A Tab stop, pressed with Space or Enter; off: reached only by the
     // arrows of its toolbar.
     in property <bool> tab-stop: true;
-    // A toggle (flag, unread): its state for screen readers.
+    // A toggle (flag, unread): shown filled while on, and its state for
+    // screen readers.
     in property <bool> checkable;
     in property <bool> checked;
+    // It opens a menu: room after the label for the 12 px chevron its
+    // user draws over it in `fg` (an `if` here would be copied into every
+    // IconButton).
+    in property <bool> menu;
     out property <bool> has-focus: fs.has-focus;
     callback clicked;
 
     forward-focus: fs;
     accessible-role: button;
     accessible-label: root.label != "" ? root.label : root.tooltip;
+    accessible-description: root.description;
     accessible-checkable: root.checkable;
     accessible-checked: root.checked;
     accessible-enabled: root.enabled;
-    accessible-action-default => { root.clicked(); }
+    accessible-action-default => { root.press(); }
 
-    height: 32px;
+    function press() {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+    property <bool> on: root.checkable && root.checked;
+    property <bool> hover: root.enabled && ta.has-hover;
+    property <bool> down: root.enabled && ta.pressed;
+    // On a subtle fill (hovered or pressed, not checked).
+    property <bool> lit: !root.on && (root.hover || root.down);
+    out property <color> fg: root.on
+        ? (!root.enabled ? Theme.on-accent-disabled : root.down ? Theme.on-accent-2 : root.hover ? Theme.on-accent-hover : Theme.on-accent)
+        : (!root.enabled ? Theme.text-disabled : Theme.contrast && root.lit ? Theme.on-selected : root.down ? Theme.text-2 : Theme.text);
+
+    height: max(32px, row.preferred-height);
     min-width: 32px;
     border-radius: Theme.radius;
-    background: !enabled ? transparent : ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+    background: root.on
+        ? (!root.enabled ? Theme.accent-disabled : root.down ? Theme.accent-pressed : root.hover ? Theme.accent-hover : Theme.accent)
+        : (root.down ? Theme.pressed : root.hover ? Theme.hover : transparent);
+    // Under a contrast theme every control keeps a 1 px edge (docs/WINUI3.md
+    // "High contrast"): ButtonText at rest (WinUI's subtle button has none
+    // there), Highlight hovered, HighlightText pressed, GrayText off.
+    border-width: Theme.contrast ? 1px : 0;
+    border-color: root.on ? Theme.accent-edge : !root.enabled ? Theme.text-disabled
+        : root.down ? Theme.hc-highlight-text : root.hover ? Theme.hc-highlight : Theme.control-stroke;
 
     fs := PressKeys {
         enabled: root.enabled;
         focus-on-tab-navigation: root.tab-stop;
-        pressed => { root.clicked(); }
+        pressed => { root.press(); }
     }
-
     ta := TouchArea {
-        enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
-        clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.press(); }
     }
-
-    HorizontalLayout {
-        padding-left: root.label == "" ? 0 : Theme.s2;
-        padding-right: root.label == "" ? 0 : Theme.s3;
+    row := HorizontalLayout {
+        padding-left: root.label == "" && !root.menu ? 0 : root.icon == "" ? 11px : Theme.s2;
+        padding-right: root.menu ? 24px : root.label == "" ? 0 : 11px;
+        padding-top: 5px;
+        padding-bottom: 6px;
         spacing: Theme.s2;
         alignment: root.alignment;
-        Icon {
+        if root.icon != "": Icon {
             text: root.icon;
             font-family: root.icon-font;
             font-size: root.icon-size;
-            color: root.enabled ? root.icon-color : Theme.text-disabled;
+            font-weight: root.icon-weight;
+            color: root.fg;
             width: 20px;
         }
         if root.label != "": Text {
             text: root.label;
             font-size: Theme.body;
-            color: root.enabled ? Theme.text : Theme.text-disabled;
+            color: root.fg;
             vertical-alignment: center;
             overflow: root.label-overflow;
         }
     }
+    TipTimer {
+        text: root.tooltip != root.label ? root.tooltip : "";
+        hover: ta.has-hover;
+        pressed: ta.pressed;
+    }
     FocusRing { shown: fs.has-focus; }
 }
 
-// Accent-filled primary action ("New mail", "Send").
-export component AccentButton inherits Rectangle {
-    in property <string> icon;
-    in property <string> label;
-    in property <bool> enabled: true;
-    out property <bool> has-focus: fs.has-focus;
-    callback clicked;
-
-    forward-focus: fs;
-    accessible-role: button;
-    accessible-label: root.label;
-    accessible-enabled: root.enabled;
-    accessible-action-default => { root.clicked(); }
-
-    height: 32px;
+// Over a std ComboBox, filling it (docs/WINUI3.md "ComboBox"): a
+// Button's elevation edge, or under a contrast theme the 1 px ButtonText
+// border Slint's style does not draw (docs/WINUI3.md "High contrast").
+export component ComboEdge inherits Rectangle {
+    border-width: Theme.contrast ? 1px : 0;
     border-radius: Theme.radius;
-    background: !enabled ? Theme.accent-disabled : ta.pressed ? Theme.accent.darker(0.2) : ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
-
-    fs := PressKeys {
-        enabled: root.enabled;
-        pressed => { root.clicked(); }
+    border-color: Theme.control-stroke;
+    Rectangle {
+        x: Theme.radius;
+        y: Theme.dark ? 0 : parent.height - 1px;
+        width: parent.width - 2 * Theme.radius;
+        height: 1px;
+        background: Theme.contrast ? transparent : Theme.control-stroke-edge;
     }
-    ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: root.enabled ? pointer : default;
-        clicked => { root.clicked(); }
-    }
-    HorizontalLayout {
-        padding-left: root.label == "" ? 0 : Theme.s3;
-        padding-right: root.label == "" ? 0 : Theme.s4;
-        spacing: Theme.s2;
-        alignment: center;
-        if root.icon != "": Icon {
-            text: root.icon;
-            color: root.enabled ? Theme.on-accent : Theme.on-accent-disabled;
-            width: 16px;
-        }
-        if root.label != "": Text {
-            text: root.label;
-            font-size: Theme.body;
-            font-weight: 600;
-            color: root.enabled ? Theme.on-accent : Theme.on-accent-disabled;
-            vertical-alignment: center;
-        }
-    }
-    FocusRing { shown: fs.has-focus; }
 }
 
-// Text that acts as a button ("Unsubscribe", "Update password"): accent
-// coloured, a Tab stop, pressed with Space or Enter.
-export component TextButton inherits Rectangle {
+// A link-styled button ("Unsubscribe", "Update password"; docs/WINUI3.md
+// "HyperlinkButton"): accent text over subtle fills, a Tab stop pressed
+// with Space or Enter.
+export component HyperlinkButton inherits Rectangle {
     in property <string> text;
     in property <string> label: root.text;
     in property <length> font-size: Theme.body;
     in property <int> font-weight: 400;
     callback clicked;
 
+    forward-focus: fs;
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
 
-    // As big as its text, so the ring and the click area hug it.
-    min-width: t.preferred-width;
-    max-width: t.preferred-width;
-    min-height: t.preferred-height;
-    max-height: t.preferred-height;
+    min-width: t.preferred-width + 22px;
+    max-width: self.min-width;
+    height: max(32px, t.preferred-height + 11px);
+    border-radius: Theme.radius;
+    background: Theme.contrast ? transparent : ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
     fs := PressKeys { pressed => { root.clicked(); } }
     ta := TouchArea {
         mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
         clicked => { root.clicked(); }
     }
     t := Text {
+        x: 11px;
         text: root.text;
         font-size: root.font-size;
         font-weight: root.font-weight;
-        color: ta.has-hover ? Theme.text : Theme.accent-text;
+        color: Theme.contrast ? Theme.link : ta.pressed ? Theme.accent-text-pressed : ta.has-hover ? Theme.accent-text-hover : Theme.link;
         vertical-alignment: center;
         accessible-role: none;
     }
-    FocusRing {
-        x: -2px;
-        y: -1px;
-        width: parent.width + 4px;
-        height: parent.height + 2px;
-        shown: fs.has-focus;
+    FocusRing { shown: fs.has-focus; }
+}
+
+// The thin scroll bar of the message list and the folder pane
+// (docs/WINUI3.md "ScrollBar"): a 2 px thumb 3 px from the edge of its
+// 12 px strip, over the content, 6 px while the pointer is on the strip;
+// dragged, or a click beside it pages, the wheel scrolls. Shown only
+// while the content overflows. `content-y` is the scrolled view's (0 or
+// less), `total` the content's height.
+export component ScrollThumb inherits Rectangle {
+    in-out property <length> content-y;
+    in property <length> total;
+    in property <length> visible-height;
+    property <length> range: root.total - root.visible-height;
+    property <length> track: root.height - 4px;
+    property <length> thumb-h: min(root.track, max(30px, root.track * root.visible-height / max(1px, root.total)));
+    property <length> thumb-y: 2px + (root.track - root.thumb-h) * clamp(-root.content-y / max(1px, root.range), 0, 1);
+    function scroll-to(y: length) {
+        root.content-y = clamp(y, -root.range, 0px);
+    }
+    width: 12px;
+    visible: root.range > 0;
+    bar-ta := TouchArea {
+        property <length> from-y;
+        property <length> from-content;
+        property <bool> drag;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                self.drag = self.mouse-y >= root.thumb-y && self.mouse-y < root.thumb-y + root.thumb-h;
+                self.from-y = self.mouse-y;
+                self.from-content = root.content-y;
+                if !self.drag {
+                    root.scroll-to(root.content-y + (self.mouse-y < root.thumb-y ? 1 : -1) * root.visible-height);
+                }
+            }
+        }
+        moved => {
+            if self.pressed && self.drag && root.track > root.thumb-h {
+                root.scroll-to(self.from-content - (self.mouse-y - self.from-y) * root.range / (root.track - root.thumb-h));
+            }
+        }
+        scroll-event(e) => {
+            root.scroll-to(root.content-y + e.delta-y);
+            accept
+        }
+    }
+    Rectangle {
+        x: parent.width - 3px - self.width;
+        y: root.thumb-y;
+        width: bar-ta.has-hover || bar-ta.pressed ? 6px : 2px;
+        height: root.thumb-h;
+        border-radius: self.width / 2;
+        background: Theme.stroke-accessible;
+        animate width { duration: Theme.fast; easing: cubic-bezier(0, 0, 0, 1); }
     }
 }
 
+// A folder pane item (docs/WINUI3.md "NavigationView, left"): at least
+// 36 px tall (taller with a larger text size); subtle fills when hovered,
+// pressed and selected, and a 3x16 accent pill while selected. Rows read
+// as a tree (TreeView's pattern): a 16 px expander slot at 4 px plus 12 px
+// a level, the 16 px icon at 20 and the label at 48 (plus the indent),
+// and a count column ending 8 px before the item's end. An account line
+// (kind 1) heads its group: 8 px of space above its plate, its chevron
+// (it folds its folders), a 20 px initial tile in its colour, its name
+// in Body Strong, and a "..." button for its menu while hovered or the
+// keyboard's row. In the rail (`compact`) an item with an initial is an
+// account's tile (it opens its Inbox). A right-click asks for the row's
+// menu. The pane's own items (kind 5 Settings, 6 the pane toggle) are Tab
+// stops of their own.
 export component NavRow inherits Rectangle {
     in property <NavItem> item;
     in property <bool> selected;
-    // Icon-only rail for narrow windows.
+    // The rail of a narrow window (Theme.rail-width): the icon with its
+    // name under it in Caption, on at most two lines.
     in property <bool> compact;
+    // Drawn on the flyout surface (the pane opened over the content): the
+    // selected plate is a subtle fill over it, not the layer's opaque one.
+    in property <bool> on-flyout;
+    // The rail's first account tile: 8 px of space above it.
+    in property <bool> group-start;
     // The keyboard's current row in the folder list.
     in property <bool> ring;
+    // A Tab stop of its own, pressed with Space or Enter.
+    in property <bool> tab-stop;
+    // Shown on hover in place of the rail's label (and unread count).
+    in property <string> tooltip;
+    // Each change takes the keyboard focus (Settings closing hands it back).
+    in property <int> focus-seq;
+    changed focus-seq => { fs.focus(); }
+    out property <bool> has-focus: fs.has-focus;
     callback clicked;
+    // Fold or open: an account line, or a folder with subfolders.
+    callback toggled;
+    // The row's menu, at this window position: a right-click, or "..."
+    // (under the button).
+    callback context(/* x */ length, /* y */ length);
+    // The account line's caution button (its server can't be reached):
+    // the account's page.
+    callback alert();
 
+    // The wide pane's account line: its tile, its gap above.
+    property <bool> head: item.kind == 1 && !root.compact;
+    // The initial tile: the account line's, or the rail's account item.
+    property <bool> tile: root.head || (root.compact && item.initial != "");
+    property <bool> expandable: !root.compact && (item.kind == 1 || (item.kind == 2 && item.has-children));
+    property <length> indent: item.level * Theme.nav-indent;
+    property <length> gap: root.head || (root.tile && root.group-start) ? Theme.nav-gap : 0;
+    // The rail tile's name: the account and its Inbox (with its unread).
+    property <string> rail-tip: item.unread > 0
+        ? @tr("rail account tooltip" => "{0} - {1} ({2} unread)", item.label, item.sub, item.unread)
+        : @tr("rail account tooltip" => "{0} - {1}", item.label, item.sub);
     accessible-role: list-item;
-    accessible-label: item.label + (item.off && item.kind == 1 ? ", switched off" : "") + (item.warn ? ", sign-in rejected" : "") + (item.unread > 0 ? ", " + item.unread + " unread" : "") + (item.count > 0 ? ", " + item.count : "");
+    accessible-label: root.tile && root.compact
+        ? root.rail-tip + (item.off ? ", " + @tr("switched off") : "") + (item.warn ? ", " + @tr("sign-in rejected") : "") + (item.caution ? ", " + item.note : "")
+        : item.label + (item.kind != 0 && item.sub != "" && item.sub != item.label ? ", " + item.sub : "") + (item.kind == 2 && item.level > 0 ? @tr(", level {0}", item.level) : "") + (item.off && item.kind == 1 ? ", " + @tr("switched off") : "") + (item.warn ? ", " + @tr("sign-in rejected") : "") + (item.caution ? ", " + item.note : "") + (item.unread > 0 ? ", " + @tr("{0} unread", item.unread) : "") + (item.count > 0 ? ", " + item.count : "");
     accessible-item-selected: root.selected;
-    // Account headers fold their folders.
-    accessible-expandable: item.kind == 1;
-    accessible-expanded: item.kind == 1 && item.expanded;
-    accessible-action-default => { root.clicked(); }
-    accessible-action-expand => { root.clicked(); }
+    // Account lines and parent folders fold.
+    accessible-expandable: root.expandable;
+    accessible-expanded: root.expandable && item.expanded;
+    accessible-action-default => { root.press(); }
+    accessible-action-expand => { root.toggle(); }
 
-    height: item.kind == 1 ? (compact ? 9px : 36px) : (compact ? 40px : 32px);
-    border-radius: Theme.radius;
-    background: item.kind == 1 ? transparent : root.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
-
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            Focus.keyboard = false;
+    function press() {
+        if root.head {
+            root.toggle();
+        } else {
             root.clicked();
         }
     }
-
-    // Selection indicator pill (Fluent nav)
-    if root.selected && item.kind != 1: Rectangle {
-        x: 0;
-        width: 3px;
-        height: 16px;
-        border-radius: 1.5px;
-        background: Theme.accent;
-    }
-
-    if compact && item.kind == 1: Rectangle {
-        height: item.warn ? 2px : 1px;
-        x: Theme.s2;
-        width: parent.width - 2 * Theme.s2;
-        background: item.warn ? Theme.danger : Theme.stroke-strong;
-    }
-    if compact && item.kind != 1: Icon {
-        text: item.icon;
-        color: item.unread > 0 ? Theme.accent-text : Theme.text-2;
-    }
-    if compact && item.kind != 1 && item.unread > 0: Rectangle {
-        x: parent.width - 14px;
-        y: 8px;
-        width: 6px;
-        height: 6px;
-        border-radius: 3px;
-        background: Theme.accent;
-    }
-    if !compact: HorizontalLayout {
-        padding-left: Theme.s3 + item.depth * 16px;
-        padding-right: Theme.s2;
-        spacing: Theme.s2;
-        Icon {
-            text: item.kind == 1 ? (item.expanded ? Icons.chevron-down : Icons.chevron-right) : item.icon;
-            font-size: item.kind == 1 ? 10px : 16px;
-            width: 20px;
-            color: item.kind == 1 || item.off ? Theme.text-3 : Theme.text-2;
+    function toggle() {
+        if root.expandable {
+            root.toggled();
         }
-        // The account's colour, as its rows show it in All inboxes.
-        if item.dot != transparent: Rectangle {
-            width: 8px;
-            height: 8px;
-            y: (parent.height - 8px) / 2;
-            border-radius: 4px;
-            background: item.dot;
+    }
+    property <bool> hover: ta.has-hover;
+    property <bool> down: ta.pressed;
+    // On a subtle fill.
+    property <bool> lit: root.hover || root.down || root.selected;
+    property <color> fg: Theme.on-fill(root.lit, item.off ? Theme.text-disabled : root.down ? Theme.text-2 : Theme.text);
+    // The account line's "..." (in place of its count): hovered, or the
+    // keyboard's row.
+    property <bool> more-shown: root.head && (root.hover || root.ring);
+    // The caution button in the count's place while the account's server
+    // can't be reached; on hover it moves left of the "..." (it stays
+    // clickable: a button that vanished under the pointer would not be).
+    property <bool> alert-shown: root.head && item.caution;
+    // Unread mail (not under an open account line), else the number of
+    // items, quietly (drafts, outbox); capped at 999+ (the accessible
+    // label keeps the number).
+    property <bool> unread-shown: item.unread > 0 && !(item.kind == 1 && item.expanded);
+    // The rail's badge: unread, else a count of items.
+    property <string> count-badge: item.unread > 0 ? (item.unread > 999 ? "999+" : "" + item.unread)
+        : item.count > 0 ? (item.count > 999 ? "999+" : "" + item.count) : "";
+    property <string> count-text: root.compact || root.more-shown || root.alert-shown ? ""
+        : root.unread-shown ? (item.unread > 999 ? "999+" : "" + item.unread)
+        : item.count > 0 && item.unread == 0 ? (item.count > 999 ? "999+" : "" + item.count) : "";
+
+    height: root.compact ? Theme.rail-row + root.gap : Theme.nav-row + root.gap;
+
+    fs := PressKeys {
+        enabled: root.tab-stop;
+        focus-on-tab-navigation: root.tab-stop;
+        pressed => { root.clicked(); }
+    }
+    // The item's plate: below the account line's gap, which is space, not
+    // part of its hit area, fills or focus ring.
+    // (Plain elements, not `if`s: each `if` is code of its own, twice over
+    // with NavRow's two repeaters.)
+    Rectangle {
+        y: root.gap;
+        height: parent.height - root.gap;
+        border-radius: Theme.radius;
+        // Selected and hovered is the pressed fill, selected and pressed
+        // the hovered one, as in WinUI.
+        background: root.down ? (root.selected ? Theme.hover : Theme.pressed)
+            : root.hover ? (root.selected ? Theme.pressed : Theme.hover)
+            : root.selected ? (root.on-flyout && Theme.dark ? Theme.pressed : Theme.nav-selected) : transparent;
+
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                // (Not the pane's own items.)
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.right && item.kind <= 4 {
+                    Focus.keyboard = false;
+                    root.context(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+            clicked => {
+                Focus.keyboard = false;
+                root.press();
+            }
+            // On a parent folder, a double-click also folds or opens it.
+            double-clicked => {
+                if item.kind == 2 {
+                    root.toggle();
+                }
+            }
+            // The expander (TreeView's chevrons): a 16 px slot, on account
+            // lines and folders with subfolders. Inside the row's
+            // TouchArea, so the row stays hovered; its click only folds.
+            Rectangle {
+                x: 4px + root.indent;
+                width: 16px;
+                visible: root.expandable;
+                accessible-role: button;
+                accessible-label: item.expanded ? @tr("Collapse") : @tr("Expand");
+                accessible-action-default => { root.toggle(); }
+                xa := TouchArea {
+                    mouse-cursor: pointer;
+                    // A right-click here is still the row's.
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down && e.button == PointerEventButton.right && item.kind <= 4 {
+                            Focus.keyboard = false;
+                            root.context(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
+                    clicked => {
+                        Focus.keyboard = false;
+                        root.toggle();
+                    }
+                }
+                // An account's reads at rest: it is the accordion's control.
+                Icon {
+                    text: item.expanded ? Icons.chevron-down : Icons.chevron-right;
+                    font-size: 8px;
+                    color: Theme.on-fill(root.lit, root.head || root.lit || xa.has-hover ? Theme.text : Theme.text-2);
+                }
+            }
+            // The account line's "..." (a subtle 28 px button 4 px from
+            // the item's end): its menu, under the button. Also inside the
+            // row's TouchArea.
+            Rectangle {
+                x: parent.width - Theme.s1 - self.width;
+                width: 28px;
+                height: 28px;
+                visible: root.more-shown;
+                border-radius: Theme.radius;
+                background: Theme.contrast ? transparent : ma.pressed ? Theme.pressed : ma.has-hover ? Theme.hover : transparent;
+                border-width: Theme.contrast && ma.has-hover ? 1px : 0;
+                border-color: Theme.on-fill(root.lit, Theme.hc-text);
+                accessible-role: button;
+                accessible-label: @tr("More actions");
+                accessible-action-default => { root.context(self.absolute-position.x, self.absolute-position.y + self.height); }
+                ma := TouchArea {
+                    mouse-cursor: pointer;
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                            Focus.keyboard = false;
+                            root.context(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
+                    clicked => {
+                        Focus.keyboard = false;
+                        root.context(self.absolute-position.x, self.absolute-position.y + self.height);
+                    }
+                }
+                // (It works on a switched-off account too: not greyed.)
+                Icon {
+                    text: Icons.more;
+                    font-size: 16px;
+                    color: Theme.on-fill(root.lit, Theme.text);
+                }
+            }
+            // The caution button (in the count's place): the account's
+            // page, where its status says what is wrong. Not a Tab stop
+            // (the row menu's Account settings reaches the same page).
+            Rectangle {
+                x: parent.width - Theme.s1 - self.width - (root.more-shown ? 28px + Theme.s1 : 0);
+                y: (parent.height - self.height) / 2;
+                width: 28px;
+                height: 28px;
+                visible: root.alert-shown;
+                border-radius: Theme.radius;
+                background: Theme.contrast ? transparent : al.pressed ? Theme.pressed : al.has-hover ? Theme.hover : transparent;
+                border-width: Theme.contrast && al.has-hover ? 1px : 0;
+                border-color: Theme.on-fill(root.lit, Theme.hc-text);
+                accessible-role: button;
+                accessible-label: item.note;
+                accessible-action-default => { root.alert(); }
+                al := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        Focus.keyboard = false;
+                        root.alert();
+                    }
+                }
+                Icon {
+                    text: Icons.warning;
+                    font-size: 16px;
+                    color: Theme.on-fill(root.lit, Theme.warning);
+                }
+            }
         }
+
+        // The selection pill (in the rail, beside the icon).
+        Rectangle {
+            x: 0;
+            y: root.compact ? 8px : (parent.height - self.height) / 2;
+            width: 3px;
+            height: 16px;
+            border-radius: 2px;
+            background: root.selected ? Theme.on-fill(true, Theme.accent) : transparent;
+        }
+        // The icon: a 16 px box after the expander slot, or the rail's
+        // 40x24 box at the top of the item; an account's 20 px initial tile.
+        Rectangle {
+            x: root.compact ? (parent.width - 40px) / 2 : 20px + root.indent;
+            y: root.compact ? 4px : 0;
+            width: root.compact ? 40px : root.head ? Theme.tile : 16px;
+            height: root.compact ? 24px : parent.height;
+            // The tile: the account's colour (as its rows show it in All
+            // inboxes) under its initial; hollow while it is switched off;
+            // under a contrast theme the Window colour in a WindowText
+            // ring (HighlightText on a lit row), never the palette. Other
+            // rows: their icon, in the same Text (one element less a row).
+            Rectangle {
+                width: root.tile ? Theme.tile : parent.width;
+                height: root.tile ? Theme.tile : parent.height;
+                border-radius: root.tile ? self.width / 2 : 0;
+                background: !root.tile || item.off || (Theme.contrast && root.lit) ? transparent
+                    : Theme.contrast ? Theme.hc-window : item.dot;
+                border-width: root.tile && (item.off || Theme.contrast) ? 1px : 0;
+                border-color: Theme.on-fill(root.lit, item.off ? Theme.text-disabled : Theme.hc-text);
+                Icon {
+                    text: root.tile ? item.initial : item.icon;
+                    font-family: root.tile ? "" : Theme.icon-font;
+                    font-size: root.tile ? 12px : 16px;
+                    font-weight: root.tile ? 600 : 400;
+                    color: root.tile ? Theme.on-fill(root.lit, item.off ? Theme.text-disabled : Theme.on-avatar) : root.fg;
+                }
+            }
+            // A rejected sign-in (danger) or a server out of reach
+            // (caution), on the tile's bottom-right: an 8 px dot cut out of
+            // the tile by a 2 px ring of the pane's colour.
+            Rectangle {
+                property <bool> shown: root.tile && (item.warn || item.caution);
+                x: (parent.width - Theme.tile) / 2 + 10px;
+                y: (parent.height - Theme.tile) / 2 + 10px;
+                width: 12px;
+                height: 12px;
+                border-radius: 6px;
+                border-width: 2px;
+                border-color: self.shown ? (Theme.contrast && root.lit ? Theme.hc-highlight : Theme.layer) : transparent;
+                background: self.shown ? Theme.on-fill(root.lit, item.warn ? Theme.danger : Theme.warning) : transparent;
+            }
+            // The rail's InfoBadge (docs/WINUI3.md "InfoBadge"): the
+            // unread count in an accent pill at the icon's top-right (grey
+            // for a switched-off account, as its counts are), or a quiet
+            // count (Drafts, Outbox); capped at 999+.
+            Rectangle {
+                property <bool> unread: item.unread > 0 && !item.off;
+                // Sits on the icon's top-right corner; a larger text size
+                // grows it outwards (up), so the glyph stays visible.
+                x: parent.width / 2 + 4px;
+                y: 6px - self.height / 2;
+                width: max(16px, badge-text.preferred-width + 8px);
+                height: max(16px, Theme.caption + 4px);
+                border-radius: 8px;
+                visible: root.compact && root.count-badge != "";
+                // Under a contrast theme Highlight, reversed on a lit row.
+                background: Theme.contrast ? (root.lit ? Theme.hc-highlight-text : Theme.hc-highlight)
+                    : self.unread ? Theme.accent : item.unread > 0 ? Theme.text-disabled : Theme.text-2;
+                badge-text := Text {
+                    text: root.count-badge;
+                    font-size: max(11px, Theme.caption - 1px);
+                    font-weight: 600;
+                    color: Theme.contrast ? (root.lit ? Theme.hc-highlight : Theme.hc-highlight-text) : Theme.text-inverse;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+            }
+        }
+        // The rail's name, under the icon: Caption, centred, wrapped on
+        // at most two lines and elided after them.
         Text {
+            x: 1px;
+            y: 30px;
+            width: parent.width - 2px;
+            height: min(self.preferred-height, 2 * Theme.caption-line + 2px);
+            visible: root.compact;
             text: item.label;
-            font-size: item.kind == 1 ? Theme.caption : Theme.body;
+            font-size: Theme.caption;
+            color: root.fg;
+            horizontal-alignment: center;
+            vertical-alignment: top;
+            wrap: word-wrap;
+            overflow: elide;
+            accessible-role: none;
+        }
+        // The label, after the icon (12 px), giving way to the count (or
+        // the "...").
+        lbl := Text {
+            x: 48px + root.indent;
+            width: max(0px, (root.more-shown || root.alert-shown ? parent.width - Theme.s1 - (root.more-shown ? 28px + Theme.s1 : 0) - (root.alert-shown ? 28px + Theme.s1 : 0) : root.count-text == "" ? root.width - Theme.s2 : cnt.x - Theme.s1) - self.x);
+            visible: !root.compact;
+            text: item.label;
+            font-size: Theme.body;
             font-weight: item.kind == 1 || item.unread > 0 ? 600 : 400;
-            color: item.off ? Theme.text-3 : item.kind == 1 ? Theme.text-2 : Theme.text;
+            color: root.fg;
             vertical-alignment: center;
             overflow: elide;
-            horizontal-stretch: 1;
+            accessible-role: none;
         }
-        // A rejected sign-in: the account needs its password updated.
-        if item.warn: Rectangle {
-            width: 8px;
-            height: 8px;
-            y: (parent.height - 8px) / 2;
-            border-radius: 4px;
-            background: Theme.danger;
-        }
-        if item.unread > 0 && !(item.kind == 1 && item.expanded): Text {
-            text: item.unread;
+        // The count column: neutral, never elided (the label gives way).
+        cnt := Text {
+            x: root.width - Theme.s2 - self.width;
+            width: self.preferred-width;
+            text: root.count-text;
             font-size: Theme.caption;
-            font-weight: 600;
-            color: Theme.accent-text;
+            font-weight: root.unread-shown ? 600 : 400;
+            color: Theme.on-fill(root.lit, item.off ? Theme.text-disabled : root.unread-shown ? Theme.text : Theme.text-2);
             vertical-alignment: center;
+            accessible-role: none;
         }
-        if item.count > 0 && item.unread == 0: Text {
-            text: item.count;
-            font-size: Theme.caption;
-            color: Theme.text-3;
-            vertical-alignment: center;
+        // The rail's name (an account tile's: the account and its Inbox);
+        // an account line's name and address (always: the address shows
+        // nowhere else); a label cut short, in full (with a deep folder's
+        // path); "More actions" on the "...". Worked out only under the
+        // pointer: the text is watched, and measuring every row's label at
+        // start would cost a long folder list its first frame.
+        TipTimer {
+            text: root.tooltip != "" ? root.tooltip
+                : !ta.has-hover ? ""
+                : ma.has-hover && root.more-shown ? @tr("More actions")
+                : al.has-hover && root.alert-shown ? item.note
+                : root.compact ? (root.tile ? root.rail-tip + (item.caution ? "\n" + item.note : "") : item.unread > 0 ? @tr("{0} ({1} unread)", item.label, item.unread) : item.label)
+                : root.head ? (item.sub != "" && item.sub != item.label ? item.label + "\n" + item.sub : item.label)
+                    + (item.off ? ", " + @tr("switched off") : "") + (item.warn ? ", " + @tr("sign-in rejected") : "") + (item.caution ? "\n" + item.note : "")
+                : lbl.preferred-width > lbl.width || item.sub != "" ? item.label + (item.sub != "" ? "\n" + item.sub : "") : "";
+            hover: ta.has-hover;
+            pressed: ta.pressed;
+        }
+        FocusRing {
+            inset: 1px;
+            shown: root.ring || fs.has-focus;
         }
     }
-    FocusRing { shown: root.ring; }
+}
+
+// A message row as a WinUI ListView item (docs/WINUI3.md "ListView
+// item"): a subtle backplate inset 4,2 when hovered, pressed or selected,
+// and a 3 px accent pill while selected; the text keeps its colours
+// (HighlightText on the plate under a contrast theme). Unread rows are
+// semibold with an accent date. No dividers: the plates separate rows.
+// A row's quick action (docs/WINUI3.md "ListView item"): a 28 px subtle
+// button that takes no focus and is no Tab stop (the row keeps the keys),
+// with its tooltip and accessible name.
+component QuickAction inherits Rectangle {
+    in property <string> icon;
+    in property <string> tooltip;
+    in property <bool> lit;
+    out property <bool> hover: ta.has-hover;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: Theme.radius;
+    accessible-role: button;
+    accessible-label: root.tooltip;
+    accessible-action-default => { root.clicked(); }
+    background: ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+    border-width: Theme.contrast && ta.has-hover ? 1px : 0;
+    border-color: Theme.hc-highlight;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.clicked(); }
+    }
+    Icon {
+        text: root.icon;
+        color: Theme.contrast && ta.has-hover ? Theme.text : Theme.on-fill(root.lit, Theme.text);
+    }
+    TipTimer {
+        text: root.tooltip;
+        hover: ta.has-hover;
+        pressed: ta.pressed;
+    }
 }
 
 export component MailItem inherits Rectangle {
@@ -377,24 +991,41 @@ export component MailItem inherits Rectangle {
     in property <bool> selected;
     // The keyboard's current row (the list has the focus).
     in property <bool> ring;
+    // Check boxes in the leading slot ("Select messages", or two or more
+    // rows selected).
+    in property <bool> checks;
+    // Rows of messages (not drafts or Outbox entries) have quick actions.
+    in property <bool> quick-actions: true;
     // With the modifiers held when the button went down (Ctrl+click
     // toggles the row, Shift+click selects a range).
     callback clicked(/* ctrl */ bool, /* shift */ bool);
     // A right-click, at this window position (for the row menu).
     callback context(/* x */ length, /* y */ length);
+    // A quick action on this row only: 0 Archive, 1 Delete, 2 Flag or
+    // Remove flag, 3 Mark as read or unread. It never opens the row.
+    callback quick(int);
+    // Its check box: add it to the selection or take it out.
+    callback check();
 
     accessible-role: list-item;
-    accessible-label: (mail.unread ? "Unread, " : "") + (mail.draft ? "Draft, " : "") + mail.sender + ", " + mail.subject + ", " + mail.date
-        + (mail.flagged ? ", Flagged" : "") + (mail.attach ? ", Has attachment" : "") + (mail.answered ? ", Replied" : "")
-        + (mail.folder != "" ? ", in " + mail.folder : "");
+    accessible-label: (mail.unread ? @tr("Unread") + ", " : "") + (mail.draft ? @tr("Draft") + ", " : "") + mail.sender + ", " + mail.subject + ", " + mail.date + (mail.tag != "" ? ", " + mail.tag : "")
+        + (mail.flagged ? ", " + @tr("Flagged") : "") + (mail.attach ? ", " + @tr("Has attachment") : "") + (mail.answered ? ", " + @tr("Replied") : "")
+        + (mail.tag != "" ? ", " + @tr("in {0}", mail.tag) : "");
     accessible-item-selected: root.selected;
     accessible-action-default => { root.clicked(false, false); }
 
+    property <bool> hover: ta.has-hover;
+    property <bool> down: ta.pressed;
+    // On the plate.
+    property <bool> lit: root.selected || root.hover || root.down;
+    // The plate's fill, which the quick actions sit on.
+    property <color> plate: root.down ? (root.selected ? Theme.selected : Theme.pressed)
+        : root.hover ? (root.selected ? Theme.pressed : Theme.hover)
+        : root.selected ? Theme.selected : transparent;
+    // Quick actions only where they show (rows are many).
+    property <bool> quick-shown: root.quick-actions && (root.hover || root.ring);
+
     height: Theme.row-height;
-    background: root.selected ? Theme.row-selected : ta.has-hover ? Theme.hover : transparent;
-    // Selected rows keep an outline, so they show without the fill too.
-    border-width: root.selected ? 1px : 0;
-    border-color: Theme.row-border;
 
     ta := TouchArea {
         property <bool> ctrl;
@@ -410,105 +1041,207 @@ export component MailItem inherits Rectangle {
             }
         }
         clicked => { root.clicked(self.ctrl, self.shift); }
-    }
 
-    if mail.unread: Rectangle {
-        x: 0;
-        width: 3px;
-        background: Theme.accent;
-    }
-
-    VerticalLayout {
-        padding-left: Theme.s4;
-        padding-right: Theme.s4;
-        padding-top: Theme.s2 + 2px;
-        padding-bottom: Theme.s2 + 2px;
-        spacing: 1px;
-        HorizontalLayout {
-            spacing: Theme.s2;
-            // Its account, in All inboxes with more than one account.
-            if mail.dot != transparent: Rectangle {
-                width: 8px;
-                height: 8px;
-                y: (parent.height - 8px) / 2;
-                border-radius: 4px;
-                background: mail.dot;
+        // The backplate: selected and hovered is the pressed fill, selected
+        // and pressed the hovered one, as in WinUI.
+        Rectangle {
+            x: 4px;
+            y: 2px;
+            width: root.width - 8px;
+            height: root.height - 4px;
+            border-radius: Theme.radius;
+            background: root.plate;
+            // The selection pill at the item's x 4 (a plain element, not an
+            // `if`: rows are many); 6 px shorter while pressed. WinUI also
+            // moves the content 7 px right while it shows; Komorebi keeps the
+            // text still (docs/WINUI3.md "ListView item"). The focus ring
+            // draws over it, as WinUI's system focus visual does.
+            Rectangle {
+                x: 0;
+                width: 3px;
+                height: max(16px, Theme.row-height - 40px) - (root.down ? 6px : 0);
+                border-radius: 1.5px;
+                background: root.selected ? Theme.on-fill(true, Theme.accent) : transparent;
+                animate height { duration: Theme.faster; easing: cubic-bezier(0, 0, 0, 1); }
             }
-            Text {
-                text: mail.sender;
-                font-size: Theme.body;
-                font-weight: mail.unread ? 600 : 400;
-                color: Theme.text;
-                overflow: elide;
-                horizontal-stretch: 1;
-            }
-            if mail.draft: Text {
-                text: "Draft";
-                font-size: Theme.caption;
-                font-weight: 600;
-                color: Theme.danger;
-                vertical-alignment: center;
-            }
-            if mail.answered: Icon { text: Icons.reply; font-size: 12px; color: Theme.text-3; }
-            if mail.attach: Icon { text: Icons.attach; font-size: 12px; color: Theme.text-3; }
-            if mail.flagged: Icon { text: Icons.flag-filled; font-size: 12px; color: Theme.danger; }
-            Text {
-                text: mail.date;
-                font-size: Theme.caption;
-                color: mail.unread ? Theme.accent-text : Theme.text-3;
-                font-weight: mail.unread ? 600 : 400;
-                vertical-alignment: center;
+            FocusRing {
+                inset: 1px;
+                shown: root.ring;
             }
         }
-        Text {
-            text: mail.subject == "" ? "(no subject)" : mail.subject;
-            font-size: Theme.body;
-            font-weight: mail.unread ? 600 : 400;
-            color: mail.unread ? Theme.text : Theme.text-2;
-            overflow: elide;
-        }
-        HorizontalLayout {
-            spacing: Theme.s1;
-            // Its folder, in a search of all folders.
-            if mail.folder != "": Rectangle {
-                border-radius: 3px;
-                border-width: 1px;
-                border-color: Theme.stroke-strong;
-                HorizontalLayout {
-                    padding-left: 5px;
-                    padding-right: 5px;
-                    Text {
-                        text: mail.folder;
-                        font-size: Theme.caption;
-                        color: Theme.text-2;
-                        vertical-alignment: center;
-                    }
+
+        lines := VerticalLayout {
+            // ListViewItem padding 16,0,12,0 (the check box's 28 px more
+            // while it shows); 9 above and below fit the three lines in
+            // 76 px.
+            padding-left: root.checks ? Theme.s4 + 28px : Theme.s4;
+            padding-right: Theme.s3;
+            padding-top: 9px;
+            padding-bottom: 9px;
+            spacing: 1px;
+            line1 := HorizontalLayout {
+                spacing: Theme.s2;
+                Text {
+                    text: mail.sender;
+                    font-size: Theme.body;
+                    font-weight: mail.unread ? 600 : 400;
+                    color: Theme.on-fill(root.lit, Theme.text);
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if mail.draft: Text {
+                    text: @tr("Draft");
+                    font-size: Theme.caption;
+                    font-weight: 600;
+                    color: Theme.on-fill(root.lit, Theme.danger);
+                    vertical-alignment: center;
+                }
+                if mail.problem: Icon { text: Icons.error; font-size: 12px; color: Theme.on-fill(root.lit, Theme.danger); }
+                if mail.answered: Icon { text: Icons.reply; font-size: 12px; color: Theme.on-fill(root.lit, Theme.text-2); }
+                if mail.attach: Icon { text: Icons.attach; font-size: 12px; color: Theme.on-fill(root.lit, Theme.text-2); }
+                if mail.flagged: Icon { text: Icons.flag-filled; font-size: 12px; color: Theme.on-fill(root.lit, Theme.danger); }
+                Text {
+                    text: mail.date;
+                    font-size: Theme.caption;
+                    color: Theme.on-fill(root.lit, Theme.text-2);
+                    font-weight: mail.unread ? 600 : 400;
+                    vertical-alignment: center;
                 }
             }
-            Text {
-                text: mail.preview;
-                font-size: Theme.caption + 1px;
-                color: Theme.text-3;
-                overflow: elide;
-                horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: Theme.s2;
+                Text {
+                    text: mail.subject == "" ? @tr("(no subject)") : mail.subject;
+                    font-size: Theme.body;
+                    font-weight: mail.unread ? 600 : 400;
+                    color: Theme.on-fill(root.lit, Theme.text);
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                // Unread: a 6 px accent dot at the end of line 2, under the
+                // date (never beside the selection pill).
+                if mail.unread: Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    y: (parent.height - 6px) / 2;
+                    border-radius: 3px;
+                    background: Theme.on-fill(root.lit, Theme.accent);
+                }
+            }
+            HorizontalLayout {
+                spacing: Theme.s1;
+                // Its account (All inboxes) or "Account · Folder" (a search
+                // of all folders), as a text tag.
+                if mail.tag != "": Rectangle {
+                    border-radius: Theme.radius;
+                    border-width: 1px;
+                    border-color: Theme.on-fill(root.lit, Theme.stroke-strong);
+                    horizontal-stretch: 0;
+                    HorizontalLayout {
+                        padding-left: 5px;
+                        padding-right: 5px;
+                        Text {
+                            text: mail.tag;
+                            font-size: Theme.caption;
+                            color: Theme.on-fill(root.lit, Theme.text-2);
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+                Text {
+                    text: mail.preview;
+                    font-size: Theme.caption;
+                    color: Theme.on-fill(root.lit, Theme.text-2);
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        // The check box (a pointer target of its own; the row's keys are
+        // Space via Ctrl+click semantics, Shift+Up/Down and Ctrl+A).
+        if root.checks: Rectangle {
+            x: 14px;
+            y: line1.y + (line1.height - 20px) / 2;
+            width: 20px;
+            height: 20px;
+            border-radius: Theme.radius;
+            property <bool> on: root.selected;
+            background: self.on ? Theme.accent : box-ta.has-hover ? Theme.control-alt-hover : Theme.control-alt;
+            border-width: self.on && !Theme.contrast ? 0 : 1px;
+            border-color: self.on ? Theme.accent-edge : Theme.stroke-accessible;
+            accessible-role: checkbox;
+            accessible-label: mail.subject;
+            accessible-checkable: true;
+            accessible-checked: self.on;
+            accessible-action-default => { root.check(); }
+            if root.selected: Icon {
+                text: Icons.check-mark;
+                font-size: 12px;
+                color: Theme.on-accent;
+            }
+            box-ta := TouchArea {
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        Focus.keyboard = false;
+                    }
+                }
+                clicked => { root.check(); }
+            }
+        }
+
+        // Quick actions in the date's place, on the row's own plate.
+        if root.quick-shown: Rectangle {
+            x: root.width - Theme.s3 - self.width;
+            y: line1.y + (line1.height - 28px) / 2;
+            width: 4 * 28px + 3 * 2px + 4px;
+            height: 28px;
+            // The list's card under the plate's (translucent) fill, so the
+            // date and icons under it don't show through.
+            background: Theme.card;
+            Rectangle { background: root.plate; }
+            HorizontalLayout {
+                padding-left: 4px;
+                spacing: 2px;
+                QuickAction {
+                    icon: Icons.archive;
+                    tooltip: @tr("Archive (Backspace)");
+                    lit: root.lit;
+                    clicked => { root.quick(0); }
+                }
+                QuickAction {
+                    icon: Icons.delete;
+                    tooltip: @tr("Delete (Del)");
+                    lit: root.lit;
+                    clicked => { root.quick(1); }
+                }
+                QuickAction {
+                    icon: mail.flagged ? Icons.flag-filled : Icons.flag;
+                    tooltip: mail.flagged ? @tr("Remove flag (Insert)") : @tr("Flag (Insert)");
+                    lit: root.lit;
+                    clicked => { root.quick(2); }
+                }
+                QuickAction {
+                    icon: mail.unread ? Icons.read : Icons.mail;
+                    tooltip: mail.unread ? @tr("Mark as read (Ctrl+Q)") : @tr("Mark as unread (Ctrl+U)");
+                    lit: root.lit;
+                    clicked => { root.quick(3); }
+                }
             }
         }
     }
-
-    Rectangle {
-        y: parent.height - 1px;
-        height: 1px;
-        x: Theme.s4;
-        width: parent.width - 2 * Theme.s4;
-        background: Theme.stroke;
-    }
-    FocusRing { shown: root.ring; }
 }
 
-// Attachment chip: file name, size, and a single action.
+// An attachment chip: its type's icon, file name and size, and a single
+// action; a control's fills and a divider stroke, at least 40 px tall
+// (taller with the text size).
 export component Chip inherits Rectangle {
     in property <string> name;
     in property <string> size;
+    // AttachmentRow.kind: 0 file, 1 picture, 2 document, 3 calendar, 4 message.
+    in property <int> kind;
     in property <string> action-icon;
     in property <string> action-label;
     callback action;
@@ -518,15 +1251,17 @@ export component Chip inherits Rectangle {
     in property <bool> opens;
 
     accessible-role: button;
-    accessible-label: (root.opens ? "Open " : "") + root.name + ", " + root.size;
+    accessible-label: root.opens ? @tr("Open {0}, {1}", root.name, root.size) : @tr("attachment" => "{0}, {1}", root.name, root.size);
     accessible-enabled: root.opens;
     accessible-action-default => { root.clicked(); }
 
-    height: 40px;
+    height: Theme.chip-height;
     border-radius: Theme.radius;
     border-width: 1px;
-    border-color: Theme.stroke-strong;
-    background: ta.has-hover ? Theme.hover : transparent;
+    // Under a contrast theme the fills are all ButtonFace: hover shows
+    // as a Highlight border, as on a Button.
+    border-color: Theme.contrast && root.opens && ta.has-hover ? Theme.hc-highlight : Theme.stroke;
+    background: root.opens && ta.pressed ? Theme.control-pressed : root.opens && ta.has-hover ? Theme.control-hover : Theme.control;
 
     fs := PressKeys {
         enabled: root.opens;
@@ -534,34 +1269,45 @@ export component Chip inherits Rectangle {
     }
     ta := TouchArea {
         mouse-cursor: root.opens ? pointer : default;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
         clicked => { root.clicked(); }
     }
     HorizontalLayout {
         padding-left: Theme.s3;
         padding-right: Theme.s1;
-        spacing: Theme.s2;
-        Icon { text: Icons.attach; width: 16px; }
+        spacing: Theme.s3;
+        Icon {
+            text: root.kind == 1 ? Icons.picture : root.kind == 2 ? Icons.document : root.kind == 3 ? Icons.calendar : root.kind == 4 ? Icons.mail : Icons.page;
+            color: Theme.text;
+            width: 16px;
+        }
         VerticalLayout {
             alignment: center;
             horizontal-stretch: 1;
             Text {
                 text: root.name;
-                font-size: Theme.caption + 1px;
+                font-size: Theme.body;
                 color: Theme.text;
                 overflow: elide;
             }
             Text {
                 text: root.size;
-                font-size: Theme.caption - 1px;
-                color: Theme.text-3;
+                font-size: Theme.caption;
+                color: Theme.text-2;
             }
         }
-        IconButton {
-            icon: root.action-icon;
-            tooltip: root.action-label;
-            width: 32px;
-            y: 4px;
-            clicked => { root.action(); }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: root.action-icon;
+                tooltip: root.action-label;
+                width: 32px;
+                clicked => { root.action(); }
+            }
         }
     }
     FocusRing { shown: fs.has-focus; }
@@ -569,20 +1315,1562 @@ export component Chip inherits Rectangle {
 
 export component FieldLabel inherits Text {
     font-size: Theme.body;
-    color: Theme.text-3;
+    color: Theme.text-2;
     vertical-alignment: center;
     width: 64px;
 }
 
-// The composer body: a plain TextInput in a scroll view, styled like the
-// Fluent TextEdit, that also reports its selection for the formatting
-// toolbar (UTF-8 byte offsets; the TextEdit widget hides them).
+// The frame of a text field (docs/WINUI3.md "TextBox"): ControlFill
+// colours, 1 px ControlStroke sides and a 1 px strong bottom edge that
+// turns into a 2 px accent one while focused (TextControlElevationBorder).
+component InputFrame inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <bool> focused;
+    in property <bool> hover;
+    // The error state (docs/WINUI3.md "TextBox"): a Critical bottom edge
+    // (2 px under a contrast theme, all round); the message is the
+    // field's user's, under it.
+    in property <bool> error;
+    border-radius: Theme.radius;
+    border-width: Theme.contrast && (root.focused || root.error) ? 2px : 1px;
+    border-color: Theme.contrast && root.enabled && (root.hover || root.focused) ? Theme.hc-highlight : Theme.control-stroke;
+    background: !root.enabled ? Theme.control-disabled : root.focused ? Theme.input-active : root.hover ? Theme.control-hover : Theme.control;
+    if root.enabled && !Theme.contrast: Rectangle {
+        x: Theme.radius;
+        y: root.height - self.height;
+        width: root.width - 2 * Theme.radius;
+        height: root.focused ? 2px : 1px;
+        border-radius: root.focused ? 1px : 0;
+        background: root.error ? Theme.danger : root.focused ? Theme.accent : Theme.stroke-accessible;
+    }
+}
+
+// A button inside a text field (clear, reveal): a 12 px glyph on a subtle
+// fill.
+component FieldButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> tooltip;
+    callback clicked;
+    accessible-role: button;
+    accessible-label: root.tooltip;
+    accessible-action-default => { root.clicked(); }
+    width: 28px;
+    height: 24px;
+    border-radius: Theme.radius;
+    background: ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+    // WinUI's 28x24 glyph button; the pointer hits 32x32 around it, the
+    // field's full height (FLUENT2 "Layout and spacing": 32 px targets).
+    ta := TouchArea {
+        x: -2px;
+        y: -4px;
+        width: 32px;
+        height: 32px;
+        clicked => { root.clicked(); }
+    }
+    Icon {
+        text: root.icon;
+        font-size: 12px;
+        color: Theme.on-fill(ta.has-hover || ta.pressed, Theme.text-2);
+    }
+    TipTimer {
+        text: root.tooltip;
+        hover: ta.has-hover;
+        pressed: ta.pressed;
+    }
+}
+
+// A WinUI TextBox (docs/WINUI3.md "TextBox"): one line that scrolls with
+// the caret, a placeholder in TextSecondary, a clear button while focused
+// (a reveal button for a password), and the usual edit menu.
+export component TextField inherits InputFrame {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <InputType> input-type: InputType.text;
+    in property <bool> read-only <=> input.read-only;
+    // Room kept at the end for a button over the field (SearchBox).
+    in property <length> end-room;
+    // The clear button shows whenever there is text, focused or not
+    // (SearchBox), with this name.
+    in property <bool> clear-always;
+    in property <string> clear-tooltip: @tr("Clear");
+    // Read with the field by a screen reader (its caption, or its error
+    // message while `error`).
+    in property <string> description;
+    out property <bool> has-focus: input.has-focus;
+    callback accepted(text: string);
+    callback edited(text: string);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    public function set-selection-offsets(anchor: int, cursor: int) {
+        input.set-selection-offsets(anchor, cursor);
+    }
+
+    // The password shows while its reveal button is on, until the focus
+    // leaves.
+    property <bool> revealed;
+    changed has-focus => {
+        if !self.has-focus {
+            self.revealed = false;
+        }
+    }
+    property <bool> password: root.input-type == InputType.password;
+    property <bool> button: (root.has-focus || (root.clear-always && !root.password)) && root.text != "" && root.enabled && (root.password || !root.read-only);
+
+    focused: input.has-focus;
+    hover: ta.has-hover;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder-text;
+    accessible-description: root.description;
+    accessible-read-only: root.read-only;
+    accessible-action-set-value(v) => {
+        root.text = v;
+        root.edited(v);
+    }
+    accessible-action-set-selection-offsets(a, c) => { input.set-selection-offsets(a, c); }
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    min-width: 64px;
+    height: max(32px, input.preferred-height + 11px);
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        ContextMenuArea {
+            enabled: root.enabled;
+            Menu {
+                MenuItem {
+                    title: @tr("Cut");
+                    enabled: !root.read-only && !root.password && root.text != "";
+                    activated => { input.cut(); }
+                }
+                MenuItem {
+                    title: @tr("Copy");
+                    enabled: !root.password && root.text != "";
+                    activated => { input.copy(); }
+                }
+                MenuItem {
+                    title: @tr("Paste");
+                    enabled: !root.read-only;
+                    activated => { input.paste(); }
+                }
+                MenuItem {
+                    title: @tr("Select all");
+                    enabled: root.text != "";
+                    activated => { input.select-all(); }
+                }
+            }
+            Rectangle {
+                x: 10px;
+                width: root.width - 16px - (root.button ? 32px : 0px) - root.end-room;
+                clip: true;
+                if root.text == "": Text {
+                    x: 0;
+                    width: 100%;
+                    height: 100%;
+                    text: root.placeholder-text;
+                    font-size: Theme.body;
+                    color: root.enabled ? Theme.text-2 : Theme.text-disabled;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    accessible-role: none;
+                }
+                input := TextInput {
+                    property <length> computed-x;
+                    x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+                    width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                    height: 100%;
+                    vertical-alignment: center;
+                    single-line: true;
+                    enabled: root.enabled;
+                    font-size: Theme.body;
+                    color: root.enabled ? Theme.text : Theme.text-disabled;
+                    selection-background-color: Theme.selection-bg;
+                    selection-foreground-color: Theme.selection-text;
+                    input-type: root.revealed ? InputType.text : root.input-type;
+                    // The field above is the accessible text field.
+                    accessible-role: none;
+                    // Keep the caret in view.
+                    cursor-position-changed(p) => {
+                        if p.x + self.computed-x < 0 {
+                            self.computed-x = -p.x;
+                        } else if p.x + self.computed-x > parent.width - self.text-cursor-width {
+                            self.computed-x = parent.width - p.x - self.text-cursor-width;
+                        }
+                    }
+                    accepted => { root.accepted(self.text); }
+                    edited => { root.edited(self.text); }
+                    key-pressed(e) => { root.key-pressed(e) }
+                }
+            }
+        }
+    }
+    if root.button: Rectangle {
+        FieldButton {
+            x: root.width - self.width - 4px - root.end-room;
+            y: (root.height - self.height) / 2;
+            icon: root.password ? Icons.reveal : Icons.clear;
+            tooltip: !root.password ? root.clear-tooltip : root.revealed ? @tr("Hide password") : @tr("Show password");
+            clicked => {
+                if root.password {
+                    root.revealed = !root.revealed;
+                } else {
+                    root.text = "";
+                    root.edited("");
+                }
+                input.focus();
+            }
+        }
+    }
+}
+
+// The search box, as WinUI's AutoSuggestBox looks (docs/WINUI3.md
+// "AutoSuggestBox"): a text field with the clear button and a 12 px query
+// button at its end, which hands the keys to the results.
+export component SearchBox inherits Rectangle {
+    in-out property <string> text <=> field.text;
+    // "Search Newsletters": the view the search applies to.
+    in property <string> placeholder: @tr("Search");
+    out property <bool> has-focus: field.has-focus;
+    callback edited(text: string);
+    callback query;
+    forward-focus: field;
+    horizontal-stretch: 1;
+    height: field.height;
+    field := TextField {
+        width: 100%;
+        end-room: 32px;
+        placeholder-text: root.placeholder;
+        accessible-label: @tr("Search mail");
+        clear-always: true;
+        clear-tooltip: @tr("Clear search (Esc)");
+        edited(t) => { root.edited(t); }
+    }
+    FieldButton {
+        x: root.width - self.width - 4px;
+        y: (root.height - self.height) / 2;
+        icon: Icons.search;
+        tooltip: @tr("Search (Ctrl+E)");
+        clicked => { root.query(); }
+    }
+}
+
+// The search scope beside the search box (docs/WINUI3.md
+// "AutoSuggestBox"): a ComboBox's look (the Button fill, the current word
+// and a 12 px chevron) that opens the scope menu. It is as wide as the
+// longest of `words`, so changing the word never moves the box.
+export component ScopeBox inherits Rectangle {
+    in property <string> text;
+    in property <[string]> words;
+    in property <bool> enabled: true;
+    in property <string> tooltip;
+    out property <bool> has-focus: fs.has-focus;
+    callback clicked;
+
+    forward-focus: fs;
+    accessible-role: combobox;
+    accessible-label: root.tooltip;
+    accessible-value: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.press(); }
+    function press() {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+    property <bool> hover: root.enabled && ta.has-hover;
+    property <bool> down: root.enabled && ta.pressed;
+    property <bool> lit: Theme.contrast && (root.hover || root.down);
+    width: ceil(words-col.preferred-width / 1px) * 1px + 11px + Theme.s2 + 12px + 11px;
+    height: max(32px, label.preferred-height + 11px);
+    border-radius: Theme.radius;
+    background: root.lit ? Theme.hc-highlight-text : !root.enabled ? Theme.control-disabled : root.down ? Theme.control-pressed : root.hover ? Theme.control-hover : Theme.control;
+    border-width: 1px;
+    border-color: root.lit ? Theme.hc-highlight : Theme.control-stroke;
+    if !Theme.contrast && root.enabled && !root.down: Rectangle {
+        x: Theme.radius;
+        y: Theme.dark ? 0 : root.height - 1px;
+        width: root.width - 2 * Theme.radius;
+        height: 1px;
+        background: Theme.control-stroke-edge;
+    }
+    // The words, measured (none is drawn).
+    Rectangle {
+        width: 0;
+        height: 0;
+        clip: true;
+        words-col := VerticalLayout {
+            for w in root.words: Text {
+                text: w;
+                font-size: Theme.body;
+                accessible-role: none;
+            }
+        }
+    }
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        focus-gained(reason) => {
+            if reason == FocusReason.tab-navigation {
+                Focus.keyboard = true;
+            }
+        }
+        key-pressed(e) => {
+            if ((e.text == " " || e.text == Key.Return || e.text == Key.F4) && !e.modifiers.control && !e.modifiers.alt)
+                || (e.text == Key.DownArrow && e.modifiers.alt) {
+                root.press();
+                return accept;
+            }
+            reject
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.press(); }
+    }
+    label := Text {
+        x: 11px;
+        width: root.width - 11px - Theme.s2 - 12px - 11px;
+        text: root.text;
+        font-size: Theme.body;
+        color: !root.enabled ? Theme.text-disabled : root.lit ? Theme.hc-highlight : root.down ? Theme.text-2 : Theme.text;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Icon {
+        x: root.width - 11px - 12px;
+        width: 12px;
+        text: Icons.chevron-down;
+        font-size: 12px;
+        color: !root.enabled ? Theme.text-disabled : root.lit ? Theme.hc-highlight : Theme.text-2;
+    }
+    TipTimer {
+        text: root.tooltip;
+        hover: ta.has-hover;
+        pressed: ta.pressed;
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+// A rectangle in the window (logical px): the title bar's interactive
+// parts, pushed to the hit test.
+export struct BarRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
+// A caption button of the app-drawn title bar (docs/WINUI3.md "Title
+// bar"): 46 x 48, a 10 px glyph, drawn from the hover and pressed states
+// the window procedure reports (the pointer never reaches it: Windows
+// handles it as a caption button). Not a Tab stop, as in Windows, but a
+// named button for Narrator, whose default action sends the command.
+export component CaptionButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> close;
+    in property <bool> hover;
+    in property <bool> pressed;
+    in property <bool> active: true;
+    callback activate;
+    width: 46px;
+    height: 48px;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.activate(); }
+    property <bool> red: root.close && (root.hover || root.pressed);
+    background: root.red ? (root.pressed ? #c42b1ce6 : #c42b1c) : root.pressed ? Theme.pressed : root.hover ? Theme.hover : transparent;
+    Icon {
+        text: root.icon;
+        font-size: 10px;
+        color: root.red ? (root.pressed ? #ffffffb3 : #ffffff) : root.pressed ? Theme.text-2 : root.active ? Theme.text : Theme.text-disabled;
+    }
+}
+
+// A WinUI CheckBox (docs/WINUI3.md "CheckBox / RadioButton /
+// ToggleSwitch"): a 20 px box, accent-filled with a check mark while
+// checked, and its label.
+export component CheckBox inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled;
+
+    forward-focus: fs;
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.toggle(); }
+
+    function toggle() {
+        if root.enabled {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+    property <bool> hover: root.enabled && ta.has-hover;
+    property <bool> down: root.enabled && ta.pressed;
+
+    height: max(32px, label.preferred-height + 10px);
+    fs := PressKeys {
+        enabled: root.enabled;
+        pressed => { root.toggle(); }
+    }
+    ta := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.toggle(); }
+    }
+    HorizontalLayout {
+        spacing: Theme.s2;
+        alignment: start;
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            y: (parent.height - 20px) / 2;
+            border-radius: Theme.radius;
+            background: root.checked
+                ? (!root.enabled ? Theme.accent-disabled : root.down ? Theme.accent-pressed : root.hover ? Theme.accent-hover : Theme.accent)
+                : (root.down ? Theme.control-alt-pressed : root.hover ? Theme.control-alt-hover : Theme.control-alt);
+            border-width: root.checked && !Theme.contrast ? 0 : 1px;
+            border-color: !root.enabled ? Theme.stroke-accessible-disabled : root.checked ? Theme.accent-edge : Theme.stroke-accessible;
+            if root.checked: Icon {
+                text: Icons.check-mark;
+                font-size: 12px;
+                color: root.enabled ? Theme.on-accent : Theme.on-accent-disabled;
+            }
+        }
+        label := Text {
+            text: root.text;
+            font-size: Theme.body;
+            color: root.enabled ? Theme.text : Theme.text-disabled;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+// A WinUI ToggleSwitch for a setting that applies at once (docs/WINUI3.md
+// "CheckBox / RadioButton / ToggleSwitch"): On / Off, then the 40 x 20
+// track; only the knob moves (83 ms; none with animations off).
+export component ToggleSwitch inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled;
+
+    forward-focus: fs;
+    accessible-role: switch;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.toggle(); }
+
+    function toggle() {
+        if root.enabled {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+    property <bool> hover: root.enabled && ta.has-hover;
+    property <bool> down: root.enabled && ta.pressed;
+
+    height: 32px;
+    fs := PressKeys {
+        enabled: root.enabled;
+        pressed => { root.toggle(); }
+    }
+    ta := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.toggle(); }
+    }
+    HorizontalLayout {
+        spacing: Theme.s3;
+        alignment: end;
+        Text {
+            text: root.checked ? @tr("On") : @tr("Off");
+            font-size: Theme.body;
+            color: root.enabled ? Theme.text : Theme.text-disabled;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            width: 40px;
+            height: 20px;
+            y: (parent.height - 20px) / 2;
+            border-radius: 10px;
+            background: root.checked
+                ? (!root.enabled ? Theme.accent-disabled : root.down ? Theme.accent-pressed : root.hover ? Theme.accent-hover : Theme.accent)
+                : (root.down ? Theme.control-alt-pressed : root.hover ? Theme.control-alt-hover : Theme.control-alt);
+            border-width: root.checked && !Theme.contrast ? 0 : 1px;
+            border-color: !root.enabled ? Theme.stroke-accessible-disabled : root.checked ? Theme.accent-edge : Theme.stroke-accessible;
+            Rectangle {
+                property <length> h: root.hover || root.down ? 14px : 12px;
+                width: root.down ? 17px : self.h;
+                height: self.h;
+                x: root.checked ? 40px - (20px - self.h) / 2 - self.width : (20px - self.h) / 2;
+                y: (20px - self.h) / 2;
+                border-radius: self.h / 2;
+                background: root.checked ? (root.enabled ? Theme.on-accent : Theme.on-accent-disabled) : (root.enabled ? Theme.text-2 : Theme.text-disabled);
+                animate x, width, height { duration: Theme.faster; easing: cubic-bezier(0, 0, 0, 1); }
+            }
+        }
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+// The surface of a Windows Community Toolkit SettingsCard (docs/WINUI3.md
+// "SettingsCard"): CardBackgroundFillColorDefault with a 1 px
+// CardStrokeColorDefault edge, radius 4, at least 68 px tall.
+// One choice of a `RadioButtons` group: its label and an optional line
+// under it.
+export struct RadioItem {
+    label: string,
+    description: string,
+}
+
+// A WinUI RadioButtons group (docs/WINUI3.md "CheckBox / RadioButton /
+// ToggleSwitch"): one Tab stop; Up/Down (Left/Right) move and check, Space
+// checks the focused item. Each item has a 20 px ring with the 12 px dot
+// (14 hovered, 10 pressed) and an optional description in Caption
+// TextSecondary under its label. `selected` -1: none chosen yet.
+export component RadioButtons inherits FocusScope {
+    in property <[RadioItem]> items;
+    in-out property <int> selected: -1;
+    // The group's accessible name (its header).
+    in property <string> label;
+    callback picked(int);
+    // The item the keys are on.
+    property <int> cursor: max(0, root.selected);
+    function pick(i: int) {
+        if root.enabled && i >= 0 && i < root.items.length {
+            root.cursor = i;
+            if root.selected != i {
+                root.selected = i;
+                root.picked(i);
+            }
+        }
+    }
+    accessible-role: radio-group;
+    accessible-label: root.label;
+    accessible-delegate-focus: root.cursor;
+    focus-gained(reason) => {
+        if reason == FocusReason.tab-navigation {
+            Focus.keyboard = true;
+        }
+    }
+    key-pressed(e) => {
+        if e.modifiers.control || e.modifiers.alt {
+            return reject;
+        }
+        if e.text == Key.UpArrow || e.text == Key.LeftArrow {
+            root.pick(max(0, root.cursor - 1));
+            return accept;
+        }
+        if e.text == Key.DownArrow || e.text == Key.RightArrow {
+            root.pick(min(root.items.length - 1, root.cursor + 1));
+            return accept;
+        }
+        if e.text == " " {
+            root.pick(root.cursor);
+            return accept;
+        }
+        reject
+    }
+    VerticalLayout {
+        spacing: Theme.s1;
+        for item[i] in root.items: it := Rectangle {
+            property <bool> on: root.selected == i;
+            property <bool> hover: root.enabled && ta.has-hover;
+            property <bool> down: root.enabled && ta.pressed;
+            height: max(32px, texts.preferred-height + 12px);
+            accessible-role: radio-button;
+            accessible-label: item.label;
+            accessible-description: item.description;
+            accessible-checkable: true;
+            accessible-checked: self.on;
+            accessible-enabled: root.enabled;
+            accessible-action-default => { root.pick(i); }
+            ta := TouchArea {
+                mouse-cursor: root.enabled ? pointer : default;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        Focus.keyboard = false;
+                    }
+                }
+                clicked => {
+                    root.focus();
+                    root.pick(i);
+                }
+            }
+            // The ring, level with the label's first line (Body: 4/3 of
+            // its size tall).
+            Rectangle {
+                x: 0;
+                y: max(6px, texts.y + (round(Theme.body * 4 / 3 / 1px) * 1px - 20px) / 2);
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                border-width: it.on && !Theme.contrast ? 0 : 1px;
+                border-color: !root.enabled ? Theme.stroke-accessible-disabled : it.on ? Theme.accent-edge : Theme.stroke-accessible;
+                background: it.on
+                    ? (!root.enabled ? Theme.accent-disabled : it.down ? Theme.accent-pressed : it.hover ? Theme.accent-hover : Theme.accent)
+                    : (it.down ? Theme.control-alt-pressed : it.hover ? Theme.control-alt-hover : Theme.control-alt);
+                Rectangle {
+                    property <length> d: it.down ? 10px : it.hover ? 14px : 12px;
+                    visible: it.on;
+                    x: (parent.width - self.d) / 2;
+                    y: (parent.height - self.d) / 2;
+                    width: self.d;
+                    height: self.d;
+                    border-radius: self.d / 2;
+                    background: root.enabled ? Theme.on-accent : Theme.on-accent-disabled;
+                }
+            }
+            texts := VerticalLayout {
+                x: 28px;
+                y: 5px;
+                width: parent.width - 28px;
+                height: self.preferred-height;
+                Text {
+                    text: item.label;
+                    font-size: Theme.body;
+                    color: root.enabled ? Theme.text : Theme.text-disabled;
+                    wrap: word-wrap;
+                    accessible-role: none;
+                }
+                if item.description != "": Text {
+                    text: item.description;
+                    font-size: Theme.caption;
+                    color: root.enabled ? Theme.text-2 : Theme.text-disabled;
+                    wrap: word-wrap;
+                    accessible-role: none;
+                }
+            }
+            FocusRing {
+                shown: root.has-focus && root.cursor == i;
+            }
+        }
+    }
+}
+
+// A WinUI Expander's header (docs/WINUI3.md "Expander"): a 48 px card row
+// with its header, an optional line under it, and the 12 px chevron at the
+// end; one Tab stop toggling with Space or Enter. The page draws the
+// content under it while `expanded` (a widget with children would be a
+// second copy of its code).
+export component Expander inherits Rectangle {
+    in property <string> header;
+    in property <string> description;
+    in-out property <bool> expanded;
+    callback toggled;
+    function toggle() {
+        root.expanded = !root.expanded;
+        root.toggled();
+    }
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.header;
+    accessible-description: root.description;
+    accessible-expandable: true;
+    accessible-expanded: root.expanded;
+    accessible-action-default => { root.toggle(); }
+    height: max(48px, texts.preferred-height + 2 * Theme.s3);
+    background: Theme.card-fill;
+    border-width: 1px;
+    border-color: Theme.card-edge;
+    border-top-left-radius: Theme.radius;
+    border-top-right-radius: Theme.radius;
+    border-bottom-left-radius: root.expanded ? 0 : Theme.radius;
+    border-bottom-right-radius: root.expanded ? 0 : Theme.radius;
+    fs := PressKeys { pressed => { root.toggle(); } }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+            }
+        }
+        clicked => { root.toggle(); }
+    }
+    texts := VerticalLayout {
+        x: Theme.s4;
+        width: root.width - Theme.s4 - 60px;
+        alignment: center;
+        Text {
+            text: root.header;
+            font-size: Theme.body;
+            color: Theme.text;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+        if root.description != "": Text {
+            text: root.description;
+            font-size: Theme.caption;
+            color: Theme.text-2;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+    }
+    // The chevron button's plate: 32 x 32, 8 from the end.
+    Rectangle {
+        x: root.width - 40px;
+        y: (root.height - 32px) / 2;
+        width: 32px;
+        height: 32px;
+        border-radius: Theme.radius;
+        border-width: Theme.contrast ? 2px : 0;
+        border-color: ta.has-hover ? Theme.hc-highlight : Theme.text;
+        background: Theme.contrast ? transparent : ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+        Icon {
+            text: root.expanded ? Icons.chevron-up : Icons.chevron-down;
+            font-size: 12px;
+            color: Theme.text;
+        }
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+export component SettingsSurface inherits Rectangle {
+    background: Theme.card-fill;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.card-edge;
+    min-height: 68px;
+}
+
+// A SettingsCard (docs/WINUI3.md "SettingsCard"): a 20 px icon, the header
+// in Body and its description in Caption TextSecondary, padding 16, and at
+// its end, centred, a Button (`action`) or a ToggleSwitch (`toggle`). They
+// are plain elements, hidden when unused: a card with children would be a
+// copy of all of this wherever it is used. Another control is drawn over
+// the card by its user, in `trailing` px kept free at the end.
+export component SettingsCard inherits SettingsSurface {
+    in property <string> icon;
+    in property <string> header;
+    in property <string> description;
+    in property <string> action;
+    in property <bool> action-accent;
+    in property <bool> action-danger;
+    in property <bool> action-enabled: true;
+    in property <string> action-description;
+    in property <int> action-focus;
+    callback action-clicked;
+    in property <bool> toggle;
+    in property <string> toggle-label;
+    in property <bool> checked;
+    callback toggled(bool);
+    in property <length> trailing;
+    accessible-role: groupbox;
+    accessible-label: root.header;
+    accessible-description: root.description;
+    height: max(68px, row.preferred-height);
+    row := HorizontalLayout {
+        padding: Theme.s4;
+        // Icon margin 2,0,20,0.
+        Rectangle {
+            width: root.icon == "" ? 0 : 42px;
+            Icon {
+                x: 2px;
+                width: 20px;
+                text: root.icon;
+                font-size: 20px;
+                color: Theme.text;
+                accessible-role: none;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.header;
+                font-size: Theme.body;
+                color: Theme.text;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+            Text {
+                text: root.description;
+                font-size: Theme.caption;
+                color: Theme.text-2;
+                wrap: word-wrap;
+                visible: root.description != "";
+                height: root.description == "" ? 0 : self.preferred-height;
+                accessible-role: none;
+            }
+        }
+        VerticalLayout {
+            padding-left: root.action != "" || root.toggle || root.trailing > 0 ? Theme.s4 : 0;
+            alignment: center;
+            Button {
+                visible: root.action != "";
+                enabled: self.visible && root.action-enabled;
+                width: self.visible ? self.preferred-width : 0;
+                height: self.visible ? self.preferred-height : 0;
+                label: root.action;
+                accent: root.action-accent;
+                danger: root.action-danger;
+                description: root.action-description;
+                focus-seq: root.action-focus;
+                clicked => { root.action-clicked(); }
+            }
+            ToggleSwitch {
+                visible: root.toggle;
+                enabled: self.visible;
+                width: self.visible ? self.preferred-width : 0;
+                height: self.visible ? 32px : 0;
+                label: root.toggle-label;
+                checked: root.checked;
+                toggled => { root.toggled(self.checked); }
+            }
+        }
+        Rectangle { width: root.trailing; }
+    }
+}
+
+export enum Severity { info, success, caution, critical }
+
+// A WinUI InfoBar (docs/WINUI3.md "InfoBar"): a message in its severity's
+// colours with their icon, an optional action button, optional buttons
+// below the message and a close button.
+export component InfoBar inherits Rectangle {
+    in property <Severity> severity;
+    in property <string> title;
+    in property <string> message;
+    in property <bool> closable: true;
+    in property <string> close-label: @tr("Close");
+    // One action button, after the message.
+    in property <string> action-text;
+    callback action;
+    // Buttons under the message (`button-clicked` gets 0 or 1), one
+    // under the other while `stack-buttons` (they would not fit side by
+    // side).
+    in property <string> button1;
+    in property <string> button2;
+    // A third (the sender notice's "Why?"), after the other two.
+    in property <string> button3;
+    in property <bool> stack-buttons;
+    // Each change takes the focus to the first content button.
+    in property <int> button-focus;
+    callback button-clicked(int);
+    callback closed;
+
+    // What a screen reader says before the severity: the title, then the message.
+    property <string> spoken: root.title != "" ? @tr("{0}. {1}", root.title, root.message) : root.message;
+    accessible-role: groupbox;
+    accessible-label: root.severity == Severity.critical ? @tr("Error: {0}", root.spoken) : root.severity == Severity.caution ? @tr("Warning: {0}", root.spoken) : root.spoken;
+    property <color> tone: root.severity == Severity.critical ? Theme.danger : root.severity == Severity.caution ? Theme.warning : root.severity == Severity.success ? Theme.success : Theme.attention;
+
+    height: max(48px, row.preferred-height);
+    border-radius: Theme.radius;
+    border-width: Theme.contrast ? 2px : 1px;
+    border-color: Theme.card-edge;
+    background: root.severity == Severity.critical ? Theme.danger-bg : root.severity == Severity.caution ? Theme.caution-bg : root.severity == Severity.success ? Theme.success-bg : Theme.info-bg;
+    row := HorizontalLayout {
+        padding-left: Theme.s4;
+        padding-right: root.closable ? 0 : Theme.s4;
+        VerticalLayout {
+            padding-top: Theme.s4;
+            padding-right: 14px;
+            alignment: start;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                Icon {
+                    text: Icons.status-circle;
+                    color: Theme.contrast ? Theme.hc-highlight : root.tone;
+                }
+                Icon {
+                    text: root.severity == Severity.critical ? Icons.status-error : root.severity == Severity.caution ? Icons.status-warning : root.severity == Severity.success ? Icons.status-success : Icons.status-info;
+                    color: Theme.contrast ? Theme.hc-highlight-text : Theme.text-inverse;
+                }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            alignment: center;
+            if root.title != "": Text {
+                text: root.title;
+                font-size: Theme.body;
+                font-weight: 600;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            // A word longer than the bar is broken (an address at a large
+            // text size): the bar never grows past its column.
+            Text {
+                text: root.message;
+                min-width: 0;
+                font-size: Theme.body;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            // Custom content (the account check's steps), 12 below the
+            // message and above the buttons; only the bar that has it.
+            @children
+            // Its content (WinUI's InfoBar.Content), below the message: up
+            // to two buttons, 8 px apart, side by side or (`stack-buttons`)
+            // one under the other. Properties, not children: an InfoBar
+            // with children would be a second copy of all of this.
+            btns := Rectangle {
+                // One under the other when asked, or when they don't fit
+                // the text column side by side (a long translation, a
+                // larger text size).
+                property <bool> stacked: root.stack-buttons
+                    || b1.preferred-width + (root.button2 != "" ? Theme.s2 + b2.preferred-width : 0px) + (root.button3 != "" ? Theme.s2 + b3.preferred-width : 0px) > self.width;
+                height: root.button1 == "" ? 0 : root.button3 != "" && self.stacked ? b3.y + b3.height : root.button2 != "" && self.stacked ? b2.y + b2.height : b1.y + b1.height;
+                b1 := Button {
+                    x: 0;
+                    y: Theme.s3;
+                    width: self.preferred-width;
+                    visible: root.button1 != "";
+                    enabled: self.visible;
+                    focus-seq: root.button-focus;
+                    label: root.button1;
+                    clicked => { root.button-clicked(0); }
+                }
+                b2 := Button {
+                    x: btns.stacked ? 0 : b1.width + Theme.s2;
+                    y: btns.stacked ? b1.y + b1.height + Theme.s2 : b1.y;
+                    width: self.preferred-width;
+                    visible: root.button2 != "";
+                    enabled: self.visible;
+                    label: root.button2;
+                    clicked => { root.button-clicked(1); }
+                }
+                b3 := Button {
+                    x: btns.stacked ? 0 : b2.x + b2.width + Theme.s2;
+                    y: btns.stacked ? b2.y + b2.height + Theme.s2 : b1.y;
+                    width: self.preferred-width;
+                    visible: root.button3 != "";
+                    enabled: self.visible;
+                    label: root.button3;
+                    clicked => { root.button-clicked(2); }
+                }
+            }
+        }
+        // The action and close buttons are plain elements, hidden and off
+        // when unused rather than `if`s: an `if` here is code of its own in
+        // every InfoBar.
+        VerticalLayout {
+            padding-left: root.action-text != "" ? Theme.s4 : 0;
+            alignment: center;
+            Button {
+                visible: root.action-text != "";
+                enabled: self.visible;
+                width: self.visible ? self.preferred-width : 0;
+                label: root.action-text;
+                clicked => { root.action(); }
+            }
+        }
+        VerticalLayout {
+            padding: root.closable ? 5px : 0;
+            alignment: start;
+            IconButton {
+                visible: root.closable;
+                enabled: self.visible;
+                icon: Icons.dismiss;
+                tooltip: root.close-label;
+                width: root.closable ? 38px : 0;
+                height: 38px;
+                clicked => { root.closed(); }
+            }
+        }
+    }
+}
+
+// A WinUI ContentDialog over the smoke (docs/WINUI3.md "ContentDialog"):
+// the title and its content on the card, then the button
+// bar on the layer with equal buttons, primary first and Cancel last.
+// Esc cancels; the keyboard stays in the dialog.
+export component ContentDialog inherits Rectangle {
+    in property <string> title;
+    in property <string> primary-text;
+    in property <string> secondary-text;
+    in property <string> close-text: @tr("Cancel");
+    // Its message (`address`: a host or an address, semibold and broken
+    // anywhere), a caption line under it, and problems to point out.
+    // Children go under these, but a dialog without any stays one shared
+    // component instead of a copy where it is used.
+    in property <string> text;
+    in property <bool> address;
+    in property <string> detail;
+    in property <[string]> warnings;
+    // A fingerprint, shown whole in the code font in its byte groups (one
+    // line each, never wrapped) under its label, with a Copy IconButton
+    // beside it (`copy-code`); the one it replaces under it with its own
+    // label, and a caution line; a note behind "How do I check this?".
+    in property <string> code;
+    in property <string> code-label;
+    in property <string> code-old;
+    in property <string> code-old-label;
+    in property <string> code-caution;
+    in property <string> code-note;
+    callback copy-code();
+    property <bool> note-open;
+    // One button only (an explanation): the primary one closes it.
+    in property <bool> single;
+    // A destructive question: no accent default button.
+    in property <bool> destructive;
+    // Cancel takes the focus (else the primary button); Enter presses the
+    // primary button only with `enter-primary`.
+    in property <bool> focus-close;
+    in property <bool> enter-primary;
+    in property <length> max-card-width: 548px;
+    callback primary();
+    callback secondary();
+    callback close();
+
+    // Its buttons are equal (docs/WINUI3.md "ContentDialog"): each prefers
+    // an equal share of the widest card, but is never narrower than its
+    // label needs.
+    property <int> buttons: root.single ? 1 : root.secondary-text != "" ? 3 : 2;
+    property <length> button-share: (min(root.max-card-width, root.width - 32px) - 2 * Theme.s6 - (root.buttons - 1) * Theme.s2) / root.buttons;
+
+    background: Theme.scrim;
+    init => {
+        if root.focus-close && !root.single {
+            close-btn.focus();
+        } else {
+            primary-btn.focus();
+        }
+    }
+    TouchArea { }  // swallow clicks behind the dialog
+    FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            if e.text == Key.Return && root.enter-primary {
+                root.primary();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: clamp(col.preferred-width, 320px, min(root.max-card-width, root.width - 32px));
+            height: col.preferred-height;
+            background: Theme.card;
+            border-radius: Theme.radius-lg;
+            border-width: 1px;
+            border-color: Theme.surface-stroke;
+            clip: true;
+            // Screen readers name the question with the focused button
+            // (AccessKit has no dialog role in Slint 1.18).
+            accessible-role: groupbox;
+            accessible-label: root.title;
+            accessible-description: root.text;
+            FocusTrap {
+                entered => {
+                    if root.single {
+                        primary-btn.focus();
+                    } else {
+                        close-btn.focus();
+                    }
+                }
+            }
+            col := VerticalLayout {
+                VerticalLayout {
+                    padding: Theme.s6;
+                    spacing: Theme.s3;
+                    Text {
+                        text: root.title;
+                        font-family: Theme.display-font;
+                        font-size: Theme.title;
+                        font-weight: 600;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    if root.text != "": Text {
+                        text: root.text;
+                        font-size: Theme.body;
+                        font-weight: root.address ? 600 : 400;
+                        color: Theme.text;
+                        wrap: root.address ? TextWrap.char-wrap : TextWrap.word-wrap;
+                    }
+                    if root.detail != "": Text {
+                        text: root.detail;
+                        font-size: Theme.caption;
+                        color: Theme.text-2;
+                        wrap: char-wrap;
+                        max-lines: 8;
+                        overflow: elide;
+                    }
+                    if root.code != "": HorizontalLayout {
+                        alignment: start;
+                        spacing: Theme.s4;
+                        VerticalLayout {
+                            spacing: Theme.s1;
+                            Text {
+                                text: root.code-label;
+                                font-size: Theme.caption;
+                                color: Theme.text-2;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: root.code;
+                                font-family: Theme.mono-font;
+                                font-size: Theme.body;
+                                color: Theme.text;
+                                wrap: no-wrap;
+                                accessible-label: root.code-label;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: end;
+                            IconButton {
+                                icon: Icons.copy;
+                                tooltip: @tr("Copy fingerprint");
+                                width: 32px;
+                                height: 32px;
+                                clicked => { root.copy-code(); }
+                            }
+                        }
+                    }
+                    if root.code-old != "": VerticalLayout {
+                        spacing: Theme.s1;
+                        Text {
+                            text: root.code-old-label;
+                            font-size: Theme.caption;
+                            color: Theme.text-2;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: root.code-old;
+                            font-family: Theme.mono-font;
+                            font-size: Theme.body;
+                            color: Theme.text-2;
+                            wrap: no-wrap;
+                            accessible-label: root.code-old-label;
+                        }
+                    }
+                    if root.code-caution != "": HorizontalLayout {
+                        spacing: Theme.s2;
+                        Icon { text: Icons.warning; color: Theme.warning; width: 16px; vertical-alignment: top; }
+                        Text {
+                            text: root.code-caution;
+                            font-size: Theme.body;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    // How to check it, behind a link (the openssl hint is
+                    // for the few who run their own server).
+                    if root.code-note != "": HorizontalLayout {
+                        alignment: start;
+                        HyperlinkButton {
+                            text: @tr("How do I check this?");
+                            clicked => { root.note-open = !root.note-open; }
+                        }
+                    }
+                    // A direct child of the column, like the question: a
+                    // wrapped Text inside a nested layout reported one
+                    // line, and the footer covered the rest.
+                    if root.code-note != "" && root.note-open: Text {
+                        text: root.code-note;
+                        font-size: Theme.caption;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                        accessible-live-region: polite;
+                    }
+                    for w in root.warnings: HorizontalLayout {
+                        spacing: Theme.s2;
+                        Icon { text: Icons.error; color: Theme.danger; width: 20px; }
+                        Text {
+                            text: w;
+                            font-size: Theme.body;
+                            color: Theme.danger;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    @children
+                }
+                Rectangle {
+                    height: 1px;
+                    background: Theme.card-edge;
+                }
+                Rectangle {
+                    background: Theme.layer;
+                    HorizontalLayout {
+                        padding: Theme.s6;
+                        spacing: Theme.s2;
+                        primary-btn := Button {
+                            accent: !root.destructive;
+                            label: root.primary-text;
+                            min-width: self.natural-width;
+                            preferred-width: root.button-share;
+                            horizontal-stretch: 1;
+                            clicked => { root.primary(); }
+                        }
+                        // In a layout, so the button stays one shared
+                        // component rather than a copy for this `if`.
+                        if root.secondary-text != "": HorizontalLayout {
+                            horizontal-stretch: 1;
+                            Button {
+                                label: root.secondary-text;
+                                min-width: self.natural-width;
+                                preferred-width: root.button-share;
+                                horizontal-stretch: 1;
+                                clicked => { root.secondary(); }
+                            }
+                        }
+                        close-btn := Button {
+                            visible: !root.single;
+                            enabled: self.visible;
+                            label: root.close-text;
+                            min-width: root.single ? 0 : self.natural-width;
+                            preferred-width: root.single ? 0 : root.button-share;
+                            max-width: root.single ? 0 : 100000px;
+                            horizontal-stretch: root.single ? 0 : 1;
+                            clicked => { root.close(); }
+                        }
+                    }
+                }
+            }
+            FocusTrap { entered => { primary-btn.focus(); } }
+        }
+    }
+}
+
+// A WinUI TeachingTip, tail-less (docs/WINUI3.md "TeachingTip"): a title,
+// a sentence, its place in the series ("1 of 2"), Got it (accent) and
+// Skip tips. Non-modal and never focused by itself; the window places it
+// 8 px beside its target and handles Esc (= Got it).
+export component TeachingTip inherits Rectangle {
+    in property <string> title;
+    in property <string> text;
+    in property <string> place;
+    callback got-it();
+    callback skip();
+    height: col.preferred-height;
+    background: Theme.flyout;
+    border-radius: Theme.radius-lg;
+    border-width: 1px;
+    border-color: Theme.flyout-stroke;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+    accessible-description: root.text;
+    // Said once as it appears, without moving the focus.
+    accessible-live-region: polite;
+    TouchArea { }  // a click on the card goes nowhere else
+    col := VerticalLayout {
+        padding-left: Theme.s4;
+        padding-right: Theme.s4;
+        padding-top: Theme.s3;
+        padding-bottom: Theme.s3;
+        spacing: Theme.s1;
+        Text {
+            text: root.title;
+            font-size: Theme.body;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+        Text {
+            text: root.text;
+            font-size: Theme.body;
+            color: Theme.text-2;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+        // The place, then the buttons at the end; at a large text size
+        // the place takes a line of its own above them.
+        property <bool> stack: place-a.preferred-width + skip-btn.preferred-width + got-btn.preferred-width + 2 * Theme.s2 > root.width - 2 * Theme.s4;
+        place-a := Text {
+            visible: col.stack;
+            height: col.stack ? self.preferred-height : 0;
+            text: root.place;
+            font-size: Theme.caption;
+            color: Theme.text-2;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+        HorizontalLayout {
+            padding-top: col.stack ? 0 : Theme.s3 - Theme.s1;
+            spacing: Theme.s2;
+            Text {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                text: col.stack ? "" : root.place;
+                font-size: Theme.caption;
+                color: Theme.text-2;
+                accessible-role: none;
+            }
+            skip-btn := Button {
+                label: @tr("Skip tips");
+                clicked => { root.skip(); }
+            }
+            got-btn := Button {
+                accent: true;
+                label: @tr("Got it");
+                clicked => { root.got-it(); }
+            }
+        }
+    }
+}
+
+// Shown once `active` has lasted `delay`: nothing flashes for a wait under
+// a second (FLUENT2 "Wait UX").
+component Delayed inherits Rectangle {
+    in property <bool> active: true;
+    in property <duration> delay: 1s;
+    out property <bool> due;
+    changed active => {
+        if !self.active {
+            self.due = false;
+        }
+    }
+    Timer {
+        interval: root.delay;
+        running: root.active && !root.due;
+        triggered => { root.due = true; }
+    }
+}
+
+// A WinUI ProgressRing (docs/WINUI3.md "Progress"): an accent arc that
+// turns, after the delay; a still arc while animations are off.
+export component ProgressRing inherits Delayed {
+    in property <length> size: 16px;
+    width: root.size;
+    height: root.size;
+    accessible-role: progress-indicator;
+    if root.active && root.due: Path {
+        property <float> c: root.size / 2px;
+        property <float> r: (root.size - root.size / 8) / 2px;
+        property <angle> start: Theme.animate ? mod(animation-tick() / 1ms, 1000) * 0.36deg : -90deg;
+        width: 100%;
+        height: 100%;
+        viewbox-width: root.size / 1px;
+        viewbox-height: root.size / 1px;
+        stroke: Theme.accent;
+        stroke-width: root.size / 8;
+        MoveTo {
+            x: parent.c + parent.r * cos(parent.start);
+            y: parent.c + parent.r * sin(parent.start);
+        }
+        ArcTo {
+            x: parent.c + parent.r * cos(parent.start + 270deg);
+            y: parent.c + parent.r * sin(parent.start + 270deg);
+            radius-x: parent.r;
+            radius-y: parent.r;
+            large-arc: true;
+            sweep: true;
+        }
+    }
+}
+
+// A WinUI ProgressBar (docs/WINUI3.md "Progress"): a 3 px accent bar over
+// a 1 px track, `value` from 0 to 1 (or a moving segment while
+// `indeterminate`), after the delay.
+export component ProgressBar inherits Delayed {
+    in property <float> value;
+    in property <bool> indeterminate;
+    height: 3px;
+    clip: true;
+    accessible-role: progress-indicator;
+    accessible-value: root.indeterminate ? "" : @tr("percent" => "{0}%", round(root.value * 100));
+    if root.active && root.due: Rectangle {
+        Rectangle {
+            y: 1px;
+            height: 1px;
+            background: Theme.stroke-accessible;
+        }
+        Rectangle {
+            x: !root.indeterminate ? 0 : Theme.animate ? (mod(animation-tick() / 1ms, 2000) / 2000 * 1.4 - 0.4) * root.width : 0;
+            width: root.indeterminate ? root.width * 0.4 : root.width * clamp(root.value, 0, 1);
+            border-radius: 1.5px;
+            background: Theme.accent;
+        }
+    }
+}
+
+// A WinUI SelectorBar (docs/WINUI3.md "SelectorBar"): one Tab stop whose
+// arrows, Home and End select, as clicks do; the selected item has the
+// accent pill.
+export component SelectorBar inherits FocusScope {
+    in property <[string]> items;
+    in-out property <int> selected;
+    // An item chosen by a click or a key (not when `selected` is set).
+    callback picked(int);
+
+    focus-on-click: false;
+    accessible-role: tab-list;
+    accessible-delegate-focus: root.selected;
+    function pick(i: int) {
+        let n = clamp(i, 0, root.items.length - 1);
+        if n != root.selected {
+            root.selected = n;
+            root.picked(n);
+        }
+    }
+    focus-gained(reason) => {
+        if reason == FocusReason.tab-navigation {
+            Focus.keyboard = true;
+        }
+    }
+    key-pressed(e) => {
+        if e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
+            return reject;
+        }
+        if e.text == Key.LeftArrow {
+            root.pick(root.selected - 1);
+        } else if e.text == Key.RightArrow {
+            root.pick(root.selected + 1);
+        } else if e.text == Key.Home {
+            root.pick(0);
+        } else if e.text == Key.End {
+            root.pick(root.items.length - 1);
+        } else {
+            return reject;
+        }
+        accept
+    }
+    HorizontalLayout {
+        padding-top: 4px;
+        padding-bottom: 4px;
+        alignment: start;
+        for label[i] in root.items: item := Rectangle {
+            property <bool> on: i == root.selected;
+            accessible-role: tab;
+            accessible-label: label;
+            accessible-item-selected: self.on;
+            accessible-action-default => { root.pick(i); }
+            min-width: t.preferred-width + 24px;
+            height: max(32px, t.preferred-height + 17px);
+            ta := TouchArea {
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        Focus.keyboard = false;
+                    }
+                }
+                clicked => { root.pick(i); }
+            }
+            t := Text {
+                y: 10px;
+                height: parent.height - 17px;
+                text: label;
+                font-size: Theme.body;
+                color: ta.pressed ? (Theme.contrast ? Theme.text-disabled : item.on ? Theme.text-2 : Theme.text-3)
+                    : ta.has-hover ? (Theme.contrast ? Theme.text-disabled : Theme.text-2) : Theme.text;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+            if item.on: Rectangle {
+                x: (item.width - 16px) / 2;
+                y: item.height - 3px;
+                width: 16px;
+                height: 3px;
+                border-radius: 1.5px;
+                background: Theme.accent;
+            }
+            FocusRing {
+                inset: -2px;
+                shown: root.has-focus && item.on;
+            }
+        }
+    }
+}
+
+// The surface of a flyout or menu (docs/WINUI3.md "MenuFlyout / ToolTip /
+// Flyout"): the acrylic fallback, a 1 px flyout stroke, radius 8.
+export component Flyout inherits Rectangle {
+    background: Theme.flyout;
+    border-radius: Theme.radius-lg;
+    border-width: 1px;
+    border-color: Theme.flyout-stroke;
+    VerticalLayout {
+        padding-top: 2px;
+        padding-bottom: 2px;
+        @children
+    }
+}
+
+// A flyout's item: 4,2 inside the surface, 32 tall, a subtle fill when
+// hovered; a Tab stop pressed with Space or Enter.
+export component FlyoutItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    // Room before the icon (a folder's depth in the Move flyout).
+    in property <length> indent;
+    callback clicked;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    height: max(36px, t.preferred-height + 13px);
+    fs := PressKeys { pressed => { root.clicked(); } }
+    Rectangle {
+        x: Theme.s1;
+        y: 2px;
+        width: parent.width - 2 * Theme.s1;
+        height: parent.height - 4px;
+        border-radius: Theme.radius;
+        background: ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+        ta := TouchArea {
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down {
+                    Focus.keyboard = false;
+                }
+            }
+            clicked => { root.clicked(); }
+        }
+        HorizontalLayout {
+            padding-left: 11px + root.indent;
+            padding-right: 11px;
+            spacing: Theme.s3;
+            Icon {
+                text: root.icon;
+                color: Theme.on-fill(ta.has-hover || ta.pressed, Theme.text);
+                width: 16px;
+            }
+            t := Text {
+                text: root.label;
+                font-size: Theme.body;
+                color: Theme.on-fill(ta.has-hover || ta.pressed, Theme.text);
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        FocusRing { shown: fs.has-focus; }
+    }
+}
+
+// The composer body (and the account form's signature): a plain TextInput
+// in a scroll view, in a text field's frame (InputFrame), that also reports
+// its selection for the formatting toolbar (UTF-8 byte offsets; the
+// TextEdit widget hides them).
 // `anchor-position-byte-offset` and `cursor-position-byte-offset` are
 // internal, test-only TextInput properties in Slint 1.18.1: check them
 // again on every Slint upgrade.
-export component ComposeBody inherits Rectangle {
+export component ComposeBody inherits InputFrame {
     in-out property <string> text <=> input.text;
     in property <length> font-size <=> input.font-size;
+    in property <string> placeholder-text;
     in-out property <length> content-y <=> scroll.content-y;
     out property <bool> has-focus: input.has-focus;
     out property <int> anchor: input.anchor-position-byte-offset;
@@ -597,78 +2885,82 @@ export component ComposeBody inherits Rectangle {
     forward-focus: input;
     accessible-role: text-input;
     accessible-value <=> input.text;
+    accessible-placeholder-text: root.placeholder-text;
     accessible-action-set-value(v) => {
         input.text = v;
         root.edited(v);
     }
     accessible-action-set-selection-offsets(a, c) => { input.set-selection-offsets(a, c); }
 
-    background: input.has-focus ? (Theme.dark ? #1e1e1e : #ffffff) : Palette.control-background;
-    border-radius: Theme.radius;
-    border-width: 1px;
-    border-color: Theme.stroke-strong;
+    focused: input.has-focus;
+    hover: ta.has-hover;
 
-    ContextMenuArea {
-        Menu {
-            MenuItem {
-                title: "Cut";
-                activated => { input.cut(); }
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        ContextMenuArea {
+            Menu {
+                MenuItem {
+                    title: @tr("Cut");
+                    activated => { input.cut(); }
+                }
+                MenuItem {
+                    title: @tr("Copy");
+                    enabled: input.text != "";
+                    activated => { input.copy(); }
+                }
+                MenuItem {
+                    title: @tr("Paste");
+                    activated => { input.paste(); }
+                }
+                MenuItem {
+                    title: @tr("Select all");
+                    enabled: input.text != "";
+                    activated => { input.select-all(); }
+                }
             }
-            MenuItem {
-                title: "Copy";
-                enabled: input.text != "";
-                activated => { input.copy(); }
-            }
-            MenuItem {
-                title: "Paste";
-                activated => { input.paste(); }
-            }
-            MenuItem {
-                title: "Select all";
-                enabled: input.text != "";
-                activated => { input.select-all(); }
-            }
-        }
 
-        scroll := ScrollView {
-            x: 12px;
-            y: 12px;
-            width: parent.width - 24px;
-            height: parent.height - 24px;
-            content-width: self.visible-width;
-            content-height: max(self.visible-height, input.preferred-height);
-
-            input := TextInput {
-                single-line: false;
+            // TextSecondary, as a TextField's placeholder.
+            Text {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                visible: input.text == "";
+                text: root.placeholder-text;
+                font-size: input.font-size;
+                color: Theme.text-2;
                 wrap: word-wrap;
-                color: Palette.foreground;
-                selection-background-color: Palette.selection-background;
-                selection-foreground-color: Palette.selection-foreground;
-                page-height: scroll.visible-height;
-                // The component above is the accessible text field.
                 accessible-role: none;
-                edited => { root.edited(self.text); }
-                key-pressed(e) => { root.key-pressed(e) }
-                // Keep the caret in view (as the Fluent TextEdit does; the
-                // 20 px stands in for a line height).
-                cursor-position-changed(p) => {
-                    if p.y + scroll.content-y < 0 {
-                        scroll.content-y = min(0, scroll.visible-height - p.y - 20px, max(scroll.visible-height - self.height, -p.y));
-                    } else if p.y + scroll.content-y > scroll.visible-height - 20px {
-                        scroll.content-y = min(0, max(scroll.visible-height - self.height, scroll.visible-height - p.y - 20px));
+            }
+            scroll := ScrollView {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                height: parent.height - 24px;
+                content-width: self.visible-width;
+                content-height: max(self.visible-height, input.preferred-height);
+
+                input := TextInput {
+                    single-line: false;
+                    wrap: word-wrap;
+                    color: Theme.text;
+                    selection-background-color: Theme.selection-bg;
+                    selection-foreground-color: Theme.selection-text;
+                    page-height: scroll.visible-height;
+                    // The component above is the accessible text field.
+                    accessible-role: none;
+                    edited => { root.edited(self.text); }
+                    key-pressed(e) => { root.key-pressed(e) }
+                    // Keep the caret in view (as the Fluent TextEdit does; the
+                    // 20 px stands in for a line height).
+                    cursor-position-changed(p) => {
+                        if p.y + scroll.content-y < 0 {
+                            scroll.content-y = min(0, scroll.visible-height - p.y - 20px, max(scroll.visible-height - self.height, -p.y));
+                        } else if p.y + scroll.content-y > scroll.visible-height - 20px {
+                            scroll.content-y = min(0, max(scroll.visible-height - self.height, scroll.visible-height - p.y - 20px));
+                        }
                     }
                 }
             }
         }
-    }
-
-    // The Fluent focus underline.
-    if input.has-focus: Rectangle {
-        x: root.border-radius;
-        y: root.height - self.height;
-        width: root.width - 2 * root.border-radius;
-        height: 2px;
-        border-radius: 1px;
-        background: Palette.accent-background;
     }
 }

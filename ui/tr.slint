@@ -1,0 +1,475 @@
+// Text the Rust side shows, kept in the one catalog the .slint files use
+// (translations/pt-PT/LC_MESSAGES/komorebi.po): Rust calls these through
+// `ui.global::<Tr>()` (src/tr.rs), so every sentence is whole, with its numbers
+// and names as placeholders (never glued from pieces; word order and plurals
+// differ). Which function a typed value (an error, a validation failure)
+// means is decided in src/app/text.rs. Numbers and dates arrive already
+// formatted (src/format.rs).
+export global Tr {
+    // ---- The window and its start
+    // The window title: the unread count of the inboxes, if any.
+    pure public function window-title(unread: int) -> string {
+        return unread > 0 ? @tr("window title" => "Inbox ({0}) - Komorebi", unread) : "Komorebi";
+    }
+    pure public function start-failed(detail: string) -> string { return @tr("Komorebi couldn't start.\n\n{0}", detail); }
+    pure public function crash-notice() -> string { return @tr("Komorebi closed unexpectedly last time; see crash.log"); }
+    pure public function cache-damaged(name: string) -> string {
+        return @tr("The mail cache was damaged, so Komorebi started a new one; the old file is kept as {0}. Add your accounts again in Settings.", name);
+    }
+    pure public function wipe-files-left(list: string) -> string {
+        return @tr("The passwords were deleted, but these files are still in use and were not removed. Delete them by hand:\n\n{0}", list);
+    }
+
+    // ---- Failures of the servers (mail::errors::Say)
+    pure public function say-offline() -> string { return @tr("Can't reach the server. Komorebi tries again by itself; check your internet connection."); }
+    pure public function say-auth() -> string { return @tr("The server rejected the sign-in. Update the password in Settings, or press Refresh to retry."); }
+    pure public function say-tls() -> string { return @tr("Couldn't make a secure connection to the server. Check the server name in Settings; its certificate may not be trusted."); }
+    pure public function say-too-large() -> string { return @tr("The server says this message is too large. Remove an attachment or share it another way."); }
+    pure public function say-quota() -> string { return @tr("The mailbox is full on the server. Delete or archive some mail, then try again."); }
+    pure public function say-busy() -> string { return @tr("The server is busy or has too many connections open. Komorebi tries again shortly; close other mail apps if this keeps happening."); }
+    pure public function say-not-found(host: string) -> string { return @tr("Couldn't find {0}. Check the spelling of the server name and your internet connection.", host); }
+    pure public function say-no-answer(host: string, port: string) -> string {
+        return @tr("{0} didn't answer on port {1}. SSL/TLS usually uses 993 (IMAP) or 465 (SMTP); STARTTLS uses 143 or 587 (some servers use 25, 2525 or 1143).", host, port);
+    }
+    pure public function say-lost(host: string) -> string { return @tr("The connection to {0} was lost. Try again, and if it keeps happening, check the server.", host); }
+    pure public function say-rejected(host: string, login: string) -> string {
+        return @tr("{0} rejected the password for {1}. If sign-in uses two steps, create an app password. If the login isn't your email address, set the username.", host, login);
+    }
+    // A preset's rejected password (the add form): the app-password advice
+    // only, then, for an address on another domain, the other preset.
+    pure public function say-rejected-preset(host: string, login: string) -> string {
+        return @tr("{0} rejected the password for {1}. If sign-in uses two steps, create an app password.", host, login);
+    }
+    pure public function say-other-preset(provider: string) -> string { return @tr("Is your mail at {0}? Change Provider.", provider); }
+    pure public function say-secure-failed(host: string) -> string {
+        return @tr("The secure connection to {0} failed. Its certificate isn't trusted or doesn't match the server name. Check the name, or if you run this server yourself, review its certificate.", host);
+    }
+    pure public function say-no-connection(host: string, port: string) -> string { return @tr("{0} didn't accept the connection on port {1}. Check the server name and port.", host, port); }
+    pure public function say-no-secure(host: string) -> string { return @tr("Couldn't set up a secure connection to {0}. Check the port and the security setting.", host); }
+    pure public function say-no-sign-in(host: string, login: string) -> string { return @tr("{0} wouldn't let {1} sign in. Check the username, the password and the server's settings.", host, login); }
+    pure public function say-no-folders(host: string) -> string { return @tr("Signed in, but {0} didn't list its folders. Try again, or check the server.", host); }
+    pure public function say-no-starttls(host: string) -> string {
+        return @tr("{0} doesn't offer STARTTLS, so Komorebi won't sign in (your password would travel unencrypted). Ask the administrator to enable it, or use the SSL/TLS port.", host);
+    }
+    pure public function say-plain-answer() -> string { return @tr("This port answered without encryption. Komorebi only connects securely; choose STARTTLS or the SSL/TLS port."); }
+    pure public function say-no-auth(host: string) -> string { return @tr("{0} doesn't offer sign-in. Komorebi can't send through servers without sign-in yet.", host); }
+    pure public function say-bad-greeting(host: string) -> string {
+        return @tr("{0} didn't greet Komorebi like an IMAP server (it said goodbye, or signed in by itself). Check the server name, the port and the security setting.", host);
+    }
+    pure public function say-no-login(host: string) -> string {
+        return @tr("{0} doesn't allow signing in with a password over this connection (LOGINDISABLED). Ask the administrator to allow it on secure connections.", host);
+    }
+    pure public function say-utf8-only(host: string) -> string {
+        return @tr("{0} only works in UTF-8 mode (UTF8=ONLY), which Komorebi doesn't support yet. Ask the administrator to also allow the standard mode.", host);
+    }
+    pure public function say-cert-changed(host: string) -> string {
+        return @tr("The certificate of {0} changed. If you didn't expect that, don't sign in: review the new certificate and compare its fingerprint before you trust it.", host);
+    }
+    // The status line's short form of it (its card in Settings says it all).
+    pure public function say-cert-changed-short(host: string) -> string {
+        return @tr("The certificate of {0} changed. Review it before you connect again.", host);
+    }
+    pure public function say-sender-refused(host: string, from: string) -> string {
+        return @tr("{0} refused to send as {1}. Check that this account may send from that address, or set the SMTP username.", host, from);
+    }
+    pure public function say-sign-in-latched() -> string { return @tr("Sign-in rejected. Update the password in Settings, or press Refresh to retry."); }
+    pure public function say-unconfirmed(detail: string) -> string {
+        return @tr("{0}. The message may or may not have been sent; check Sent before you retry it from the Outbox.", detail);
+    }
+    pure public function say-too-large-send(detail: string) -> string { return @tr("The server says this message is too large ({0})", detail); }
+
+    // ---- Caveats of actions that worked (mail::Notice)
+    pure public function notice-left-flagged() -> string { return @tr("Removed here; the server keeps it flagged as deleted."); }
+    pure public function notice-move-gone() -> string { return @tr("Already gone from the server, so there was nothing to move."); }
+    pure public function notice-no-drafts-folder() -> string { return @tr("There is no Drafts folder on the server, so drafts are only saved on this PC."); }
+    pure public function notice-no-sent-folder() -> string {
+        return @tr("This account has no Sent folder on the server, so sent mail isn't saved there. You can choose one in Settings: Accounts, Edit.");
+    }
+    pure public function notice-no-draft-uid() -> string {
+        return @tr("A draft saved to the server couldn't be found there, so drafts are only saved on this PC.");
+    }
+    pure public function notice-drafts-not-saved(detail: string) -> string { return @tr("Couldn't save drafts to the server ({0}); they are kept on this PC.", detail); }
+    // A line about one account: its address, then what to say about it.
+    pure public function account-line(email: string, text: string) -> string { return @tr("{0}: {1}", email, text); }
+
+    // ---- Errors with a lead-in; the detail is the failure's own words
+    // A failure of the local cache or the system, in its own words.
+    pure public function error-detail(detail: string) -> string { return @tr("Something went wrong. {0}", detail); }
+    pure public function not-saved(detail: string) -> string { return @tr("Not saved. {0}", detail); }
+    pure public function not-removed(detail: string) -> string { return @tr("Not removed. {0}", detail); }
+    pure public function not-reset(detail: string) -> string { return @tr("Not reset. {0}", detail); }
+    pure public function stopped-no-files(detail: string) -> string { return @tr("Stopped, no files removed. {0}", detail); }
+    pure public function could-not-save(detail: string) -> string { return @tr("Couldn't save: {0}", detail); }
+    pure public function could-not-save-file(name: string, detail: string) -> string { return @tr("Couldn't save {0}: {1}", name, detail); }
+    pure public function could-not-open-file(name: string, detail: string) -> string { return @tr("Couldn't open {0}: {1}", name, detail); }
+    pure public function could-not-attach(detail: string) -> string { return @tr("Couldn't attach the files: {0}", detail); }
+    pure public function could-not-open-draft(detail: string) -> string { return @tr("Couldn't open the draft: {0}", detail); }
+    pure public function could-not-save-draft(detail: string) -> string { return @tr("Couldn't save the draft: {0}", detail); }
+    pure public function could-not-send(detail: string) -> string { return @tr("Couldn't send: {0}", detail); }
+    pure public function could-not-send-back-in-drafts(detail: string) -> string { return @tr("Couldn't send: {0}. It is back in Drafts.", detail); }
+    pure public function could-not-undo(detail: string) -> string { return @tr("Couldn't undo: {0}", detail); }
+    pure public function could-not-send-reply(detail: string) -> string { return @tr("Couldn't send the reply: {0}", detail); }
+    pure public function could-not-download-status(detail: string) -> string { return @tr("Couldn't download this message: {0}", detail); }
+    pure public function could-not-download-body(detail: string) -> string { return @tr("Couldn't download this message.\n\n{0}", detail); }
+    pure public function saved-to(path: string) -> string { return @tr("Saved {0}", path); }
+    pure public function no-app-opens(name: string) -> string { return @tr("No app on this computer opens {0}.", name); }
+    pure public function file-can-run(name: string) -> string { return @tr("{0} can run programs, so Komorebi doesn't open it. Save it to check it first.", name); }
+
+    // ---- The send (mail::Outcome)
+    pure public function sent() -> string { return @tr("status" => "Sent"); }
+    pure public function sent-not-saved(detail: string) -> string { return @tr("Message sent, but {0}", detail); }
+    pure public function not-sent-yet(detail: string) -> string { return @tr("Not sent yet: {0}. It stays in the Outbox and is tried again shortly.", detail); }
+    pure public function not-sent(detail: string) -> string { return @tr("Not sent: {0}. It is in the Outbox.", detail); }
+    pure public function message-discarded() -> string { return @tr("Message discarded."); }
+    pure public function rebuild-failed() -> string {
+        return @tr("A message sent as Komorebi closed couldn't be prepared again; it is back in Drafts.");
+    }
+    pure public function sending-in(secs: int) -> string { return @tr("Sending in {0} s", secs); }
+    // The undo-send offer at the bottom of the list, with the subject
+    // (shortened) of the message being sent.
+    pure public function sending-subject-in(subject: string, secs: int) -> string { return @tr("Sending \u{201c}{0}\u{201d} in {1} s", subject, secs); }
+    pure public function sending() -> string { return @tr("Sending\u{a0}…"); }
+    // The Outbox row and the open Outbox message: where the message is.
+    pure public function outbox-pending() -> string { return @tr("Sending in a few seconds"); }
+    pure public function outbox-waiting() -> string { return @tr("Waiting to send"); }
+    // A send refused for now: the sentence for its kind, then when the next
+    // try is.
+    pure public function outbox-retry(sentence: string, time: string) -> string { return @tr("{0} Trying again at {1}.", sentence, time); }
+    // Why a send didn't go through, by the SMTP class of the server's reply
+    // (the reply itself is behind Details).
+    pure public function send-no-such(address: string) -> string { return @tr("{0} doesn't exist. Check the address and send again.", address); }
+    pure public function send-no-such-any() -> string { return @tr("One of the addresses doesn't exist. Check the addresses and send again."); }
+    pure public function send-bad-address() -> string { return @tr("The server says an address isn't written correctly. Check the addresses and send again."); }
+    pure public function send-mailbox-full() -> string { return @tr("The recipient's mailbox is full. Try again later, or reach them another way."); }
+    pure public function send-too-large() -> string { return @tr("The message is too large for the server. Remove an attachment, then send again."); }
+    pure public function send-sender-refused() -> string { return @tr("The server won't send from this address. Check the account's address and SMTP username in Settings."); }
+    pure public function send-policy() -> string { return @tr("The server refused the message under its rules, for example as spam. Change the message, or ask your provider."); }
+    pure public function send-sign-in() -> string { return @tr("The server rejected the sign-in. Update the password in Settings, then send again."); }
+    pure public function send-certificate() -> string { return @tr("Couldn't make a secure connection to the server. Check the account in Settings, then send again."); }
+    pure public function send-busy() -> string { return @tr("The server couldn't take the message right now."); }
+    pure public function send-busy-gave-up() -> string { return @tr("The server couldn't take the message, and Komorebi stopped trying. Select Retry to send it again."); }
+    pure public function send-unreachable() -> string { return @tr("Couldn't reach the server."); }
+    pure public function send-unreachable-gave-up() -> string { return @tr("Couldn't reach the server, and Komorebi stopped trying. Check your internet connection, then select Retry."); }
+    pure public function send-other() -> string { return @tr("The server refused the message. Details says why."); }
+    pure public function send-unconfirmed() -> string { return @tr("The connection broke while sending, so it may have gone out. Check Sent before you send it again."); }
+    pure public function undo-too-late() -> string { return @tr("Too late to undo: the message is being sent."); }
+    pure public function reply-in-outbox() -> string { return @tr("Your reply is in the Outbox; only the organizer gets it."); }
+    pure public function answer-kept() -> string { return @tr("Answer kept on this computer; no reply was sent."); }
+
+    // ---- Status line actions
+    pure public function action-undo() -> string { return @tr("Undo"); }
+    pure public function action-retry() -> string { return @tr("Retry"); }
+    pure public function action-update-password() -> string { return @tr("Update password"); }
+    pure public function action-review-certificate() -> string { return @tr("Review certificate"); }
+    pure public function action-try-now() -> string { return @tr("Try now"); }
+    // An account's caution badge in the folder pane and rail (its server
+    // was out of reach at the last sync).
+    pure public function nav-unreachable(host: string) -> string { return @tr("Can't reach {0}", host); }
+    // The What's new bar (src/app/tips.rs), Informational, after an update.
+    pure public function whats-new-bar(version: string) -> string { return @tr("Komorebi was updated to {0}.", version); }
+    pure public function action-whats-new() -> string { return @tr("What's new"); }
+
+    // ---- The account form and the accounts' lines
+    pure public function err-email() -> string { return @tr("Enter your full email address."); }
+    pure public function err-email-first() -> string { return @tr("Enter your full email address first."); }
+    pure public function err-account-exists() -> string { return @tr("This account is already added."); }
+    pure public function err-account-removed() -> string { return @tr("This account was removed."); }
+    pure public function err-password-to-test() -> string { return @tr("Enter the password to test."); }
+    pure public function err-offline-check() -> string { return @tr("Offline: a password or server change can't be checked."); }
+    pure public function err-offline-cert() -> string { return @tr("Offline: a certificate can't be reviewed."); }
+    pure public function err-offline-find() -> string { return @tr("Offline: settings can't be looked up."); }
+    pure public function err-saved-password() -> string { return @tr("Komorebi couldn't read the saved password. Type the password to test."); }
+    pure public function err-provider() -> string { return @tr("Choose your provider."); }
+    pure public function err-server-names() -> string { return @tr("Enter the IMAP and SMTP server names."); }
+    pure public function err-server-name-only() -> string { return @tr("Enter the server name only, such as mail.example.com."); }
+    pure public function err-zone-id() -> string { return @tr("Zone identifiers such as %eth0 aren't supported. Remove the part after the % sign."); }
+    pure public function err-ascii-name() -> string { return @tr("Use the ASCII (xn--) form of the server name, such as xn--mail-example.com."); }
+    pure public function err-port(proto: string) -> string { return @tr("Enter a valid {0} port.", proto); }
+    pure public function err-username(proto: string) -> string { return @tr("Enter a valid {0} username.", proto); }
+    pure public function check-passed() -> string { return @tr("Every step passed. Nothing was saved; use Add account or Save to keep these settings."); }
+    pure public function account-added(email: string) -> string { return @tr("Added {0}. Downloading mail\u{a0}…", email); }
+    pure public function account-saved(email: string) -> string { return @tr("Saved {0}.", email); }
+    pure public function account-off() -> string { return @tr("Off: no connections; its downloaded mail stays"); }
+    pure public function account-downloading(done: string, total: string) -> string { return @tr("Downloading {0} of {1}\u{a0}…", done, total); }
+    pure public function account-sign-in-rejected() -> string { return @tr("Sign-in rejected"); }
+    pure public function account-secure-failed() -> string { return @tr("Secure connection failed"); }
+    pure public function account-syncing() -> string { return @tr("Syncing\u{a0}…"); }
+    pure public function account-checked(time: string) -> string { return @tr("Up to date, checked {0}", time); }
+    pure public function account-up-to-date() -> string { return @tr("Up to date"); }
+    pure public function account-unreachable(host: string) -> string { return @tr("Can't reach {0}", host); }
+    pure public function account-sync-failed(detail: string) -> string { return @tr("Last sync failed: {0}", detail); }
+    pure public function status-downloading(email: string, done: string, total: string, folder: string) -> string {
+        return @tr("{0}: downloading {1} of {2} in {3}\u{a0}…", email, done, total, folder);
+    }
+    pure public function redownloading(email: string) -> string { return @tr("Downloading the mail of {0} again\u{a0}…", email); }
+    pure public function redownload-later(email: string) -> string { return @tr("The mail of {0} downloads again at its next sync.", email); }
+
+    // ---- Folders and the list
+    pure public function all-inboxes() -> string { return @tr("All inboxes"); }
+    pure public function drafts() -> string { return @tr("Drafts"); }
+    pure public function outbox() -> string { return @tr("Outbox"); }
+    pure public function all-folders() -> string { return @tr("All folders"); }
+    // The title bar's search: its placeholder names the view, its scope
+    // control has scope words (never a view name), and the list says what
+    // a search found where.
+    pure public function search-in(view: string) -> string { return @tr("Search {0}", view); }
+    pure public function scope-this-folder() -> string { return @tr("This folder"); }
+    pure public function scope-these-inboxes() -> string { return @tr("These inboxes"); }
+    pure public function search-results() -> string { return @tr("Search results"); }
+    pure public function results-in(n: int, view: string) -> string { return @tr("{n} result in {0}" | "{n} results in {0}" % n, view); }
+    pure public function results-all(n: int) -> string { return @tr("{n} result in all folders" | "{n} results in all folders" % n); }
+    pure public function show-in-folder() -> string { return @tr("Show in folder"); }
+    // An all-folders search's row tag: the account and the folder.
+    pure public function account-folder(account: string, folder: string) -> string { return @tr("tag" => "{0} · {1}", account, folder); }
+    // The folder pane's row menu, and the list's "..." menu.
+    pure public function menu-mark-all-read() -> string { return @tr("Mark all as read"); }
+    pure public function menu-collapse-all() -> string { return @tr("Collapse all"); }
+    pure public function menu-collapse-all-folders() -> string { return @tr("Collapse all folders"); }
+    pure public function menu-refresh() -> string { return @tr("Refresh"); }
+    pure public function menu-account-settings() -> string { return @tr("Account settings"); }
+    // The account page's "…" menu (as `menu:account` prints it).
+    pure public function menu-move-up() -> string { return @tr("Move up"); }
+    pure public function menu-move-down() -> string { return @tr("Move down"); }
+    pure public function menu-select-messages() -> string { return @tr("Select messages"); }
+    // The row menu and the reader's More menu (each item's accelerator text
+    // follows after a tab; key names stay as Windows writes them, but
+    // Backspace, which Portuguese Windows calls Retrocesso).
+    pure public function menu-reply() -> string { return @tr("Reply"); }
+    pure public function menu-reply-all() -> string { return @tr("Reply all"); }
+    pure public function menu-forward() -> string { return @tr("Forward"); }
+    pure public function menu-forward-attached() -> string { return @tr("Forward as attachment"); }
+    pure public function menu-mark-read() -> string { return @tr("Mark as read"); }
+    pure public function menu-mark-unread() -> string { return @tr("Mark as unread"); }
+    pure public function menu-flag() -> string { return @tr("Flag"); }
+    pure public function menu-remove-flag() -> string { return @tr("Remove flag"); }
+    pure public function menu-archive() -> string { return @tr("Archive"); }
+    pure public function menu-delete() -> string { return @tr("Delete"); }
+    pure public function menu-move-to() -> string { return @tr("Move to"); }
+    pure public function menu-report-junk() -> string { return @tr("Report junk"); }
+    pure public function menu-not-junk() -> string { return @tr("Not junk"); }
+    pure public function menu-save-eml() -> string { return @tr("Save as .eml"); }
+    pure public function menu-show-original() -> string { return @tr("Show original"); }
+    pure public function menu-copy-message-id() -> string { return @tr("Copy Message-ID"); }
+    pure public function menu-plain-text() -> string { return @tr("View as plain text"); }
+    pure public function menu-original-colours() -> string { return @tr("Show original colours"); }
+    pure public function menu-load-images() -> string { return @tr("Load images"); }
+    pure public function menu-stop-images() -> string { return @tr("Stop loading images from this sender"); }
+    pure public function key-backspace() -> string { return @tr("key" => "Backspace"); }
+    // The Move flyout's recent folders.
+    pure public function move-recent() -> string { return @tr("Recent"); }
+    // The rail's fixed names, as the window shows them (its width follows
+    // their longest word).
+    pure public function rail-new-mail() -> string { return @tr("New mail"); }
+    pure public function rail-settings() -> string { return @tr("Settings"); }
+    pure public function rail-folders() -> string { return @tr("Folders"); }
+    // All inboxes under its rail icon, on at most two short lines.
+    pure public function rail-all-inboxes() -> string { return @tr("rail" => "All inboxes"); }
+    // The names of the folders a server marks by role, shown in the language
+    // chosen instead of the server's own spelling (English keeps the server's).
+    pure public function role-inbox() -> string { return @tr("Inbox"); }
+    pure public function role-drafts() -> string { return @tr("Drafts"); }
+    pure public function role-sent() -> string { return @tr("Sent"); }
+    pure public function role-archive() -> string { return @tr("folder" => "Archive"); }
+    pure public function role-junk() -> string { return @tr("Junk"); }
+    pure public function role-trash() -> string { return @tr("Trash"); }
+    pure public function empty-no-matches() -> string { return @tr("No matches"); }
+    pure public function empty-no-drafts() -> string { return @tr("No drafts. Select New mail to start one."); }
+    pure public function empty-outbox() -> string { return @tr("Outbox is empty. Messages wait here while they are sent."); }
+    pure public function empty-no-unread() -> string { return @tr("No unread messages"); }
+    pure public function empty-no-flagged() -> string { return @tr("No flagged messages"); }
+    pure public function empty-loading() -> string { return @tr("Loading\u{a0}…"); }
+    pure public function empty-unreachable() -> string { return @tr("Can't reach the server, so this list may be incomplete"); }
+    pure public function empty-failed() -> string { return @tr("Couldn't check for new mail, so this list may be incomplete"); }
+    pure public function empty-nothing() -> string { return @tr("Nothing here"); }
+    pure public function empty-folder() -> string { return @tr("This folder is empty"); }
+    pure public function empty-downloading(done: string, total: string) -> string {
+        return @tr("Downloading your mail\u{a0}… {0} of {1}. Newest messages arrive first.", done, total);
+    }
+    pure public function empty-downloading-start() -> string { return @tr("Downloading your mail\u{a0}… Newest messages arrive first."); }
+    pure public function removed-deleted() -> string { return @tr("Deleted"); }
+    pure public function removed-moved(place: string) -> string { return @tr("Moved to {0}", place); }
+    pure public function removed-deleted-many(n: int) -> string { return @tr("{n} message deleted" | "{n} messages deleted" % n); }
+    pure public function removed-moved-many(n: int, place: string) -> string { return @tr("{n} message moved to {0}" | "{n} messages moved to {0}" % n, place); }
+    // Two whole sentences: what was done, and what was missing.
+    pure public function removed-with-note(label: string, note: string) -> string { return @tr("{0}. {1}", label, note); }
+    pure public function missing-archive() -> string { return @tr("This account has no Archive folder. You can choose one in Settings: Accounts, Edit."); }
+    pure public function missing-trash() -> string { return @tr("This account has no Trash folder, so nothing was deleted. You can choose one in Settings: Accounts, Edit."); }
+    pure public function missing-junk() -> string { return @tr("This account has no Junk folder, so nothing was moved. You can choose one in Settings: Accounts, Edit."); }
+    pure public function missing-inbox() -> string { return @tr("This account has no Inbox folder."); }
+    pure public function role-automatic(name: string) -> string { return @tr("Automatic ({0})", name); }
+    pure public function role-automatic-none() -> string { return @tr("Automatic (none found)"); }
+    // A message row of the Outbox and Drafts views.
+    pure public function row-no-recipient() -> string { return @tr("(no recipient)"); }
+    pure public function row-to(who: string) -> string { return @tr("To: {0}", who); }
+    pure public function no-subject() -> string { return @tr("(no subject)"); }
+
+    // ---- Reading
+    pure public function body-cut-note() -> string { return @tr("[Message shortened for display]"); }
+    pure public function encrypted-notice(kind: string) -> string {
+        return @tr("This message is encrypted ({0}). Komorebi cannot decrypt it; save the encrypted file to open it in a program that has the key.", kind);
+    }
+    pure public function reader-too-large() -> string { return @tr("This message is too large to show formatted, so it is shown as plain text."); }
+    pure public function reader-too-slow() -> string { return @tr("This message took too long to lay out, so it is shown as plain text."); }
+    pure public function link-text-mismatch(shown: string, host: string) -> string { return @tr("The link text says \u{201c}{0}\u{201d}, but it opens {1}.", shown, host); }
+    pure public function link-punycode(host: string) -> string { return @tr("{0} is an international name, which can imitate the letters of another site.", host); }
+    pure public function link-user-info(host: string) -> string { return @tr("The address puts a user name before the real site, which is {0}.", host); }
+    pure public function link-raw-ip(host: string) -> string { return @tr("{0} is a bare IP address, not a site name.", host); }
+    pure public function trust-notice-one(a: string) -> string { return @tr("Reason: {0}.", a); }
+    pure public function trust-notice-two(a: string, b: string) -> string { return @tr("Reasons: {0}; {1}.", a, b); }
+    pure public function trust-dmarc() -> string { return @tr("it failed your server's sender check (DMARC)"); }
+    pure public function trust-spf-dkim() -> string { return @tr("it failed your server's sender checks (SPF and DKIM)"); }
+    pure public function trust-name-domain(shown: string, real: string) -> string { return @tr("the name shows {0}, but the address is at {1}", shown, real); }
+    pure public function trust-punycode(ascii: string, unicode: string) -> string { return @tr("{0} is the international name \u{201c}{1}\u{201d}", ascii, unicode); }
+    pure public function trust-mixed-script(domain: string, script: string) -> string { return @tr("{0} mixes Latin and {1} letters", domain, script); }
+    pure public function script-cyrillic() -> string { return @tr("Cyrillic"); }
+    pure public function script-greek() -> string { return @tr("Greek"); }
+    pure public function fetching() -> string { return @tr("Fetching message\u{a0}…"); }
+    pure public function not-downloaded() -> string { return @tr("This message isn't downloaded yet."); }
+    pure public function no-message-id() -> string { return @tr("This message has no Message-ID."); }
+    pure public function message-id-copied() -> string { return @tr("Message-ID copied."); }
+
+    // ---- The invitation card
+    pure public function invite-cancelled() -> string { return @tr("Cancelled: this event will not take place."); }
+    pure public function invite-accepted() -> string { return @tr("You accepted."); }
+    pure public function invite-tentative() -> string { return @tr("You tentatively accepted."); }
+    pure public function invite-declined() -> string { return @tr("You declined."); }
+    pure public function invite-over() -> string { return @tr("This event is over."); }
+    pure public function invite-updated() -> string { return @tr("Updated invitation"); }
+    pure public function invite-organizer(who: string) -> string { return @tr("Organizer: {0}", who); }
+    pure public function invite-where(place: string) -> string { return @tr("Where: {0}", place); }
+    pure public function invite-no-title() -> string { return @tr("(no title)"); }
+
+    // ---- Composing
+    pure public function title-new() -> string { return @tr("New message"); }
+    pure public function title-reply() -> string { return @tr("Reply"); }
+    pure public function title-reply-all() -> string { return @tr("Reply all"); }
+    pure public function title-forward() -> string { return @tr("Forward"); }
+    pure public function fix-address-to() -> string { return @tr("Fix the To address to send."); }
+    pure public function fix-address-cc() -> string { return @tr("Fix the Cc address to send."); }
+    pure public function fix-address-bcc() -> string { return @tr("Fix the Bcc address to send."); }
+    pure public function add-recipient() -> string { return @tr("Add a recipient to send."); }
+    pure public function attachments-over() -> string { return @tr("Attachments are over 25 MB; remove some to send."); }
+    pure public function guard-both() -> string { return @tr("No subject, and the text mentions an attachment but nothing is attached."); }
+    pure public function guard-no-subject() -> string { return @tr("This message has no subject."); }
+    pure public function guard-no-attachment() -> string { return @tr("The text mentions an attachment, but nothing is attached."); }
+    pure public function address-invalid(address: string) -> string { return @tr("\u{201c}{0}\u{201d} is not a valid address", address); }
+    pure public function earlier-draft-saved() -> string { return @tr("Earlier draft saved in Drafts."); }
+    pure public function add-account-write() -> string { return @tr("Add an account to write messages."); }
+    pure public function add-account-send() -> string { return @tr("Add an account to send messages."); }
+    pure public function still-downloading() -> string { return @tr("The message is still downloading."); }
+    pure public function draft-gone() -> string { return @tr("This draft is no longer saved."); }
+    pure public function draft-left-out(names: string) -> string { return @tr("Couldn't load {0}; left out of this draft.", names); }
+    pure public function draft-saved() -> string { return @tr("Draft saved"); }
+    // The composer's header caption, refreshed by every save.
+    pure public function draft-saved-at(time: string) -> string { return @tr("Draft saved {0}", time); }
+    // The line above a reply's quote, and a forward's heading and fields,
+    // in the language shown.
+    pure public function quote-wrote(date: string, name: string) -> string { return @tr("On {0}, {1} wrote:", date, name); }
+    pure public function forwarded() -> string { return @tr("---------- Forwarded message ----------"); }
+    pure public function forward-from() -> string { return @tr("forwarded header" => "From"); }
+    pure public function forward-date() -> string { return @tr("forwarded header" => "Date"); }
+    pure public function forward-subject() -> string { return @tr("forwarded header" => "Subject"); }
+    pure public function forward-to() -> string { return @tr("forwarded header" => "To"); }
+    pure public function attach-total(size: string) -> string { return @tr("Attachments {0} of 25 MB", size); }
+    pure public function attach-folder(name: string) -> string { return @tr("{0}: folders can't be attached", name); }
+    pure public function attach-too-big(name: string) -> string { return @tr("{0}: over Komorebi's 100 MB attachment limit", name); }
+    // A line about one file: its name, then why.
+    pure public function attach-failed(name: string, why: string) -> string { return @tr("{0}: {1}", name, why); }
+
+    // ---- Certificates in the account form
+    pure public function cert-pinned(fingerprint: string) -> string { return @tr("Certificate: pinned (SHA-256 {0})", fingerprint); }
+    pure public function cert-damaged(host: string) -> string { return @tr("The saved certificate for {0} is damaged. Forget it and review the certificate again.", host); }
+    pure public function cert-windows() -> string { return @tr("Certificate: checked by Windows"); }
+    pure public function cert-unreadable(address: string) -> string {
+        return @tr("Couldn't read the certificate of {0}. Check the server name, the port and the security setting, then try again.", address);
+    }
+    pure public function cert-trusted(host: string) -> string {
+        return @tr("Certificate trusted for {0}. Press Test connection, or Add account or Save, to continue.", host);
+    }
+    pure public function cert-names(names: string) -> string { return @tr("Names: {0}", names); }
+    pure public function cert-subject(subject: string) -> string { return @tr("Subject: {0}", subject); }
+    pure public function cert-self-signed() -> string { return @tr("Self-signed"); }
+    pure public function cert-issued-by(issuer: string) -> string { return @tr("Issued by {0}", issuer); }
+    pure public function cert-valid(begin: string, end: string) -> string { return @tr("Valid from {0} to {1}", begin, end); }
+    // The lines above the prompt's fingerprints, and the caution under a
+    // certificate that replaces a saved one.
+    pure public function cert-fp-label() -> string { return @tr("SHA-256 fingerprint"); }
+    pure public function cert-fp-new() -> string { return @tr("New certificate (SHA-256)"); }
+    pure public function cert-fp-old() -> string { return @tr("Saved before (SHA-256)"); }
+    pure public function cert-fp-caution() -> string { return @tr("This isn't the certificate you saved. If you didn't expect a new one, cancel."); }
+
+    // ---- "Find settings"
+    pure public function find-none() -> string { return @tr("No settings found, enter them by hand."); }
+    pure public function find-builtin() -> string { return @tr("Komorebi has settings built in for this provider."); }
+    pure public function find-srv() -> string { return @tr("Found in your domain's DNS records."); }
+    pure public function find-autoconfig() -> string { return @tr("Found by your provider's autoconfig."); }
+    pure public function find-both() -> string { return @tr("Found in your domain's DNS records and by your provider's autoconfig."); }
+    pure public function find-no-incoming() -> string { return @tr("No incoming server found, enter it by hand."); }
+    pure public function find-no-sending() -> string { return @tr("No sending server found, enter it by hand."); }
+    pure public function find-refused(host: string) -> string { return @tr("The provider's settings point to {0}, a different domain. Not filled in.", host); }
+    pure public function find-kept() -> string { return @tr("Kept the server settings you typed."); }
+
+    // ---- The in-app prompts
+    pure public function q-resend-title() -> string { return @tr("Send this message again?"); }
+    pure public function q-resend-text() -> string { return @tr("It may already have been sent. Check your Sent folder first, or the recipients may get it twice."); }
+    pure public function q-resend-ok() -> string { return @tr("Send again"); }
+    pure public function q-discard-title() -> string { return @tr("Discard this message?"); }
+    // One sentence for every discard (the composer, a draft row, the
+    // Outbox): what goes, and where from.
+    pure public function q-discard-text() -> string { return @tr("It is deleted here and from your Drafts folder on the server, with its attachments."); }
+    pure public function q-discard-ok() -> string { return @tr("Discard"); }
+    // Delete in Trash (deleted on the server) or in Junk (moved to Trash).
+    pure public function q-delete-trash-title(n: int) -> string { return @tr("Delete {n} message for good?" | "Delete {n} messages for good?" % n); }
+    pure public function q-delete-trash-text(n: int) -> string {
+        return @tr("{n} message is deleted from Trash on the server. Once the Undo offer goes, it can't be brought back." | "{n} messages are deleted from Trash on the server. Once the Undo offer goes, they can't be brought back." % n);
+    }
+    pure public function q-delete-junk-title(n: int) -> string { return @tr("Delete {n} message from Junk?" | "Delete {n} messages from Junk?" % n); }
+    pure public function q-delete-junk-text(n: int) -> string { return @tr("{n} message moves to Trash." | "{n} messages move to Trash." % n); }
+    pure public function q-delete-ok() -> string { return @tr("Delete"); }
+    pure public function q-remove-title(email: string) -> string { return @tr("Remove {0}?", email); }
+    pure public function q-remove-text() -> string { return @tr("Removes this account and its downloaded mail from this computer. Mail on the server is not affected."); }
+    pure public function q-remove-unsent(n: int) -> string {
+        return @tr("Its {n} unsent draft or Outbox message will be lost." | "Its {n} unsent drafts and Outbox messages will be lost." % n);
+    }
+    pure public function q-remove-ok() -> string { return @tr("Remove"); }
+    pure public function q-rsvp-title-accepted() -> string { return @tr("Reply \u{201c}Accepted\u{201d}?"); }
+    pure public function q-rsvp-title-tentative() -> string { return @tr("Reply \u{201c}Tentative\u{201d}?"); }
+    pure public function q-rsvp-title-declined() -> string { return @tr("Reply \u{201c}Declined\u{201d}?"); }
+    pure public function q-rsvp-text(organizer: string, account: string) -> string { return @tr("The reply goes only to the organizer, {0}, from {1}. No one else gets it.", organizer, account); }
+    pure public function q-rsvp-domain(theirs: string, sender: string) -> string {
+        return @tr("Check the address: the organizer's domain ({0}) is not the sender's ({1}).", theirs, sender);
+    }
+    pure public function q-rsvp-unlisted(account: string) -> string { return @tr("You are not listed as an attendee, so the reply answers as {0}.", account); }
+    pure public function q-rsvp-alias(address: string) -> string { return @tr("The reply answers as {0}, an address this message was sent to.", address); }
+    pure public function q-rsvp-local() -> string { return @tr("\u{201c}Don't send a reply\u{201d} keeps your answer on this computer only."); }
+    pure public function q-rsvp-ok() -> string { return @tr("Send reply"); }
+    pure public function q-rsvp-alt() -> string { return @tr("Don't send a reply"); }
+    pure public function q-redownload-title(email: string) -> string { return @tr("Download the mail of {0} again?", email); }
+    pure public function q-redownload-text() -> string {
+        return @tr("Komorebi forgets the mail it downloaded for this account and downloads it again. Mail on the server is not affected; drafts, the Outbox and settings stay.");
+    }
+    pure public function q-redownload-ok() -> string { return @tr("Download again"); }
+    pure public function q-wipe-title() -> string { return @tr("Remove all of Komorebi's data?"); }
+    pure public function q-wipe-text() -> string {
+        return @tr("Deletes the saved passwords of all accounts, then the downloaded mail, drafts, Outbox, settings and logs on this computer, and closes Komorebi. Mail on the server is not affected.");
+    }
+    pure public function q-wipe-unsent(n: int) -> string {
+        return @tr("{n} unsent draft or Outbox message will be lost." | "{n} unsent drafts and Outbox messages will be lost." % n);
+    }
+    pure public function q-wipe-ok() -> string { return @tr("Remove all data"); }
+    pure public function q-trust-title() -> string { return @tr("Trust this certificate?"); }
+    pure public function q-trust-text(address: string, host: string) -> string {
+        return @tr("{0} presented a certificate that Windows doesn't trust. Trust this certificate for {1} only?", address, host);
+    }
+    pure public function q-trust-ok() -> string { return @tr("Trust this certificate"); }
+    // Behind "How do I check this?" in the prompt.
+    pure public function q-trust-note() -> string {
+        return @tr("Ask whoever runs the server for its fingerprint, or run openssl x509 -noout -fingerprint -sha256 on its certificate, and compare every byte. Only trust it on a network you control. A saved certificate has to be reviewed again when the server renews it.");
+    }
+
+    // ---- Titles of the file dialogs
+    pure public function dlg-save-attachment() -> string { return @tr("Save attachment"); }
+    pure public function dlg-save-invitation() -> string { return @tr("Save invitation"); }
+    pure public function dlg-save-message() -> string { return @tr("Save message"); }
+    pure public function dlg-attach-files() -> string { return @tr("Attach files"); }
+}

@@ -31,17 +31,27 @@
 //! every connection is replaced.
 
 pub mod compose_html;
+pub mod discover;
 pub mod errors;
 #[cfg(test)]
 mod fake;
+#[cfg(test)]
+mod fake_imapd;
+#[cfg(test)]
+pub(crate) mod fake_tls;
 pub mod html;
 pub mod ical;
 mod idle;
 pub mod imap;
 pub mod mime;
+pub mod pin;
+#[cfg(test)]
+mod profiles;
 pub mod render;
 pub mod smtp;
 pub mod source;
+#[cfg(test)]
+mod tolerance;
 
 use crate::db::{self, Account, Db, Folder, Fp};
 use crate::diag;
@@ -49,14 +59,14 @@ use crate::providers::Server;
 use crate::role::Role;
 use crate::secrets;
 use anyhow::{Context, Result, anyhow};
-pub use errors::{Class, Problem, SIGN_IN_HINT};
-use errors::{is_auth_error, is_connection_error, is_parse_error};
+pub use errors::{Attention, Class, Problem, Say};
+use errors::{is_connection_error, is_parse_error};
 use idle::{IdleHandle, Idler, spawn_idle};
 use imap::{FolderStatus, Imap, Statuses};
 use lettre::address::Envelope;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -136,7 +146,7 @@ pub enum Event {
     },
     BodyFailed {
         message_id: i64,
-        error: String,
+        error: Problem,
     },
     /// A `Job::Send` of outbox row `row` ended (its row is settled).
     Sent {
@@ -158,7 +168,7 @@ pub enum Event {
     /// An action worked, with a caveat the user should see.
     Notice {
         account_id: i64,
-        message: String,
+        message: Notice,
     },
     /// The server reported a change in this folder (IMAP IDLE); a
     /// STATUS-gated sync picks it up.
@@ -179,12 +189,51 @@ pub enum Outcome {
     DeliveredNotSaved(String),
     /// Not sent, and safe to try again later: the server could not be
     /// reached or refused for now (4xx). The row is queued with backoff.
-    Retry(String),
+    Retry(Reason),
     /// Not sent: refused, or out of retries.
-    Failed(String),
+    Failed(Reason),
     /// The connection broke after the session was up: it may or may not
     /// have been sent.
-    Unconfirmed(String),
+    Unconfirmed(Reason),
+}
+
+/// Why a send did not go through. `text` is what the outbox row keeps (the
+/// failure's own words, in English); `say` is the sentence the status line
+/// renders in the display language, when the failure has one of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reason {
+    pub text: String,
+    pub say: Option<Say>,
+}
+
+impl Reason {
+    /// A failure with a sentence of its own (kept in the row as its
+    /// English record).
+    pub fn said(say: Say) -> Self {
+        Reason {
+            text: say.record().unwrap_or_default(),
+            say: Some(say),
+        }
+    }
+}
+
+impl From<String> for Reason {
+    fn from(text: String) -> Self {
+        Reason { text, say: None }
+    }
+}
+
+impl From<&str> for Reason {
+    fn from(text: &str) -> Self {
+        Reason::from(text.to_string())
+    }
+}
+
+impl std::ops::Deref for Reason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.text
+    }
 }
 
 impl Outcome {
@@ -197,35 +246,36 @@ impl Outcome {
     pub fn reason(&self) -> &str {
         match self {
             Self::Delivered => "",
-            Self::DeliveredNotSaved(e)
-            | Self::Retry(e)
-            | Self::Failed(e)
-            | Self::Unconfirmed(e) => e,
+            Self::DeliveredNotSaved(e) => e,
+            Self::Retry(e) | Self::Failed(e) | Self::Unconfirmed(e) => &e.text,
         }
     }
 }
 
-/// Status after a delete or COPY-move that left the original flagged.
-const LEFT_FLAGGED: &str = "Removed here; the server keeps it flagged as deleted.";
+/// A caveat of an action that worked, for the status line (the app words
+/// it in the display language).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Notice {
+    /// A delete or COPY-move left the original flagged on the server.
+    LeftFlagged,
+    /// A move whose messages were already gone from the server.
+    MoveGone,
+    /// Said once per session when drafts can't be copied to the server.
+    NoDraftsFolder,
+    /// Said once per account and session when sent mail has no folder to
+    /// be copied to (nothing is created for it).
+    NoSentFolder,
+    /// Said once per session when a draft saved to the server can't be
+    /// found there (its next save would leave it behind).
+    NoDraftUid,
+    /// Saving a draft to the server failed for a reason of the server's
+    /// (its own words): drafts stay on this PC.
+    DraftsNotSaved(String),
+}
 
-/// A move whose messages were already gone from the server.
-const MOVE_GONE: &str = "Already gone from the server, so there was nothing to move.";
-
-/// After a send that may have gone through. Never resent automatically.
-const UNCONFIRMED: &str =
-    "The message may or may not have been sent; check Sent before you retry it from the Outbox.";
-
-/// A send that was running when the app stopped (`Db::recover_outbox`).
+/// A send that was running when the app stopped (`Db::recover_outbox`): the
+/// outbox record, in English as the one above.
 pub const INTERRUPTED: &str = "Komorebi closed while sending, so it may or may not have been sent; check Sent before you retry.";
-
-/// Said once per session when drafts can't be copied to the server.
-const NO_DRAFTS_FOLDER: &str =
-    "There is no Drafts folder on the server, so drafts are only saved on this PC.";
-
-/// Said once per session when a draft saved to the server can't be found
-/// there (its next save would leave it behind).
-const NO_DRAFT_UID: &str =
-    "A draft saved to the server couldn't be found there, so drafts are only saved on this PC.";
 
 /// Drafts whose attachments are larger than this stay on this PC: every
 /// server copy uploads them again.
@@ -236,8 +286,6 @@ pub const MAX_SEND_ATTEMPTS: i64 = 6;
 /// The wait before the first automatic retry; it doubles, up to [`RETRY_MAX`].
 const RETRY_FIRST: i64 = 30;
 const RETRY_MAX: i64 = 15 * 60;
-
-const TOO_LARGE: &str = "The server says this message is too large";
 
 pub type Notify = Arc<dyn Fn(Event) + Send + Sync>;
 
@@ -335,20 +383,59 @@ pub struct Workers {
     sync: Sender<Job>,
     interactive: Sender<Job>,
     pending: Pending,
-    auth_failed: Arc<AtomicBool>,
+    auth_failed: errors::Latch,
     /// Raised by [`Workers::resumed`]: every worker replaces its connection
     /// before its next command.
     resume: Arc<AtomicU64>,
     /// Stops the IDLE thread when the workers are dropped.
     idle: IdleHandle,
+    /// The missing Sent folder was said once.
+    sent_noted: Arc<std::sync::atomic::AtomicBool>,
+    /// Every job goes to the channel and nothing runs (`Workers::capture`).
+    capture: bool,
 }
 
 impl Workers {
+    /// Workers that run nothing and connect nowhere: every job sent,
+    /// sends included, arrives on the returned receiver as it was queued.
+    /// For the app's own tests, which check what the UI queues (the
+    /// workers' tests run those jobs against the fake servers).
+    #[doc(hidden)]
+    pub fn capture(account: Account, db_path: PathBuf, notify: Notify) -> (Self, Receiver<Job>) {
+        let (tx, rx) = channel();
+        // No ready signal ever comes: the IDLE thread ends at once.
+        let (_, ready_rx) = channel();
+        let auth_failed = errors::Latch::default();
+        let idle = spawn_idle(
+            Idler::new(
+                account.clone(),
+                Box::new(|_| Err(anyhow!("captured workers connect nowhere"))),
+                notify.clone(),
+                auth_failed.clone(),
+            ),
+            ready_rx,
+        );
+        let workers = Self {
+            account,
+            db_path,
+            notify,
+            sync: tx.clone(),
+            interactive: tx,
+            pending: Pending::default(),
+            auth_failed,
+            resume: Arc::new(AtomicU64::new(0)),
+            idle,
+            sent_noted: Arc::default(),
+            capture: true,
+        };
+        (workers, rx)
+    }
+
     pub fn spawn(account: Account, db_path: PathBuf, notify: Notify) -> Self {
         let (sync, sync_rx) = channel();
         let (interactive, inter_rx) = channel();
         let pending = Pending::default();
-        let auth_failed = Arc::new(AtomicBool::new(false));
+        let auth_failed = errors::Latch::default();
         let resume = Arc::new(AtomicU64::new(0));
         let (ready, ready_rx) = channel();
         let idle = spawn_idle(
@@ -371,6 +458,8 @@ impl Workers {
             auth_failed,
             resume,
             idle,
+            sent_noted: Arc::default(),
+            capture: false,
         };
         for (rx, name) in [(sync_rx, "sync"), (inter_rx, "interactive")] {
             let mut w = workers.worker();
@@ -405,6 +494,7 @@ impl Workers {
             ready: None,
             unselect_when_idle: false,
             drafts_noted: false,
+            sent_noted: self.sent_noted.clone(),
             resume: self.resume.clone(),
             resume_seen: self.resume.load(Ordering::Relaxed),
             parked: Vec::new(),
@@ -423,7 +513,7 @@ impl Workers {
     /// Let the workers sign in again after a rejected sign-in (new
     /// password, or the user asked to retry).
     pub fn credentials_changed(&self) {
-        self.auth_failed.store(false, Ordering::Relaxed);
+        self.auth_failed.clear();
     }
 
     /// An action on messages is queued or running (its UIDs are pending).
@@ -434,11 +524,20 @@ impl Workers {
     /// The server rejected the sign-in (or no password is saved): no
     /// LOGIN is tried until [`Workers::credentials_changed`].
     pub fn sign_in_rejected(&self) -> bool {
-        self.auth_failed.load(Ordering::Relaxed)
+        self.auth_failed.get()
+    }
+
+    /// What the workers wait for the user to fix, if anything: the sign-in
+    /// or the secure connection. One attempt was made; none follows until
+    /// [`Workers::credentials_changed`].
+    pub fn attention(&self) -> Option<errors::Attention> {
+        self.auth_failed.attention()
     }
 
     pub fn send(&self, job: Job) {
-        if let Job::Send { row } = job {
+        if let Job::Send { row } = job
+            && !self.capture
+        {
             return self.spawn_send(row);
         }
         for key in job.message_keys() {
@@ -520,7 +619,7 @@ struct Worker {
     smtp: SmtpSend,
     /// Set when the server rejected the sign-in (or no password is saved),
     /// shared by the account's workers: no LOGIN is tried until cleared.
-    auth_failed: Arc<AtomicBool>,
+    auth_failed: errors::Latch,
     /// The sync worker already reported the current rejection.
     latch_reported: bool,
     pending: Pending,
@@ -540,6 +639,9 @@ struct Worker {
     /// Draft copies to the server stopped for this session, after one
     /// notice (no Drafts folder, the server refused, or no UID came back).
     drafts_noted: bool,
+    /// The account's missing Sent folder was said (shared by its workers
+    /// and send threads).
+    sent_noted: Arc<std::sync::atomic::AtomicBool>,
     /// [`Workers::resumed`]'s count, and the value this worker last acted
     /// on.
     resume: Arc<AtomicU64>,
@@ -582,8 +684,14 @@ type Connect = Box<dyn Fn(&Account) -> Result<Imap> + Send>;
 
 fn connect_account(account: &Account) -> Result<Imap> {
     let started = Instant::now();
-    let imap = secrets::get_password(account.id)
-        .and_then(|password| Imap::connect(&account.imap, &account.email, &password));
+    let imap = secrets::get_password(account.id).and_then(|password| {
+        Imap::connect(
+            &account.imap,
+            account.imap_pin.as_deref(),
+            account.imap_login(),
+            &password,
+        )
+    });
     let status = match &imap {
         Ok(_) => "OK",
         Err(e) => errors::classify(e).name(),
@@ -599,7 +707,14 @@ type SmtpSend = Box<dyn Fn(&Account, &Envelope, &[u8]) -> Result<()> + Send>;
 
 fn smtp_account(account: &Account, envelope: &Envelope, raw: &[u8]) -> Result<()> {
     let password = secrets::get_password(account.id)?;
-    smtp::send_raw(&account.smtp, &account.email, &password, envelope, raw)
+    smtp::send_raw(
+        &account.smtp,
+        account.smtp_pin.as_deref(),
+        account.smtp_login(),
+        &password,
+        envelope,
+        raw,
+    )
 }
 
 impl Worker {
@@ -687,12 +802,12 @@ impl Worker {
         match job {
             Job::SyncAll { full } => {
                 // No network while the sign-in is rejected; say so once.
-                if self.auth_failed.load(Ordering::Relaxed) {
+                if self.auth_failed.get() {
                     if !std::mem::replace(&mut self.latch_reported, true) {
                         (self.notify)(Event::Syncing {
                             account_id: id,
                             active: false,
-                            error: Some(Problem::of(&errors::SignInLatched.into())),
+                            error: Some(Problem::of(&self.auth_failed.error())),
                         });
                     }
                     return;
@@ -708,7 +823,7 @@ impl Worker {
                 if self.backfill == Backfill::AfterFirstPass {
                     self.backfill = Backfill::Running;
                 }
-                self.latch_reported = self.auth_failed.load(Ordering::Relaxed);
+                self.latch_reported = self.auth_failed.get();
                 let synced = error.is_none();
                 (self.notify)(Event::Syncing {
                     account_id: id,
@@ -730,7 +845,7 @@ impl Worker {
                 if let Err(e) = self.fetch_body(db, message_id) {
                     (self.notify)(Event::BodyFailed {
                         message_id,
-                        error: Problem::of(&e).text().to_string(),
+                        error: Problem::of(&e),
                     });
                 }
             }
@@ -796,7 +911,7 @@ impl Worker {
             if matches!(job, Job::Move { .. }) {
                 (self.notify)(Event::Notice {
                     account_id: self.account.id,
-                    message: MOVE_GONE.to_string(),
+                    message: Notice::MoveGone,
                 });
             }
             db.clear_fingerprint(folder_id).ok();
@@ -913,7 +1028,7 @@ impl Worker {
         if expunged == imap::Expunged::LeftFlagged {
             (self.notify)(Event::Notice {
                 account_id: self.account.id,
-                message: LEFT_FLAGGED.to_string(),
+                message: Notice::LeftFlagged,
             });
         }
     }
@@ -924,8 +1039,8 @@ impl Worker {
     /// dropped without a retry (the command may already have run). After a
     /// rejected sign-in, fails without touching the network.
     fn with_imap<T>(&mut self, mut f: impl FnMut(&mut Imap, &Notify) -> Result<T>) -> Result<T> {
-        if self.auth_failed.load(Ordering::Relaxed) {
-            return Err(errors::SignInLatched.into());
+        if self.auth_failed.get() {
+            return Err(self.auth_failed.error());
         }
         // Woken from sleep: the connection is surely dead; don't wait on
         // a probe (or a LOGOUT) to find out.
@@ -958,11 +1073,12 @@ impl Worker {
         }
         let imap = match (self.connect)(&self.account) {
             Ok(imap) => self.imap.insert(imap),
-            Err(e) if is_auth_error(&e) => {
-                self.auth_failed.store(true, Ordering::Relaxed);
+            // A rejected sign-in, or a certificate or STARTTLS failure: one
+            // attempt, then the workers wait for the user (no retry loop).
+            Err(e) => {
+                self.auth_failed.set_from(&e);
                 return Err(e);
             }
-            Err(e) => return Err(e),
         };
         let result = f(imap, &self.notify);
         imap.touch();
@@ -1029,8 +1145,7 @@ impl Worker {
                 // sign-in was rejected: every later folder would fail the
                 // same way. The 1-minute timer retries. A parse error only
                 // dropped the connection, so the pass goes on.
-                let ends = self.auth_failed.load(Ordering::Relaxed)
-                    || (self.imap.is_none() && !is_parse_error(&e));
+                let ends = self.auth_failed.get() || (self.imap.is_none() && !is_parse_error(&e));
                 errors.push((f.display.clone(), e));
                 if ends {
                     return Err(pass_error(errors));
@@ -1138,11 +1253,9 @@ impl Worker {
         }
         if let Err(e) = self.try_save_draft(db, row)
             && !is_connection_error(&e)
-            && !self.auth_failed.load(Ordering::Relaxed)
+            && !self.auth_failed.get()
         {
-            self.note_drafts(&format!(
-                "Couldn't save drafts to the server ({e:#}); they are kept on this PC."
-            ));
+            self.note_drafts(Notice::DraftsNotSaved(format!("{e:#}")));
         }
     }
 
@@ -1158,7 +1271,7 @@ impl Worker {
         let Some(folder) = db.folder_by_role(id, Role::Drafts)? else {
             // Without an inbox the folder list isn't known yet.
             if db.folder_by_role(id, Role::Inbox)?.is_some() {
-                self.note_drafts(NO_DRAFTS_FOLDER);
+                self.note_drafts(Notice::NoDraftsFolder);
             }
             return Ok(());
         };
@@ -1232,17 +1345,17 @@ impl Worker {
         }
         if !found_new {
             // Every later save would leave another copy behind.
-            self.note_drafts(NO_DRAFT_UID);
+            self.note_drafts(Notice::NoDraftUid);
         }
         Ok(())
     }
 
     /// Say why drafts stay local, once per session, and stop copying them.
-    fn note_drafts(&mut self, message: &str) {
+    fn note_drafts(&mut self, message: Notice) {
         if !std::mem::replace(&mut self.drafts_noted, true) {
             (self.notify)(Event::Notice {
                 account_id: self.account.id,
-                message: message.to_string(),
+                message,
             });
         }
     }
@@ -1297,7 +1410,7 @@ impl Worker {
     fn deliver(&mut self, db: &mut Db, row: i64, out: &db::Outbound) -> Outcome {
         let envelope = match smtp::envelope(&self.account.email, &out.to, &out.cc, &out.bcc) {
             Ok(env) => env,
-            Err(e) => return Outcome::Failed(format!("{e:#}")),
+            Err(e) => return Outcome::Failed(format!("{e:#}").into()),
         };
         let started = Instant::now();
         let sent = (self.smtp)(&self.account, &envelope, &out.raw);
@@ -1307,6 +1420,13 @@ impl Worker {
         };
         diag::record(self.account.id, "SMTP SEND", status, started.elapsed());
         if let Err(e) = sent {
+            // Its own sentence: the server won't send as this address.
+            if smtp::sender_refused(&e) {
+                return Outcome::Failed(Reason::said(errors::sender_refused(
+                    &self.account.smtp.host,
+                    &self.account.email,
+                )));
+            }
             return send_failure(&e);
         }
         // The message is out: drop its row first, so nothing can send it
@@ -1335,6 +1455,21 @@ impl Worker {
                         folder_id: folder.id,
                     })
                 })
+        } else if db
+            .folder_by_role(self.account.id, Role::Inbox)
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            // The folder list is known and has no Sent folder: nothing is
+            // created for it. The message is out; say so once.
+            if !self.sent_noted.swap(true, Ordering::Relaxed) {
+                (self.notify)(Event::Notice {
+                    account_id: self.account.id,
+                    message: Notice::NoSentFolder,
+                });
+            }
+            Ok(())
         } else {
             Err(anyhow!("there is no Sent folder, so no copy was saved"))
         };
@@ -1871,13 +2006,22 @@ fn prefetch_batch(
     // The cached UIDVALIDITY now, not when the folder was loaded.
     let (name, uidvalidity) = folder_ref(db, folder_id)?;
     let uids: Vec<u32> = batch.iter().map(|m| m.1).collect();
-    let mut stored = 0;
-    for (uid, raw) in imap.fetch_bodies((&name, uidvalidity), &uids)? {
-        if let Some((id, _, _)) = batch.iter().find(|m| m.1 == uid) {
-            store_body(db, *id, &raw)?;
-            stored += 1;
-        }
-    }
+    // Parse first, then write the whole batch in one short transaction.
+    let parsed: Vec<_> = imap
+        .fetch_bodies((&name, uidvalidity), &uids)?
+        .into_iter()
+        .filter_map(|(uid, raw)| {
+            let (id, _, _) = batch.iter().find(|m| m.1 == uid)?;
+            let body = mime::parse_body(&raw);
+            Some((*id, raw, body.preview(), !body.attachments.is_empty()))
+        })
+        .collect();
+    let items: Vec<_> = parsed
+        .iter()
+        .map(|(id, raw, preview, attach)| (*id, raw.as_slice(), preview.as_str(), *attach))
+        .collect();
+    db.set_bodies(&items)?;
+    let stored = items.len();
     *budget -= batch.iter().map(|m| m.2).sum::<i64>();
     Ok(stored)
 }
@@ -1974,16 +2118,38 @@ fn folder_ref(db: &Db, folder_id: i64) -> Result<(String, u32)> {
 /// [`Outcome::Unconfirmed`]; unreachable or refused for now is
 /// [`Outcome::Retry`]; any other refusal is [`Outcome::Failed`].
 fn send_failure(e: &anyhow::Error) -> Outcome {
-    let mut text = format!("{e:#}");
-    if smtp::too_large(e) {
-        text = format!("{TOO_LARGE} ({text})");
+    // A changed or untrusted certificate: trying again can't help, and the
+    // outbox must not loop on it. The row fails with the sentence; the user
+    // fixes the account and sends it again.
+    let problem = Problem::of(e);
+    if problem.class == Class::TlsCert {
+        let say = problem.say().unwrap_or(Say::Class(Class::TlsCert));
+        return Outcome::Failed(Reason::said(say));
     }
-    if smtp::may_have_sent(e) {
-        Outcome::Unconfirmed(format!("{text}. {UNCONFIRMED}"))
-    } else if smtp::retryable(e) {
-        Outcome::Retry(text)
+    let detail = format!("{e:#}");
+    // A sentence of its own: a rejected sign-in that is waited out, or a
+    // message the server found too large.
+    let say = if e.chain().any(|c| c.is::<errors::SignInLatched>()) {
+        Some(Say::SignInLatched)
+    } else if smtp::too_large(e) {
+        Some(Say::TooLargeSend {
+            detail: detail.clone(),
+        })
     } else {
-        Outcome::Failed(text)
+        None
+    };
+    let reason = Reason {
+        text: say.as_ref().and_then(Say::record).unwrap_or(detail),
+        say,
+    };
+    if smtp::may_have_sent(e) {
+        Outcome::Unconfirmed(Reason::said(Say::Unconfirmed {
+            detail: reason.text,
+        }))
+    } else if smtp::retryable(e) {
+        Outcome::Retry(reason)
+    } else {
+        Outcome::Failed(reason)
     }
 }
 
@@ -2015,20 +2181,118 @@ fn uidvalidity_changed(e: &anyhow::Error) -> bool {
         .any(|c| c.downcast_ref::<imap::UidValidityChanged>().is_some())
 }
 
-/// Check that an account's IMAP settings and password work.
-pub fn verify(imap_server: &Server, username: &str, password: &str) -> Result<()> {
-    let mut imap = Imap::connect(imap_server, username, password)?;
-    imap.noop()?;
-    imap.logout();
-    Ok(())
+/// The saved certificates of an account's two servers (IMAP, SMTP), as
+/// the checks take them.
+pub type Pins<'a> = (Option<&'a [u8]>, Option<&'a [u8]>);
+
+/// Check an account's servers and password before saving them, step by
+/// step ([`errors::Step`]): the name, the connection, TLS, the IMAP sign-in
+/// and folder list, then the SMTP connection and sign-in (nothing is sent),
+/// each with its own login name (`Account::imap_login`,
+/// `Account::smtp_login`). `report` hears each step as it passes; the error
+/// names the one that failed, with a sentence for the user
+/// ([`errors::StepError::text`]). Nothing is saved here. The diagnostics
+/// log gets the step and class of a failure, never the server's words.
+pub fn verify_account(
+    imap: &Server,
+    smtp: &Server,
+    pins: Pins,
+    logins: (&str, &str),
+    password: &str,
+    report: &mut dyn FnMut(errors::Step),
+) -> Result<(), errors::StepError> {
+    let began = std::time::Instant::now();
+    let result = verify_steps(imap, smtp, pins, logins, password, report);
+    if let Err(e) = &result {
+        diag::record(
+            0,
+            "VERIFY",
+            &format!("{} {}", e.step.name(), e.class.name()),
+            began.elapsed(),
+        );
+    }
+    result
 }
 
-/// Check an account's servers and password before saving them: IMAP, then
-/// SMTP (sign-in only, nothing is sent). The error names the one that
-/// failed.
-pub fn verify_account(imap: &Server, smtp: &Server, username: &str, password: &str) -> Result<()> {
-    verify(imap, username, password).context("IMAP sign-in failed")?;
-    smtp::verify_smtp(smtp, username, password)
+fn verify_steps(
+    imap: &Server,
+    smtp: &Server,
+    pins: Pins,
+    logins: (&str, &str),
+    password: &str,
+    report: &mut dyn FnMut(errors::Step),
+) -> Result<(), errors::StepError> {
+    run_steps(
+        imap,
+        pins.0.is_some(),
+        logins.0,
+        |report| Imap::connect_steps(imap, pins.0, logins.0, password, Some(report)),
+        |report| smtp::verify_smtp(smtp, pins.1, logins.1, password, report),
+        report,
+    )
+}
+
+/// The sequence of [`verify_account`] around its two connections: IMAP
+/// (`connect` reports its own steps), the folder list, then SMTP.
+fn run_steps(
+    imap: &Server,
+    pinned: bool,
+    imap_login: &str,
+    connect: impl FnOnce(&mut dyn FnMut(errors::Step)) -> Result<Imap, imap::StepFailure>,
+    smtp_check: impl FnOnce(&mut dyn FnMut(errors::Step)) -> Result<(), errors::StepError>,
+    report: &mut dyn FnMut(errors::Step),
+) -> Result<(), errors::StepError> {
+    use errors::Step;
+    let failed = |step, e| imap_step_error(step, e, imap, pinned, imap_login);
+    let mut session = connect(report).map_err(|(s, e)| failed(s, e))?;
+    session
+        .list_folders()
+        .map_err(|e| failed(Step::ListFolders, e))?;
+    report(Step::ListFolders);
+    session.logout();
+    smtp_check(report)
+}
+
+/// A failed IMAP step as the form reports it.
+fn imap_step_error(
+    step: errors::Step,
+    e: anyhow::Error,
+    server: &Server,
+    pinned: bool,
+    login: &str,
+) -> errors::StepError {
+    use errors::{Class, Special, Step};
+    let (class, special) = match step {
+        Step::Resolve | Step::Connect => (Class::Offline, Special::None),
+        Step::Secure if e.chain().any(|c| c.is::<imap::StartTlsRefused>()) => {
+            (Class::TlsCert, Special::NoStartTls)
+        }
+        Step::Secure if e.downcast_ref::<imap::PlainAnswer>().is_some() => {
+            (Class::TlsCert, Special::PlainAnswer)
+        }
+        Step::Secure | Step::ImapSignIn if e.chain().any(|c| c.is::<imap::GreetingRefused>()) => {
+            (Class::Other, Special::BadGreeting)
+        }
+        Step::ImapSignIn if e.chain().any(|c| c.is::<imap::NoSignIn>()) => {
+            (Class::Other, Special::NoLogin)
+        }
+        Step::ImapSignIn if e.chain().any(|c| c.is::<imap::Utf8Only>()) => {
+            (Class::Other, Special::Utf8Only)
+        }
+        Step::Secure if pinned && errors::classify(&e) == Class::TlsCert => {
+            (Class::TlsCert, Special::CertChanged)
+        }
+        _ => (errors::classify(&e), Special::None),
+    };
+    errors::StepError {
+        step,
+        class,
+        special,
+        host: server.host.clone(),
+        port: server.port,
+        login: login.to_string(),
+        source: e,
+    }
 }
 
 #[cfg(test)]
@@ -2037,7 +2301,9 @@ mod tests {
     use super::*;
     use crate::db::{NewAccount, NewHeader};
     use crate::providers::Security;
+    use errors::UNCONFIRMED;
     use std::path::Path;
+    use std::sync::atomic::AtomicBool;
 
     /// An account with a synced INBOX (UIDVALIDITY `uidvalidity`) holding
     /// `uids`; returns the folder.
@@ -2049,6 +2315,8 @@ mod tests {
         };
         let account_id = db
             .add_account(&NewAccount {
+                imap_user: String::new(),
+                smtp_user: String::new(),
                 email: "me@example.com".into(),
                 name: "Me".into(),
                 imap: server.clone(),
@@ -2076,7 +2344,7 @@ mod tests {
         worker_with(db, Some(imap))
     }
 
-    fn worker_with(db: &Db, imap: Option<Imap>) -> (Worker, Arc<Mutex<Vec<Event>>>) {
+    pub(super) fn worker_with(db: &Db, imap: Option<Imap>) -> (Worker, Arc<Mutex<Vec<Event>>>) {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = events.clone();
         let w = Worker {
@@ -2086,7 +2354,7 @@ mod tests {
             imap,
             connect: Box::new(|_| Err(anyhow!("no server in this test"))),
             smtp: Box::new(|_, _, _| Err(anyhow!("no SMTP server in this test"))),
-            auth_failed: Arc::default(),
+            auth_failed: errors::Latch::default(),
             latch_reported: false,
             pending: Pending::default(),
             prefetch: None,
@@ -2095,6 +2363,7 @@ mod tests {
             ready: None,
             unselect_when_idle: false,
             drafts_noted: false,
+            sent_noted: Arc::default(),
             resume: Arc::default(),
             resume_seen: 0,
             parked: Vec::new(),
@@ -2287,6 +2556,123 @@ mod tests {
             })
             .collect();
         db.insert_headers(f.account_id, f.id, &headers).unwrap();
+    }
+
+    #[test]
+    fn a_failed_body_batch_stores_nothing_and_is_retried() {
+        let mut db = Db::in_memory().unwrap();
+        let f = setup(&mut db, 7, &[]);
+        add_sized(&mut db, &f, 1..=2, 100);
+        let missing = db.missing_bodies(f.id, 300, PREFETCH_MAX_SIZE).unwrap();
+        assert_eq!(missing.len(), 2);
+        let raw: &[u8] = b"Subject: x
+
+hello
+";
+        // The second row names a message that does not exist: the batch fails.
+        let bad = [
+            (missing[0].0, raw, "hello", false),
+            (i64::MAX, raw, "hello", false),
+        ];
+        assert!(db.set_bodies(&bad).is_err());
+        let again = db.missing_bodies(f.id, 300, PREFETCH_MAX_SIZE).unwrap();
+        assert_eq!(again.len(), 2, "nothing was stored; the next pass retries");
+        let good = [
+            (missing[0].0, raw, "hello", false),
+            (missing[1].0, raw, "hello", true),
+        ];
+        db.set_bodies(&good).unwrap();
+        assert!(
+            db.missing_bodies(f.id, 300, PREFETCH_MAX_SIZE)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// `KOMOREBI_PERF_DIR=<scratch> cargo test --release --locked -- --ignored
+    /// --nocapture body_write_harness`: 300 bodies on a file cache (WAL),
+    /// one transaction per body (old) against one per batch of 25 (new),
+    /// interleaved, fresh cache each run.
+    #[test]
+    #[ignore]
+    fn body_write_harness() {
+        use std::time::Instant;
+        let dir = std::path::PathBuf::from(std::env::var("KOMOREBI_PERF_DIR").unwrap());
+        let mut text = String::new();
+        for i in 0..60 {
+            text.push_str(&format!(
+                "Line {i} of a plausible message body, with words.
+"
+            ));
+        }
+        let raw = format!(
+            "From: a@example.com
+To: b@example.com
+Subject: s
+MIME-Version: 1.0
+             Content-Type: text/plain; charset=utf-8
+
+{text}"
+        )
+        .into_bytes();
+        let prepare = |name: &str| {
+            let path = dir.join(name);
+            for ext in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+            }
+            let mut db = Db::open(&path).unwrap();
+            let f = setup(&mut db, 7, &[]);
+            add_sized(&mut db, &f, 1..=300, 3000);
+            let missing = db.missing_bodies(f.id, 300, PREFETCH_MAX_SIZE).unwrap();
+            assert_eq!(missing.len(), 300);
+            (db, f, missing)
+        };
+        let (mut old, mut new) = (Vec::new(), Vec::new());
+        for run in 0..9 {
+            for variant in [run % 2, 1 - run % 2] {
+                let (mut db, f, missing) = prepare(&format!("w{variant}.db"));
+                let t = Instant::now();
+                if variant == 0 {
+                    for m in &missing {
+                        let b = mime::parse_body(&raw);
+                        db.set_body(m.0, &raw, &b.preview(), !b.attachments.is_empty())
+                            .unwrap();
+                    }
+                    old.push(t.elapsed().as_secs_f64() * 1e3);
+                } else {
+                    for chunk in missing.chunks(PREFETCH_BATCH) {
+                        let parsed: Vec<_> = chunk
+                            .iter()
+                            .map(|m| {
+                                let b = mime::parse_body(&raw);
+                                (m.0, b.preview(), !b.attachments.is_empty())
+                            })
+                            .collect();
+                        let items: Vec<_> = parsed
+                            .iter()
+                            .map(|(id, p, a)| (*id, raw.as_slice(), p.as_str(), *a))
+                            .collect();
+                        db.set_bodies(&items).unwrap();
+                    }
+                    new.push(t.elapsed().as_secs_f64() * 1e3);
+                }
+                assert!(
+                    db.missing_bodies(f.id, 300, PREFETCH_MAX_SIZE)
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+        for (n, v) in [("per-body", &mut old), ("per-batch", &mut new)] {
+            v.sort_by(|a, b| a.total_cmp(b));
+            println!(
+                "{n}: median {:.2} ms min {:.2} max {:.2} runs {}",
+                v[v.len() / 2],
+                v[0],
+                v[v.len() - 1],
+                v.len()
+            );
+        }
     }
 
     #[test]
@@ -3338,7 +3724,7 @@ mod tests {
 
         w.run_job(&mut db, Job::SyncAll { full: false }, &mut || None);
         server.finish();
-        assert!(w.auth_failed.load(Ordering::Relaxed));
+        assert!(w.auth_failed.get());
         let errors = sync_errors(&events);
         assert!(
             matches!(&errors[..], [e] if e.class == Class::Auth && e.detail.contains("Invalid credentials")),
@@ -3369,7 +3755,7 @@ mod tests {
         w.run_job(&mut db, Job::SyncAll { full: false }, &mut || None);
         let errors = sync_errors(&events);
         assert!(
-            matches!(&errors[..], [e] if e.class == Class::Auth && e.text().ends_with(SIGN_IN_HINT)),
+            matches!(&errors[..], [e] if e.class == Class::Auth && e.say() == Some(Say::Class(Class::Auth))),
             "{errors:?}"
         );
         assert_eq!(*attempts.lock().unwrap(), 1);
@@ -3379,7 +3765,7 @@ mod tests {
         script.extend(logout_steps("a3 LOGOUT"));
         let server = FakeServer::start(script);
         *addr.lock().unwrap() = server.addr;
-        w.auth_failed.store(false, Ordering::Relaxed);
+        w.auth_failed.clear();
         w.run_job(&mut db, Job::Warm, &mut || None);
         assert_eq!(*attempts.lock().unwrap(), 2);
         w.imap.take().unwrap().logout();
@@ -3406,10 +3792,10 @@ mod tests {
 
         w.run_job(&mut db, Job::SyncAll { full: false }, &mut || None);
         refused.finish();
-        assert!(w.auth_failed.load(Ordering::Relaxed));
+        assert!(w.auth_failed.get());
         let errors = sync_errors(&events);
         assert!(
-            matches!(&errors[..], [e] if e.class == Class::Auth && e.text().ends_with(SIGN_IN_HINT)),
+            matches!(&errors[..], [e] if e.class == Class::Auth && e.say() == Some(Say::Class(Class::Auth))),
             "{errors:?}"
         );
 
@@ -3426,9 +3812,9 @@ mod tests {
         let accepted = FakeServer::start(script);
         *addr.lock().unwrap() = accepted.addr;
         *password.lock().unwrap() = "new".into();
-        w.auth_failed.store(false, Ordering::Relaxed);
+        w.auth_failed.clear();
         w.run_job(&mut db, Job::Warm, &mut || None);
-        assert!(!w.auth_failed.load(Ordering::Relaxed));
+        assert!(!w.auth_failed.get());
         assert!(events.lock().unwrap().is_empty());
         w.imap.take().expect("signed in").logout();
         accepted.finish();
@@ -3452,7 +3838,7 @@ mod tests {
             &mut || None,
         );
         server.finish();
-        assert!(!w.auth_failed.load(Ordering::Relaxed));
+        assert!(!w.auth_failed.get());
         assert!(matches!(
             &events.lock().unwrap()[..],
             [Event::ActionFailed { error, .. }]
@@ -3567,7 +3953,7 @@ mod tests {
 
     /// A message to you@example.com, built and queued in the outbox as Send
     /// leaves it when its undo window ends; returns its row.
-    fn queued(db: &Db, account_id: i64, body: &str) -> i64 {
+    pub(super) fn queued(db: &Db, account_id: i64, body: &str) -> i64 {
         let raw = smtp::build_raw(smtp::Outgoing {
             from_email: "me@example.com".into(),
             to: "you@example.com".into(),
@@ -4093,7 +4479,7 @@ mod tests {
         let (lines, events) = save_draft_through(&mut db, script, row);
         assert!(!lines.iter().any(|l| l.contains("STORE")), "{lines:?}");
         assert!(
-            matches!(&events[..], [Event::Notice { message, .. }] if message == NO_DRAFT_UID),
+            matches!(&events[..], [Event::Notice { message, .. }] if *message == Notice::NoDraftUid),
             "{events:?}"
         );
         assert_eq!(db.delete_draft(row).unwrap().unwrap().uid, 12);
@@ -4148,7 +4534,7 @@ mod tests {
         w.run_job(&mut db, Job::SaveDraft { row }, &mut || None);
         let events = events.lock().unwrap().clone();
         assert!(
-            matches!(&events[..], [Event::Notice { message, .. }] if message == NO_DRAFTS_FOLDER),
+            matches!(&events[..], [Event::Notice { message, .. }] if *message == Notice::NoDraftsFolder),
             "said once: {events:?}"
         );
         assert_eq!(db.drafts_to_upload(inbox.account_id).unwrap(), [(row, 1)]);
@@ -4471,7 +4857,7 @@ mod tests {
             };
             w.run_job(&mut db, job, &mut || None);
             server.finish();
-            assert!(!w.auth_failed.load(Ordering::Relaxed), "{reply}");
+            assert!(!w.auth_failed.get(), "{reply}");
             assert!(
                 matches!(
                     &events.lock().unwrap().drain(..).collect::<Vec<_>>()[..],
@@ -4527,7 +4913,7 @@ mod tests {
                         Event::NeedsSync { folder_id: a },
                         Event::Notice { message, .. },
                         Event::NeedsSync { folder_id: b },
-                    ] if *a == f.id && *b == f.id && message == MOVE_GONE
+                    ] if *a == f.id && *b == f.id && *message == Notice::MoveGone
                 ),
                 "{events:?}"
             );
@@ -4870,5 +5256,378 @@ mod tests {
             matches!(send_failure(&e), Outcome::Retry(t) if t.contains("454")),
             "{e:#}"
         );
+    }
+
+    fn account_with_logins(imap_user: &str, smtp_user: &str) -> Account {
+        let server = Server {
+            host: "mail.example.com".into(),
+            port: 993,
+            security: Security::Tls,
+        };
+        Account {
+            id: 1,
+            email: "me@example.com".into(),
+            name: String::new(),
+            imap: server.clone(),
+            smtp: server,
+            save_sent: false,
+            signature: String::new(),
+            enabled: true,
+            imap_user: imap_user.into(),
+            smtp_user: smtp_user.into(),
+            imap_pin: None,
+            smtp_pin: None,
+        }
+    }
+
+    /// The LOGIN line an IMAP fake got for `login`, and the user name and
+    /// password in the AUTH PLAIN payload an SMTP fake got for `smtp_login`.
+    fn logins_seen(login: &str, smtp_login: &str) -> (String, (String, String)) {
+        use base64::Engine;
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend(logout_steps("a3 LOGOUT"));
+        let server = FakeServer::start(script);
+        Imap::connect_plain(server.addr, login, "pw")
+            .unwrap()
+            .logout();
+        let login_line = server.finish().remove(0);
+
+        let smtp = FakeSmtp::start(SmtpEnd::Accept);
+        smtp::verify_plain(smtp.port, smtp_login, "pw").unwrap();
+        let auth = smtp.finish_with_auth();
+        let payload = auth
+            .iter()
+            .find_map(|l| l.strip_prefix("AUTH PLAIN "))
+            .expect("an AUTH PLAIN line");
+        let plain = base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .unwrap();
+        let plain = String::from_utf8(plain).unwrap();
+        let mut parts = plain.split('\0');
+        assert_eq!(parts.next(), Some(""), "no authorization identity");
+        let user = parts.next().unwrap().to_string();
+        let password = parts.next().unwrap().to_string();
+        (login_line, (user, password))
+    }
+
+    #[test]
+    fn imap_and_smtp_sign_in_with_their_own_logins() {
+        let a = account_with_logins("alice", "bob");
+        let (imap, smtp) = logins_seen(a.imap_login(), a.smtp_login());
+        assert_eq!(imap, r#"a1 LOGIN "alice" "pw""#);
+        assert_eq!(smtp, ("bob".to_string(), "pw".to_string()));
+
+        // Empty logins are the email address, for both.
+        let a = account_with_logins("", "");
+        let (imap, smtp) = logins_seen(a.imap_login(), a.smtp_login());
+        assert_eq!(imap, r#"a1 LOGIN "me@example.com" "pw""#);
+        assert_eq!(smtp, ("me@example.com".to_string(), "pw".to_string()));
+
+        // One of them set: the other stays the address.
+        let a = account_with_logins("alice", "");
+        assert_eq!(
+            (a.imap_login(), a.smtp_login()),
+            ("alice", "me@example.com")
+        );
+    }
+
+    #[test]
+    fn a_login_with_quotes_and_backslashes_is_sent_intact() {
+        let login = r#"dom\al"ice"#;
+        let (imap, smtp) = logins_seen(login, login);
+        assert_eq!(imap, r#"a1 LOGIN "dom\\al\"ice" "pw""#);
+        assert_eq!(smtp, (login.to_string(), "pw".to_string()));
+    }
+
+    // ---- "Test connection": the failing step and its sentence
+
+    use errors::{Special, Step as Check, StepError};
+
+    fn imap_server(host: &str, port: u16, security: Security) -> Server {
+        Server {
+            host: host.into(),
+            port,
+            security,
+        }
+    }
+
+    /// `Imap::connect_steps` as the form calls it, for a failure.
+    fn connect_failure(server: &Server) -> StepError {
+        let (step, e) = match Imap::connect_steps(server, None, "alice", "pw", Some(&mut |_| {})) {
+            Err(failure) => failure,
+            Ok(_) => panic!("connected"),
+        };
+        imap_step_error(step, e, server, false, "alice")
+    }
+
+    #[test]
+    fn a_name_that_does_not_resolve_fails_the_resolve_step() {
+        let e = connect_failure(&imap_server("nonexistent.invalid", 993, Security::Tls));
+        assert_eq!((e.step, e.class), (Check::Resolve, Class::Offline));
+        assert_eq!(
+            e.say(),
+            Say::NotFound {
+                host: "nonexistent.invalid".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_closed_port_fails_the_connect_step() {
+        let port = closed_port();
+        let e = connect_failure(&imap_server("127.0.0.1", port, Security::Tls));
+        assert_eq!((e.step, e.class), (Check::Connect, Class::Offline));
+        assert_eq!(
+            e.say(),
+            Say::NoAnswer {
+                host: "127.0.0.1".into(),
+                port
+            }
+        );
+        // The raw chain stays in the error's source, not in the sentence
+        // or in what the logs get.
+        assert!(format!("{:#}", e.source).contains("connecting to"));
+        assert!(!e.to_string().contains("connecting to"), "{e}");
+    }
+
+    #[test]
+    fn a_refused_starttls_fails_the_secure_step_before_any_password() {
+        let server = FakeServer::start(vec![
+            Step::Send("* OK fake IMAP ready\r\n"),
+            Step::Expect("a0 CAPABILITY"),
+            Step::Send("* CAPABILITY IMAP4rev1 STARTTLS\r\na0 OK done\r\n"),
+            Step::Expect("a1 STARTTLS"),
+            Step::Send("a1 NO not today\r\n"),
+        ]);
+        let e = connect_failure(&imap_server(
+            "127.0.0.1",
+            server.addr.port(),
+            Security::StartTls,
+        ));
+        // No LOGIN reached the server.
+        assert_eq!(server.finish(), ["a0 CAPABILITY", "a1 STARTTLS"]);
+        assert_eq!((e.step, e.special), (Check::Secure, Special::NoStartTls));
+        assert_eq!(
+            e.say(),
+            Say::NoStartTls {
+                host: "127.0.0.1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_plain_answer_on_a_tls_port_is_named() {
+        // A server that greets in plain text on every connection.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(2).flatten() {
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    use std::io::Write;
+                    stream.write_all(b"* OK plain IMAP ready\r\n").ok();
+                    std::thread::sleep(Duration::from_millis(800));
+                });
+            }
+        });
+        let e = connect_failure(&imap_server("127.0.0.1", port, Security::Tls));
+        assert_eq!((e.step, e.special), (Check::Secure, Special::PlainAnswer));
+        assert_eq!(e.say(), Say::PlainAnswer);
+    }
+
+    #[test]
+    fn a_tls_server_is_not_taken_for_a_plain_one() {
+        // Silent until the client speaks, as a TLS port is.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let _held = listener.accept();
+            std::thread::sleep(Duration::from_secs(3));
+        });
+        assert!(!imap::answers_plain("127.0.0.1", port));
+    }
+
+    /// The whole check against the plain fakes: IMAP as `Imap::connect_plain`
+    /// gets it (which reports the steps a TLS connection would), SMTP over
+    /// plain TCP. Returns the steps reported and the outcome.
+    fn check_plain(
+        imap_script: Vec<Step>,
+        smtp_end: SmtpEnd,
+    ) -> (Vec<Check>, Result<(), StepError>) {
+        let imap_fake = FakeServer::start(imap_script);
+        let smtp_fake = FakeSmtp::start(smtp_end);
+        let addr = imap_fake.addr;
+        let port = smtp_fake.port;
+        let server = imap_server("imap.example.com", 993, Security::Tls);
+        let mut seen = Vec::new();
+        let result = run_steps(
+            &server,
+            false,
+            "alice",
+            |report| {
+                let imap =
+                    Imap::connect_plain(addr, "alice", "pw").map_err(|e| (Check::ImapSignIn, e))?;
+                for step in [
+                    Check::Resolve,
+                    Check::Connect,
+                    Check::Secure,
+                    Check::ImapSignIn,
+                ] {
+                    report(step);
+                }
+                Ok(imap)
+            },
+            |report| smtp::verify_plain_steps(port, "relay", "pw", report),
+            &mut |step| seen.push(step),
+        );
+        if result.is_err() {
+            // The fakes may not have been reached to the end.
+            drop((imap_fake, smtp_fake));
+        } else {
+            imap_fake.finish();
+            smtp_fake.finish_with_auth();
+        }
+        (seen, result)
+    }
+
+    fn list_and_logout() -> Vec<Step> {
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect("a3 LIST"),
+            Step::Send("* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n{tag} OK done\r\n"),
+        ]);
+        script.extend(logout_steps("a4 LOGOUT"));
+        script
+    }
+
+    #[test]
+    fn a_working_account_passes_every_step_in_order() {
+        let (seen, result) = check_plain(list_and_logout(), SmtpEnd::Accept);
+        result.unwrap();
+        assert_eq!(seen, Check::ALL);
+    }
+
+    #[test]
+    fn a_rejected_imap_password_fails_the_imap_sign_in_step() {
+        let (seen, result) = check_plain(
+            vec![
+                Step::Send("* OK fake IMAP ready\r\n"),
+                Step::Expect("a1 LOGIN"),
+                Step::Send("{tag} NO [AUTHENTICATIONFAILED] bad credentials\r\n"),
+            ],
+            SmtpEnd::Accept,
+        );
+        let e = result.unwrap_err();
+        assert!(seen.is_empty(), "{seen:?}");
+        assert_eq!((e.step, e.class), (Check::ImapSignIn, Class::Auth));
+        assert_eq!(
+            e.say(),
+            Say::Rejected {
+                host: "imap.example.com".into(),
+                login: "alice".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_rejected_smtp_password_fails_the_smtp_sign_in_step() {
+        let (seen, result) = check_plain(list_and_logout(), SmtpEnd::RejectAuth);
+        let e = result.unwrap_err();
+        // IMAP passed, and so did the SMTP connection.
+        assert_eq!(seen.last(), Some(&Check::SmtpConnect));
+        assert_eq!((e.step, e.class), (Check::SmtpSignIn, Class::Auth));
+        assert_eq!(
+            e.say(),
+            Say::Rejected {
+                host: "127.0.0.1".into(),
+                login: "relay".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_busy_smtp_server_gets_the_busy_sentence() {
+        let (_, result) = check_plain(list_and_logout(), SmtpEnd::TempRejectAuth);
+        let e = result.unwrap_err();
+        assert_eq!(
+            (e.step, e.class),
+            (Check::SmtpSignIn, Class::TooManyConnections)
+        );
+        assert_eq!(e.say(), Say::Class(Class::TooManyConnections));
+    }
+
+    #[test]
+    fn sending_failures_are_classified_like_incoming_ones() {
+        let smtp = |end| {
+            let server = FakeSmtp::start(end);
+            let e = smtp::verify_plain(server.port, "me", "pw").unwrap_err();
+            drop(server);
+            e
+        };
+        assert_eq!(errors::classify(&smtp(SmtpEnd::RejectAuth)), Class::Auth);
+        assert_eq!(
+            errors::classify(&smtp(SmtpEnd::TempRejectAuth)),
+            Class::TooManyConnections
+        );
+        // A refused recipient is a message problem, not a sign-in one.
+        assert_eq!(errors::classify_smtp(&anyhow!("plain")), None);
+    }
+
+    fn verify_server(server: &Server) -> StepError {
+        let mut seen = Vec::new();
+        let e = smtp::verify_smtp(server, None, "relay", "pw", &mut |s| seen.push(s)).unwrap_err();
+        assert!(seen.is_empty(), "{seen:?}");
+        e
+    }
+
+    #[test]
+    fn smtp_failures_before_the_sign_in_name_their_step() {
+        // Closed port.
+        let e = verify_server(&imap_server("127.0.0.1", closed_port(), Security::Tls));
+        assert_eq!((e.step, e.class), (Check::SmtpConnect, Class::Offline));
+        assert!(matches!(e.say(), Say::NoAnswer { .. }), "{:?}", e.say());
+        // A name that does not resolve is said so, naming the sending server.
+        let e = verify_server(&imap_server("nonexistent.invalid", 465, Security::Tls));
+        assert_eq!(
+            (e.step, e.special),
+            (Check::SmtpConnect, Special::SmtpResolve)
+        );
+        assert_eq!(
+            e.say(),
+            Say::NotFound {
+                host: "nonexistent.invalid".into()
+            }
+        );
+        // STARTTLS wanted, not offered: no AUTH line ever arrives.
+        let fake = FakeSmtp::start(SmtpEnd::Accept);
+        let e = verify_server(&imap_server("127.0.0.1", fake.port, Security::StartTls));
+        assert_eq!(
+            (e.step, e.special),
+            (Check::SmtpConnect, Special::NoStartTls)
+        );
+        assert!(matches!(e.say(), Say::NoStartTls { .. }), "{:?}", e.say());
+        assert!(fake.finish_with_auth().is_empty());
+    }
+
+    #[test]
+    fn a_plain_smtp_greeting_on_a_tls_port_is_named() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(2).flatten() {
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    use std::io::Write;
+                    stream.write_all(b"220 plain SMTP ready\r\n").ok();
+                    std::thread::sleep(Duration::from_millis(800));
+                });
+            }
+        });
+        let e = verify_server(&imap_server("127.0.0.1", port, Security::Tls));
+        assert_eq!(
+            (e.step, e.special),
+            (Check::SmtpConnect, Special::PlainAnswer)
+        );
+        assert_eq!(e.say(), Say::PlainAnswer);
     }
 }

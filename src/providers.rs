@@ -29,22 +29,46 @@ pub struct Server {
 }
 
 pub struct Preset {
+    /// The name the account form shows (a brand: not translated).
+    pub name: &'static str,
+    /// The provider's own mail domain: an address there is its account.
+    pub domain: &'static str,
     pub imap: (&'static str, u16),
     pub smtp: (&'static str, u16),
 }
 
 /// Presets in the order of the account form's provider list (Purelymail,
-/// Postale.io); "Other (manual)" follows them in the UI.
+/// Postale.io); "Other server" follows them in the UI.
 pub const PRESETS: &[Preset] = &[
     Preset {
+        name: "Purelymail",
+        domain: "purelymail.com",
         imap: ("imap.purelymail.com", 993),
         smtp: ("smtp.purelymail.com", 465),
     },
     Preset {
+        name: "Postale.io",
+        domain: "postale.io",
         imap: ("mail.postale.io", 993),
         smtp: ("mail.postale.io", 465),
     },
 ];
+
+/// The preset an address's domain names: an address at purelymail.com or
+/// postale.io is that provider's (case and spaces aside). Any other domain
+/// (a custom one hosted anywhere) names none: the user picks.
+pub fn guess(email: &str) -> Option<usize> {
+    let (_, domain) = email.trim().rsplit_once('@')?;
+    let domain = domain.trim_end_matches('.');
+    PRESETS
+        .iter()
+        .position(|p| p.domain.eq_ignore_ascii_case(domain))
+}
+
+/// Whether `email` is on preset `index`'s own domain.
+pub fn on_own_domain(index: usize, email: &str) -> bool {
+    guess(email) == Some(index)
+}
 
 impl Preset {
     pub fn imap_server(&self) -> Server {
@@ -78,5 +102,22 @@ mod tests {
         assert_eq!(PRESETS[0].smtp.0, "smtp.purelymail.com");
         assert_eq!(PRESETS[1].imap.0, "mail.postale.io");
         assert_eq!(PRESETS[1].smtp.0, "mail.postale.io");
+    }
+
+    #[test]
+    fn the_provider_is_guessed_from_its_own_domain_only() {
+        assert_eq!(guess("ana@purelymail.com"), Some(0));
+        assert_eq!(guess(" Ana@PurelyMail.COM "), Some(0));
+        assert_eq!(guess("ana@postale.io"), Some(1));
+        assert_eq!(guess("ana@postale.io."), Some(1));
+        // A custom domain can be hosted by either (or anyone): no guess.
+        assert_eq!(guess("ana@example.com"), None);
+        assert_eq!(guess("ana@mail.purelymail.com"), None);
+        assert_eq!(guess("ana@purelymail.com.evil.example"), None);
+        assert_eq!(guess("purelymail.com"), None);
+        assert_eq!(guess(""), None);
+        assert_eq!(guess("ana@"), None);
+        assert!(on_own_domain(1, "a@postale.io"));
+        assert!(!on_own_domain(0, "a@postale.io"));
     }
 }

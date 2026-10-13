@@ -105,8 +105,12 @@ fn run() -> Result<()> {
         // The IDLE connection only notifies, as in the app; the pass after the
         // wake runs on a separate, already signed-in read-only connection.
         let watcher = if idle {
-            let mut syncer =
-                Imap::connect(&probe.preset.imap_server(), &probe.email, &probe.password)?;
+            let mut syncer = Imap::connect(
+                &probe.preset.imap_server(),
+                None,
+                &probe.email,
+                &probe.password,
+            )?;
             syncer.set_read_only(true);
             Some((start_idle(&probe, &folders)?, syncer))
         } else {
@@ -125,7 +129,7 @@ fn run() -> Result<()> {
         if let Some((watcher, syncer)) = watcher {
             idle_wake(&probe, watcher, syncer, t)?;
         }
-        let mut writer = Imap::connect(&probe.preset.imap_server(), email, password)?;
+        let mut writer = Imap::connect(&probe.preset.imap_server(), None, email, password)?;
         let sent = folders.iter().find(|f| f.role == Role::Sent);
         let t = Instant::now();
         if let Some(sent) = sent {
@@ -157,6 +161,8 @@ impl Probe {
         let _ = std::fs::remove_file(&self.db_path);
         let mut db = Db::open(self.db_path.as_ref())?;
         let account_id = db.add_account(&NewAccount {
+            imap_user: String::new(),
+            smtp_user: String::new(),
             email: self.email.clone(),
             name: String::new(),
             imap: server.clone(),
@@ -167,7 +173,7 @@ impl Probe {
         // ---- connection
         connect_phases(&server, &self.email, &self.password, report)?;
         let t = Instant::now();
-        let mut imap = Imap::connect(&server, &self.email, &self.password)?;
+        let mut imap = Imap::connect(&server, None, &self.email, &self.password)?;
         imap.set_read_only(true);
         report.add(
             "connect+tls+login",
@@ -374,7 +380,12 @@ fn start_idle(probe: &Probe, folders: &[Folder]) -> Result<Watcher> {
         .iter()
         .find(|f| f.role == Role::Inbox)
         .context("no inbox")?;
-    let mut imap = Imap::connect(&probe.preset.imap_server(), &probe.email, &probe.password)?;
+    let mut imap = Imap::connect(
+        &probe.preset.imap_server(),
+        None,
+        &probe.email,
+        &probe.password,
+    )?;
     if !imap.has_capability("IDLE") {
         bail!("the server has no IDLE");
     }

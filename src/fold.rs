@@ -8,10 +8,27 @@ use std::borrow::Cow;
 /// `s` lower-cased with Latin accents removed. Borrows `s` when it is
 /// already folded (lower-case ASCII, most header text).
 pub fn fold(s: &str) -> Cow<'_, str> {
-    if !s.bytes().any(|b| b.is_ascii_uppercase() || !b.is_ascii()) {
+    if !needs_fold(s) {
         return Cow::Borrowed(s);
     }
     let mut out = String::with_capacity(s.len());
+    push_folded(s, &mut out);
+    Cow::Owned(out)
+}
+
+/// `s` folded into `out` (cleared first), reusing its allocation. Always
+/// copies; callers that can borrow check [`needs_fold`] first.
+pub fn fold_into(s: &str, out: &mut String) {
+    out.clear();
+    push_folded(s, out);
+}
+
+/// Whether [`fold`] would change `s`: an ASCII capital or a non-ASCII byte.
+pub fn needs_fold(s: &str) -> bool {
+    s.bytes().any(|b| b.is_ascii_uppercase() || !b.is_ascii())
+}
+
+fn push_folded(s: &str, out: &mut String) {
     for c in s.chars() {
         if c.is_ascii() {
             out.push(c.to_ascii_lowercase());
@@ -25,7 +42,6 @@ pub fn fold(s: &str) -> Cow<'_, str> {
             }
         }
     }
-    Cow::Owned(out)
 }
 
 /// Combining diacritical marks (U+0300 to U+036F): an accent written as a

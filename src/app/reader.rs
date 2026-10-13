@@ -27,6 +27,7 @@
 //! in, the page is laid out once more with them. Fetched bytes stay in
 //! memory for one message at a time.
 
+use crate::tr::t;
 use crate::{AppWindow, LinkItem, Palette, SelRect, Tile};
 use komorebi::mail::mime::{self, Body};
 use komorebi::mail::render::links::{self, Mailto, Warning, WebLink};
@@ -388,19 +389,15 @@ pub(super) fn shell_execute(_target: &std::ffi::OsStr) -> bool {
 
 /// The confirm prompt's line for a warning about `link`.
 fn warning_text(w: Warning, link: &WebLink, text: &str) -> String {
-    let host = &link.host;
+    let host = link.host.as_str();
     match w {
         Warning::TextMismatch => {
             let shown: String = text.chars().take(80).collect();
-            format!("The link text says \u{201c}{shown}\u{201d}, but it opens {host}.")
+            t!(invoke_link_text_mismatch, shown.into(), host.into())
         }
-        Warning::Punycode => format!(
-            "{host} is an international name, which can imitate the letters of another site."
-        ),
-        Warning::UserInfo => {
-            format!("The address puts a user name before the real site, which is {host}.")
-        }
-        Warning::RawIp => format!("{host} is a bare IP address, not a site name."),
+        Warning::Punycode => t!(invoke_link_punycode, host.into()),
+        Warning::UserInfo => t!(invoke_link_user_info, host.into()),
+        Warning::RawIp => t!(invoke_link_raw_ip, host.into()),
     }
 }
 
@@ -1039,6 +1036,9 @@ struct State {
     remote: bool,
     /// The message shown keeps its original colours in the dark theme.
     original: bool,
+    /// Why the formatted view is not shown, while its note is (the note is
+    /// said again when the language changes).
+    failed: Option<RenderError>,
 }
 
 /// The UI-side controller of the HTML reader.
@@ -1084,6 +1084,7 @@ impl Reader {
                 pending: None,
                 remote: false,
                 original: false,
+                failed: None,
             })
         }));
         let r = reader.clone();
@@ -1201,12 +1202,21 @@ impl Reader {
         s.layout(shown);
     }
 
+    /// The language changed: the note about a failed render says so in it.
+    pub fn language_changed(&self) {
+        let s = self.state();
+        if let (Some(error), Some(ui)) = (s.failed, s.ui()) {
+            ui.set_r_note(State::failed_note(error).into());
+        }
+    }
+
     /// Show the text view; renders in flight are dropped.
     pub fn close(&self) {
         let mut s = self.state();
         s.src = None;
         s.remote = false;
         s.original = false;
+        s.failed = None;
         s.key = None;
         s.page = None;
         s.generation += 1;
@@ -1339,6 +1349,7 @@ impl State {
     }
 
     fn show_waiting(&mut self) {
+        self.failed = None;
         self.page = None;
         self.relayout = false;
         self.tiles.set_vec(Vec::new());
@@ -1482,26 +1493,29 @@ impl State {
             ui.set_r_note(SharedString::new());
             ui.set_r_waiting(false);
             ui.set_r_html(true);
+            self.failed = None;
         }
         self.request_tiles();
     }
 
+    /// What the note says of a failed render (empty: nothing).
+    fn failed_note(error: RenderError) -> String {
+        match error {
+            RenderError::TooLarge => t!(invoke_reader_too_large),
+            RenderError::Deadline => t!(invoke_reader_too_slow),
+            RenderError::Malformed | RenderError::NoHtml => String::new(),
+        }
+    }
+
     fn show_failed(&mut self, error: RenderError) {
+        self.failed = Some(error);
         self.page = None;
         self.fallback_timer.stop();
         self.tiles.set_vec(Vec::new());
         self.state.clear();
         self.selection.set_vec(Vec::new());
         self.set_links(Vec::new(), false);
-        let note = match error {
-            RenderError::TooLarge => {
-                "This message is too large to show formatted, so it is shown as plain text."
-            }
-            RenderError::Deadline => {
-                "This message took too long to lay out, so it is shown as plain text."
-            }
-            RenderError::Malformed | RenderError::NoHtml => "",
-        };
+        let note = Self::failed_note(error);
         if let Some(ui) = self.ui() {
             ui.set_r_note(note.into());
             ui.set_r_html(false);
@@ -2202,7 +2216,7 @@ mod tests {
         assert!(frame() > 10_000);
 
         // Narrow the window: one relayout once the resize pauses.
-        ui.window().set_size(slint::PhysicalSize::new(900, 800));
+        ui.window().set_size(slint::PhysicalSize::new(1100, 800));
         frame();
         assert!(layouts(take()).is_empty(), "debounced");
         std::thread::sleep(RESIZE_DEBOUNCE + Duration::from_millis(50));
@@ -2241,7 +2255,7 @@ mod tests {
         // keeps its logical size, as on a move to another monitor).
         ui.window()
             .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
-        ui.window().set_size(slint::PhysicalSize::new(1350, 1200));
+        ui.window().set_size(slint::PhysicalSize::new(1650, 1200));
         frame();
         std::thread::sleep(RESIZE_DEBOUNCE + Duration::from_millis(50));
         frame();

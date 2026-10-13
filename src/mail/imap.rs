@@ -5,6 +5,7 @@
 //! and the stream ([`Counted`]) refuses the replies the crate would abort
 //! on (a tagged reply with another command's tag, a tagged OK to IDLE).
 
+use super::errors::Step as CheckStep;
 use super::mime::{HEADER_FIELDS, parse_header};
 use crate::db::{self, NewHeader};
 use crate::diag;
@@ -14,7 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use imap::extensions::idle::SetReadTimeout;
 use imap::types::{Flag, Name, NameAttribute, StatusAttribute, UnsolicitedResponse};
 use imap_proto::types::Capability;
-use native_tls::{TlsConnector, TlsStream};
+use native_tls::TlsStream;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -601,32 +602,122 @@ fn status_of(e: &imap::Error) -> String {
     }
 }
 
+/// The server refused STARTTLS, or did not answer it with OK.
+#[derive(Debug)]
+pub struct StartTlsRefused;
+
+impl std::fmt::Display for StartTlsRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("server refused STARTTLS")
+    }
+}
+
+impl std::error::Error for StartTlsRefused {}
+
+/// A connection that failed, and the step it failed in.
+pub type StepFailure = (CheckStep, anyhow::Error);
+
 impl Imap {
-    pub fn connect(server: &Server, username: &str, password: &str) -> Result<Self> {
-        let addrs: Vec<_> = (server.host.as_str(), server.port)
-            .to_socket_addrs()
-            .with_context(|| format!("resolving {}", server.host))?
-            .collect();
-        if addrs.is_empty() {
-            anyhow::bail!("{} has no address", server.host);
-        }
-        let tcp = connect_any(&interleave(addrs))
-            .with_context(|| format!("connecting to {}:{}", server.host, server.port))?;
-        tcp.set_read_timeout(Some(IO_TIMEOUT))?;
-        tcp.set_write_timeout(Some(IO_TIMEOUT))?;
-        let tls = TlsConnector::new().context("initializing TLS")?;
-        let tcp = match server.security {
-            Security::Tls => tcp,
-            Security::StartTls => starttls(tcp).context("IMAP STARTTLS failed")?,
+    pub fn connect(
+        server: &Server,
+        pin: Option<&[u8]>,
+        username: &str,
+        password: &str,
+    ) -> Result<Self> {
+        Self::connect_steps(server, pin, username, password, None).map_err(|(_, e)| e)
+    }
+
+    /// [`Imap::connect`] by steps: name lookup, TCP, TLS, then sign-in. With
+    /// a `report`, each step that passed is reported to it, and a TLS
+    /// failure on an implicit-TLS port also checks whether the port speaks
+    /// plain text (the workers' connections do not).
+    pub fn connect_steps(
+        server: &Server,
+        pin: Option<&[u8]>,
+        username: &str,
+        password: &str,
+        mut report: Option<&mut dyn FnMut(CheckStep)>,
+    ) -> Result<Self, StepFailure> {
+        let probing = report.is_some();
+        let mut passed = |step| {
+            if let Some(report) = report.as_deref_mut() {
+                report(step);
+            }
         };
-        // A second handle to the plain socket, for timeouts and shutdown.
-        let sock = tcp.try_clone()?;
-        let stream = tls
-            .connect(&server.host, tcp)
-            .map_err(|e| TlsFailed(format!("{}: {e}", server.host)))?;
-        let stream = Transport::Tls(Box::new(stream));
-        let greeting = server.security == Security::Tls;
-        Self::login(stream, sock, greeting, username, password)
+        let addrs: Vec<_> = (|| {
+            let addrs: Vec<_> = (server.host.as_str(), server.port)
+                .to_socket_addrs()
+                .with_context(|| format!("resolving {}", server.host))?
+                .collect();
+            if addrs.is_empty() {
+                anyhow::bail!("{} has no address", server.host);
+            }
+            Ok(addrs)
+        })()
+        .map_err(|e| (CheckStep::Resolve, e))?;
+        passed(CheckStep::Resolve);
+        let tcp = connect_any(&interleave(addrs))
+            .with_context(|| format!("connecting to {}:{}", server.host, server.port))
+            .map_err(|e| (CheckStep::Connect, e))?;
+        passed(CheckStep::Connect);
+        let secure = |tcp: TcpStream| -> Result<(Transport, TcpStream, Option<Vec<String>>)> {
+            tcp.set_read_timeout(Some(IO_TIMEOUT))?;
+            tcp.set_write_timeout(Some(IO_TIMEOUT))?;
+            let tls = super::pin::connector(pin)?;
+            let tcp = match server.security {
+                Security::Tls => tcp,
+                Security::StartTls => starttls(tcp).context("IMAP STARTTLS failed")?,
+            };
+            // A second handle to the plain socket, for timeouts and shutdown.
+            let sock = tcp.try_clone()?;
+            let stream = tls.connect(&server.host, tcp).map_err(|e| {
+                if handshake_dropped(&e) {
+                    // The connection broke, which says nothing about the
+                    // certificate: an ordinary network failure.
+                    anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::ConnectionAborted))
+                        .context(format!("TLS handshake with {} was cut off", server.host))
+                } else if super::pin::usable(pin).is_some() {
+                    // With a saved certificate a failed handshake means the
+                    // server no longer presents it (changed, or expired).
+                    anyhow::Error::new(super::pin::PinMismatch(server.host.clone()))
+                } else {
+                    TlsFailed(format!("{}: {e}", server.host)).into()
+                }
+            })?;
+            // Before anything is sent: the certificate is the saved one.
+            super::pin::check_peer(&stream, pin, &server.host)?;
+            let mut stream = Transport::Tls(Box::new(stream));
+            // Capabilities learned before TLS are attacker data: after a
+            // STARTTLS they are asked for again.
+            let caps = secured_greeting(
+                &mut stream,
+                server.security == Security::Tls,
+                server.security == Security::StartTls,
+            )?;
+            Ok((stream, sock, caps))
+        };
+        let (stream, sock, caps) = secure(tcp).map_err(|e| {
+            let plain = probing
+                && server.security == Security::Tls
+                && e.chain()
+                    .any(|c| c.is::<TlsFailed>() || c.is::<super::pin::PinMismatch>())
+                && answers_plain(&server.host, server.port);
+            // A server that hangs up before it greets was not reached.
+            let step = if e.chain().any(|c| c.is::<ConnectionClosed>()) {
+                CheckStep::Connect
+            } else {
+                CheckStep::Secure
+            };
+            (step, if plain { e.context(PlainAnswer) } else { e })
+        })?;
+        passed(CheckStep::Secure);
+        let mut imap = Self::login(stream, sock, username, password, caps.as_deref())
+            .map_err(|e| (CheckStep::ImapSignIn, e))?;
+        if probing {
+            imap.noop().map_err(|e| (CheckStep::ImapSignIn, e))?;
+        }
+        passed(CheckStep::ImapSignIn);
+        Ok(imap)
     }
 
     /// Plaintext connection to a local fake server (tests only).
@@ -636,33 +727,69 @@ impl Imap {
         username: &str,
         password: &str,
     ) -> Result<Self> {
+        Self::connect_plain_with(addr, username, password, false)
+    }
+
+    /// [`Imap::connect_plain`] that asks for the capabilities before the
+    /// sign-in, as a connection does after STARTTLS (tests only).
+    #[cfg(test)]
+    pub(crate) fn connect_plain_listing(
+        addr: impl ToSocketAddrs,
+        username: &str,
+        password: &str,
+    ) -> Result<Self> {
+        Self::connect_plain_with(addr, username, password, true)
+    }
+
+    #[cfg(test)]
+    fn connect_plain_with(
+        addr: impl ToSocketAddrs,
+        username: &str,
+        password: &str,
+        list: bool,
+    ) -> Result<Self> {
         let tcp = TcpStream::connect(addr)?;
         tcp.set_read_timeout(Some(IO_TIMEOUT))?;
         tcp.set_write_timeout(Some(IO_TIMEOUT))?;
         let sock = tcp.try_clone()?;
-        Self::login(Transport::Plain(tcp), sock, true, username, password)
+        let mut stream = Transport::Plain(tcp);
+        let caps = secured_greeting(&mut stream, true, list)?;
+        Self::login(stream, sock, username, password, caps.as_deref())
     }
 
-    /// Read the greeting (unless STARTTLS already did), sign in and read the
-    /// capabilities.
+    /// Sign in and read the capabilities. `caps` are the capabilities listed
+    /// before the sign-in, if they were asked for: a server that lists
+    /// `LOGINDISABLED` under TLS is refused before anything is sent.
+    ///
+    /// The sign-in is `LOGIN`, never `AUTHENTICATE`: the crate's
+    /// `authenticate` matches the server's challenge with a regular
+    /// expression, which links the whole regex engine into the program
+    /// (976 KB, over the size ceiling).
     fn login(
         stream: Transport,
         sock: TcpStream,
-        greeting: bool,
         username: &str,
         password: &str,
+        caps: Option<&[String]>,
     ) -> Result<Self> {
         let bytes = Arc::new(AtomicU64::new(0));
         let done = Arc::new(DoneGuard::default());
-        let mut client = imap::Client::new(Counted::new(stream, bytes.clone(), done.clone()));
-        if greeting {
-            client.read_greeting().context("reading IMAP greeting")?;
+        let client = imap::Client::new(Counted::new(stream, bytes.clone(), done.clone()));
+        let listed =
+            |name: &str| caps.is_some_and(|c| c.iter().any(|c| c.eq_ignore_ascii_case(name)));
+        if listed("LOGINDISABLED") {
+            return Err(NoSignIn.into());
         }
-        let mut session = client.login(username, password).map_err(|(e, _)| match e {
-            imap::Error::No(text) if rejects_credentials(&text) => AuthFailed(text).into(),
-            // Kept typed, so an I/O failure counts as a connection error.
-            e => anyhow::Error::new(e).context("sign-in failed"),
-        })?;
+        let refused = |e: imap::Error| -> anyhow::Error {
+            match e {
+                imap::Error::No(text) if rejects_credentials(&text) => AuthFailed(text).into(),
+                // Kept typed, so an I/O failure counts as a connection error.
+                e => anyhow::Error::new(e).context("sign-in failed"),
+            }
+        };
+        let mut session = client
+            .login(username, password)
+            .map_err(|(e, _)| refused(e))?;
         let capabilities: Vec<String> = match session.capabilities() {
             Ok(caps) => caps
                 .iter()
@@ -675,6 +802,11 @@ impl Imap {
             Err(_) => Vec::new(),
         };
         let has = |name: &str| capabilities.iter().any(|c| c.eq_ignore_ascii_case(name));
+        // Names and flags would be UTF-8 where Komorebi sends and reads
+        // modified UTF-7 (UTF8=ACCEPT servers still take the latter).
+        if has("UTF8=ONLY") {
+            return Err(Utf8Only.into());
+        }
         Ok(Self {
             has_move: has("MOVE"),
             has_uidplus: has("UIDPLUS"),
@@ -686,7 +818,7 @@ impl Imap {
             read_only: false,
             bytes,
             done,
-            commands: 2, // LOGIN + CAPABILITY
+            commands: 2, // sign-in + CAPABILITY
             capabilities,
             list_status_broken: false,
             last_used: SystemTime::now(),
@@ -1265,7 +1397,14 @@ fn to_remote(names: &[Name]) -> Vec<RemoteFolder> {
     let mut out = Vec::new();
     for n in names {
         let attrs = n.attributes();
-        if attrs.iter().any(|a| matches!(a, NameAttribute::NoSelect)) {
+        // A name that can't be selected is a header (`\Noselect`) or not
+        // there at all (`\NonExistent`): neither is a folder to sync.
+        let unselectable = |a: &NameAttribute| match a {
+            NameAttribute::NoSelect => true,
+            NameAttribute::Custom(v) => v.eq_ignore_ascii_case("\\NonExistent"),
+            _ => false,
+        };
+        if attrs.iter().any(unselectable) {
             continue;
         }
         let special = attrs.iter().find_map(|a| match a {
@@ -1325,7 +1464,7 @@ fn quote(s: &str) -> Result<String> {
 
 /// Resolved addresses in connect order: alternating families, starting
 /// with the first one's (RFC 8305 §4).
-fn interleave(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+pub(crate) fn interleave(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     let first_v6 = addrs.first().is_some_and(SocketAddr::is_ipv6);
     let (first, other): (Vec<_>, Vec<_>) = addrs.into_iter().partition(|a| a.is_ipv6() == first_v6);
     let (mut first, mut other) = (first.into_iter(), other.into_iter());
@@ -1340,7 +1479,7 @@ fn interleave(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
 
 /// Connect to the first address that answers, a few seconds each, so one
 /// dead address (e.g. IPv6 without a route) doesn't cost the full timeout.
-fn connect_any(addrs: &[SocketAddr]) -> Result<TcpStream> {
+pub(crate) fn connect_any(addrs: &[SocketAddr]) -> Result<TcpStream> {
     let mut last_err = None;
     for (i, addr) in addrs.iter().enumerate() {
         let timeout = if i + 1 == addrs.len() {
@@ -1359,33 +1498,240 @@ fn connect_any(addrs: &[SocketAddr]) -> Result<TcpStream> {
     Err(last_err.map_or_else(|| anyhow!("no address"), Into::into))
 }
 
+/// A TLS port that answered in plain text (the failed handshake's cause).
+#[derive(Debug)]
+pub struct PlainAnswer;
+
+impl std::fmt::Display for PlainAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("the port answered without encryption")
+    }
+}
+
+impl std::error::Error for PlainAnswer {}
+
+/// Whether a server on `host:port` speaks first in plain text (an IMAP
+/// `* OK` or `+OK`, an SMTP `220`), which a TLS port never does. Read-only:
+/// connects, waits a moment for a greeting, reads at most a few bytes and
+/// sends nothing.
+pub(crate) fn answers_plain(host: &str, port: u16) -> bool {
+    let Ok(addrs) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+    let Ok(mut tcp) = connect_any(&interleave(addrs.collect())) else {
+        return false;
+    };
+    let mut buf = [0u8; 8];
+    tcp.set_read_timeout(Some(Duration::from_secs(2))).ok();
+    let n = tcp.read(&mut buf).unwrap_or(0);
+    let head = &buf[..n];
+    head.starts_with(b"* OK") || head.starts_with(b"+OK") || head.starts_with(b"220")
+}
+
 /// Plain-text greeting and STARTTLS exchange, before the TLS handshake.
 fn starttls<S: Read + Write>(stream: S) -> Result<S> {
     let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    if !line.starts_with("* OK") {
-        anyhow::bail!("unexpected greeting");
+    starttls_exchange(&mut reader)?;
+    // Bytes sent before the handshake would be taken as if they had come
+    // over TLS (response injection).
+    if !reader.buffer().is_empty() {
+        anyhow::bail!("unexpected data before TLS");
     }
-    reader.get_mut().write_all(b"a0 STARTTLS\r\n")?;
-    loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 {
-            anyhow::bail!("connection closed");
-        }
-        if let Some(rest) = line.strip_prefix("a0 ") {
-            if !rest.starts_with("OK") {
-                anyhow::bail!("server refused STARTTLS");
+    Ok(reader.into_inner())
+}
+
+/// The plain exchange that ends where the TLS handshake starts: the
+/// greeting, a CAPABILITY that must list STARTTLS (a server that doesn't
+/// is never asked, and never sees a password), then STARTTLS, which must be
+/// answered OK. Also the Review certificate probe's.
+pub(crate) fn starttls_exchange<S: Read + Write>(reader: &mut BufReader<S>) -> Result<()> {
+    // Whatever it lists is attacker data until TLS: asked for again.
+    greeting(reader)?;
+    let caps = capability_exchange(reader, "a0")?;
+    if !caps.iter().any(|c| c == "STARTTLS") {
+        return Err(StartTlsRefused.into());
+    }
+    reader.get_mut().write_all(b"a1 STARTTLS\r\n")?;
+    for _ in 0..MAX_REPLY_LINES {
+        let line = super::pin::read_line_capped(reader)?;
+        if let Some(rest) = line.strip_prefix("a1 ") {
+            if rest.starts_with("OK") {
+                return Ok(());
             }
-            // Bytes sent before the handshake would be taken as if they had
-            // come over TLS (response injection).
-            if !reader.buffer().is_empty() {
-                anyhow::bail!("unexpected data before TLS");
-            }
-            return Ok(reader.into_inner());
+            return Err(StartTlsRefused.into());
         }
+    }
+    anyhow::bail!("no answer to STARTTLS")
+}
+
+/// The most lines of one reply read by hand.
+const MAX_REPLY_LINES: usize = 64;
+
+/// The server's greeting, refused unless it is a plain `* OK`: `* PREAUTH`
+/// would mean signed in without a password and `* BYE` that the server is
+/// not taking this connection.
+///
+/// A `* OK [CAPABILITY ...]` greeting (Dovecot's) brings the capabilities
+/// for free; they are returned, and only trusted under TLS.
+fn greeting<R: BufRead>(reader: &mut R) -> Result<Option<Vec<String>>> {
+    let line = super::pin::read_line_capped(reader)?;
+    let upper = line.to_ascii_uppercase();
+    Err(if let Some(rest) = upper.strip_prefix("* OK") {
+        let listed = rest
+            .trim_start()
+            .strip_prefix("[CAPABILITY ")
+            .and_then(|r| r.split_once(']'))
+            .map(|(list, _)| list.split(' ').map(str::to_string).collect());
+        return Ok(listed);
+    } else if upper.starts_with("* PREAUTH") {
+        GreetingRefused::PreAuth
+    } else if upper.starts_with("* BYE") {
+        GreetingRefused::Bye
+    } else {
+        GreetingRefused::Other
+    }
+    .into())
+}
+
+/// `CAPABILITY` by hand under `tag`: the upper-cased capability atoms.
+fn capability_exchange<S: Read + Write>(
+    reader: &mut BufReader<S>,
+    tag: &str,
+) -> Result<Vec<String>> {
+    reader
+        .get_mut()
+        .write_all(format!("{tag} CAPABILITY\r\n").as_bytes())?;
+    let mut caps = Vec::new();
+    let prefix = format!("{tag} ");
+    for _ in 0..MAX_REPLY_LINES {
+        let line = super::pin::read_line_capped(reader)?;
+        if let Some(rest) = line.strip_prefix(&prefix) {
+            if rest.starts_with("OK") {
+                return Ok(caps);
+            }
+            anyhow::bail!("CAPABILITY was refused");
+        }
+        if let Some(list) = line.trim_end().strip_prefix("* CAPABILITY ") {
+            caps = list.split(' ').map(str::to_ascii_uppercase).collect();
+        }
+    }
+    anyhow::bail!("no answer to CAPABILITY")
+}
+
+/// On the secured stream: read the greeting (unless STARTTLS did already:
+/// `greet`), and, if `list`, ask for the capabilities again. Nothing the
+/// server pipelined beyond the answers is accepted.
+fn secured_greeting(
+    stream: &mut Transport,
+    greet: bool,
+    list: bool,
+) -> Result<Option<Vec<String>>> {
+    let mut reader = BufReader::new(stream);
+    let listed = if greet { greeting(&mut reader)? } else { None };
+    let caps = if list {
+        Some(capability_exchange(&mut reader, "c0")?)
+    } else {
+        listed
+    };
+    if !reader.buffer().is_empty() {
+        anyhow::bail!("unexpected data after the greeting");
+    }
+    Ok(caps)
+}
+
+/// A TLS handshake that failed because the connection broke, not because of
+/// what the server presented.
+fn handshake_dropped(e: &native_tls::HandshakeError<TcpStream>) -> bool {
+    use std::io::ErrorKind::*;
+    let native_tls::HandshakeError::Failure(err) = e else {
+        return false;
+    };
+    let mut next: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(cause) = next {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>()
+            && matches!(
+                io.kind(),
+                ConnectionReset | ConnectionAborted | UnexpectedEof | TimedOut | BrokenPipe
+            )
+        {
+            return true;
+        }
+        next = cause.source();
+    }
+    // native-tls on Windows wraps the I/O error without exposing it as a
+    // source; its Debug form names the kind (`Os { code: 10053, kind:
+    // ConnectionAborted, .. }`), in English whatever the language of
+    // Windows.
+    let debug = format!("{err:?}");
+    [
+        "ConnectionReset",
+        "ConnectionAborted",
+        "UnexpectedEof",
+        "TimedOut",
+        "BrokenPipe",
+    ]
+    .iter()
+    .any(|kind| debug.contains(&format!("kind: {kind}")))
+}
+
+/// The server closed the connection (or stopped) before it answered.
+#[derive(Debug)]
+pub struct ConnectionClosed;
+
+impl std::fmt::Display for ConnectionClosed {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("connection closed")
     }
 }
+
+impl std::error::Error for ConnectionClosed {}
+
+/// A greeting other than `* OK`: the server signed the connection in by
+/// itself (PREAUTH), or said goodbye (BYE), or is not an IMAP server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GreetingRefused {
+    PreAuth,
+    Bye,
+    Other,
+}
+
+impl std::fmt::Display for GreetingRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::PreAuth => "the server signed the connection in by itself (PREAUTH)",
+            Self::Bye => "the server said goodbye instead of greeting (BYE)",
+            Self::Other => "the server's greeting is not an IMAP greeting",
+        })
+    }
+}
+
+impl std::error::Error for GreetingRefused {}
+
+/// The server speaks UTF-8 only (`UTF8=ONLY`, RFC 6855), which Komorebi
+/// does not.
+#[derive(Debug)]
+pub struct Utf8Only;
+
+impl std::fmt::Display for Utf8Only {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("the server only works in UTF-8 mode (UTF8=ONLY)")
+    }
+}
+
+impl std::error::Error for Utf8Only {}
+
+/// The server does not allow `LOGIN` over the secure connection
+/// (`LOGINDISABLED`), the only sign-in Komorebi uses.
+#[derive(Debug)]
+pub struct NoSignIn;
+
+impl std::fmt::Display for NoSignIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("the server does not allow LOGIN (LOGINDISABLED)")
+    }
+}
+
+impl std::error::Error for NoSignIn {}
 
 /// Longest UID set in one STORE, MOVE, COPY or EXPUNGE, so a large
 /// selection stays well inside the 8,192-octet command line servers are
@@ -1444,7 +1790,19 @@ fn remote_folder(name: &str, delimiter: Option<&str>, special: Option<Role>) -> 
     // Match well-known names on the decoded name; the top-level INBOX always
     // wins over special-use attributes.
     let display = decode_mutf7(leaf);
-    let role = match Role::from_name(name, &display) {
+    // Only a folder at the top, or directly under INBOX (`INBOX.Sent`, the
+    // way Courier and Cyrus name them), is a Sent folder by its name: a
+    // `Projects/Archive` is the user's own.
+    let parent = delimiter
+        .filter(|d| !d.is_empty())
+        .and_then(|d| name.rsplit_once(d))
+        .map_or("", |(parent, _)| parent);
+    let by_name = if parent.is_empty() || parent.eq_ignore_ascii_case("INBOX") {
+        Role::from_name(name, &display)
+    } else {
+        None
+    };
+    let role = match by_name {
         Some(Role::Inbox) => Role::Inbox,
         by_name => special.or(by_name).unwrap_or_default(),
     };
@@ -1453,11 +1811,23 @@ fn remote_folder(name: &str, delimiter: Option<&str>, special: Option<Role>) -> 
         display: if role == Role::Inbox {
             "Inbox".to_string()
         } else {
-            display
+            capped(display)
         },
         depth: if role == Role::Other { depth } else { 0 },
         role,
     }
+}
+
+/// The longest folder name shown; commands always use the whole raw name.
+const MAX_DISPLAY: usize = 120;
+
+fn capped(display: String) -> String {
+    if display.chars().count() <= MAX_DISPLAY {
+        return display;
+    }
+    let mut short: String = display.chars().take(MAX_DISPLAY - 1).collect();
+    short.push('\u{2026}');
+    short
 }
 
 /// Decode an IMAP modified UTF-7 mailbox name (RFC 3501 §5.1.3).
@@ -1474,8 +1844,10 @@ pub fn decode_mutf7(s: &str) -> String {
         let encoded = &after[..end];
         if encoded.is_empty() {
             out.push('&');
-        } else if let Some(units) = decode_mbase64(encoded) {
-            out.push_str(&String::from_utf16_lossy(&units));
+        } else if let Some(text) =
+            decode_mbase64(encoded).and_then(|units| String::from_utf16(&units).ok())
+        {
+            out.push_str(&text);
         } else {
             out.push_str(&rest[start..start + end + 2]);
         }
@@ -1505,6 +1877,11 @@ fn decode_mbase64(s: &str) -> Option<Vec<u16>> {
             bytes.push((bits >> nbits) as u8);
             bits &= (1 << nbits) - 1;
         }
+    }
+    // Whole UTF-16 units and only zero padding bits left: anything else is
+    // not modified UTF-7, and the name is kept as the server wrote it.
+    if bytes.len() % 2 != 0 || bits != 0 {
+        return None;
     }
     Some(
         bytes
@@ -1993,6 +2370,235 @@ mod tests {
     }
 
     #[test]
+    fn invalid_modified_utf7_is_kept_as_the_server_wrote_it() {
+        for raw in [
+            "&",             // nothing after it
+            "&abc",          // no closing dash
+            "&AB-",          // half a UTF-16 unit
+            "&!!-",          // not base64
+            "&2D4-",         // a lone surrogate
+            "&AAA=-",        // padding is not part of it
+            "Mail&ZeVnLIqe", // unterminated after valid text
+        ] {
+            assert_eq!(decode_mutf7(raw), raw, "{raw}");
+        }
+        // Valid and invalid in one name: only the valid one is decoded.
+        assert_eq!(decode_mutf7("&ZeVnLIqe-/&AB-"), "日本語/&AB-");
+    }
+
+    #[test]
+    fn folder_names_of_every_style() {
+        let f = |name: &str, delim: &str| remote_folder(name, Some(delim), None);
+        // Case variants of INBOX are the inbox, shown as "Inbox".
+        for name in ["INBOX", "Inbox", "inbox"] {
+            let r = f(name, "/");
+            assert_eq!((r.role, r.display.as_str()), (Role::Inbox, "Inbox"));
+        }
+        // Courier and Cyrus: `INBOX.` before the name, `.` between levels.
+        for (name, role) in [
+            ("INBOX.Sent", Role::Sent),
+            ("INBOX.Sent Items", Role::Sent),
+            ("INBOX.Sent Messages", Role::Sent),
+            ("INBOX.Drafts", Role::Drafts),
+            ("INBOX.Deleted Items", Role::Trash),
+            ("INBOX.Deleted Messages", Role::Trash),
+            ("INBOX.Spam", Role::Junk),
+            ("INBOX.Junk E-mail", Role::Junk),
+            ("INBOX.Archives", Role::Archive),
+            ("inbox.trash", Role::Trash),
+        ] {
+            assert_eq!(f(name, ".").role, role, "{name}");
+        }
+        // The same with a `/`, with and without the prefix.
+        assert_eq!(f("INBOX/Sent", "/").role, Role::Sent);
+        assert_eq!(f("Sent Messages", "/").role, Role::Sent);
+        // A folder of the user's own, deeper down, keeps its place and name.
+        let nested = f("INBOX.Projects.Archive", ".");
+        assert_eq!(
+            (nested.role, nested.display.as_str(), nested.depth),
+            (Role::Other, "Archive", 2)
+        );
+        let nested = f("Work/Sent", "/");
+        assert_eq!((nested.role, nested.depth), (Role::Other, 1));
+        // The delimiter is the one LIST reported: a `/` in a `.` name is text.
+        let odd = f("INBOX.a/b", ".");
+        assert_eq!((odd.display.as_str(), odd.depth), ("a/b", 1));
+        // Quotes, backslashes, `&`, spaces: shown and kept verbatim.
+        let odd = f("Q\"uote \\ & Co", "/");
+        assert_eq!(
+            (odd.name.as_str(), odd.display.as_str()),
+            ("Q\"uote \\ & Co", "Q\"uote \\ & Co")
+        );
+        // Very long names are shortened for display, never for commands.
+        let long = "x".repeat(500);
+        let r = f(&long, "/");
+        assert_eq!(r.name, long);
+        assert_eq!(r.display.chars().count(), MAX_DISPLAY);
+        assert!(r.display.ends_with('\u{2026}'));
+        // No delimiter reported (a flat server): the whole name, no depth.
+        let flat = remote_folder("Archive.2024", None, None);
+        assert_eq!((flat.display.as_str(), flat.depth), ("Archive.2024", 0));
+    }
+
+    #[test]
+    fn unselectable_names_are_not_folders() {
+        let server = FakeServer::start({
+            let mut script = login_steps(PLAIN_CAPS);
+            script.extend([
+                Step::Expect("a3 LIST"),
+                Step::Send(concat!(
+                    r#"* LIST (\HasNoChildren) "." "INBOX""#,
+                    "\r\n",
+                    r#"* LIST (\Noselect \HasChildren) "." "INBOX.Projects""#,
+                    "\r\n",
+                    r#"* LIST (\NonExistent \HasChildren) "." "INBOX.Ghost""#,
+                    "\r\n",
+                    r#"* LIST (\HasNoChildren) "." "INBOX.Real""#,
+                    "\r\n",
+                    "{tag} OK LIST completed\r\n",
+                )),
+            ]);
+            script.extend(logout_steps("a4 LOGOUT"));
+            script
+        });
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        let names: Vec<_> = imap
+            .list_folders()
+            .unwrap()
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(names, ["INBOX", "INBOX.Real"]);
+        imap.logout();
+        server.finish();
+    }
+
+    // ---- greetings that are no greeting
+
+    #[test]
+    fn preauth_bye_and_silence_are_not_a_greeting() {
+        for (greeting, want) in [
+            ("* PREAUTH welcome back\r\n", Some(GreetingRefused::PreAuth)),
+            ("* BYE too many users\r\n", Some(GreetingRefused::Bye)),
+            ("HTTP/1.1 400 Bad Request\r\n", Some(GreetingRefused::Other)),
+            ("", None),
+        ] {
+            let server = FakeServer::start(if greeting.is_empty() {
+                vec![Step::Close]
+            } else {
+                vec![Step::Send(greeting), Step::ExpectEof]
+            });
+            let err = Imap::connect_plain(server.addr, "user", "pass")
+                .err()
+                .expect("refused");
+            match want {
+                Some(want) => assert_eq!(err.downcast_ref::<GreetingRefused>(), Some(&want)),
+                None => assert!(err.is::<ConnectionClosed>(), "{err:#}"),
+            }
+            // No LOGIN was sent to it.
+            assert!(server.finish().is_empty());
+        }
+    }
+
+    // ---- the sign-in: bytes, and the methods
+
+    /// The LOGIN line the fake got for `password`.
+    fn login_line_for(password: &str) -> String {
+        let server = FakeServer::start({
+            let mut script = login_steps(PLAIN_CAPS);
+            script.extend(logout_steps("a3 LOGOUT"));
+            script
+        });
+        Imap::connect_plain(server.addr, "alice", password)
+            .unwrap()
+            .logout();
+        server.finish().remove(0)
+    }
+
+    #[test]
+    fn passwords_are_sent_as_typed() {
+        // Quotes and backslashes escaped; spaces and non-ASCII (UTF-8) as is.
+        assert_eq!(
+            login_line_for(r#"p"w\ x"#),
+            r#"a1 LOGIN "alice" "p\"w\\ x""#
+        );
+        assert_eq!(
+            login_line_for("pässwörd ✓"),
+            "a1 LOGIN \"alice\" \"pässwörd ✓\""
+        );
+    }
+
+    /// A connection that asks for the capabilities before the sign-in (as
+    /// after STARTTLS), given the server's `caps` line; the fake's script
+    /// after that is `then`.
+    fn listed_sign_in(caps: &'static str, then: Vec<Step>) -> Result<Vec<String>> {
+        let mut script = vec![
+            Step::Send("* OK fake IMAP ready\r\n"),
+            Step::Expect("c0 CAPABILITY"),
+            Step::Send(caps),
+        ];
+        script.extend(then);
+        let server = FakeServer::start(script);
+        // Dropped (closed) before the script is read to its end.
+        let result = Imap::connect_plain_listing(server.addr, "alice", "pw").map(drop);
+        let seen = server.finish();
+        match result {
+            Ok(()) => Ok(seen),
+            Err(e) => Err(e.context(seen.join("|"))),
+        }
+    }
+
+    #[test]
+    fn a_server_that_disables_login_gets_nothing_at_all() {
+        // The profile of LOGINDISABLED under TLS (AUTH=PLAIN or not): the
+        // password is never sent, and the error says why.
+        for caps in [
+            "* CAPABILITY IMAP4rev1 LOGINDISABLED\r\nc0 OK done\r\n",
+            "* CAPABILITY IMAP4rev1 LOGINDISABLED AUTH=PLAIN\r\nc0 OK done\r\n",
+        ] {
+            let err = listed_sign_in(caps, vec![Step::ExpectEof]).unwrap_err();
+            assert!(err.chain().any(|c| c.is::<NoSignIn>()), "{err:#}");
+        }
+        // Without it the listing is followed by an ordinary LOGIN.
+        let then = vec![
+            Step::Expect(r#"a1 LOGIN "alice" "pw""#),
+            Step::Send("{tag} OK LOGIN completed\r\n"),
+            Step::Expect("a2 CAPABILITY"),
+            Step::Send(PLAIN_CAPS),
+            Step::ExpectEof,
+        ];
+        let seen =
+            listed_sign_in("* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\nc0 OK done\r\n", then).unwrap();
+        assert_eq!(seen[0], "c0 CAPABILITY");
+    }
+
+    #[test]
+    fn a_greeting_that_lists_the_capabilities_saves_the_round_trip() {
+        // Dovecot's greeting: LOGINDISABLED there means no LOGIN, no ask.
+        let server = FakeServer::start(vec![
+            Step::Send("* OK [CAPABILITY IMAP4rev1 LOGINDISABLED] ready\r\n"),
+            Step::ExpectEof,
+        ]);
+        let err = Imap::connect_plain(server.addr, "alice", "pw")
+            .err()
+            .expect("refused");
+        assert!(err.is::<NoSignIn>(), "{err:#}");
+        assert!(server.finish().is_empty());
+    }
+
+    #[test]
+    fn utf8_only_servers_are_refused_with_a_sentence_of_their_own() {
+        let mut script = login_steps("* CAPABILITY IMAP4rev1 UTF8=ONLY\r\n{tag} OK done\r\n");
+        script.push(Step::ExpectEof);
+        let server = FakeServer::start(script);
+        let err = Imap::connect_plain(server.addr, "alice", "pw")
+            .err()
+            .expect("refused");
+        assert!(err.is::<Utf8Only>(), "{err:#}");
+        server.finish();
+    }
+
+    #[test]
     fn login_refusals_by_response_code() {
         assert!(rejects_credentials(
             "[AUTHENTICATIONFAILED] Invalid credentials"
@@ -2068,12 +2674,28 @@ mod tests {
     #[test]
     fn starttls_refuses_bytes_before_the_handshake() {
         let canned = |s: &'static str| Canned(std::io::Cursor::new(s.as_bytes()));
-        assert!(starttls(canned("* OK ready\r\na0 OK begin TLS\r\n")).is_ok());
-        let err = starttls(canned("* OK ready\r\na0 OK begin TLS\r\n* OK injected\r\n"))
-            .err()
-            .unwrap();
+        const READY: &str =
+            "* OK ready\r\n* CAPABILITY IMAP4rev1 STARTTLS LOGINDISABLED\r\na0 OK done\r\n";
+        assert!(starttls(canned(leak(format!("{READY}a1 OK begin TLS\r\n")))).is_ok());
+        let err = starttls(canned(leak(format!(
+            "{READY}a1 OK begin TLS\r\n* OK injected\r\n"
+        ))))
+        .err()
+        .unwrap();
         assert!(err.to_string().contains("unexpected data"));
-        assert!(starttls(canned("* OK ready\r\na0 NO not now\r\n")).is_err());
+        assert!(starttls(canned(leak(format!("{READY}a1 NO not now\r\n")))).is_err());
+        // A server that doesn't list STARTTLS is never asked for it.
+        let err = starttls(canned(
+            "* OK ready\r\n* CAPABILITY IMAP4rev1\r\na0 OK done\r\na1 OK begin TLS\r\n",
+        ))
+        .err()
+        .unwrap();
+        assert!(err.is::<StartTlsRefused>(), "{err:#}");
+        // PREAUTH and BYE are no greeting.
+        for greeting in ["* PREAUTH hi\r\n", "* BYE go away\r\n"] {
+            let err = starttls(canned(greeting)).err().unwrap();
+            assert!(err.is::<GreetingRefused>(), "{err:#}");
+        }
     }
 
     // ---- the fence: replies the crate would abort on, and odd servers

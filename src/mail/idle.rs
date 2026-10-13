@@ -3,7 +3,7 @@
 //! them. It notifies only: no SQLite, no job queue, so dropping the
 //! [`super::Workers`] still closes the job channels.
 
-use super::errors::{is_auth_error, is_parse_error, is_refusal};
+use super::errors::{Latch, is_parse_error, is_refusal};
 use super::imap::WaitOutcome;
 use super::{Connect, Event, Notify};
 use crate::db::Account;
@@ -34,7 +34,7 @@ pub(super) struct Idler {
     account: Account,
     connect: Connect,
     notify: Notify,
-    auth_failed: Arc<AtomicBool>,
+    auth_failed: Latch,
     stop: Arc<AtomicBool>,
     /// Set by [`IdleHandle::kick`]: reconnect now, with the backoff reset.
     kicked: Arc<AtomicBool>,
@@ -116,7 +116,7 @@ impl Idler {
         account: Account,
         connect: Connect,
         notify: Notify,
-        auth_failed: Arc<AtomicBool>,
+        auth_failed: Latch,
     ) -> Self {
         Self {
             account,
@@ -163,7 +163,7 @@ impl Idler {
         let mut rng = seed();
         for attempt in 0.. {
             // A rejected sign-in waits for the user to retry (Refresh).
-            while self.auth_failed.load(Ordering::Relaxed) {
+            while self.auth_failed.get() {
                 // A kick has no connection to cut here (and would cut
                 // every nap short).
                 self.kicked.store(false, Ordering::Relaxed);
@@ -211,12 +211,9 @@ impl Idler {
     fn watch(&self, (inbox_id, inbox): &(i64, String), catch_up: bool) -> IdleEnd {
         let mut imap = match (self.connect)(&self.account) {
             Ok(imap) => imap,
-            Err(e) if is_auth_error(&e) => {
-                // Shared with the other workers, so none of them adds a
-                // failed login either.
-                self.auth_failed.store(true, Ordering::Relaxed);
-                return IdleEnd::Retry;
-            }
+            // Shared with the other workers, so none of them adds a failed
+            // login (or another failed handshake) either.
+            Err(e) if self.auth_failed.set_from(&e) => return IdleEnd::Retry,
             Err(e) if is_refusal(&e) => return IdleEnd::Refused,
             Err(_) => return IdleEnd::Retry,
         };
@@ -299,6 +296,12 @@ mod tests {
     /// handed over; returns its handle and the events it sends. The thread
     /// holds the only sender, so the receiver disconnects once it exits.
     fn idler(db: &Db, connect: Connect) -> (IdleHandle, Receiver<Event>) {
+        idler_with(db, connect, Latch::default())
+    }
+
+    /// [`idler`] sharing `latch` with the test, as the account's other
+    /// workers share it.
+    fn idler_with(db: &Db, connect: Connect, latch: Latch) -> (IdleHandle, Receiver<Event>) {
         let (events, rx) = channel();
         let events = Mutex::new(events);
         let (ready, ready_rx) = channel();
@@ -309,7 +312,7 @@ mod tests {
             Arc::new(move |e| {
                 events.lock().unwrap().send(e).ok();
             }),
-            Arc::default(),
+            latch,
         );
         idler.wait = Duration::from_millis(300);
         (spawn_idle(idler, ready_rx), rx)
@@ -455,5 +458,68 @@ mod tests {
         // The second attempt comes well inside the ~5 s backoff.
         attempts.recv_timeout(Duration::from_secs(2)).unwrap();
         drop(handle);
+    }
+
+    #[test]
+    fn idle_thread_quits_on_a_server_without_idle() {
+        // The profile of a server with no IDLE: the thread logs out and is
+        // gone; the poll timer finds new mail instead.
+        let mut db = Db::in_memory().unwrap();
+        setup(&mut db, 7, &[]);
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend(logout_steps("a3 LOGOUT"));
+        let server = FakeServer::start(script);
+        let (_handle, events) = idler(&db, connect_plain(server.addr));
+
+        assert!(exits_within(&events, Duration::from_secs(5)));
+        server.finish();
+    }
+
+    /// A changed certificate or a rejected password is one attempt: the
+    /// thread latches the account (shared with its other workers) instead of
+    /// asking the server again after every backoff.
+    #[test]
+    fn idle_thread_latches_the_account_on_a_failure_only_the_user_can_fix() {
+        type Fail = fn() -> anyhow::Error;
+        let cases: [(Fail, bool); 3] = [
+            (
+                || crate::mail::pin::PinMismatch("imap.example.com".into()).into(),
+                true,
+            ),
+            (
+                || crate::mail::imap::TlsFailed("imap.example.com".into()).into(),
+                true,
+            ),
+            (|| crate::mail::imap::AuthFailed("no".into()).into(), false),
+        ];
+        for (fail, secure) in cases {
+            let mut db = Db::in_memory().unwrap();
+            setup(&mut db, 7, &[]);
+            let latch = Latch::default();
+            let tries = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let count = tries.clone();
+            let (handle, _events) = idler_with(
+                &db,
+                Box::new(move |_| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Err(fail())
+                }),
+                latch.clone(),
+            );
+            let until = Instant::now() + Duration::from_secs(5);
+            while !latch.get() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(latch.get(), "latched");
+            assert_eq!(latch.is_secure(), secure);
+            assert_eq!(tries.load(Ordering::SeqCst), 1);
+            drop(handle);
+        }
+        // A refused connection is not such a failure.
+        let latch = Latch::default();
+        assert!(
+            !latch.set_from(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused).into())
+        );
+        assert!(!latch.get());
     }
 }

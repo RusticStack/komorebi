@@ -75,6 +75,36 @@ impl From<io::Error> for FetchError {
 
 /// GET `url` and return the body.
 pub fn get(url: &str) -> Result<Vec<u8>, FetchError> {
+    get_with(url, &Options::images())
+}
+
+/// What a request asks for and how much it accepts.
+pub struct Options<'a> {
+    /// The `Accept` header.
+    pub accept: &'a str,
+    /// The largest body accepted.
+    pub max_body: usize,
+    /// The limit for the whole request, redirects included.
+    pub total: Duration,
+    /// Whether a redirect may be followed to this (already `https`) URL.
+    pub redirect_ok: &'a dyn Fn(&Url) -> bool,
+}
+
+impl Options<'_> {
+    /// Remote images in a message.
+    fn images() -> Self {
+        Options {
+            accept: "image/*",
+            max_body: MAX_BODY,
+            total: TOTAL_TIMEOUT,
+            redirect_ok: &|_| true,
+        }
+    }
+}
+
+/// [`get`] with its own limits (still HTTPS only, public hosts only, and
+/// refused under `KOMOREBI_OFFLINE`).
+pub fn get_with(url: &str, opts: &Options) -> Result<Vec<u8>, FetchError> {
     if crate::dev_var("KOMOREBI_OFFLINE").is_some() {
         return Err(FetchError::Offline);
     }
@@ -83,7 +113,7 @@ pub fn get(url: &str) -> Result<Vec<u8>, FetchError> {
         tls,
         loopback_ok: false,
     }
-    .get(url)
+    .get_with(url, opts)
 }
 
 struct Client {
@@ -101,18 +131,26 @@ struct Head {
 }
 
 impl Client {
+    #[cfg(test)]
     fn get(&self, url: &str) -> Result<Vec<u8>, FetchError> {
-        let end = Instant::now() + TOTAL_TIMEOUT;
+        self.get_with(url, &Options::images())
+    }
+
+    fn get_with(&self, url: &str, opts: &Options) -> Result<Vec<u8>, FetchError> {
+        let end = Instant::now() + opts.total;
         let mut url = https_url(&upgraded(url))?;
         for _ in 0..=MAX_REDIRECTS {
-            match self.request(&url, end)? {
+            match self.request(&url, end, opts)? {
                 Ok(body) => return Ok(body),
                 Err(location) => {
                     url = https_url(
                         url.join(&location)
                             .map_err(|_| FetchError::Refused)?
                             .as_str(),
-                    )?
+                    )?;
+                    if !(opts.redirect_ok)(&url) {
+                        return Err(FetchError::Refused);
+                    }
                 }
             }
         }
@@ -120,7 +158,12 @@ impl Client {
     }
 
     /// One request: the body, or where a redirect points.
-    fn request(&self, url: &Url, end: Instant) -> Result<Result<Vec<u8>, String>, FetchError> {
+    fn request(
+        &self,
+        url: &Url,
+        end: Instant,
+        opts: &Options,
+    ) -> Result<Result<Vec<u8>, String>, FetchError> {
         let host = url.host_str().ok_or(FetchError::Refused)?;
         let port = url.port_or_known_default().ok_or(FetchError::Refused)?;
         // An IPv6 literal comes bracketed; resolve and verify it bare.
@@ -146,14 +189,15 @@ impl Client {
         };
         let req = format!(
             "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: {USER_AGENT}\r\n\
-             Accept: image/*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+             Accept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+            accept = opts.accept
         );
         stream.write_all(req.as_bytes())?;
         stream.flush()?;
         let mut r = BufReader::new(stream);
-        let head = read_head(&mut r)?;
+        let head = read_head(&mut r, opts.max_body)?;
         match head.status {
-            200 => read_body(&mut r, &head).map(Ok),
+            200 => read_body(&mut r, &head, opts.max_body).map(Ok),
             301 | 302 | 303 | 307 | 308 => head.location.map(Err).ok_or(FetchError::BadResponse),
             s => Err(FetchError::Status(s)),
         }
@@ -286,7 +330,7 @@ fn read_line(r: &mut impl BufRead, limit: u64) -> Result<String, FetchError> {
     String::from_utf8(line).map_err(|_| FetchError::BadResponse)
 }
 
-fn read_head(r: &mut impl BufRead) -> Result<Head, FetchError> {
+fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> {
     let mut left = MAX_HEAD;
     let mut next = |r: &mut _| -> Result<String, FetchError> {
         let line = read_line(r, left)?;
@@ -320,7 +364,7 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FetchError> {
         match name.trim().to_ascii_lowercase().as_str() {
             "content-length" => {
                 let n: u64 = value.parse().map_err(|_| FetchError::BadResponse)?;
-                if n > MAX_BODY as u64 {
+                if n > max_body as u64 {
                     return Err(FetchError::TooLarge);
                 }
                 head.length = Some(n as usize);
@@ -341,14 +385,14 @@ fn read_head(r: &mut impl BufRead) -> Result<Head, FetchError> {
     }
 }
 
-fn read_body(r: &mut impl BufRead, head: &Head) -> Result<Vec<u8>, FetchError> {
+fn read_body(r: &mut impl BufRead, head: &Head, max_body: usize) -> Result<Vec<u8>, FetchError> {
     let mut body = Vec::new();
     if head.chunked {
         loop {
             let line = read_line(r, 1024)?;
             let size = line.trim().split(';').next().unwrap_or("").trim();
             let size = usize::from_str_radix(size, 16).map_err(|_| FetchError::BadResponse)?;
-            if size > MAX_BODY - body.len() {
+            if size > max_body - body.len() {
                 return Err(FetchError::TooLarge);
             }
             if size == 0 {
@@ -367,8 +411,8 @@ fn read_body(r: &mut impl BufRead, head: &Head) -> Result<Vec<u8>, FetchError> {
         r.read_exact(&mut body)?;
         return Ok(body);
     }
-    r.take(MAX_BODY as u64 + 1).read_to_end(&mut body)?;
-    if body.len() > MAX_BODY {
+    r.take(max_body as u64 + 1).read_to_end(&mut body)?;
+    if body.len() > max_body {
         return Err(FetchError::TooLarge);
     }
     Ok(body)
@@ -466,6 +510,8 @@ mod tests {
                 b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 5\r\n\r\nimage"
                     .to_vec()
             }
+            "/xml" => b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n<a/>\r\n".to_vec(),
+            "/to-other" => redirect(format!("https://localhost:{port}/img")),
             "/missing" => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
             "/to-http" => redirect(format!("http://127.0.0.1:{port}/img")),
             // /hop/N redirects N + 1 times (the last one relative) to /img.
@@ -534,6 +580,52 @@ mod tests {
             assert!(head.contains("\r\nUser-Agent: Mozilla/5.0\r\n"), "{head}");
             assert!(head.contains("\r\nAccept-Encoding: identity\r\n"), "{head}");
         }
+    }
+
+    #[test]
+    fn options_set_the_accept_header_body_cap_and_redirect_rule() {
+        let (port, seen) = serve();
+        let c = client();
+        let url = |p: &str| format!("https://127.0.0.1:{port}{p}");
+        let any = |_: &Url| true;
+        let opts = |max_body: usize, redirect_ok: &dyn Fn(&Url) -> bool| {
+            // The options borrow the closure only for the call.
+            c.get_with(
+                &url("/xml"),
+                &Options {
+                    accept: "application/xml",
+                    max_body,
+                    total: Duration::from_secs(5),
+                    redirect_ok,
+                },
+            )
+        };
+        assert_eq!(opts(64, &any).unwrap(), b"<a/>\r\n");
+        assert!(
+            seen.lock().unwrap()[0].contains("\r\nAccept: application/xml\r\n"),
+            "{}",
+            seen.lock().unwrap()[0]
+        );
+        // A body over the caller's cap is refused.
+        assert_eq!(opts(5, &any), Err(FetchError::TooLarge));
+
+        // A redirect the caller does not allow is refused before it is followed.
+        let only_same_host = |u: &Url| u.host_str() == Some("127.0.0.1");
+        let get = |path: &str, ok: &dyn Fn(&Url) -> bool| {
+            c.get_with(
+                &url(path),
+                &Options {
+                    accept: "*/*",
+                    max_body: 64,
+                    total: Duration::from_secs(5),
+                    redirect_ok: ok,
+                },
+            )
+        };
+        let before = seen.lock().unwrap().len();
+        assert_eq!(get("/to-other", &only_same_host), Err(FetchError::Refused));
+        assert_eq!(seen.lock().unwrap().len(), before + 1);
+        assert_eq!(get("/hop/1", &only_same_host).unwrap(), b"image");
     }
 
     #[test]

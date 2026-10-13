@@ -98,7 +98,8 @@ fn mailchimp_quote_keeps_text_and_drops_images() {
     assert!(read.blocked_remote > 0);
     let reply = reply_to("01-mailchimp-campaign").unwrap();
     let text = mime::parse_body(&reply).text;
-    assert!(text.starts_with("Thanks, **noted**."), "{text}");
+    // The text/plain part reads as text: the bold marks became HTML only.
+    assert!(text.starts_with("Thanks, noted."), "{text}");
     let doc = big_stack(move || {
         render::layout(
             &mime::parse_render_input(&reply),

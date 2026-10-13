@@ -15,6 +15,11 @@ pub(super) enum RawUse {
     Forward,
 }
 
+/// The status line while a body downloads for one of these.
+fn fetching() -> String {
+    t!(invoke_fetching)
+}
+
 impl App {
     /// Run `action` on the open message (from the row menu, on the one
     /// selected row, which opens first), once its body is here.
@@ -28,12 +33,19 @@ impl App {
         }
         let (id, account) = (open.msg.id, open.msg.account_id);
         let Some(w) = self.workers.get(&account) else {
-            return self.set_status("This message isn't downloaded yet.", true);
+            return self.set_status(&t!(invoke_not_downloaded), true);
         };
         // Asked again: a first download may have failed.
         w.send(Job::FetchBody(id));
         self.raw_wait = Some((id, action));
-        self.set_status("Fetching message…", false);
+        // Said only once it takes a second (FLUENT2 "Wait UX").
+        Timer::single_shot(Duration::from_secs(1), move || {
+            with_app(|a| {
+                if a.raw_wait.is_some_and(|(wait, _)| wait == id) {
+                    a.set_status(&fetching(), false);
+                }
+            });
+        });
     }
 
     /// The body of message `id` arrived: run the action waiting for it, if
@@ -46,6 +58,9 @@ impl App {
             return;
         }
         self.raw_wait = None;
+        if self.ui().get_status() == fetching().as_str() {
+            self.set_status("", false);
+        }
         if self.open.as_ref().is_none_or(|o| o.msg.id != id) {
             return;
         }
@@ -55,15 +70,18 @@ impl App {
                 open.msg.raw = raw;
             }
         }
-        self.set_status("", false);
         self.run_raw(action);
     }
 
     /// The body of message `id` couldn't be downloaded.
-    pub(super) fn raw_failed(&mut self, id: i64, error: &str) {
+    pub(super) fn raw_failed(&mut self, id: i64, error: &Problem) {
         if self.raw_wait.is_some_and(|(wait, _)| wait == id) {
             self.raw_wait = None;
-            self.set_status(&format!("Couldn't download this message: {error}"), true);
+            let text = t!(
+                invoke_could_not_download_status,
+                text::problem(error).into()
+            );
+            self.set_status(&text, true);
         }
     }
 
@@ -111,16 +129,16 @@ impl App {
         }
         let id = self.open_message_id();
         if id.is_empty() {
-            return self.set_status("This message has no Message-ID.", false);
+            return self.set_status(&t!(invoke_no_message_id), false);
         }
         self.ui().invoke_r_copy_text(id.as_str().into());
-        self.set_status("Message-ID copied.", false);
+        self.set_status(&t!(invoke_message_id_copied), false);
     }
 }
 
 /// Save as .eml: the open message's bytes, exactly as cached.
 fn save_eml() {
     if let Some((name, raw)) = with_app(|a| a.eml_export()).flatten() {
-        save_file("Save message", &name, raw);
+        save_file(&t!(invoke_dlg_save_message), &name, raw);
     }
 }

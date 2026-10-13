@@ -1454,6 +1454,286 @@ Learned on Postale's Dovecot, and handled:
       medians): window 4.2 ms, cache loaded 6.2 ms, first frame drawn
       31.5 ms. User data: no schema change; Remove all data deletes
       everything in the data inventory, the uninstaller only on Yes.
+- [x] Native Windows 11 round, Stage 1 (2026-10-09): Komorebi follows
+      Windows' appearance settings as a WinUI 3 app does
+      (`docs/WINUI3.md` "Following the user's Windows theme"). New
+      `src/theme.rs` reads, once before the first frame, the accent ramp
+      (`AccentPalette`), light or dark apps (`AppsUseLightTheme`, then HKLM
+      `SystemUsesLightTheme`), high contrast with its 8 `GetSysColor`
+      colours, `TextScaleFactor`, animation effects and DWM
+      `ColorPrevalence`; a `SetWindowSubclass` listener on the window
+      (after winit's own handling) sets the title bar again and posts one
+      coalesced re-read per burst of `WM_SETTINGCHANGE`,
+      `WM_DWMCOLORIZATIONCOLORCHANGED`, `WM_SYSCOLORCHANGE` or
+      `WM_THEMECHANGED` (winit's `ThemeChanged` is no longer used). Theme
+      gains `ramp`, `contrast`, `hc-*`, `animate` (`fast`/`faster`), the
+      scaled type sizes (`title-large` new; `row-height` derives from them)
+      and `display-font`; `AppWindow.default-font-size` is `Theme.body`, so
+      Slint's std widgets go from 12 to 14 px. Only `accent` (Dark1 /
+      Light2), `on-accent` (white / black), `accent-text` (Dark2 / Light3
+      through `readable`), the new `selection-bg`/`-text` and `focus` moved;
+      under a contrast theme they take Highlight / HighlightText /
+      WindowText, and light or dark follows the theme's Window colour over
+      the Light/Dark setting. The title bar's caption is the layer colour
+      (Windows' own under high contrast or with accent title bars). Mica
+      stays on its documented solid fallback. Dev switches
+      `KOMOREBI_ACCENT`, `KOMOREBI_THEME=contrast` + `KOMOREBI_CONTRAST`,
+      `KOMOREBI_TEXT_SCALE`, `KOMOREBI_ANIMATE=0`, `KOMOREBI_SNAPSHOT_HOVER`.
+      Known residuals until later stages: Slint's std widgets (search box
+      underline, check boxes, combo box lists) keep Slint's approximated
+      accent and have no contrast colours; every other token keeps its
+      light/dark value under a contrast theme; toolbar labels overlap at
+      150 % and 225 % text size; the approximate ramp of a light accent
+      (yellow) gives white on a mid fill. Release binary 14,779,392 bytes
+      (+16,384); first frame drawn, median of 5 on the 2000-message seed,
+      33.5 ms (35.4 ms for the build before). User data: none read or
+      changed; nothing new is stored.
+- [x] Native Windows 11 round, Stage 3 (2026-10-11): shared WinUI-style
+      widgets in `ui/widgets.slint` (`docs/WINUI3.md` "Components"):
+      `FocusRing` (keyboard only, inside or outside), `Button` (standard,
+      `accent`, `checkable` toggle; tooltip, accessible name and
+      description), subtle `IconButton` (checked and pressed states),
+      `HyperlinkButton`, one ToolTip overlay (`Tip` global, 500 ms),
+      `TextField`, `CheckBox`, `ToggleSwitch`, `InfoBar`, `ContentDialog`,
+      `ProgressRing`/`ProgressBar` (shown after 1 s), `SelectorBar` (one
+      Tab stop) and the `Flyout` surface (Move). Adopted where they drop
+      in: every std `LineEdit`, `CheckBox` and `Spinner` is gone; the list
+      filters are toggle buttons (8 px taller header until Stage 5's
+      SelectorBar); Settings tabs, the send guards' bar, the account
+      form's error, the link, discard and yes/no prompts use them. No
+      `AccentButton` component and no children in dialogs or info bars:
+      both would copy the widget's code (binary size). Left for later
+      stages: the std `ComboBox` and signature `TextEdit`, ToggleSwitch
+      (Settings, Stage 8), destructive prompts still have an accent
+      button (Stage 8), toolbar labels overlap at 150 %/225 % text size
+      (Stage 6), Settings form labels clip at 225 % (Stage 8). Release
+      binary 14,839,296 bytes (+54,784 against Stage 2's 14,784,512);
+      first frame drawn, median of 5 on the 2000-message seed, 33.3 ms
+      (32.0 ms for the Stage 2 build in the same session). User data: none
+      read or changed.
+- [x] Native Windows 11 round, Stage 4 (2026-10-11): the shell as a WinUI
+      left NavigationView (`docs/WINUI3.md` "NavigationView, left"). The
+      list and the reader sit on one card flush with the window's right
+      and bottom edges (top-left corner 8, 1 px `card-stroke` top and left
+      edge, a 1 px divider between them); the folder pane is on the layer.
+      `NavRow`: `Theme.nav-row` tall (36 px, more with the text size), 4 px
+      apart and from the pane's sides, 40 px icon box, label 4 px after it,
+      hover / pressed / selected / selected-and-hovered fills, pressed text
+      secondary, 3x16 pill (radius 2); account lines get hover and press,
+      the colour dot in the icon box and WinUI's 8 px chevron at the end.
+      Settings is a footer item (selected while Settings shows). Narrow
+      window: a 48 px rail with tooltips, its account lines 8 px
+      separators (not clickable), and a pane toggle (E700, 40x36, named
+      "Open navigation" / "Close navigation" as WinUI's) that
+      opens the 248 px pane over the content on the flyout surface (1 px
+      edge, no animation) until Esc, a click outside, a choice or a wider
+      window; `KOMOREBI_SNAPSHOT_ACTION=pane`. Welcome on the content card
+      (glyph secondary, accent only on Add account). The toggle and
+      Settings share one `NavRow` repeater, and `NavRow` draws its pill,
+      separator, icon and dot as plain elements, not `if`s: each `if` or
+      extra instance is code of its own (the toggle as an `IconButton`
+      alone was 10.7 KB). Left for later stages: the list's selected row
+      still has its old outline and touches the card's left edge (Stage 5);
+      the toggle and Settings follow the folders in Tab order (one
+      repeater); the rail's account lines stay list items for screen
+      readers (Slint's `accessible-role` must be constant). Release binary
+      14,829,056 bytes (-10,752 against Stage 3's 14,839,808); first frame
+      drawn, median of 5 on the 2000-message seed, 33.5 ms (32.8 ms for the
+      Stage 3 build in the same session). User data: none read or changed.
+- [x] Native Windows 11 round, Stage 5 (2026-10-11): the message list as a
+      WinUI ListView (`docs/WINUI3.md` "ListView item", "AutoSuggestBox",
+      "SelectorBar", "ScrollBar"). Rows: a subtle backplate inset 4,2
+      (radius 4) when hovered, pressed or selected, a 3 px accent pill
+      (36 px on a 76 px row, 6 px shorter while pressed, 83 ms), no
+      dividers and no unread bar (unread is semibold sender and subject
+      with a semibold accent date); read subjects in TextPrimary, padding
+      16,9,12,9, folder tag radius 4; HighlightText on Highlight plates and
+      a ringed account dot under a contrast theme; multi-selection uses the
+      same plates. The text does not move 7 px for the pill (recorded in
+      WINUI3.md). `row-selected` and `row-border` are gone. Header: buttons
+      centred by padding, the 16 px sync ring after 1 s with a "Syncing…"
+      tooltip; `SearchBox` (placeholder "Search", 12 px query button that
+      hands the keys to the list, tooltip "Search (Ctrl+F)") with the
+      "All folders" ToggleButton beside it while searching; an All /
+      Unread / Flagged SelectorBar replaces the toggles (`SelectorBar`
+      gains `picked`; `list-filter` is in-out, still owned by Rust). Empty
+      states centred over the list: 32 px glyph, the reason, one
+      HyperlinkButton (Search all folders / Clear search / Show all).
+      Slint's scroll bar is off; an overlay thumb (2 px, 6 px on its 12 px
+      strip, drag, click to page, wheel) follows the rows' total height.
+      Not done: the thumb widens at once rather than after WinUI's 400 ms;
+      the sync ring cannot show in offline snapshots. Release binary
+      14,828,032 bytes (-1,024 against Stage 4's 14,829,056); first frame
+      drawn, median of 5 on the 2000-message seed, 33.9 ms (36.3 ms for the
+      Stage 4 build in the same session); cache loaded 7.1 ms. User data:
+      none read or changed.
+- [x] Native Windows 11 round, Stage 6 (2026-10-11): the reader's chrome
+      (`docs/WINUI3.md` "CommandBar / AppBarButton", "InfoBar", "Expander",
+      "Components"). Command bar: Reply, Reply all, Forward | Archive,
+      Delete, Move (12 px chevron, its flyout 4 px below) | Unread and Flag
+      (accent-filled toggles) and More, 4 px apart with DividerStroke
+      separators and no literal offsets; labels by priority from the
+      bar's width and the measured label text only (the same in light and
+      dark and for every message; Reply labels at 900 px, icons only at
+      225 % text in a 1280 px window). View as plain text and Show original
+      colours (checkable) moved into the reader's own More menu with the
+      other secondary commands (`reader-menu`; the row menu is unchanged).
+      Header: below 560 px (scaled with the text size) the date joins the
+      To line, or takes a line of its own when To would get less than 10
+      em; Unsubscribe is a Body HyperlinkButton; a PersonPicture avatar
+      under a contrast theme. InfoBars: "Check the sender" (Caution) and
+      encryption (Informational) in one bar (`r-crypt` is new,
+      `r-notice-warn` is gone); remote images (Informational, the sender's
+      address in full, "Load images" / "Always load from this sender",
+      stacked when the reader is narrow) and failed images (Caution) in one
+      closable bar. Attachments: a wrapping chip grid (180-280 px, 8 px
+      gaps, `chip-height`, now under the invitation card), chips on control
+      fills with a type icon (`format::file_kind`, `AttachmentRow.kind`). Invitation card:
+      outlined, radius 8, padding 16; answers as Buttons, the answer given
+      accent-filled when changing it (`i-answer`); Details uses the
+      Expander's 12 px chevron. Focused links get the double focus ring
+      (radius 2); the plain-text body keeps its Tab stop with a focus
+      ring; the hovered-link box is drawn as a ToolTip. Not done: a full
+      Expander header (24 KB; recorded in WINUI3.md); with an odd mix of
+      text size and width the InfoBar's two buttons stack by an estimate
+      of the bar's text column. Release binary 14,841,856 bytes (+13,824
+      against Stage 5's 14,828,032). User data: none read or changed.
+- [x] Native Windows 11 round, Stage 7 (2026-10-11): the composer and the
+      Outbox entry (`docs/WINUI3.md` "TextBox", "ComboBox", "Button",
+      "HyperlinkButton", "InfoBar", "ContentDialog", "Components").
+      Fields: the label column is `max(64 px, "Subject" measured)` so it
+      grows with the text size and every field starts and ends at the same
+      x (address errors and the suggestions line up with it); Cc and Bcc
+      are two HyperlinkButtons inside the To field's end (its clear button
+      moves before them; Tab: To, Cc, Bcc, Subject); the std From ComboBox
+      gets a Button's elevation edge. Send: the reason row is gone, the
+      reason is Send's tooltip (also while off) and accessible description,
+      the button a polite live region (whether a description change is
+      read out depends on the screen reader). Suggestions: a flyout over
+      the composer 4 px under the field typed in, the field's width
+      (ComboBox drop-down surface; items margin 5,2, padding 11,5,11,7,
+      radius 3, the current one selected with the 3x16 pill, the address
+      in TextSecondary); placed on each edit, so nothing below moves.
+      Formatting row: E9B2 quote glyph (MDL2 and Fluent Icons), "1." in
+      Body semibold, a 1x20 DividerStroke separator centred, buttons 4 px
+      apart, no fixed height. Link bar: Insert is the accent button, Cancel
+      subtle. Size counter: E7BA / E783 at 12 px beside the Caution /
+      Critical text. Discard prompt: destructive (two standard buttons,
+      Cancel focused, no Enter default). Undo send: the offer counts down
+      each second for the whole window ("Sending in 9 s", then "Sending …"
+      while the build finishes; it used to vanish after 5 s), the
+      status-line action is a text Button, a delivery says "Sent".
+      Outbox entry: a command bar first (Edit and Discard subtle, Retry
+      standard), padding 16, then subject, To and an InfoBar (Critical for
+      failed or unsure, else Informational, not closable); failed and
+      unsure rows get a 12 px Critical error glyph (`MailRow.problem`).
+      `InfoBar` now draws its action and close buttons as hidden elements
+      rather than `if`s (each `if` was code of its own in every InfoBar:
+      -12 KB with five bars). Not done: "1." follows the text size while
+      the icon glyphs stay 16 px (as WinUI scales text, not icons); the
+      std ComboBox keeps Slint's colours under a contrast theme (known
+      gap). Release binary 14,854,144 bytes (+10,752 against Stage 6's
+      14,843,392; budget 20 KB). User data: none read or changed.
+- [x] Native Windows 11 round, Stage 9 (2026-10-11): states, first run
+      and waits (FLUENT2 "Wait UX", "Onboarding"; `docs/WINUI3.md`
+      "InfoBar", "Components"). The status toast is an `InfoBar` at the top
+      of the list (and of the Settings page), never over a row, with a
+      severity (`status-severity` replaces `status-error`; `Severity` is
+      exported to Rust): Informational 5 s, Critical 12 s, and Caution for
+      a server out of reach or at its connection limit, which stays until
+      that account syncs again or the bar is closed and comes back after a
+      shorter line or an Undo offer (which it never replaces). Its action
+      is the bar's button under the message. "Fetching message …" and
+      "Downloading message …" show only after a second; the download
+      progress line stays off the status bar while Settings shows (the
+      card's bar says it). Empty Drafts / Outbox: "No drafts", "Outbox is
+      empty. Messages wait here while they are sent."; the Drafts reader
+      placeholder "Select a draft to keep writing"; opening Drafts answers
+      "Resume draft". Welcome: the copy says what is needed and how long
+      it takes, Add account opens the form directly (`settings-add`, Name
+      focused), New mail is hidden without an account. A no-break space
+      before every ellipsis in the UI copy (not in clipped mail text).
+      Snapshot actions `settings-add`, `signin-wait`, `undo-send`. Not
+      done: with animation effects off the ring stays a still arc
+      (`docs/WINUI3.md` "Progress") rather than a static glyph. Release
+      binary 14,836,736 bytes (-2,560 against Stage 8's 14,839,296); first
+      frame drawn, median of 5 on the 2000-message seed, 35.1 and 33.3 ms
+      (Stage 8 build in the same session 33.3 and 32.7 ms). User data:
+      none read or changed.
+- [x] Native Windows 11 round, Stage 10 (2026-10-12): keyboard and
+      accessibility (FLUENT2 "Accessibility", "Layout and spacing";
+      `docs/WINUI3.md` "High contrast", "Components"). Shift+F6 to the
+      folders at 1280 px with a message open already worked (Stage 6 made
+      the bar's labels properties, so no focused button is re-created);
+      a test now covers it from the list, the command bar and the page,
+      at the widths where the labels switch (1000 to 1280 px, snapshots).
+      Prompts give the focus back to their opener (`return-pane`): the
+      link prompt to the page, Show original (Ctrl+U or More), an
+      invitation's answer and the Outbox's Retry / Discard to the reader,
+      Ctrl+, back to where it was pressed. Under a contrast theme the
+      subtle buttons keep a 1 px ButtonText edge (Highlight hovered,
+      HighlightText pressed) and `ComboEdge` borders the From and General
+      ComboBoxes. A text field's clear / reveal / query button takes the
+      pointer on 32 x 32. Dialogs are named groups for screen readers;
+      the sign-in error and the send guards' bar are assertive live
+      regions, "Signing in …" polite. Audited without change: text size
+      150 % and 225 % (main, reader, composer, Settings, dialog, the
+      status bar), the four contrast presets (HTML mail authored on hcwhite,
+      dimmed on the dark ones), every `animate` on `Theme.fast` /
+      `faster`. Not done: the account form's three ComboBoxes keep Slint's
+      faint border under a contrast theme (5.6 KB to wrap them); the std
+      ScrollView and ComboBox keep Slint's animations with animation
+      effects off. Release binary 14,840,320 bytes (+3,584 against Stage
+      9's 14,836,736; budget 5 KB); first frame drawn, median of 5 on the
+      2000-message seed, 32.9 and 33.9 ms (Stage 9 build in the same
+      session 33.1 ms). User data: none read or changed.
+- [x] Native Windows 11 round, Stage 11 (2026-10-12): final consistency
+      pass. Sweep of `ui/app.slint` and `ui/widgets.slint`: no hex
+      colour, `Palette.*`, shadow or off-ramp type size outside
+      `ui/theme.slint` (icon glyphs at 8/12/16/20/32/40 px as WINUI3
+      gives them; radii 4 for controls, 8 for overlays and the content
+      corner, 1.5/2/3 for pills, circles for dots and the avatar);
+      every `animate` on `Theme.fast` / `faster`. The avatar's white
+      initials and Show original's Consolas became tokens (`on-avatar`,
+      `mono-font`); four unused `Icons` (drafts, junk, inboxes, colors)
+      went, and with them `IconButton.icon-color`; the selection
+      panel's Flag icon is no longer the Critical red (FLUENT2
+      "Colour": status colours only for status), and its Mark read /
+      Mark unread / Flag / Unflag go two to a row (at 225 % text in a
+      900 px window Unflag was cut off). Pixel
+      review of 172 snapshots (13 views and the narrow pane, light /
+      dark / hcblack / hcwhite at 1280 and 900 px, blue, red, yellow
+      and purple on the reader, composer and General, text size 225 %)
+      with sampled pixels against the WINUI3 tables (layer, card,
+      card-stroke, nav-selected, selected plate and pill, card-fill,
+      flyout and its edge, smoke, caution background, Highlight /
+      HighlightText): all match. Release binary 14,840,320 bytes (the
+      same as Stage 10's); first frame drawn, median of 5 on the
+      2000-message seed, 33.2 and 33.5 ms (Stage 10 build in the
+      same session 32.8 ms), cache loaded 6.7 ms. Scrolling smoothness
+      on 2000 rows was not measured (snapshots cannot show it; a check
+      by hand). User data: none read or changed.
+- [x] UI polish round (WinUI 3 / Fluent 2), final whole-UI pass
+      (2026-10-12): 464 snapshots looked at (48 views: list, reader,
+      HTML notices, invitation, attachments, plain / original colours,
+      link focus and prompt, toolbar and folder focus, composer and its
+      states, drafts, Outbox, Settings sections and forms, dialogs,
+      status bars, search, empty states, welcome, narrow pane; light
+      blue and dark green at 1280 x 800, light red and dark yellow at
+      900 x 700, hcblack at both sizes, hcwhite at 1280; and blue,
+      green, red and yellow side by side in light and dark at both sizes
+      on eight accent-heavy views). One inconsistency fixed (Open check
+      5, `docs/WINUI3.md`): the account form's Provider and IMAP / SMTP
+      security ComboBoxes get `ComboEdge` (the Button's elevation edge,
+      ButtonText under a contrast theme) like the General and From ones,
+      and the signature is a `ComposeBody` (TextBox frame: strong bottom
+      edge, 2 px accent while focused, ButtonText border under a contrast
+      theme, placeholder in TextSecondary) instead of Slint's std
+      `TextEdit`, which had no contrast colours. Release binary
+      14,803,456 bytes (-36,864 against Stage 11's 14,840,320: the std
+      TextEdit's code went); first frame drawn, median of 5 on the
+      2000-message seed, 33.4 and 32.5 ms (Stage 11 build in the same
+      session 32.4 ms). User data: none read or changed.
 ## Baseline for the product round (2026-10-08)
 
 Release builds before and after Stage 1, same machine, offline, against a
@@ -1493,6 +1773,1199 @@ Independent re-run of the gates on the finished tree, same machine:
 - From comparing real mail with eM Client (outside the stages): consented
   `http://` image URLs are requested over HTTPS, `text-transform:
   capitalize`/`lowercase` work, and inline margins and padding are kept.
+
+## Self-hosted servers, Stage 4: server tolerance (2026-10-12)
+
+- [x] Capability profiles (`src/mail/fake_imapd.rs`, a stateful fake IMAP
+      server; `profiles.rs`, `tolerance.rs`): no IDLE, CONDSTORE, UIDPLUS,
+      MOVE or SPECIAL-USE, `.` delimiter with `INBOX.` prefix, valid and
+      invalid modified UTF-7 names. Each syncs a corpus, sees a flag change,
+      sets one, moves, deletes and saves a sent copy; no bare EXPUNGE, a failed
+      COPY leaves the source, what another client flagged \Deleted stays.
+      STARTTLS must be listed, answered OK and is re-listed under TLS;
+      PREAUTH/BYE greetings, LOGINDISABLED, UTF8=ONLY are refused with their
+      own sentences before a password is sent. EHLO is `[127.0.0.1]`; a refused
+      sender has its own sentence. A failure only the user can fix (auth,
+      changed or untrusted certificate, no STARTTLS) latches the account
+      (`errors::Latch`): one attempt by sync, interactive and IDLE workers,
+      then Retry / Update password / Refresh / Save. Folder roles: `role_override`
+      is now used (Edit account > Folders); name inference only at the top or
+      under `INBOX`.
+- Release exe 14,920,192 bytes (ceiling 15,000,000). Before the fix it was
+  16.05 MB: the imap crate's `authenticate` links the regex engine (976 KB),
+  so the sign-in stays `LOGIN` (no AUTHENTICATE PLAIN), and the size was
+  brought under the ceiling by building image/SVG, window-glue, SMTP and
+  charset crates with `opt-level = "z"`. First frame on the 2000-message seed
+  34-40 ms.
+- Not done: bounding the flag fetch window without CONDSTORE (the full path
+  still reads every UID's flags), NAMESPACE (the LIST delimiter is used),
+  AUTHENTICATE PLAIN, a confirm before a permanent delete without Trash (it is
+  refused instead). Not validated against a real self-hosted server.
+
+## Self-hosted servers, Stage 6: polish, docs and full QA (2026-10-12)
+
+- [x] The manual account form opens on Name, Email, Password, Find settings
+      and Add; the server fields are folded under "Advanced server settings"
+      (open by themselves after a lookup answered, even with nothing found,
+      or when Add or Test fails; always shown in Edit). Enter in the password
+      field adds the account (same guard as the button), Esc goes back.
+      Tab order follows the page; focus and tokens unchanged. End-to-end
+      test on the TLS fakes (`mail::pin` tests): Find settings with injected
+      SRV records, Test stops at the untrusted certificate with no credentials
+      sent, Review reads both certificates, confirm, Test passes every step,
+      Add stores the pins and the effective login, and the stored account
+      signs in the way a worker does. Snapshots looked at: `settings-add`,
+      `account-find-rest`, `account-find`, `-srv`, `-none`, `-foreign`,
+      `account-test-failed`, `account-cert-failed`, `-prompt`, `-pinned`,
+      `settings-edit`, light and dark at 1280x800 and 900x700 (44 images).
+- Release exe 15,157,760 bytes (15.16 MB; the ceiling is 20.0 MB since
+  2026-10-12). First frame on the 2000-message seed 32.5-38.6 ms, cache loaded
+  6.1-7.0 ms (5 runs). Gates: fmt, clippy (only the imap-proto notice),
+  `cargo test --locked` (364 lib, 168 bin, integration all passing), release build.
+- Not tested: any real self-hosted server, real DNS, a real autoconfig page,
+  the Windows revocation fetch (see PRIVACY.md), screen readers on the new
+  disclosure button. Deferred as in the plan: SPKI/CA pinning (first
+  follow-up), SMTP without sign-in, a native-tls submission client,
+  OAuth2, ISPDB lookups.
+
+## Languages: English and European Portuguese (2026-10-12)
+
+- [x] pt-PT (Portugal; never Brazilian) next to English. Follows the Windows
+      display language (pt-PT, pt-AO, pt-MZ and bare pt give pt-PT; pt-BR and
+      everything else English); Settings -> General -> Language (System,
+      English, Portugues (Portugal)) overrides it and switches live. Text in
+      `.slint` through `@tr`, Rust sentences through the `Tr` global
+      (`ui/tr.slint`, `src/tr.rs`), typed errors rendered on the UI thread,
+      dates, numbers, sizes and plurals per language in `src/format.rs`.
+      Catalog `translations/pt-PT/LC_MESSAGES/komorebi.po`, template
+      `translations/komorebi.pot`, guard test `tests/i18n_catalog.rs`.
+- [x] QA: every screen and dialog snapshotted in both languages, light and
+      dark, 1280x800 and 900x700 (48 actions, 400 images, the invitation card
+      and its reply prompt on a made-up invitation cache) and looked at. One
+      clip found and fixed: the composer's "Hiperligacao" label was cut at
+      900 px (the label column now also measures it). The reader's toolbar
+      drops its text labels earlier in pt-PT (icons and tooltips) because the
+      words are longer; this is by design.
+- [x] Live switching: unit tests on the real controller (`the_language_switches_live_and_is_saved`,
+      `what_rust_set_is_set_again_when_the_language_changes`: window title,
+      folder list, list title, setting saved); a cache with the choice saved
+      starts in it. A click-driven run of the open window could not be
+      scripted (the snapshot hook clicks once and the combo's popup is not
+      captured), so System -> English -> pt-PT -> back was not driven by hand.
+- Release exe 15,265,280 bytes (15.27 MB; the ceiling is 20.0 MB; 15.13 MB
+  before i18n). First frame on the 2000-message seed 32.8-36.8 ms in English
+  and 33.2-36.7 ms in pt-PT (baseline exe 33.1-40.0 ms), cache loaded
+  6.2-7.4 ms. Gates: fmt, clippy (only the imap-proto notice),
+  `cargo test --locked`, release build.
+- Not done / deferred: other languages and pt-BR (English until a separate
+  catalog is justified), right-to-left, relative dates, the regional-format
+  locale apart from the display language, translating server text and the
+  technical detail after an error sentence, the pt-PT wording reviewed by a
+  native reader (the translation is not proofread by a person yet).
+- Status lines already on screen keep the language they were made in until
+  replaced (documented in `language_changed`).
+- [x] Final audit (2026-10-12): every main view and dialog (40 views) rendered in
+      English and pt-PT, light and dark, 1280x800 and 900x700, and looked at: no
+      clipping, overlap or horizontal scroll. The whole pt-PT catalog was read
+      again against the glossary; one wording changed ("Fazer piscar o botao
+      da barra de tarefas"). The outbox error detail stays in the server's
+      English by design.
+
+## Folder pane, Stage 1: folder tree, expanders, remembered folds (2026-10-12)
+
+- [x] `src/tree.rs`: the folder tree inferred per account (delimiter from
+      the user folders' names and depths, none stored: no migration), each
+      user folder under the folder its name continues (or the nearest
+      listed ancestor), role folders first and roots, children under their
+      parents (`INBOX/Receipts` under Inbox, `Projects-old` after the whole
+      `Projects` subtree), levels capped at 5. Unit tests for the spec's
+      cases, the fold tokens and pruning. The Move-to list uses the same
+      order.
+- [x] Pane 264 px (`Theme.pane-width`), 12 px per level
+      (`Theme.nav-indent`); folders get a leading 16 px expander slot
+      (TreeView's chevrons), a double-click on a parent also folds it.
+      `nav-toggle` is separate from `nav-clicked` and never changes the
+      view. Folded accounts and parent folders are saved in the settings
+      table (`nav_folded`: `a<id>`/`f<id>` tokens), pruned only once every
+      account has its folder list, and dropped with their account. A
+      folded parent shows its subtree's unread; a selected folder inside a
+      folded line puts the pill on that line.
+- [x] Keys: Right opens a folded line, then goes to its first child; Left
+      folds an open line, else goes to the parent line (not in the rail);
+      Enter/Space on an account line folds it. Rust keeps the keyboard row
+      on its line when rows fold (or on the line it went into) and on the
+      pill when the view changes. Screen readers: ", level n" on nested
+      folders, expandable/expanded on account lines and parents, the
+      expander named "Expand"/"Collapse" (pt-PT "Expandir"/"Fechar";
+      "Fechar" follows the spec and Microsoft pt-PT usage as remembered, not
+      verified against the Microsoft terminology portal).
+- [x] `examples/seed.rs`: `--accounts` (three `.invalid` accounts, nested
+      folders, a path deeper than the cap), `--folders N`, `--fold a2,f5`.
+      `KOMOREBI_SNAPSHOT_FOCUS=nav:n:keys` presses tree keys (`l r u d e`).
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (new: the `tree` tests, `folders_fold_into_a_tree_that_is_remembered`;
+      the reader's resize test now narrows to 1100 px, since at 900 px the
+      wider pane left its page width on the same 16 px step), release build.
+      Release exe 15,302,144 bytes (+36,864). First frame best of 3: 31.9 ms
+      one account (baseline 33.3), 35.6 ms three accounts (baseline 35.2),
+      50.9 ms with 300 more folders; `rebuild_nav` 0.3-8.0 ms per fold on
+      333 folders (`[timing] rebuild_nav` line). Snapshots before/after
+      (light, dark, hcblack, hcwhite, pt-PT, text 1.5, accents, rail,
+      overlay, keys, fold from settings) looked at.
+- [x] Stage 3 of the folder pane spec: row actions ("..." and the shared
+      menu), rail model, overlay edge, scroll cues (see Stage 3 below).
+
+## Folder pane, Stage 2: account accordion and row visuals (2026-10-12)
+
+- [x] Account line: 8 px of space above its plate (`Theme.nav-gap`; not
+      part of its hit area, fills or focus ring), its chevron at 4 in
+      `text`, a 20 px initial tile in the account's colour (`Theme.tile`,
+      also with one account; hollow with a `text-disabled` ring while
+      switched off; under HC Window in a WindowText ring, HighlightText on
+      a lit row, never the palette), a rejected sign-in as a `danger`
+      badge on the tile, and the account's name (its address when it has
+      none) in Body Strong `text`. Tooltip: name and address (", switched
+      off" / ", sign-in rejected"); the accessible label adds the address.
+- [x] Rows: count column ending 8 px before the item's end (never elided),
+      the label giving way and elided with a tooltip (worked out only under
+      the pointer, so a long folder list measures nothing at start).
+      Counts neutral: unread Caption semibold `text`, items Caption
+      `text-2`, 999+ cap, `text-disabled` for a switched-off account. The
+      server's Drafts folder shows its total quietly (less drafts held in
+      a Delete's undo window, as the list leaves them out). NavRow's `if`s are
+      plain elements, the icon and the tile's initial share one Text.
+- [x] Not done (optional in the spec, unverified): filled icons for the
+      selected folder and a new All inboxes glyph; the regular glyphs stay.
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked`, release build. Release exe 15,281,664 bytes after the
+      review (+16,384 over the pre-sidebar 15,265,280; 20,480 under Stage
+      1's). First frame,
+      best of 3 interleaved with Stage 1's binary: one account 33.4 ms
+      (Stage 1 35.3), three accounts 37.1 ms (35.3), 300 more folders
+      51.5 ms (49.9). Snapshots before/after (S1-S7, S9-S12, S14-S17,
+      hcblack/hcwhite, pt-PT at 100 % and 150 % with the elided tooltip,
+      folded states, overlay, rail, 1041x700 with a message open: the
+      reader fits) looked at; the warn badge checked once with a
+      temporary local build (no real account; nothing kept).
+- [ ] Check by hand once: mouse-wheel scrolling of the pane with 300 more
+      folders (no stutter expected: plain rows, `set_vec` on fold).
+- Deferred: a resizable pane splitter, a wide-pane hide toggle, pinned
+  favourites, hiding All inboxes with one account.
+
+## Folder pane, Stage 3: row actions, scrolling cues, rail and overlay (2026-10-12)
+
+- [x] One shared row menu (`nav-menu`, a `ContextMenuArea` in the window,
+      none per row), opened by a right-click on a row, by the account
+      line's "..." (a subtle 28 px button shown while the line is hovered
+      or the keyboard's row, in place of its count; "More actions") or by
+      Shift+F10 / the Menu key in the folder list (under the current row).
+      Account line: Refresh (that account only: `retry_account`, the
+      Refresh button's work for one account; off while it is switched
+      off), Mark all as read (its Inbox), Expand all / Collapse all (its
+      parent folders; Expand all also opens the account, so it shows),
+      Account settings (Settings on that account; the overlay closes and
+      closing Settings hands the focus back to the pane). Folder: Mark all
+      as read (exactly that folder, whatever view is open), Expand or
+      Collapse. All inboxes: Mark all as read (every Inbox). Drafts and
+      Outbox: no menu. Rust says whether a row has a menu and what its
+      items can do (`nav_context`: unread from the cache, less held mail).
+- [x] `mark_folders_read(&[i64])` split out of the list's `mark_all_read`
+      (which keeps its view gate); the open message is marked read only
+      when it is in those folders (before, Mark all as read in a search of
+      all folders marked an open message elsewhere read on screen).
+- [x] The pane scrolls with the list's thin bar (now one `ScrollThumb`
+      component, also used by the list), its thumb in the pane's right
+      4 px; a 1 px edge under New mail while scrolled down and the footer
+      separator above Settings while rows are hidden below.
+- [x] Rail: its own `rail-items` model (the unified items, then one
+      initial tile per account that opens its Inbox), shown through one
+      repeater (`shown-nav`), so no hidden folder rows are made; the pill
+      on the open folder's account (`rail-pill`), the unread dot clear of
+      the tile, tooltip and screen-reader name "{account} - {Inbox} ({n}
+      unread)"; the separator rows are gone. The keyboard row goes to the
+      pill when the pane switches between rail and overlay.
+- [x] Overlay: right edge `surface-stroke` (reads against the white card
+      in light), opens scrolled to the open folder (once per opening: a
+      fold makes the rows anew, and must not jump back to the selection;
+      checked with a fold far from it on the stress cache), stays open
+      while folding (as before).
+- [x] Review fixes: the pane's scroll strip is 8 px wide (the list's is
+      12), so it no longer covers the right 4 px of the account line's
+      "..." (its thumb draws in the same place); a right-click on a
+      chevron or on the "..." opens the row's menu too, and a right-click
+      makes that row the keyboard's row (Shift+F10 then asks for the same
+      row); the "..." glyph stays `text` on a switched-off account (its
+      commands still work); the rail's unread dot is grey for a
+      switched-off account, as its counts are.
+- [x] Strings: "Refresh", "Expand all", "Collapse all", "Account settings"
+      and the two rail tooltips ("rail account tooltip" context), pt-PT
+      "Atualizar", "Expandir tudo", "Fechar tudo", "Definições da conta",
+      "{0} - {1} ({2} por ler)"; "More actions" and "Mark all as read" were
+      in the catalog.
+- [x] `KOMOREBI_SNAPSHOT_ACTION=pane-last` opens the last folder, then the
+      overlay (to see it scrolled to the selection).
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (new: `the_folder_pane_menu_and_rail_act_on_their_row`:
+      the rail's tiles and pill, folder-scoped Mark all as read in another
+      view, Collapse all / Expand all, the account's Mark all as read,
+      Shift+F10 asking for the current row's menu, also with a message
+      open when the list's own Shift+F10 is on, Account settings),
+      release build. Release exe 15,351,296 bytes (+69,632 against Stage
+      2's; +86,016 over the pre-sidebar 15,265,280, under the +300 KB
+      budget). First frame, best of 4 interleaved with Stage 2's binary:
+      one account 33.4 ms (Stage 2 33.2), three accounts 34.6 ms (35.1),
+      300 more folders 51.3 ms (50.4); `rebuild_nav` on 333 folders
+      0.3-7.7 ms per fold. Snapshots before/after (light, dark, hcblack,
+      hcwhite, pt-PT, a red accent; account line hovered, its "..."
+      hovered, the keyboard's row; rail with tiles, hovered tile tooltip,
+      switched-off account, a tile chosen with Enter; overlay in light,
+      dark, HC, pt-PT and opened on the last of 333 folders; the stress
+      cache scrolled to the middle and the end, the thumb hovered) looked
+      at.
+- [ ] Check by hand once (the snapshot can't capture native menus: a
+      right-click in the harness opens a real popup that waits for the
+      user): the pane menu at the pointer on a right-click (also on a
+      chevron and on the "...", scrolled down and in the overlay), under the "..." button, and under the
+      current row with Shift+F10 and the Menu key; its items per row
+      (account, folder, All inboxes; none on Drafts and Outbox) and
+      their enabled states; the pt-PT labels fit ("Definições da conta",
+      "Marcar todas como lidas").
+- [ ] Check by hand once against the local fake server (`src/mail/fake.rs`,
+      no real account): an account's Refresh syncs only that account, and
+      a folder's Mark all as read sends one `MarkAllRead` for exactly that
+      folder while another view is open.
+- [ ] Check by hand once: mouse-wheel scrolling of the pane and of the
+      overlay with 300 more folders, and dragging the pane's thumb; the
+      message list's thumb (now the shared `ScrollThumb`) still drags,
+      pages on a click beside it and scrolls with the wheel.
+
+## UX final, Stage 1: navigation structure (2026-10-12)
+
+- [x] Settings: a back arrow before the title ("Back to mail (Esc)"; on
+      the account form it stays "Back to accounts"); the footer gear and
+      Ctrl+, toggle Settings. The ContentDialog smoke covers the whole
+      window, rail and pane included (checked on `remove-data` at 900).
+- [x] One account: no All inboxes row; the start opens on its Inbox
+      (`settle_view` also moves there when an account goes or the first
+      Inbox arrives). `last_view` (`all`, `drafts`, `outbox`, `f<id>`) is
+      saved on every view change and restored at start while it exists
+      (`start_view`: a folder of an account still here, the Outbox while it
+      holds mail, All inboxes with 2+ accounts), else the Inbox.
+- [x] Default folds (`tree::default_folds`, once per account through
+      `nav_folds_init`): user parent folders at any depth without unread of
+      their own, and every account after the first when there are several.
+      (The plan's "depth >= 1" is read as one level below the account line,
+      so a top-level `Projects` without unread folds: with the stricter
+      reading the `--accounts` seed needed 19 rows and the three account
+      headers did not fit at 1280x800.)
+- [x] Rail: `Theme.rail-width` 64 px, wider only when the longest word of
+      its fixed names needs it (measured from `rail-words`: 69 px in pt-PT,
+      96 px in pt-PT at text scale 1.5); items `Theme.rail-row` (64 px: the
+      plan's 56 cannot hold two Caption lines under a 24 px icon zone) with
+      the name under the icon, two lines at most; InfoBadge counts; the
+      inbox-tray glyph (EC59, in both icon fonts) for All inboxes; Drafts;
+      New mail as the accent button with its name; the toggle "Folders"
+      ("Folders (Open navigation)"); rail tile menu Inbox / Sent / Archive.
+      All inboxes uses a short rail name ("rail" context; pt-PT "Caixas de
+      entrada").
+- [x] Overlay pane: smoke over the rest of the window (click closes), a
+      16 px gradient shadow; in dark the selected plate is SubtleTertiary.
+- [x] Drafts model: the entry is always there (count, new empty state);
+      `Db::draft_copies` leaves the server copies of local drafts out of
+      the Drafts-role folder's list and count; that folder has no
+      SelectorBar and no unread bold (outgoing rows are never bold); its
+      messages show the InfoBar, no Reply / Reply all (also refused in
+      `reply()` for Ctrl+R and the row menu) and "Forward as new draft";
+      New mail is always blank; the start-up drafts line and
+      `StatusAction::ResumeDraft` are gone (the `discard` and `guard`
+      snapshot actions open the newest draft directly). Drafts / Outbox
+      rows: Up/Down/Home/End, Enter, Delete (asks first) and a row menu
+      (Open, Discard); no "N selected" panel for them.
+- [x] List header: a folder's account under its name; the "..." ("More
+      actions") holds text commands only (`list_menu`: Mark all as read,
+      greyed with nothing unread).
+- [x] Pane row menu built in Rust (`nav_menu`, two groups): Mark all as
+      read + Collapse all (account: Collapse all folders, then Refresh and
+      Account settings); no Empty folder, no Undo; Mark all as read is
+      `mark_folders_read` from both menus
+      (`mark_all_read_is_one_function_from_the_pane_and_the_list`).
+- [x] `KOMOREBI_SNAPSHOT_ACTION=menu:list|pane|rail` prints the entries
+      from the same lists and exits 0; no native popup is opened.
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (new: db `server_copies_of_drafts_are_found_by_folder_uid_and_validity`,
+      `view_and_fold_settings_round_trip`; tree `long_trees_start_folded`;
+      app `start_view_falls_back_to_the_inbox`;
+      `drafts_answer_enter_delete_and_their_menu`; the pane-menu test
+      rewritten), release build 15,440,896 bytes (+89,600). First frame on
+      the 2000-message seed: median 35.2 ms over 7 runs (32.8-38.1; the
+      Folder pane Stage 3 record was 33.4), inside run-to-run noise; the
+      first start after the update also writes the two new settings once
+      (+1.5 ms). A right-click on a draft or Outbox row opens its own menu
+      through the same `show-row-menu-at` as Shift+F10; a server draft's
+      row menu greys Reply and Reply all. Snapshots before/after in light, dark, contrast, pt-PT, a
+      green accent and text scale 1.5 looked at.
+- [ ] Check by hand once (native menus can't be snapshot): the list's
+      "..." menu, the pane row menu on All inboxes / a folder / an
+      account, a rail tile's menu and a draft's row menu (right-click and
+      Shift+F10) open where expected with the entries `menu:*` prints.
+- [x] Review (2026-10-12): snapshots re-walked in light, dark, contrast,
+      en and pt-PT at 1280x800 and 900x700 (`uxfinal\s1\review0`): every
+      acceptance item holds. Fixed: the list's and the pane's "Mark all as
+      read" is greyed on a server Drafts folder (its rows are never shown
+      unread); "Collapse all folders" is greyed on a folded account line;
+      `mark_folders_read` refreshes the counts of the folders it marked
+      when a later one fails; the rail badge grows around the icon's
+      corner with the text size (tests: the pane-menu test covers the two
+      greyed entries). Seen at 225% text size in a
+      snapshot: the rail scrolls, the names fit in two lines and the
+      badges still cover part of the glyph.
+- [ ] Check by hand once: the overlay pane's smoke takes clicks (closes
+      the pane) and the gradient shadow reads in light and dark; the
+      rail's scrolling at 225% text size on a real display.
+- [ ] Check by hand once against the local fake server: a Drafts-role
+      folder with a server copy of a local draft shows it once after a
+      real `SaveDraft` round trip (the unit test covers the query).
+
+## UX final, Stage 2: custom title bar and search in the bar (2026-10-12)
+
+- [x] docs/WINUI3.md amended first ("Title bar", "Title bar and frame",
+      "AutoSuggestBox", components, dev switches): app-drawn 48 px bar on
+      Windows 11, system caption on Windows 10 and under high contrast.
+- [x] `src/chrome.rs` (library): the pure `hit_test` (top band with
+      corners, three 46 x 48 caption columns from the right edge, the
+      pushed passthrough rects, HTCAPTION for the rest of the pushed bar
+      height, everything client while an in-window popup is open),
+      `upgrade_border` (HTLEFT / HTRIGHT -> HTTOPLEFT / HTTOPRIGHT level
+      with the top band), the signed lParam decode, `nccalc_top` and the
+      2 px auto-hide insets, `corrects_size`, `custom_wanted`; and on
+      Windows `chrome_proc` (subclass id 2): WM_NCCALCSIZE, WM_NCHITTEST,
+      the NC mouse messages of the caption buttons (TrackMouseEvent with
+      TME_NONCLIENT, press on down, WM_SYSCOMMAND on an up over the same
+      button, never DefWindowProc for a button down), WM_NCACTIVATE with
+      lParam -1, and the geometry fix.
+- [x] Geometry: winit adds a system caption to every client size it asks
+      for (restore, `KOMOREBI_SIZE`, Slint's minimum through
+      `set_min_inner_size`, and WM_DPICHANGED); `chrome_proc` takes it
+      back in WM_WINDOWPOSCHANGING (no move, outside a size/move loop, not
+      a frame change; any size during WM_DPICHANGED) and off
+      `ptMinTrackSize`. Live probe (`uxfinal\s2\probe.ps1`, throwaway
+      seed): client 1280 x 820 on three launches in a row, the same after
+      maximize -> restore and minimize -> restore; maximized, the client
+      starts at the screen top and the close button answers HTCLOSE in
+      the corner pixel. Snapshot images are exactly `KOMOREBI_SIZE`.
+- [x] Frame flash: the subclass is installed from a thread-local WH_CBT
+      hook at HCBT_CREATEWND, so the first WM_NCCALCSIZE is already the
+      custom one (`KOMOREBI_TIMING` prints "title bar subclass installed
+      at creation, before the first frame" on every run); the first
+      window event installs it late (keeping the client size) only if
+      the hook missed.
+- [x] Mode: `custom_wanted` (build >= 22000 from `CurrentBuildNumber`, no
+      high contrast, no `KOMOREBI_SYSTEM_TITLEBAR`; snapshots custom unless
+      contrast; `KOMOREBI_SNAPSHOT_TITLEBAR` forces); switched live in
+      `dress_title_bar` with SWP_FRAMECHANGED in the same pass as the Slint
+      property. In system mode the 48 px strip holds the search only.
+- [x] The bar (inline in app.slint): icon (the .exe's own 32 px icon
+      resource, no image decoder: +0 instead of +146 KB), "Komorebi" in
+      Caption (collapses below 1040 px), the search centred 220-600 px
+      (after the icon when compact), the scope control, the caption
+      buttons (hover, pressed, close red, inactive dimming, Restore glyph
+      while maximized, named for Narrator, not Tab stops). Height
+      `max(48, search + 16)`: 48 / 53 / 64 at text scale 1 / 1.5 / 2.25,
+      buttons stay 46 x 48 at the top; every snapshot prints
+      `[titlebar] ... drawn=N pushed=N match`.
+- [x] Search: placeholder "Search {view}", clear button whenever there is
+      text ("Clear search (Esc)"), scope words "This folder" / "These
+      inboxes" / "All folders" in a ComboBox-looking button with a native
+      menu (`menu:scope`), its slot as wide as the longest word; the query
+      stays across folder switches (scope back to the view); "Search
+      results" title, the results line ("{n} results in {view}" / "in all
+      folders", a polite live region, Search all folders, Clear search),
+      the "Account · Folder" tag, Show in folder in the row menu while
+      searching; no-match hint "Searches subject, people and preview of
+      downloaded mail."
+- [x] Keys: Ctrl+E, F3 and Ctrl+F focus the search (from Settings too,
+      which close); search is the first F6 stop and the first Tab stop;
+      Backspace archives only from a message row (list) or the reader's
+      page / plain text, never in Drafts, the Outbox, a server Drafts
+      folder, a text field or a button (`search_keys_and_the_backspace_scope`).
+- [x] Tests: chrome unit tests (scale 1 / 1.25 / 1.5 / 2, boundary pixels,
+      no pixel lost or doubled, top band normal / maximized, corners, the
+      HTLEFT upgrade, the 2.25 tall bar, popup, lParam, nccalc, size
+      correction, geometry round trip, mode), Win32 integration on a hidden
+      overlapped window (frame insets, winit-style size requests keep the
+      client size, WM_NCHITTEST points, maximized WM_NCCALCSIZE, NC button
+      down/up posts exactly one SC_MAXIMIZE and min-down/close-up nothing,
+      system mode passes through; no Slint event loop), theme
+      `the_windows_build_is_read`, app `search_all_folders` extended
+      (title, placeholder, tags, query across folders, Show in folder).
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (lib 406, app 190, catalog 6, the rest unchanged), release
+      build 15,553,024 bytes (+112,128 over Stage 1). First frame on the
+      2000-message seed: median 36.0 ms over 11 runs (34.3-46.1; Stage 1
+      35.2 over 7), the bar costs under 1 ms. Snapshots before/after in
+      `uxfinal\s2\before` and `after` (light, dark, hc black / hc white,
+      en / pt-PT, green accent, 1280 x 800 and 900 x 700, text scale 1.5
+      and 2.25, each caption button's hover and press, inactive, system
+      mode, searches in one folder / all folders / no match, Settings, the
+      overlay pane, the composer, the HTML reader, the first run) looked at.
+- [x] Review (2026-10-12): the list's "..." Mark all as read is disabled
+      while a search is showing (it covers the view, never the results
+      listed; the folder pane's row menu keeps it). `search_all_folders`
+      asserts it; README and docs/WINUI3.md say so.
+- [x] Snap Layouts: the flyout on the maximize button and the HTMAXBUTTON
+      path work now; the 720 px minimum overflowed a 1366 px half (683)
+      and a 1920 px third (640). Stage 8 lowered it to 500 px with a
+      one-pane layout (hand check in the Stage 8 list).
+- [ ] Found, not from this stage (the Stage 1 `m-welcome` snapshots show it
+      too): with no account the window opens at its 480 px minimum height
+      (live and in snapshots, `KOMOREBI_SIZE` ignored); with an account it
+      opens at 820. For Stage 4 (first run).
+- [ ] Check by hand once (window chrome is outside snapshots):
+      - Snap Layouts flyout on maximize hover, Win+Z, snapping to halves
+        and thirds (after Stage 8).
+      - Drag, double-click maximize/restore, right-click system menu,
+        Alt+Space, Alt+F4, Aero shake, drag a maximized window down to
+        restore.
+      - All edges and corners plus the top band, with cursor shapes.
+      - Top 1 px DWM border, rounded corners and shadow (if the border is
+        missing, `KOMOREBI_TITLEBAR_BORDER=1` draws it; make it the
+        default then).
+      - Maximized: nothing off-screen, close button in the screen corner,
+        auto-hide taskbar at every edge.
+      - Inactive dimming, also under rfd dialogs.
+      - Mixed DPI 100/150 % while dragging between monitors (the
+        WM_DPICHANGED size correction).
+      - High contrast on/off live, with no double bar.
+      - Windows 10 VM.
+      - Frame flash on first launch.
+      - Geometry stable over 3 relaunches (the probe says yes on one
+        monitor at 125 %).
+      - Narrator on the caption buttons (names, default action) and on the
+        results line (announced politely).
+      - Touch drag and tap.
+      - The scope menu and the row menu's Show in folder open where
+        expected with the entries `menu:scope` prints.
+
+## UX final, Stage 3: message list and reader commands (2026-10-12)
+
+- [x] docs/WINUI3.md amended first ("ListView item": unread = semibold +
+      trailing 6 px accent dot, account = line-3 text tag, quick actions,
+      multi-select; "CommandBar / AppBarButton": per-button label
+      priority, Mark as read / unread and Flag / Remove flag as plain
+      buttons, More menu, Move flyout; "MenuFlyout": accelerator text
+      after a tab; "InfoBar": the bottom Undo slot and the not-downloaded
+      body; dev switches).
+- [x] Rows (`MailItem`): the account dot is gone; All inboxes with two or
+      more accounts tags each row with its account name, an all-folders
+      search with "Account · Folder" (`MailRow.tag`, `Rows::set_account_tags`).
+      Unread: semibold sender and subject and a 6 px accent dot at the
+      end of line 2; the date keeps TextSecondary read or unread.
+- [x] Quick actions: 28 px subtle buttons (Archive, Delete, Flag / Remove
+      flag, Mark as read / unread) over the date on the hovered row or the
+      keyboard's row, on its plate; built only there (`if`); no focus, no
+      Tab stop; tooltips with keys; `App::quick_action` reads that one
+      message and never opens or selects it (`remove_targets`,
+      `delete_targets`); a quick archive of another row leaves the open
+      message open.
+- [x] Select messages ("..." menu, a check mark while on): 20 px check
+      boxes in the leading slot (also with two or more rows selected); a
+      click then checks a row; the panel has Select all, Clear selection
+      and the reason under a disabled Move; Esc with nothing selected and
+      another view turn it off.
+- [x] Reader bar: labels measured one by one; Archive, Delete, Reply
+      strictly in order, then Mark as read, Flag, Move, Reply all, Forward
+      while they fit (`cmd-labels` bit mask). pt-PT 1280: Responder,
+      Arquivar, Eliminar, Mover; en 1280: also Flag; 900: Archive and
+      Delete (en also Reply). Tooltips: "Reply (Ctrl+R)", "Archive
+      (Backspace)" (pt-PT "Retrocesso"), "Delete (Del)", "Move
+      (Ctrl+Shift+V)", "Mark as read (Ctrl+Q)", "Flag (Insert)".
+- [x] Row and More menus built in Rust (`row_menu`, `more_menu`) with the
+      accelerator after a tab; More gained Move to, Load images / Stop
+      loading images from this sender and Show in folder; `menu:row`,
+      `menu:more`, `menu:move` print them (`menu:list` shows Select
+      messages with its mark).
+- [x] Keys: Ctrl+Q mark read, Ctrl+U mark unread (Show original lost
+      Ctrl+U, Ctrl+Shift+U is gone), Ctrl+Shift+F forward, Ctrl+Shift+V
+      the Move flyout (reader or selection), Ctrl+Shift+I the Inbox.
+- [x] Move flyout: filter box (focused, Enter takes the first entry),
+      "Recent" with the last three folders of that account (setting
+      `move_recent`), the tree indented by depth, Drafts folders left out,
+      at most 360 px tall (scrolls); Move stays on whatever the filter.
+      Review: a folder whose parent is left out (the current folder) sits
+      where that parent would, never indented under nothing
+      (`triage::move_levels`); the row's accessible name ends with its
+      account tag; Show original no longer claims Ctrl+U in the README.
+- [x] Undo: its own slot over the bottom of the list (`undo-text`,
+      `UndoOffer`), rows not shifted (same first-row y in `s3\after\archive`);
+      a move's window is 10 s (`UndoClock`, `undo_timer`), stops while
+      hovered or focused and then gets at least 3 s; the next move sends
+      the held one; the undo-send countdown moved there too (its window
+      stays the Settings value); Esc never dismisses it.
+- [x] Delete in Trash or Junk asks first (`Question::DeleteFrom`, no
+      default button, Cancel focused); from Trash the held job is a server
+      delete, from Junk a move to Trash.
+- [x] Offline body: with the account's server out of reach (no worker,
+      or its last sync unreachable / failed), after 2 s "This message
+      hasn't been downloaded yet..." with Retry instead of a blank page.
+- [x] Unread filter: a message opened there stays listed (read) until the
+      filter or the view changes (`kept_unread`).
+- [x] Tests: `reader_bar_labels_go_by_priority` (en / pt-PT 1280, widths
+      down to 720 on the headless window's real text measures),
+      `quick_actions_never_open_or_mark_their_row_read`,
+      `deleting_from_trash_or_junk_asks_first`,
+      `backspace_does_nothing_in_drafts_outbox_or_the_filters`,
+      `tab_from_a_row_skips_its_quick_actions`,
+      `forward_move_and_inbox_keys`,
+      `the_move_flyout_lists_recent_folders_and_filters`,
+      `select_messages_checks_rows_without_opening_them`,
+      `a_message_opened_in_unread_stays_until_the_view_changes`,
+      `the_undo_offer_holds_its_window_and_the_next_move_flushes_it`,
+      `menus_carry_accelerators_and_a_missing_body_says_why`; triage unit
+      tests (undo clock, recent folders, move entries, menu entries);
+      existing tests moved to the Undo slot and the new keys.
+- [x] Snapshot switches: the hover moves the pointer twice 50 ms apart
+      (so what appears under it, a row's quick actions, gets it too);
+      `select-mode`, `move`, `delete-confirm`, `not-downloaded` (the
+      snapshot waits for its 2 s), `menu:row|more|move` (run once the page
+      rendered).
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (lib 406, app 205, catalog 6, the rest unchanged), release
+      build 15,819,776 bytes (+266,752 over Stage 2). First frame on the
+      2000-message seed: median 35.8 ms over 5 runs (35.5-35.9; Stage 2
+      36.0). Snapshots before/after in `uxfinal\s3\before` and `after`
+      (en / pt-PT, light / dark / hc, green accent, 1280 and 900, text
+      scale 1.5, row and quick-action hovers with the tooltip, archive with
+      the Undo offer, Select messages, a selection across accounts, the
+      Move flyout, the delete question, the not-downloaded body) looked at.
+- [ ] Check by hand once (outside snapshots):
+      - The row and More menus: the accelerator text right-aligned in the
+        native Win32 menu (the tab in the title), light and dark; Move to
+        submenu with the folders.
+      - Quick actions with a real mouse: they appear as the pointer
+        enters a row, their tooltips, clicking one never opens the row;
+        the pointer moving from the row onto them keeps them shown.
+      - The Undo offer's 10 s with a stopwatch, pausing while the pointer
+        is over it and after Tab reaches its button; Narrator reads it
+        politely.
+      - The Move flyout: typing in the filter, Down / Tab into the list,
+        Esc closes it, a click outside closes it, and it stays inside the
+        window at 900 px.
+      - Delete in Trash with Enter pressed at once (no default button:
+        nothing happens) and Esc (cancels).
+      - Narrator on a row's check box (checkbox role, checked state) and
+        on the quick actions (button names with keys).
+      - Offline: pull the network, open a message never downloaded, Retry
+        after reconnecting.
+
+## UX final, Stage 4: first run and account setup (2026-10-13)
+
+- [x] docs first: docs/WINUI3.md (TextBox error state, RadioButtons with
+      descriptions, Expander as a real header, InfoBar custom content,
+      the no-account title bar, the add form and its wait, the first-sync
+      empty list, dev switches), docs/FLUENT2.md (Komorebi's first run),
+      the plan's non-goal line (discovery is explicit and user-initiated
+      only) and PRIVACY.md (Add / Test with Other server and no server
+      typed also looks the domain up; never while typing).
+- [x] Welcome: the whole window (no pane, rail or toggle; the title bar
+      without its search, pushing no passthrough rectangle), the benefit
+      caption, Add account focused, and "Need help?" (README "Add an
+      account"), "Privacy" (PRIVACY.md), both through the link prompt,
+      and "Settings". F6 and Ctrl+E / Ctrl+F / F3 do nothing there.
+- [x] Fixed: on a first run the window opened at its minimum height
+      (480) instead of 820: the layout reported a transient zero maximum
+      height as the window was created. The root now has an explicit
+      maximum. Checked with a real (non-snapshot) start on an empty cache:
+      client 1280 x 820, custom and system title bar.
+- [x] Add form: Email (focused), Password with the Credential Manager
+      caption, Username under it after "Set username" (or while one is
+      typed for a preset), Provider radios with descriptions (guessed for
+      purelymail.com / postale.io only; `providers::guess`), Server
+      settings expander under Other server, "Your name (optional)" last.
+      Signature and Sent copy only on the Edit page. Add / Test always
+      enabled with inline errors; `FormError::Provider` in Rust too.
+- [x] Discovery only on a press: Find settings, or Add / Test with Other
+      server and both servers empty (the expander opens; nothing is added
+      until the next press).
+- [x] Wait: Cancel, Back and Esc enabled while a check runs; each drops
+      its answer (`cancel_check`, `check_seq`) and keeps the form; after
+      3 s "Still signing in… You can cancel and check the server name."
+- [x] Failure: the steps inside the Critical InfoBar (`@children`), Set
+      username / Review certificate as its buttons, scrolled into view,
+      then focus on the Password box (rejected) or the first button; the
+      rejected sentence by provider (`text::rejected`: presets the
+      app-password advice, plus the other preset for a custom domain);
+      a preset keeps a typed username (`form_logins`).
+- [x] Landing: a successful add closes Settings, opens the new Inbox once
+      its folders arrive (if the view did not change), focuses the list;
+      "Added … Downloading mail…" stays without a close button until the
+      first pass ends; the empty list shows "Downloading your mail… 1,234
+      of 5,000. Newest messages arrive first." over a ProgressBar, then
+      "This folder is empty" once synced.
+- [x] Tests: provider guess, cancel drops a late answer (and Esc while
+      busy), a preset keeps its username, the rejected text per provider
+      (en and pt-PT), landing + first-sync list states + status line,
+      title bar regions with and without an account, WM_NCHITTEST with no
+      passthrough (caption where the search was), and a TLS fake that
+      rejects LOGIN giving `Say::Rejected` (the username path). Tests never
+      touch Windows Credential Manager (`store_password` / `forget_password`
+      fakes) and start no workers.
+- [x] Snapshots (empty cache unless named, BEFORE/AFTER in
+      `scratchpad\uxfinal\s4`): welcome 1280 / 900 pt-PT dark / contrast
+      / 1.5 / 2.25 at 900x700 / green / Tab, settings-add (Email focused,
+      no Provider), signin-wait (Cancel enabled) and the 3 s line,
+      account-test-failed at 900x700 (failed step and Set username in
+      view), also pt-PT dark, contrast, 1.5 and 2.25, account-find-rest /
+      account-find with the expander (also contrast, 1.5, pt-PT dark 900),
+      fresh-inbox (also pt-PT dark 900, contrast, 1.5), Settings from the
+      welcome (General, Accounts at 900), the Edit page breadcrumb.
+- Hand checks (need a person at the machine):
+  - The welcome's title bar drags, double-click maximizes and Snap
+    Layouts open over the maximize button, everywhere between the title
+    and the caption buttons (no search box there); the search comes back
+    after the first account without a restart.
+  - Tab order on the add form: Email, Password, (Username), the Provider
+    group (one stop: arrows move and check), Find settings, the Server
+    settings header, its fields, Your name, Add account, Test connection,
+    Cancel. Narrator reads the radio descriptions and the expander state,
+    and the field error with its field.
+  - Typing an address at purelymail.com or postale.io selects that
+    provider and changing it to another domain clears the guess (but not
+    a provider clicked by hand).
+  - Add with Other server and empty servers looks the domain up (one
+    lookup per press, nothing on typing), then fills and opens the
+    expander; a real rejected sign-in on Purelymail / Postale.io shows
+    the preset sentence and Set username (authorized account only).
+  - A real first add lands on the Inbox as its folders arrive, and the
+    status line goes when the first pass ends.
+- Review (2026-10-13): with no account the title bar now keeps the
+  "Komorebi" title below 1040 px too (it collapsed with the search, which
+  is not there). Known tradeoff, not fixed: at 900x700 a rejected
+  password focuses the Password box but the error bar (the failed step
+  and Set username) is what stays in view, so the box is scrolled above
+  the viewport and typing a new password is not seen until the page
+  scrolls (both cannot fit at that height; at 1280x800 both show).
+
+## UX final, Stage 5: onboarding tips, help and shortcuts (2026-10-13)
+
+- [x] docs first: docs/WINUI3.md "TeachingTip" (tail-less, max 320,
+      radius 8, flyout fill and stroke, padding 16/12, BodyStrong title,
+      Body text-2, "n of N" Caption, Got it accent / Skip tips, 8 px beside
+      the target below the title bar, non-modal, no focus, Esc = Got it,
+      tooltips blocked), the Keyboard shortcuts dialog under
+      "ContentDialog", the component and the dev switches.
+- [x] Tips (`komorebi::onboard`, `src/app/tips.rs`): Search and Help on
+      the desktop, Folders first in the compact rail; the place computed
+      from the tips still due in the layout ("1 of 2" / "1 of 3"; a desktop
+      user who finished sees Folders once as "1 of 1" when the pane folds).
+      They start 1.5 s after the list first shows a row with an account (or
+      after the pane folds), wait while Settings, the composer, a dialog,
+      the open overlay pane or the What's new bar is up, and never start by
+      themselves in snapshot runs or tests. Setting `tips_seen` per tip;
+      Skip tips marks all three; Settings > About > Show tips again clears
+      them and closes Settings.
+- [x] What's new: setting `whats_new_version`; an Informational status
+      line "Komorebi was updated to {0}." with What's new (the changelog,
+      through the link prompt) 2 s after start when the saved version
+      differs (or is missing) and there is an account; once a run, the
+      version saved when it is closed or acted on (a status that replaces
+      it lets it come back at the next start), and silently when the first
+      account is added; never while a tip is up (it follows the series) and
+      no tip starts while it is up.
+- [x] No new-mail hint; the taskbar-flash card in General already has its
+      one-line description ("When new mail arrives while Komorebi is in the
+      background.").
+- [x] Settings > About: What's new in {0}, Show tips again, Keyboard
+      shortcuts, Get help (README), Report a problem (issues page, "No data
+      is attached"), Privacy statement; each page through the link prompt.
+- [x] Keyboard shortcuts dialog (F1, Ctrl+/ outside the composer, About):
+      `ui/shortcuts.slint`, two columns by group, Close focused, Esc and
+      Enter close, the focus back where it was; `tests/shortcuts_table.rs`
+      keeps its keys equal to the README "Keyboard" table (an "F1 or
+      Ctrl+/" row was added there).
+- [x] Tests: `tips_seen` parse/format and the db keys; sequences per
+      layout (2 vs 3), a tip seen in one layout not repeated in the other,
+      a Folders tip ending when the rail goes, Skip, Show tips again;
+      What's new (missing key + account shows once, equal hides, set on
+      the first account); tips and the bar never together; Esc with a tip,
+      a search and an open message closes the tip only.
+- [x] Snapshots (BEFORE/AFTER in the session scratchpad, `uxfinal/s5`):
+      tips:search and tips:help at 1280 and 900 (en light, pt-PT dark,
+      contrast, 1.5, green), tips:folders at 900 (en, pt-PT light and dark,
+      contrast, 1.5, 2.25), tips:help at 1280 2.25 (beside the footer once
+      the pane is too narrow), tips:folders at 1280 (prints "tip not
+      applicable at this width", exits 0), whats-new (1280, pt-PT dark 900,
+      contrast; empty cache: not due), shortcuts (1280, pt-PT dark 900,
+      contrast, 1.5), settings:about (1280, pt-PT dark 900, contrast, 1.5);
+      the seeded list at 1280 and 900, and General, are pixel-identical to
+      BEFORE.
+- Hand checks (need a person at the machine):
+  - A real start on a cache with an account and no `tips_seen`: the
+    Search tip appears about 1.5 s after the list, takes no focus (typing
+    still reaches the list), Got it shows Help as "2 of 2"; making the
+    window narrower than 1040 px afterwards shows Folders as "1 of 1".
+  - Tip placement at text scale 1.5 and 2.25 (Windows Settings >
+    Accessibility > Text size), at 100 %, 125 % and 150 % display scale;
+    clicks on the tip's buttons are not taken by the title bar.
+  - Narrator reads a tip once as it appears (polite live region), and
+    the Keyboard shortcuts dialog's rows in order.
+  - What's new after an update (a cache whose `whats_new_version` is an
+    older version): the bar shows once, What's new asks before opening
+    the changelog in the browser; the next start shows nothing.
+  - Ctrl+/ on a Portuguese keyboard (Ctrl+Shift+7) opens the dialog in
+    the mail view and still makes a numbered list in the composer.
+- Known tradeoff: the Folders tip sits beside the rail's toggle, so it
+  covers the list header and the top of the first row at 900 px (more at
+  2.25); the Search tip covers the reader's command bar while a message is
+  open. Both go with Got it or Esc.
+- Review (stage 5, review 0; shots in `uxfinal/s5/review0`): fixed the
+  Keyboard shortcuts dialog, which could not be scrolled from the keyboard
+  (Up / Down, PageUp / PageDown, Home / End now scroll it with Close
+  focused; shots `shortcuts-900-down5`, `-end`, `-end-home`); F6 no longer
+  moves the focus behind any dialog's scrim (`cycle-pane` returns while a
+  dialog is up; shot `shortcuts-900-f6`) and the dialog's FocusScope
+  accepts every key but Tab, so Ctrl+N, Ctrl+E or Ctrl+, act nowhere
+  behind its scrim (bin test `tips_follow_the_layout_and_esc_closes_only_the_tip`,
+  which also covers the Move-list rule); the dialog's card has a groupbox
+  role and name like ContentDialog; the tip's "n of N" texts are
+  `accessible-role: none` so a reader says the caption once; a tip hides
+  while the Move list (a Slint popup) is open, so Esc closes the list, not
+  the tip; the About card says "folders, search and help". Verified by
+  shots: Tab reaches Skip tips and Got it after Settings (tab 4 and 5 at
+  1280, with a ring). Snapshot focus gained `press:keys` (README).
+  - Hand check added: with the Keyboard shortcuts dialog up, the mouse
+    wheel over the list and the new keys agree; the Help tip in the wide
+    pane covers the last folder rows of a long tree (three accounts), so
+    confirm a click on a covered folder is not needed before Got it.
+
+## UX final, Stage 6: composer, drafts and Outbox (2026-10-13)
+
+- [x] docs first: docs/WINUI3.md composer paragraph (header with "Draft
+      saved hh:mm", Close, Send always enabled with the field's error,
+      Preview ToggleButton, one-time format caption, folded quote, the one
+      discard sentence, Outbox accent by failure class with Details,
+      undo-send with the subject, the draft-reply InfoBar), a "Drag and
+      drop" item and the new dev switches; README (Closing and drafts,
+      Send, Replies and forwards, Preview, Outbox sentences, Ctrl+Shift+Q
+      in "Keyboard", the new `_ACTION`s), PRIVACY (when drafts are saved,
+      the server copy goes with a discard), CHANGELOG.
+- [x] Parking: one `park_composer` for Close, Esc, a click on a message
+      and a click on an Outbox row: saved here, `Job::SaveDraft` queued at
+      once, "Draft saved"; an empty draft goes. The header caption "Draft
+      saved 14:05" comes from every save (autosave included).
+- [x] Send always enabled; no recipient: "Add a recipient to send." under
+      To (assertive live region), a wrong address: its error; the field
+      takes the focus and nothing is sent. Only the 25 MB attachment limit
+      still says so on the status line.
+- [x] Undo send: "Sending "{subject}" in 5 s" in the bottom Undo slot
+      (subject cut at 40 characters with an ellipsis; "(no subject)").
+- [x] Outbox: `mail::smtp::classify` reads the stored record (lettre's
+      `permanent error (550): 5.1.1 ...` or a `Say` record) into a class
+      (unknown recipient, bad address, mailbox full, too large, sender
+      refused, policy, sign-in, busy, unreachable, certificate, other),
+      the reply code, the enhanced code and the named address; one
+      translated sentence per class (busy and unreachable have a "stopped
+      trying" form when out of tries); the reply behind a Details
+      Expander; Edit accent on a permanent refusal, Retry accent otherwise;
+      the first three lines of the text; a failed send's status line no
+      longer times out. The record stays as it was stored (no schema
+      change); "keep structured codes" is lettre's own text, which already
+      carries both codes.
+- [x] One discard sentence (composer, draft rows, Outbox): "It is deleted
+      here and from your Drafts folder on the server, with its
+      attachments." (pt-PT gender-neutral: "O conteúdo e os anexos são
+      eliminados aqui e da sua pasta Rascunhos no servidor.")
+- [x] Formatting: Preview (ToggleButton, E7B3) renders the HTML part with
+      `mail::render` on a short-lived thread (layout deadline, one band of
+      at most 4096 device rows, "shows the beginning" past that);
+      `compose_html::plain` takes out exactly the marks the HTML converts
+      (same scanner, a `Sink`), for text/plain and the Drafts/Outbox
+      previews; Ctrl+Shift+Q quotes (in the shortcuts dialog and README);
+      the one-time caption (setting `format_hint_seen`).
+- [x] Numbered list glyph: **not changed**. E9D5 is CheckList in Segoe
+      Fluent Icons and in Segoe MDL2 Assets (rendered both to check), and
+      neither font has a numbered-list glyph; a checklist would mislabel
+      the button, so "1." (Body semibold) stays.
+- [x] Reply/forward: the quote is folded behind "Show quoted text" (the
+      draft keeps `body` + `quote`; saved and sent as the full body,
+      folded again when reopened; the split is language-independent: a
+      `---------- ... ----------` heading, or the line above a trailing
+      run of `>` lines); the attribution and forward heading/fields follow
+      the UI language; placeholder "Write your message".
+- [x] Drag and drop: overlay "Drop to attach" / "Drop to attach to a new
+      message"; a drop with no composer opens a new message for the files.
+- [x] Narrow: Discard and Send keep their labels; Attach goes icon-only.
+- [x] Draft reply: "You started a reply to this message." (Informational)
+      with Resume, in the reader, while a reply is in memory or in Drafts.
+- [x] Tests: `outbox_records_map_to_their_smtp_class` (fake SMTP server's
+      550/450/552 and an unreachable port, plus real-world replies),
+      `text_plain_has_no_markers`, `every_way_out_of_the_composer_saves_here_and_on_the_server`
+      (captured workers: `Workers::capture`, the jobs the UI queues),
+      `discarding_removes_the_draft_here_and_its_server_copy`,
+      `send_is_always_on_and_the_field_says_why`,
+      `quotes_fold_out_of_the_composer_and_are_still_sent`,
+      `the_undo_send_offer_shortens_the_subject`, Outbox sentences in en
+      and pt-PT; the existing APPEND tests in `mail::tests` run the queued
+      `Job::SaveDraft` against the fake IMAP server.
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (lib 420, app 223, the rest unchanged; one reader test
+      that depends on the 250 ms layout budget failed once under a loaded
+      full run and passed on three reruns: pre-existing, reader.rs is
+      untouched), release build 16,481,280 bytes (+201,728 over the start
+      of the stage). First frame on the 2000-message seed: median 36.9 ms
+      over 7 runs (35.2-45.2), 37.2 ms over 9 earlier in the session
+      (35.6-39.8); Stage 3 recorded 35.8 ms; nothing added runs before
+      the first frame (the new Slint is all behind `if`s, one more setting
+      key is read). The seeded list at 1280 and 900 is pixel-identical to
+      Stage 5's. Snapshots in `uxfinal\s6\before` and `after` (compose,
+      compose-invalid, compose-no-to, compose-preview incl. 1920 wide,
+      compose-hint, discard, outbox:permanent / :transient en and pt-PT,
+      drafts, reply on the HTML fixture, undo-send, draft-reply,
+      drop-hover; en light 1280, pt-PT dark 900, contrast, text scale 1.5,
+      green accent, compose at 900 en / pt-PT and at 900 x 1.5) looked at.
+- Hand checks (need a person at the machine):
+  - Drag files from Explorer over the window with and without a composer
+    open: the overlay shows and goes when the drag leaves; a drop with no
+    composer opens a new message with the files attached; a drop over
+    Settings does nothing.
+  - The undo-send countdown at the real 5 s (and 10 s) window, and Undo
+    within it; the subject in the offer at 900 px and text scale 1.5.
+  - Narrator: pressing Send with no recipient reads "Add a recipient to
+    send." at once (assertive); the Preview toggle's state is read.
+  - Preview on a real HTML reply (quoted original with images removed),
+    in the dark theme (dimmed like the reader) and at 125 % / 150 %
+    display scale (sharp, the right width), and resizing the window while
+    it is on.
+  - A real failed send to an unknown address on the live test account
+    (self-sends only are allowed there, so this needs a separate
+    authorization): the Outbox sentence and Details match the provider's
+    actual reply text.
+  - Ctrl+Shift+Q on a Portuguese and a US keyboard.
+- [x] Review (2026-10-13, own snapshots in `uxfinal\s6\review0`: the
+      stage's surfaces in en light 1280, pt-PT dark 900, en 900, contrast,
+      pt-PT dark 1280, text scale 1.5, green accent; Tab walks through
+      the composer, the Outbox, the Discard and Delete dialogs). Fixed:
+      the quote fold left the two blank lines in the body, so a body
+      replaced as a whole (the `draft-reply` action, or Ctrl+A and
+      typing) was saved and sent glued to the attribution
+      ("then.On Thu ... wrote:"), and on reopening that merged line was
+      taken for the attribution and the typed text folded away; a fresh
+      reply also never showed "Write your message" (its body was
+      `"\n\n"`). Now `quote_start` backs up over the blank lines, the
+      quote owns them, `full_body` inserts a blank line when neither side
+      has one, and the Drafts row previews only the text above the quote
+      (`above_quote`). Tests: `a_replaced_reply_body_keeps_its_distance_from_the_quote`,
+      and the fold / reopen / signature tests updated to the empty body.
+      Judged and left: the Discard dialog's Tab walk in a `tab:n`
+      snapshot runs from the list behind it (`invoke_focus_list` comes
+      first), so it cannot show the trap; the ContentDialog has a
+      FocusTrap at both ends. Preview and the reader both draw HTML at
+      the display scale, not the text scale (consistent; a later item if
+      wanted). Nothing else material found.
+
+## UX final, Stage 7: settings, accounts and trust surfaces (2026-10-13)
+
+- [x] docs first: docs/WINUI3.md "SettingsCard" (account cards that open
+      the account page, its groups, the pinned buttons, the certificate
+      prompt's byte groups, the caution badge and Try now, Privacy and
+      About groups, the language note), "InfoBar" (the sender notice with
+      Report junk / Delete / Why?, the remote-images Undo bar and caption)
+      and the new dev switches; README (account page, Review certificate,
+      Try now, Privacy, the new `_ACTION`s), PRIVACY (Download again's new
+      place, Open logs folder, the Undo bar), CHANGELOG.
+- [x] Accounts: one card per account (name, address, status with Update
+      password or Review certificate, chevron) that opens its page. The
+      page is the Edit page: Account (Sync this account, Name, Email with
+      why it is fixed, Password), Signature, Folders (headers above the
+      boxes), Server settings (Expander, folded; opens on an error, a
+      review or a saved certificate; Find settings inside it only for a
+      non-preset server), Download again, Remove. Save / Test connection /
+      Cancel pinned under the scroll view. "…" (two accounts or more):
+      Move up / Move down (`menu:account`).
+- [x] Certificates: `StatusAction::ReviewCertificate` (a changed
+      certificate; `problem_action` maps attention + problem to the
+      button), one short status sentence, the full one on the card;
+      Review certificate opens the page, forgets the changed server's pin
+      in the form (its fingerprint kept with its server for the prompt)
+      and reads the new one. The prompt: 4 x 8 bytes in the code font,
+      never wrapped (`group_fingerprint`), Copy IconButton, "How do I
+      check this?" for the openssl hint, "Saved before" with a caution.
+- [x] Offline: `StatusAction::TryNow` on the standing Caution line; a
+      caution dot on the account's tile (pane and rail) and a caution
+      button on its pane row (opens the page) while `AccountState` is
+      Unreachable, cleared by a sync that goes through (not by closing
+      the line).
+- [x] Sender notice: "This message may not be from who it says", the
+      reason on line 2 ("Reason: …"), Report junk (Not junk in Junk),
+      Delete (the Trash / Junk confirm still applies), Why? (a one-button
+      ContentDialog). Remote images: "Images from {0} will always load."
+      with Undo (forgets the address) and Privacy settings; the caption
+      "Images load from this sender · Change" for an allowed sender.
+- [x] Privacy: Remote images, Diagnostics (one sentence; Logs folder with
+      Open logs folder), Reset (Remove all data). About: version, Help
+      group, About group (Privacy statement, Data folder cut from its
+      start with the full path as a tooltip, Source code, Made with
+      Slint). General: a language change shows "Some text changes after
+      Komorebi restarts." under its card.
+- [x] Tests: `a_problem_maps_to_its_status_action`,
+      `a_fingerprint_is_shown_in_whole_bytes_eight_a_line`,
+      `a_changed_certificate_is_the_server_it_names`,
+      `the_offline_badge_stays_until_a_sync_goes_through`,
+      `a_changed_certificate_offers_review_certificate`; the certificate
+      and dialog-focus tests follow the new prompt and Privacy order.
+- [x] Checks: fmt, clippy (only the imap-proto notice), `cargo test
+      --locked` (lib 420, app 229, the rest unchanged), release build
+      16,673,280 bytes (+192,000 over Stage 6; limit 20.0 MB). First
+      frame on the 2000-message seed: median 38.4 ms over 11 runs of the
+      final build (36.8-48.0), 37.7 ms over 9 earlier (36.7-49.4); sets
+      taken while other processes kept the machine busy read 41-44 ms
+      (40.2-58.8); Stage 6 recorded 36.9 ms;
+      nothing new runs before the first frame (the Settings page and the
+      dialogs are behind `if`s; two more `NavItem` fields). Snapshots in
+      `uxfinal\s7\before` and `after` (settings:accounts with 1 and 3
+      accounts, settings-edit, settings-edit-folders, account-cert-failed /
+      -prompt / -again / -pinned, cert-changed(-settings), offline(-settings,
+      rail 900, hover), settings:privacy / :about (also 1300 tall) /
+      :general, remove-data, the DMARC notice and Why?, remote-always-bar;
+      en light 1280, pt-PT dark 900, contrast, text scale 1.5, green
+      accent) looked at: no truncated label in pt-PT, Save visible without
+      scrolling.
+- [x] Review (`uxfinal\s7\review0`, own snapshots at 1280 / 900, light /
+      dark / contrast, en / pt-PT, text scale 1.5): two defects fixed.
+      "How do I check this?" opened its note under the dialog's footer
+      (a wrapped Text inside a nested layout reported one line; the note
+      is now a direct child of the column, and the dialog grows to it,
+      also at text scale 1.5 in pt-PT, where it then fills a 700 px
+      window). The pane row's caution button vanished under the pointer
+      (the "…" replaced it on hover), so it could not be clicked: it now
+      moves left of the "…" and keeps its tooltip. `KOMOREBI_SNAPSHOT_FOCUS=press:t…`
+      (`t` Tab) walks a Settings page's Tab stops, which `tab:n` leaves:
+      the account cards, the Expander, Download again, Remove and the
+      pinned Save row all take a visible ring, in contrast too.
+      Gates after the fixes: fmt, clippy (imap-proto only), tests (lib 420,
+      app 229), release 16,670,720 bytes, first frame median 36.3 ms over
+      9 runs (35.7-40.3). Snapshots can't click the account page's "…"
+      menu (native); `menu:account` prints Move up [disabled] / Move down
+      [enabled] with three accounts and "not shown" with one.
+- Hand checks (need a person at the machine):
+  - The account card: Tab reaches each card, Enter and Space open it, the
+    focus comes back to it after Back; the hover fill.
+  - The account page's "…" menu (a native menu: never clicked in
+    snapshots): Move up / Move down move the account and the page stays
+    on it; with one account the button is not there.
+  - Review certificate against a real server whose certificate changed
+    (needs the user's authorization for that account): the prompt shows
+    the new and saved fingerprints; Trust then Save makes the account
+    connect again.
+  - Try now on a real network drop (Wi-Fi off, then on): the line comes
+    back while offline; the badge goes at the first sync that goes
+    through; the row's caution button opens the account page.
+  - The data path's start cut and its tooltip at 900 px and text scale
+    1.5; Open logs folder with and without a log kept.
+  - Changing the language: the window redraws, the note shows and closes.
+  - Why?, Report junk and Delete from the notice with the keyboard; Undo
+    on the remote-images bar, then opening another message from that
+    sender (images blocked again).
+
+## UX final, Stage 8: narrow window, Snap, regional dates and final QA (2026-10-13)
+
+- [x] docs first: docs/WINUI3.md "Layout breakpoints" (new: wide / compact /
+      one pane, the selection-keeps-the-list rule, the back button, the
+      floating status and Undo in one pane, min / max widths instead of a
+      width bound to the window, the search minimum and the Search tip's
+      place), "Title bar and frame" (the 500 px minimum), dev switches
+      (`[layout]`); README (Window sizes, Esc, `[layout]`, regional
+      dates), CHANGELOG.
+- [x] `min-width` 720 -> 500 (`ui/app.slint`); winit passes it to
+      `WM_GETMINMAXINFO`, and the chrome proc still corrects only the
+      height, so no `src/chrome.rs` change was needed (a 560 px snapshot
+      now comes out 700 physical px wide at 125 %, not the 900 px of the
+      720 clamp).
+- [x] One pane below 720 px: `one-pane`, `show-list`, `show-reader`
+      (out properties); an open message, composer or Outbox entry hides
+      the list; a back IconButton (E72B, "Back to list (Esc)" / "Voltar à
+      lista (Esc)") leads the reader's command bar (its width comes off the
+      label budget) and the Outbox entry's commands, and takes the focus
+      when the list goes from under it; `back_to_list` (Rust) closes the
+      Outbox entry or the message (nothing on the server changes) and is
+      also Esc's last step (an open Outbox entry now closes with Esc at
+      every width). F6 skips the hidden list. The status line and the
+      Undo offer (now the `UndoOffer` component) float over the reader's
+      foot while the list is hidden; the drop overlay (now `DropOverlay`)
+      covers the list when there is no reader column.
+- [x] Below 1040 px the list stretches over the reader's place while the
+      reader holds nothing (min / max width + stretch; a width bound to
+      the window's made a binding loop). The Search tip goes under the
+      search box when there is no reader column (it had landed on the far
+      right over Refresh and "…" at 900 px).
+- [x] Title bar: the search's minimum is 120 px in one pane, so at 500 px
+      the 48 px drag gap before the caption buttons stays (passthrough
+      rects at 560 px end at 468 physical px, the captions start at 527).
+- [x] Dates: `format::picture` renders a Windows date picture (`d`..`dddd`,
+      `M`..`MMMM`, `y`, `yy`, `yyyy`, quoted text; an era or time letter
+      -> ISO fallback); `load_short_date` reads `LOCALE_SSHORTDATE` once
+      with `GetLocaleInfoEx` before the first frame (0.010-0.020 ms; the
+      validation probe uses a `NaiveDate`, as a `Local` date loaded the
+      time zone and cost 0.35 ms); English list dates of other years and
+      the reader's date (`reader_date`) use it; quote headers in sent
+      replies keep `full_date` (ISO), so what is sent doesn't depend on
+      the PC.
+- [x] Tests: `windows_short_date_pictures` (en-US, en-GB, ISO, de-DE,
+      `dd-MMM-yy`, `d/M/y`, long names, quotes, era / time / empty ->
+      fallback, rejected pictures not kept), `full_dates` (reader date),
+      `narrow_windows_show_one_pane_at_a_time` (wide, compact stretch,
+      one pane, Back, Esc with the focus moved to the back button, a
+      selection keeps the list, the composer and an Outbox entry take the
+      pane, Back closes the Outbox entry).
+- [x] Matrix: every snapshot action of Stages 1-7 (69 surfaces,
+      `uxfinal\s8\gen.py`) at 1280 (en light, contrast, text scale 1.5),
+      900 (en light, pt-PT dark) and 560 (en light, pt-PT light, pt-PT
+      dark, contrast, text scale 1.5): 687 shots in `uxfinal\s8\after`,
+      342 with the Stage 7 build in `before` (1280 / 900 only; 560 was
+      clamped to 720 then). Pixel diff before/after: every change is a
+      regional date, the stretched list at 900, the moved Search tip, or
+      timing noise (spinner, a focus ring under parallel load; the same
+      when rerun serially). Regressions found and fixed in the pass: the
+      Undo offer and the status line were invisible in one pane (they
+      lived in the hidden list), the drop overlay was invisible with no
+      reader column, the Search tip at 900. No clipping or horizontal
+      overflow at 560 in light / dark / contrast / en / pt-PT / 1.5 (list,
+      reader with back, welcome, Settings and the account forms, composer,
+      Outbox, dialogs).
+- Hand checks, consolidated for the release (need a person at the machine;
+  the Stage 1-7 sections keep the details):
+  - Window chrome: drag, double-click maximize / restore, the system menu
+    (right-click, Alt+Space), Alt+F4, every edge and corner with its
+    cursor, the top band, the 1 px top border (else
+    `KOMOREBI_TITLEBAR_BORDER=1` by default), maximized at every taskbar
+    edge (auto-hide too), inactive dimming, mixed DPI 100 / 150 % drags,
+    high contrast on and off live, Windows 10, geometry over 3 relaunches,
+    frame flash on first launch, touch.
+  - Snap: the flyout over Maximize and Win+Z; halves on a 1366 px screen
+    and thirds on a 1920 px screen at 100 % and 125 % (the window fills
+    the zone and switches to one pane below 720); at 150 % a 1920 px third
+    (427 logical px) is under the 500 px minimum, so Windows keeps the
+    window at 500 there (expected). Resize live across 1040 and 720 with
+    a message open, the composer open and Settings open.
+  - Snapshot matrix evidence: under parallel load (xargs -P 6, even -P 2)
+    the 600 ms action timer can fire before the rows are loaded, so a
+    SELECT or action shot comes out as the plain list (its `[layout]`
+    line then reads `list=true reader=false` where a reader was meant);
+    part of `uxfinal\s8\after` has this (10 of its 130 action shots at 560). Run the matrix serially, or make
+    the harness wait for the rows, before using it as evidence again.
+  - One pane: Up / Down in the list only move the cursor (the list stays;
+    review found they opened the row and the next key landed on Reply,
+    fixed with a test); open a message with the mouse and with Enter,
+    Back with the mouse and Esc, the focus ring on Back after opening by
+    keyboard (F6 to the reader lands on Back too);
+    Archive / Delete from the reader show Undo at the reader's foot; a
+    status line (offline) at the foot can be closed; Tab never reaches
+    the hidden list.
+  - Menus (native, never clicked in snapshots): the list's "…", the pane
+    row and rail tile menus, the row menu and More (accelerator text
+    right-aligned), Move to, the search scope menu, the account page's
+    "…"; each at 560 px too, opening inside the window.
+  - Drag and drop: files over the window with and without the composer,
+    at 1280, 900 and 560 (the overlay over the list when no reader
+    shows), and leaving without a drop.
+  - Narrator: caption buttons, the back button, row check boxes and quick
+    actions, the Undo offer and status (polite), a tip appearing, Send
+    with no recipient (assertive), the shortcuts dialog in order.
+  - Tips: a real first start (Search after about 1.5 s, no focus taken),
+    the compact series at 900 and at 560 (Folders, Search under the search
+    box, Help), at text scale 1.5 / 2.25 and display scale 100 / 125 /
+    150 %.
+  - Regional dates: change Region > Regional format > Short date (for
+    example M/d/yyyy, yyyy-MM-dd) and restart: the list's older rows and
+    the reader's date follow it in English; pt-PT keeps dd/MM/yyyy.
+- Remaining product gaps (not UI): no validation yet against a real
+  Purelymail account; live checks of server draft copies, Review
+  certificate and real failed sends need the user's authorization per
+  account; the local cache is plaintext; no code signing (the installer
+  exists); editing server-only drafts (C8) is deferred; no toasts or tray
+  (non-goal); a cold-start measurement on a clean machine and the
+  static-CRT release smoke test are still open (see "Next").
+
+## Release readiness (UX), final audit (2026-10-13)
+
+The five task walkthroughs of the UX plan (first run, triage, write, find,
+manage) were redone end to end on the Stage 8 build: 278 snapshots in
+`uxfinal\final\` (70 surfaces × en light 1280×800, pt-PT dark 900×700,
+pt-PT light 1280×800, en dark 900×700, less the two `tips:folders` at
+1280 that exit without a file; plus eight menu dumps in en and pt-PT),
+run serially, every `[layout]` and `[titlebar]` line checked
+(drawn = pushed height in all 278; no panic; every SELECT shot has its
+reader). Looked at as contact sheets. Nothing clips or overflows; the
+menus carry their accelerators and check marks in both languages.
+
+- [x] Fixed: an error below the fold on the add-account or account page
+      (`account-test-failed`, `account-cert-failed`) was scrolled with its
+      bottom at the pinned buttons, so the header's edge cut through the
+      field above it (at 1280×800 the Password box's red underline showed
+      right under the "Add an account" title; in pt-PT half a caption).
+      The bar now sits 8 px under the header; while such an error shows,
+      the form grows under its bar by what the view lacks (`err-pad`), so
+      the scroll can reach that place (checked at 1280, 900, 560 and text
+      scale 2.25, both languages, light and dark). WINUI3 "SettingsCard"
+      (the account page paragraph) documents the rule.
+- Gates on the fixed build: fmt clean; clippy only the imap-proto notice;
+  717 tests pass; `komorebi.exe` 16,768,000 bytes (16.77 MB decimal,
+  15.99 MiB) under the 20.0 MB ceiling; first frame on the 2000-message
+  seed 36.7-39.5 ms (median 39 ms of 4 runs; the same exe before the fix
+  measured 37-42 ms today, so no regression; the number moves with the
+  machine's load, ~33 ms on a quiet run).
+- Snapshot harness note: job lines piped from Windows Python end in `\r`,
+  so the last token of each line (`KOMOREBI_SNAPSHOT_SELECT=0`,
+  `menu:list`) arrived unparsable in a first pass (a plain list where a
+  reader was meant, "unknown menu" for every menu). `uxfinal\final\run.sh`
+  strips it (`tr -d '\r'`); any earlier "plain list" shot in the Stage 8
+  matrix may have the same cause.
+- Still needing a person at the machine before release (the Stage 8 list
+  above keeps every detail):
+  - **Title bar**: drag, double-click maximize / restore, the system menu
+    (right-click, Alt+Space), every edge and corner with its cursor and
+    the top band, the 1 px top border (else `KOMOREBI_TITLEBAR_BORDER=1`),
+    inactive dimming, mixed DPI drags, high contrast on and off live
+    (system caption, one search strip), Windows 10, geometry over three
+    relaunches, frame flash, Narrator on the caption buttons, touch.
+  - **Snap Layouts**: the flyout over Maximize and Win+Z; halves on a
+    1366 px screen and thirds on 1920 px at 100 / 125 % (the window fills
+    the zone and goes to one pane below 720 px); resizing live across
+    1040 and 720 with a message, the composer and Settings open.
+  - **Menus** (native, never clicked in snapshots): the list's "…", the
+    pane row and rail tile menus, the row menu and More (accelerators
+    right-aligned, labels following the selection), Move to, the search
+    scope menu, the account page's "…"; each at 560 px too, opening inside
+    the window; their colours in the dark theme.
+  - Tips on a real first start (Search after about 1.5 s, no focus taken;
+    the compact series at 900 and 560), drag and drop of files, Narrator
+    through the window, regional short dates.
+
+## Performance pass (2026-10-13)
+
+Rules and method: `docs/PERF.md`. Release `--locked`, offline, throwaway seeds,
+9 to 21 runs, median / min in ms; exe 16,768,000 to 17,079,296 bytes (limit
+20,000,000). No UI, text or pixel change: the 278-shot matrix equals the
+baseline except the 12 known nondeterministic PNGs (signin-wait spinner,
+outbox made-up times).
+
+| Metric | Before | After |
+|---|---|---|
+| Launch 2000: cache loaded / first frame | 9.6 / 9.1, 37.3 / 36.5 | 6.7 / 6.4, 34.7 / 32.2 |
+| Launch 20000: cache loaded / first frame | 11.3 / 11.1, 39.3 / 36.4 | 8.7 / 7.9, 36.8 / 35.1 |
+| Search "joao" 2000 / 20000 | 2.4 / 19.9 (min 1.9 / 16.9) | 2.3 / 12.6 (min 1.1 / 9.6) |
+| HTML open, image-heavy #0 / #4 / #10 / #13 | 55.3, 42.6, 33.7, 48.4 | 42.1, 36.5, 20.6, 28.6 |
+| Heavy fixtures, live memory | unchanged | unchanged (WS 32.9 / 33.9 MB) |
+
+Kept: tiny-skia and SQLite at opt-level 3 (PERF 4.1, 4.2, 7.1, 5.7), one-pass
+`fold_has` search (3.1 to 3.3), DB open and icon load on threads plus deferred
+first-launch fold writes (6.1 to 6.3), one transaction per body batch (5.1;
+300 bodies 25.9 to 5.9 ms, worker thread).
+
+Deferred, not measured (no A/B was run, so no claim): `box_down` column sums,
+byte-budget `DOC_CACHE`, lazy image prescale, `/DELAYLOAD`, the extra SQLite
+flags. Small HTML opens (#5, #11, #12) show a few ms of median jitter against
+the baseline in a 21-run interleaved A/B with equal minimums; no regression
+was attributed. Cold-disk first boot was not measured.
 
 ## Next
 
@@ -1569,6 +3042,26 @@ Independent re-run of the gates on the finished tree, same machine:
       prompt dialogs keep Tab inside them; the focus rings show at 125%
       and 150% scale; Shift+F10 and the Menu key open the row menu under
       the current row (also scrolled down the list) and arrows move in it.
+- [ ] Check by hand once (native round, Stage 1; the snapshot renders
+      only the client area and sends no system messages): the caption is
+      the window's grey (accent with "Show accent colour on title bars",
+      Windows' own under a contrast theme), also on an inactive window;
+      changing the accent colour, light/dark, a contrast theme, the text
+      size slider (does it broadcast `WM_SETTINGCHANGE`?) and animation
+      effects with Komorebi open follows at once (WINUI3 "Open checks").
+- [ ] Known gaps of the native Windows 11 round (UI plan "Deferred";
+      `docs/WINUI3.md` "Open checks"): the native context and More
+      menus can look light in the dark theme (a dark menu needs the
+      undocumented uxtheme `SetPreferredAppMode`, checked by hand on
+      Windows 10 and 11); no Mica (the software renderer draws opaque
+      pixels; the solid fallback WinUI itself uses is shown); the text
+      size follows at the next start if the slider sends no
+      `WM_SETTINGCHANGE`; Slint's std ComboBox has no contrast colours
+      of its own (`ComboEdge` adds the ButtonText edge) and keeps
+      Slint's animations with animation effects off; the navigation
+      pill jumps instead of sliding; recipients are text, not person tokens; the approximate
+      ramp of a light accent (`KOMOREBI_ACCENT=#ffb900`) gives white on
+      a mid fill, as WinUI would with that ramp.
 - [ ] Check by hand once (Stage 14): the list's More (…) menu opens
       under its button at 1280 and 900 px wide; Enter, then PageDown or
       Space scrolls a long page rather than the list; Esc from the page
