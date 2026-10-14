@@ -1,6 +1,7 @@
 //! Outgoing mail: building RFC 5322 messages and sending them over SMTP.
 
 use super::errors::{Class, Special, Step, StepError};
+use crate::db::Importance;
 use crate::providers::{Security, Server};
 use anyhow::{Context, Result, anyhow, bail};
 use lettre::Transport;
@@ -46,6 +47,8 @@ pub struct Outgoing {
     /// An iCalendar alternative of `body` (an invitation's REPLY). It
     /// takes the place of `body_html`.
     pub calendar: Option<CalendarPart>,
+    /// High or low: sent as `Importance` and `X-Priority` ([`importance`]).
+    pub importance: Importance,
 }
 
 /// A `text/calendar` part: its iTIP method and the iCalendar text.
@@ -196,6 +199,12 @@ fn build_with(out: Outgoing, addrs: Addresses, builder: MessageBuilder) -> Resul
     if !out.references.is_empty() {
         b = b.references(out.references);
     }
+    for (name, value) in importance(out.importance) {
+        b = b.raw_header(header::HeaderValue::new(
+            header::HeaderName::new_from_ascii_str(name),
+            value.to_string(),
+        ));
+    }
 
     // `Body::new` converts a String's line endings to CRLF.
     let text = SinglePart::builder()
@@ -251,6 +260,18 @@ fn build_with(out: Outgoing, addrs: Addresses, builder: MessageBuilder) -> Resul
 }
 
 const RFC822: &str = "message/rfc822";
+
+/// The headers a message's importance is sent as: `Importance` (RFC 2156,
+/// what Outlook and most clients read) and `X-Priority` (1 highest, 5
+/// lowest, for the rest). A normal message carries neither, as most mail
+/// does.
+pub fn importance(i: Importance) -> &'static [(&'static str, &'static str)] {
+    match i {
+        Importance::Normal => &[],
+        Importance::High => &[("Importance", "high"), ("X-Priority", "1")],
+        Importance::Low => &[("Importance", "low"), ("X-Priority", "5")],
+    }
+}
 
 /// The body of an attached message (a forward as attachment, or an `.eml`
 /// file): its bytes as they are, marked 7bit or 8bit, when they are valid
@@ -982,6 +1003,7 @@ mod tests {
             references: "<abc@example.com>".into(),
             message_id: String::new(),
             calendar: None,
+            importance: Importance::Normal,
         }
     }
 
@@ -1416,6 +1438,37 @@ mod tests {
         assert_eq!(body_html, None);
         let after = build_raw(Outgoing { body, ..o }).unwrap();
         assert_eq!(without_date(after), without_date(before));
+    }
+
+    #[test]
+    fn importance_is_sent_as_two_headers() {
+        let text = |raw: Vec<u8>| String::from_utf8(raw).unwrap();
+        let read = |raw: &[u8]| crate::mail::mime::parse_header(raw).importance;
+        // Normal: neither header, as most mail.
+        let normal = text(build_raw(sample()).unwrap());
+        assert!(!normal.contains("Importance:") && !normal.contains("X-Priority:"));
+        let mut o = sample();
+        o.importance = Importance::High;
+        let high = text(build_raw(o.clone()).unwrap());
+        assert!(high.contains("\r\nImportance: high\r\n"), "{high}");
+        assert!(high.contains("\r\nX-Priority: 1\r\n"), "{high}");
+        assert_eq!(read(high.as_bytes()), Importance::High);
+        // The server's Drafts copy keeps it too.
+        let draft = build_draft(o.clone(), 7).unwrap();
+        assert_eq!(read(&draft), Importance::High);
+        o.importance = Importance::Low;
+        let low = text(build_raw(o.clone()).unwrap());
+        assert!(low.contains("\r\nImportance: low\r\n") && low.contains("\r\nX-Priority: 5\r\n"));
+        assert_eq!(read(low.as_bytes()), Importance::Low);
+        // Once each, in the top-level header only (not in the parts).
+        o.attachments = vec![OutAttachment {
+            filename: "a.txt".into(),
+            data: b"hi".to_vec(),
+        }];
+        let mixed = text(build_raw(o).unwrap());
+        assert_eq!(mixed.matches("Importance:").count(), 1);
+        let head = &mixed[..mixed.find("\r\n\r\n").unwrap()];
+        assert!(head.contains("Importance: low"));
     }
 
     #[test]

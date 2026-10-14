@@ -250,9 +250,14 @@ impl App {
             entry(t!(invoke_menu_mark_unread), "Ctrl+U", true, CMD_MARK_UNREAD)
         };
         let flag_entry = if unflagged {
-            entry(t!(invoke_menu_flag), "Insert", true, CMD_FLAG)
+            entry(t!(invoke_menu_flag), "Ctrl+Shift+G", true, CMD_FLAG)
         } else {
-            entry(t!(invoke_menu_remove_flag), "Insert", true, CMD_UNFLAG)
+            entry(
+                t!(invoke_menu_remove_flag),
+                "Ctrl+Shift+G",
+                true,
+                CMD_UNFLAG,
+            )
         };
         let junk_entry = if junk {
             entry(t!(invoke_menu_not_junk), "", true, CMD_NOT_JUNK)

@@ -1713,6 +1713,9 @@ fn wire(ui: &AppWindow) {
     ui.on_c_reveal(|field| {
         with_app(|a| a.reveal_cc(field));
     });
+    ui.on_c_set_importance(|code| {
+        with_app(|a| a.draft_importance(code));
+    });
     ui.on_c_close(|| {
         with_app(|a| a.close_composer());
     });
@@ -4140,6 +4143,7 @@ impl App {
             return;
         }
         let (body, input) = mime::parse_reader(raw);
+        let backfill = backfill_importance(&mut open.msg, &body);
         open.body = Some(body);
         if input.prefers_plain {
             self.reader.close();
@@ -4147,6 +4151,20 @@ impl App {
             let src = reader::Source::Input(Arc::new(input));
             self.reader.open(id, src, remote);
         }
+        self.keep_importance(backfill);
+    }
+
+    /// A body cached before v13 told the open message's importance
+    /// ([`backfill_importance`]): its row keeps it (one row, only this
+    /// once) and the list shows it.
+    fn keep_importance(&self, backfill: Option<(i64, db::Importance)>) {
+        let Some((id, importance)) = backfill else {
+            return;
+        };
+        if let Err(e) = self.db.set_importance(id, importance) {
+            self.set_status(&text::detail(&e), true);
+        }
+        self.rows.changed(id);
     }
 
     /// Load the open message's remote images: this once, or from now on
@@ -4199,7 +4217,9 @@ impl App {
             && let Some(open) = self.open.as_mut()
             && open.body.is_none()
         {
+            let backfill = backfill_importance(&mut open.msg, &body);
             open.body = Some(body);
+            self.keep_importance(backfill);
             self.show_open();
         }
     }
@@ -4222,6 +4242,7 @@ impl App {
         ui.set_r_cc(format::recipients(&m.cc).into());
         ui.set_r_flagged(m.flagged);
         ui.set_r_unread(!m.seen);
+        ui.set_r_importance(m.importance.code() as i32);
         ui.set_r_server_draft(self.folder_role(m.folder_id) == Role::Drafts);
         ui.set_r_in_junk(self.folder_role(m.folder_id) == Role::Junk);
         self.show_draft_reply();
@@ -5434,6 +5455,18 @@ fn problem_action(id: i64, attention: Option<Attention>, problem: &Problem) -> S
 }
 
 /// Whether a search over `scope` cached messages waits for a typing pause.
+/// The importance an opened message's parsed body says its sender set,
+/// when its row has none yet (cached before v13): taken into `msg`, and
+/// returned (id, importance) for the row to keep. None otherwise; a row
+/// that already has one keeps it.
+fn backfill_importance(msg: &mut db::Message, body: &mime::Body) -> Option<(i64, db::Importance)> {
+    if msg.importance != db::Importance::Normal || body.importance == db::Importance::Normal {
+        return None;
+    }
+    msg.importance = body.importance;
+    Some((msg.id, body.importance))
+}
+
 fn debounces_search(scope: u32, text: &str) -> bool {
     scope > SEARCH_DEBOUNCE_ABOVE && !text.trim().is_empty()
 }
@@ -5747,7 +5780,7 @@ mod tests {
                 "",
                 Filter::Flagged,
                 st(false, Some(&failed)),
-                "No flagged messages",
+                "No important messages",
             ),
             ("", Filter::All, st(true, Some(&failed)), "Loading\u{a0}…"),
             ("  ", Filter::All, st(false, None), "Nothing here"),
@@ -5811,13 +5844,13 @@ mod tests {
     /// (the Windows 10 icon font; Windows 11's Segoe Fluent Icons, used
     /// when present, has them all too). None needed a substitute. A new
     /// icon is added here only once it is checked in that font.
-    const MDL2_GLYPHS: [u32; 65] = [
+    const MDL2_GLYPHS: [u32; 66] = [
         0xE700, 0xE70B, 0xE70D, 0xE70E, 0xE70F, 0xE710, 0xE711, 0xE712, 0xE713, 0xE715, 0xE71B,
         0xE721, 0xE723, 0xE724, 0xE72A, 0xE72B, 0xE72C, 0xE73E, 0xE74D, 0xE74E, 0xE762, 0xE76C,
         0xE77B, 0xE783, 0xE787, 0xE7B3, 0xE7B8, 0xE7BA, 0xE7C1, 0xE7C3, 0xE894, 0xE898, 0xE8A5,
         0xE8B7, 0xE8B9, 0xE8BB, 0xE8C2, 0xE8C3, 0xE8C8, 0xE8C9, 0xE8DB, 0xE8DD, 0xE8DE, 0xE8FB,
         0xE8FD, 0xE921, 0xE922, 0xE923, 0xE943, 0xE946, 0xE97A, 0xE9B2, 0xE9CE, 0xEB4B, 0xEC59,
-        0xF136, 0xF13C, 0xF13D, 0xF13E, 0xF13F, 0xE765, 0xE897, 0xEA18, 0xEA80, 0xED15,
+        0xF136, 0xF13C, 0xF13D, 0xF13E, 0xF13F, 0xE765, 0xE897, 0xEA18, 0xEA80, 0xED15, 0xE74B,
     ];
 
     #[test]

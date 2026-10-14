@@ -374,31 +374,92 @@ HighlightText.
 Komorebi's message row (`MailItem`): 76 px (`Theme.row-height`, taller
 with the text size), padding `16,9,12,9`, the plate and pill as above
 (selected + pressed SubtleSecondary, as `ListViewItemBackgroundSelectedPressed`),
-the pill's height animated over 83 ms; no dividers and no unread bar.
+the pill's height animated over 83 ms; no dividers and no unread bar (a
+left bar would meet the selection pill).
 **The content does not move 7 px while the pill shows**: the row's three
 lines would re-elide and jump on every selection, against FLUENT2 "Built
 for focus"; the pill sits in the 16 px padding instead. Sender and subject
-Body (semibold unread), preview and date Caption TextSecondary (the date
-the same colour read or unread, in both themes; semibold unread), status
-icons 12 px TextSecondary.
+Body, date and preview Caption, status icons 12 px TextSecondary. Each
+colour holds in every plate state (rest, hover, pressed, selected).
 
-Cues (new Outlook, Windows Mail): **unread** is the semibold sender and
-subject plus a **6 px AccentFillDefault dot at the trailing end of line 2**
-(right edge, under the date; HighlightText on a lit row under HC), so it
-never meets the selection pill at x 4. The **account** (All inboxes with
+Cues (new Outlook, Windows Mail): an **unread** row has its sender,
+subject and date in TextPrimary, semibold (the preview stays Caption
+TextSecondary, regular), and an **8 px AccentFillDefault dot in a leading
+8 px slot** before the sender, centred on line 1 (HighlightText on a lit
+row under HC). The slot (8 px, then 4 px) is kept on all three lines and
+on read rows too, so the columns never shift; it follows the 16 px padding
+(and the check box while it shows), 9 px clear of the selection pill. A
+**read** row is regular and **dimmed**: sender and subject `row-read-text`,
+date and preview `row-read-meta`, both TextSecondary. TextTertiary measures
+3.3:1 on the light card, under the 4.5:1 floor, so it is never used for row
+text. Only weights 400 and 600; every row colour keeps 4.5:1 on the card
+and on the hover, pressed and selected plates, and under a contrast theme
+all of them are WindowText (`hc-text`, HighlightText on a lit row), so HC
+keeps the dot and the weight as its cues. An optional subtle unread tint
+(an `unread-tint` fill behind unread rows) is allowed if it stays under the
+plates' strength and drops out under HC; Komorebi does not ship one, as at
+the plates' 4 to 6 percent it competes with hover and selection. The
+**account** (All inboxes with
 more than one account) and a search of all folders ("Account · Folder")
 are a **text tag** at the start of line 3, Caption TextSecondary in a
 radius-4 box with a ControlStrokeColorSecondary edge, never a coloured
 dot. No other coloured dots in rows.
 
+**Important** (IMAP `\Flagged`, worded "Mark as important" / "Remove
+importance" and the "Important" filter): a 14 px filled flag in
+`Theme.important` at the end of line 2, in a 20 px slot after the
+subject (kept on every row of messages, so a hover never re-elides it). `important` is Fluent 2 marigold (shade30 #835b00 on light,
+primary #eaa300 on dark: 6.1:1 and 6.6:1 on the card, 5.6:1 and 5.4:1 on
+a hovered or selected row), kept apart from SystemFillColorCritical,
+which stays for drafts and failed sends; WindowText under HC
+(HighlightText on a lit row). It sits on line 2, not before the date,
+because the quick actions cover the end of line 1 on hover. On a hovered
+row of messages that is not important the slot shows an outline flag in
+TextSecondary. The slot is a subtle button of its own (hover and pressed
+fills, a HighlightText outline instead under HC, a tooltip, an accessible name, no Tab stop): a click toggles that
+row only, like the quick action, and never selects or opens the row. On
+a draft or an Outbox row (no quick actions) the flag is a plain icon,
+outside the accessibility tree: the row's name already says Important.
+
+**High importance** (set by the sender: `Importance: high`, `X-Priority`
+1 or 2, or `X-MSMail-Priority: High`) is a different thing from the
+user's Important and never looks like it: a bold "!" (Body size, weight
+700, in the text font, as the icon fonts' Important glyph is an outline
+too thin at 12 to 14 px) in TextPrimary, first among line 1's status
+icons before the date; HighlightText on a lit row and WindowText under HC
+(through `on-fill`). Never amber (the user's marker) and never
+SystemFillColorCritical (drafts and errors). It is passive (no pointer
+target) and, like the date, sits under the quick actions while they show;
+the row's accessible name says "High importance". **Low importance** is
+quieter: the composer's Down glyph (Segoe Fluent Icons E74B) at 12 px in
+TextSecondary, among line 1's status icons after the "!" slot, like the
+reply and attachment icons; the row's accessible name says "Low
+importance". It only takes room on the (few) low rows; at 900x700 in
+pt-PT the sender elides a little more there and nothing else moves.
+
+**Reader importance**: under the To line, a Caption TextSecondary line
+"Sent with high importance", led by the list's bold "!" (Body, weight
+700, TextPrimary, hidden from screen readers, which read the sentence),
+or "Sent with low importance" alone. Plain text, not an InfoBar (it is
+information about the message, not a state to act on); passive, and
+absent for normal mail. It elides rather than wraps.
+
+**Composer importance**: two ToggleButtons at the end of the formatting
+bar, after a divider: High importance (the Important glyph) and Low
+importance (Down), 32 px, tooltip only. At most one is on; turning it off
+again sends the message as normal. They are part of the bar's one Tab
+stop (Left/Right move along it), and checked uses the bar's
+checked-button style (Preview's).
+
 **Quick actions** (new Outlook's hover actions): while the pointer is over
 a row, or the row has the keyboard ring, four 28 px subtle buttons (Archive,
-Delete, Flag / Remove flag, Mark as read / Mark as unread) take the date's
+Delete, Mark as important / Remove importance, Mark as read / Mark as unread) take the date's
 place at the end of line 1, on the row's own plate. They act on that row
 only: they never open it, never mark it read (only Mark as read sets
 `\Seen`) and never change the selection. They are **not Tab stops** and
 take no focus: focus stays on the row, and the keyboard reaches the same
-commands with Backspace, Delete, Insert, Ctrl+Q, Ctrl+U and Shift+F10.
+commands with Backspace, Delete, Insert (or Ctrl+Shift+G), Ctrl+Q, Ctrl+U
+and Shift+F10.
 Each has a tooltip with its shortcut ("Archive (Backspace)") and the same
 accessible name. Only the hovered or ringed row builds them (`if`), so the
 list's first frame does not pay for them.
@@ -599,14 +660,14 @@ focus ring of one stays clear of its neighbours and the separators), padded
 1×20 DividerStroke centred in the row, every button as tall as Reply (the
 first to get a label) so the icons stay in line at a larger text size. Primary commands: Reply, Reply all,
 Forward | Archive, Delete, Move (a 12 px E70D chevron 8 px from its end,
-its flyout 4 below the button) | Mark as read / Mark as unread and Flag /
-Remove flag (plain buttons whose label and icon swap with the message's
+its flyout 4 below the button) | Mark as read / Mark as unread and Mark as
+important / Remove importance (plain buttons whose label and icon swap with the message's
 state, not toggles: a toggle's "checked" fill did not say which way it
 would go) and More.
 
 **Label priority, per button.** Each label is measured on its own at the
 current text size, and labels are dropped one at a time, first dropped
-first: Forward, Reply all, Move, Flag, Mark as read, then Reply, Delete,
+first: Forward, Reply all, Move, Mark as important, Mark as read, then Reply, Delete,
 and Archive last. Archive, Delete and Reply keep theirs strictly in that
 order; the others each show while they still fit after the ones before
 them (so a short Move label can show when Mark as read's long one does
@@ -615,11 +676,13 @@ the bar less the icon-only bar (padding 16, eight 32 px buttons and Move
 52, separators 2, gaps 40); a label takes its text and 15 px (Move 8 px).
 So the commands people use most keep their words longest, whatever the
 language: pt-PT at 1280 x 800 shows Responder, Arquivar, Eliminar and
-Mover; English shows those and Flag; at 900 both keep Archive and Delete
+Mover; English shows Reply, Archive and Delete and then Mark as read
+or Move, whichever fits for that message (Mark as important / Remove
+importance is too long to keep its label); at 900 both keep Archive and Delete
 (English also Reply). The bar publishes which labels show (`cmd-labels`, a bit per button
 in drop order) for the tests. Every tooltip carries its shortcut ("Reply
-(Ctrl+R)", "Archive (Backspace)", "Mark as read (Ctrl+Q)", "Flag
-(Insert)"), as do the quick actions.
+(Ctrl+R)", "Archive (Backspace)", "Mark as read (Ctrl+Q)", "Mark as
+important (Ctrl+Shift+G)"), as do the quick actions.
 
 More is a native menu of the secondary commands: Forward as attachment,
 Move to (the folders), Report junk / Not junk, View as plain text
@@ -1374,7 +1437,7 @@ Highlight border, as on a Button); the reader lays them in a
   title bar with its `ScopeBox`). The list header: title ("Search
   results" while a query runs), a 16 px ProgressRing ("Syncing…", after
   1 s), Refresh and More, centred by the row's padding; the SelectorBar
-  All / Unread / Flagged in folder views; while searching, the results
+  All / Unread / Important in folder views; while searching, the results
   line (Caption TextSecondary, then the Search all folders and Clear
   search HyperlinkButtons, their text in line with the heading). An empty
   list shows, centred over it, a 32 px glyph in TextDisabled, its reason

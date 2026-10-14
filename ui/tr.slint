@@ -240,8 +240,8 @@ export global Tr {
     pure public function menu-forward-attached() -> string { return @tr("Forward as attachment"); }
     pure public function menu-mark-read() -> string { return @tr("Mark as read"); }
     pure public function menu-mark-unread() -> string { return @tr("Mark as unread"); }
-    pure public function menu-flag() -> string { return @tr("Flag"); }
-    pure public function menu-remove-flag() -> string { return @tr("Remove flag"); }
+    pure public function menu-flag() -> string { return @tr("Mark as important"); }
+    pure public function menu-remove-flag() -> string { return @tr("Remove importance"); }
     pure public function menu-archive() -> string { return @tr("Archive"); }
     pure public function menu-delete() -> string { return @tr("Delete"); }
     pure public function menu-move-to() -> string { return @tr("Move to"); }
@@ -276,7 +276,7 @@ export global Tr {
     pure public function empty-no-drafts() -> string { return @tr("No drafts. Select New mail to start one."); }
     pure public function empty-outbox() -> string { return @tr("Outbox is empty. Messages wait here while they are sent."); }
     pure public function empty-no-unread() -> string { return @tr("No unread messages"); }
-    pure public function empty-no-flagged() -> string { return @tr("No flagged messages"); }
+    pure public function empty-no-flagged() -> string { return @tr("No important messages"); }
     pure public function empty-loading() -> string { return @tr("Loading\u{a0}…"); }
     pure public function empty-unreachable() -> string { return @tr("Can't reach the server, so this list may be incomplete"); }
     pure public function empty-failed() -> string { return @tr("Couldn't check for new mail, so this list may be incomplete"); }

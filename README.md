@@ -322,7 +322,10 @@ getting in the way.
   the body's place until it is turned off). The plain-text part of a
   formatted message has the marks taken out (`**bold**` reads `bold`), and
   so do the previews in Drafts and the Outbox. There is no underline,
-  headings, fonts or colours.
+  headings, fonts or colours. **High importance** and **Low importance**,
+  after Preview, send the message with `Importance: high` / `low` and
+  `X-Priority: 1` / `5` (one at most; neither for normal mail); the
+  choice is saved with the draft.
 - **Replies and forwards:** the quote is folded behind **Show quoted
   text** under the body (it is still saved and sent); the line above it
   ("On ..., ... wrote:", or a forward's heading and fields) is written in
@@ -369,17 +372,18 @@ getting in the way.
 - **One window:** starting Komorebi again brings the running window to
   the front (one app per cache file; a throwaway `KOMOREBI_DB` runs
   beside it).
-- **Organizing:** read/unread, flag, archive, delete and move, all
-  two-way with the server. Several messages can be selected at once:
+- **Organizing:** read/unread, important, archive, delete and move, all
+  two-way with the server (important is the standard IMAP `\Flagged`
+  flag, which other clients show as a flag or a star). Several messages can be selected at once:
   Ctrl+click adds or removes one, Shift+click or Shift+Up/Down selects a
   range, Ctrl+A in the list selects the whole view, and Esc clears. The
   reader pane then shows how many are selected, with Archive, Delete, Move
-  (when they are all in one account), Mark read / unread and Flag /
-  Unflag; Delete and Ctrl+Q act on the selection too. The list changes at
+  (when they are all in one account), Mark read / unread and Mark as
+  important / Remove importance; Delete and Ctrl+Q act on the selection too. The list changes at
   once, and the server gets one command per folder for the whole batch
   (in UID sets of up to 4,000 characters), never one per message.
   Right-clicking a message opens a menu (Reply, Reply all, Forward, Mark
-  as read / unread, Flag, Archive, Delete, Move to, Report junk) that acts
+  as read / unread, Mark as important, Archive, Delete, Move to, Report junk) that acts
   on the selection; a row outside the selection is selected first,
   without opening it or marking it read. The same menu is under More
   (…) in the reader.
@@ -404,7 +408,7 @@ getting in the way.
   work as usual). On Windows 10 and under high contrast the Windows title
   bar stays, with the same search strip under it; turning high contrast
   on or off switches it while the app runs.
-- **Filters and read state:** All, Unread and Flagged tabs under the search
+- **Filters and read state:** All, Unread and Important tabs under the search
   box narrow the list (with the search, too); a message read while Unread
   is on stays in the list until it reloads. More (…) beside Refresh offers
   "Mark all as read" for the folder shown (in All inboxes, every inbox;
@@ -417,7 +421,7 @@ getting in the way.
   leaves the messages passed on the way unread (Settings → General:
   right away, after 1 or 3 seconds, or never). An empty list says why, in
   its middle, with one way out: no matches (Search all folders, or Clear
-  search), no unread or flagged messages (Show all), or that the last
+  search), no unread or important messages (Show all), or that the last
   check for mail failed.
 - **Junk and Undo:** Report junk moves messages to the account's Junk
   folder (with none, nothing moves and a line says so); in Junk, Not junk
@@ -441,12 +445,22 @@ getting in the way.
   reader's toolbar or page, the folders, the composer, or the Settings
   button that opened them). Controls carry names and states for screen
   readers (the list and folders by name, each message with its unread,
-  flagged, attachment and replied state, toggles as checked, accounts as
+  important, attachment and replied state, toggles as checked, accounts as
   expanded or collapsed, the reader's header fields), and the status line
   is announced as it appears, at once when it is an error. Accent-coloured
   text is darkened or lightened from the Windows accent until it reads at
-  4.5:1 on the surfaces it sits on, and unread subjects use the text
-  colour.
+  4.5:1 on the surfaces it sits on. Unread messages are semibold in the
+  text colour with an accent dot before the sender; read ones are regular
+  in the secondary text colour, still at 4.5:1. An important message
+  has an amber flag at the end of its subject line; hovering a row shows
+  an outline one there, and a click on it marks or unmarks that row only.
+  A message its sender marked as high importance (the `Importance`,
+  `X-Priority` or `X-MSMail-Priority` header) shows a bold "!" in the
+  text colour before the date, and screen readers hear "High importance";
+  low importance is a small Down arrow in the secondary text colour. The
+  reader says "Sent with high importance" or "Sent with low importance"
+  under the To line. Mail cached before this version shows it once its
+  body is downloaded, or opened if it already was.
 - **Private:** no telemetry, no ads, no AI. Passwords stay in Windows
   Credential Manager.
 - **Connection trouble:** an error says what happened in one sentence
@@ -649,7 +663,7 @@ After `cargo build --release --locked`:
 | Ctrl+E, F3 or Ctrl+F | Search (the title bar's box; from Settings too, which then close) |
 | Ctrl+Q / Ctrl+U | Mark as read / Mark as unread (Outlook's keys; on a selection, every message) |
 | Ctrl+S | Save the message as a .eml file |
-| Insert | Flag / Remove flag |
+| Insert or Ctrl+Shift+G | Mark as important / Remove importance (Ctrl+Shift+G for keyboards without Insert) |
 | Backspace | Archive (with the focus on a message row or the reader's page only; never in a text field, Drafts or the Outbox) |
 | Up / Down | Previous / next message (with none open, the first); in Drafts, move to a draft (Enter opens it); in the Outbox, show the entry |
 | Home / End | First / last message |
@@ -665,14 +679,14 @@ After `cargo build --release --locked`:
 | F5 | Refresh (also retries a rejected sign-in) |
 
 The keys that act on the selected message (reply, forward, read and
-unread, flag, archive, Delete, Move, and the list keys above) work only
+unread, important, archive, Delete, Move, and the list keys above) work only
 while the reader shows, never in the composer or Settings. The list has
 the keys from the start, before any click. Show original has no key: it
 is in the reader's More menu (and the row menu), whose items show their
 keys.
 
 On a message row, the quick actions (hover, or the keyboard's row) are
-Archive, Delete, Flag and Mark as read / unread: they act on that row
+Archive, Delete, Mark as important and Mark as read / unread: they act on that row
 only, never open it and never mark it read. "Select messages" in the
 list's "..." menu shows check boxes (a click then checks a row instead of
 opening it). A message opened from the Unread filter stays in the list,

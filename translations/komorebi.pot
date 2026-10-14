@@ -913,8 +913,9 @@ msgstr ""
 msgid "Unread"
 msgstr ""
 
-#: ui/app.slint ui/widgets.slint
-msgid "Flagged"
+#: ui/app.slint
+msgctxt "filter"
+msgid "Important"
 msgstr ""
 
 #: ui/app.slint
@@ -1037,6 +1038,14 @@ msgstr ""
 msgid "Preview the message as it is sent"
 msgstr ""
 
+#: ui/app.slint ui/widgets.slint
+msgid "High importance"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Low importance"
+msgstr ""
+
 #: ui/app.slint
 msgid "Marks like **bold**, _italic_ and “- ” lists are sent as formatting. Preview shows how the message looks."
 msgstr ""
@@ -1140,15 +1149,15 @@ msgid "Mark as unread (Ctrl+U)"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint
-msgid "Flag"
+msgid "Mark as important"
 msgstr ""
 
 #: ui/app.slint ui/widgets.slint
-msgid "Flag (Insert)"
+msgid "Mark as important (Ctrl+Shift+G)"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint
-msgid "Remove flag"
+msgid "Remove importance"
 msgstr ""
 
 #: ui/app.slint ui/widgets.slint
@@ -1224,7 +1233,7 @@ msgid "Forward (Ctrl+Shift+F)"
 msgstr ""
 
 #: ui/app.slint ui/widgets.slint
-msgid "Remove flag (Insert)"
+msgid "Remove importance (Ctrl+Shift+G)"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint ui/widgets.slint
@@ -1253,6 +1262,14 @@ msgstr ""
 
 #: ui/app.slint
 msgid "To: {0}   Cc: {1}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Sent with high importance"
+msgstr ""
+
+#: ui/app.slint
+msgid "Sent with low importance"
 msgstr ""
 
 #: ui/app.slint
@@ -1755,12 +1772,12 @@ msgstr ""
 
 #: ui/shortcuts.slint
 msgctxt "shortcut key"
-msgid "Insert"
+msgid "Insert or Ctrl+Shift+G"
 msgstr ""
 
 #: ui/shortcuts.slint
 msgctxt "shortcut"
-msgid "Flag / Remove flag"
+msgid "Mark as important / Remove importance"
 msgstr ""
 
 #: ui/shortcuts.slint
@@ -2522,7 +2539,7 @@ msgid "No unread messages"
 msgstr ""
 
 #: ui/tr.slint
-msgid "No flagged messages"
+msgid "No important messages"
 msgstr ""
 
 #: ui/tr.slint
@@ -3105,6 +3122,10 @@ msgstr ""
 
 #: ui/widgets.slint
 msgid "Draft"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Important"
 msgstr ""
 
 #: ui/widgets.slint

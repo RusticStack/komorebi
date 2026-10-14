@@ -2967,6 +2967,74 @@ flags. Small HTML opens (#5, #11, #12) show a few ms of median jitter against
 the baseline in a 21-run interleaved A/B with equal minimums; no regression
 was attributed. Cold-disk first boot was not measured.
 
+## Message list, Stage 1: read and unread rows (2026-10-14)
+
+- [x] Read rows dimmed: sender and subject `Theme.row-read-text`, date
+      and preview `Theme.row-read-meta` (both TextSecondary; TextTertiary
+      is 3.3:1 on the light card), weights 400 / 600 only, `hc-text`
+      under HC through `on-fill`.
+- [x] Unread: an 8 px accent dot in a leading 8 px slot before the
+      sender (kept on every row, so columns never shift; after the check
+      box in "Select messages"); the old dot at the end of line 2 is gone.
+- Not done, by choice: a subtle unread tint (it would compete with the
+      4 to 6 percent hover and selection plates, and HC has no fill for it).
+
+## Message list, Stage 2: important marker (2026-10-14)
+
+- [x] `\Flagged` is worded "important": Mark as important / Remove
+      importance in the row menu (key text Ctrl+Shift+G), quick action,
+      command bar and selection panel; the Important tab and "No
+      important messages"; the row's accessible name says "Important".
+      Storage and wiring unchanged (`set_flags`, `db::set_flagged_many`).
+- [x] `Theme.important` (marigold #835b00 / #eaa300, `hc-text` under
+      HC) for a 14 px marker at the end of line 2, out from under the
+      quick actions; a hovered row shows an outline flag there, and the
+      marker is its own subtle button (quick action 2) that never
+      selects or opens the row.
+- [x] Ctrl+Shift+G beside Insert (Ctrl+Shift+I stays Go to the Inbox);
+      shortcuts dialog and README table updated together.
+- Not done: incoming Importance / X-Priority headers and setting
+      importance in the composer (a later stage).
+
+## Message list, Stage 3: sender-set importance (2026-10-14)
+
+- [x] `IMPORTANCE X-PRIORITY X-MSMAIL-PRIORITY` added to the header
+      FETCH (`mime::HEADER_FIELDS`), read by `mime::importance`
+      (Importance, then X-Priority's leading digit, then
+      X-MSMail-Priority; first field of each name, values capped at 64
+      bytes, anything else normal).
+- [x] Schema v13: `messages.priority`, `drafts.importance` (0 normal, 1
+      high, 2 low; unknown codes read as normal), with a migration test.
+- [x] List row: a bold "!" in TextPrimary for high importance, and
+      "High importance" in the row's accessible name.
+- [x] Composer: High / Low importance toggles at the end of the
+      formatting bar; sent as `Importance` + `X-Priority`, saved with the
+      draft and its Drafts-folder copy.
+- [x] Messages cached before v13: the importance rides the body
+      fetches that already happen (`Body::importance` from the same
+      parse; `set_body` / `set_bodies` fill `priority` only where it is
+      0), and an already cached body fills it as the message opens
+      (`backfill_importance`, one row UPDATE). No migration scan (first
+      start after the upgrade stays fast), no new round trip.
+- [ ] Still normal until then: a pre-v13 message whose body was never
+      downloaded (over the prefetch size, or outside its window), or
+      cached but never opened. A header-only FETCH of the importance
+      fields for cached UIDs would cover them; not done, to keep the
+      sync's round trips as they are.
+- [x] Reader: "Sent with high importance" after the list's bold "!"
+      (hidden from screen readers), or "Sent with low importance", as a
+      Caption TextSecondary line under the To line.
+- [x] List row: low importance is a 12 px Down glyph in TextSecondary
+      among line 1's status icons ("Low importance" in the row's name);
+      checked at 900x700 in pt-PT: the sender elides a little more on
+      those rows only.
+- [x] A flagged draft or Outbox row: the flag is a plain icon outside the
+      accessibility tree (the row's name already says Important), not a
+      disabled button.
+- [x] Composer: High / Low importance (or another From account) on a
+      blank message (`Draft::is_empty`) does not mark it touched, so Esc
+      drops it and nothing reaches Drafts; a reply keeps the choice.
+
 ## Next
 
 - [ ] Validate against a real Purelymail account (Postale.io is measured

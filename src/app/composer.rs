@@ -138,6 +138,8 @@ pub(super) struct Draft {
     pub quote: Option<String>,
     /// When it was last saved (unix seconds), for the header caption.
     pub saved_at: Option<i64>,
+    /// High or low importance, set in the formatting bar (normal: none).
+    pub importance: db::Importance,
 }
 
 /// The lines a reply's or forward's quote starts with, in the language
@@ -346,6 +348,7 @@ impl Draft {
             attachments,
             message_id: r.message_id,
             quoted_html: r.quoted_html,
+            importance: r.importance,
             saved_at: (r.updated > 0).then_some(r.updated),
             row: Some(r.id),
             // Saved because the user wrote it.
@@ -371,6 +374,7 @@ impl Draft {
             quoted_html: self.quoted_html.clone(),
             message_id: self.message_id.clone(),
             updated: 0,
+            importance: self.importance,
         }
     }
 
@@ -1205,6 +1209,7 @@ impl App {
         ui.set_c_subject(d.subject.as_str().into());
         ui.set_c_body(d.body.as_str().into());
         ui.set_c_quote_folded(d.quote.is_some());
+        ui.set_c_importance(d.importance.code() as i32);
         ui.set_c_preview(false);
         ui.set_c_guard(SharedString::new());
         self.drafts.suggest = None;
@@ -1600,7 +1605,7 @@ impl App {
     }
 
     /// Another From account: its signature replaces the old one if that is
-    /// untouched, and the draft is saved at once.
+    /// untouched, and the draft is saved at once unless it is blank.
     pub(super) fn draft_account(&mut self, index: i32) {
         let Some(account) = self.accounts.get(index.max(0) as usize) else {
             return;
@@ -1613,7 +1618,9 @@ impl App {
             return;
         }
         d.account_id = id;
-        d.touched = true;
+        // A blank message stays untouched: switching From is not writing,
+        // so Esc still drops it silently (a reply keeps the choice).
+        d.touched |= !d.is_empty();
         d.dirty = true;
         if d.resign(&block) {
             let body = SharedString::from(d.body.as_str());
@@ -1630,6 +1637,31 @@ impl App {
             .iter()
             .find(|a| a.id == account)
             .map_or_else(String::new, |a| signature_block(&a.signature))
+    }
+
+    /// The formatting bar's High or Low importance toggle: `code` is the
+    /// importance picked (`Importance::code`; 0 when the one on is turned
+    /// off). The draft is saved at once, like another From account, unless
+    /// it is blank ([`Draft::is_empty`]).
+    pub(super) fn draft_importance(&mut self, code: i32) {
+        let importance = db::Importance::from_code(code.into());
+        self.ui().set_c_importance(importance.code() as i32);
+        let Some(d) = self.drafts.active_mut() else {
+            return;
+        };
+        if d.importance == importance {
+            return;
+        }
+        d.importance = importance;
+        // As for another From account: on a blank message (no recipients,
+        // subject, body or attachments) importance alone keeps nothing, so
+        // it is not saved here or copied to the server's Drafts; on a
+        // reply it is a choice worth keeping.
+        d.touched |= !d.is_empty();
+        d.dirty = true;
+        if let Some(draft) = self.drafts.active_id() {
+            self.save_draft(draft);
+        }
     }
 
     /// Show the Cc and Bcc rows and focus `field` (Cc or Bcc).
@@ -2032,6 +2064,7 @@ pub(super) fn outgoing(account: &Account, d: Draft) -> Outgoing {
         references: d.references,
         message_id: d.message_id,
         calendar: None,
+        importance: d.importance,
     }
 }
 
@@ -2616,6 +2649,7 @@ mod tests {
             date: 0,
             seen: true,
             flagged: false,
+            importance: db::Importance::Normal,
             raw: None,
         }
     }
@@ -3328,7 +3362,8 @@ mod tests {
             let message = db.message_ids(&[folder], "").unwrap()[0];
             let raw = b"From: Bob <bob@example.org>\r\nTo: me@example.org\r\n\
                 Subject: Lunch\r\nMessage-ID: <m1@example.org>\r\n\r\nNoon?\r\n";
-            db.set_body(message, raw, "Noon?", false).unwrap();
+            db.set_body(message, raw, "Noon?", false, Default::default())
+                .unwrap();
             with_app(|a| {
                 // No tip or What's new bar by itself: a slow test would
                 // see one appear (their tests start them by hand).
@@ -3906,6 +3941,60 @@ mod tests {
         );
     }
 
+    /// The reader says the importance its sender set; a body cached before
+    /// v13 (its row still normal) tells it as the message opens, and the
+    /// row keeps it.
+    #[test]
+    fn the_reader_shows_the_senders_importance() {
+        let h = Harness::new("reader-importance");
+        let id = h.message;
+        let mut db = Db::open(&h.path).unwrap();
+        let raw = b"From: Bob <bob@example.org>\r\nTo: me@example.org\r\nSubject: Lunch\r\n\
+            Importance: high\r\nContent-Type: text/plain\r\n\r\nNoon?\r\n";
+        // As cached before v13: the body is here, the row says normal.
+        db.set_body(id, raw, "Noon?", false, Default::default())
+            .unwrap();
+        assert_eq!(
+            db.header(id).unwrap().unwrap().importance,
+            db::Importance::Normal
+        );
+        assert!(!h.ui().get_rows().row_data(0).unwrap().high_importance);
+        h.app(|a| a.select_message(id));
+        h.frame();
+        assert_eq!(h.ui().get_r_importance(), 1);
+        assert_eq!(
+            db.header(id).unwrap().unwrap().importance,
+            db::Importance::High
+        );
+        let row = h.ui().get_rows().row_data(0).unwrap();
+        assert!(row.high_importance && !row.low_importance);
+
+        // Low, as synced: the reader's quiet note and the row's mark.
+        let m = db.message(id).unwrap().unwrap();
+        db.insert_headers(
+            m.account_id,
+            m.folder_id,
+            &[db::NewHeader {
+                uid: m.uid + 1,
+                subject: "Later".into(),
+                date: m.date + 60,
+                importance: db::Importance::Low,
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        h.app(|a| a.reload_rows());
+        let low = h.ui().get_rows().row_data(0).unwrap();
+        assert!(
+            low.low_importance && !low.high_importance,
+            "{}",
+            low.subject
+        );
+        h.app(|a| a.select_message(i64::from(low.id)));
+        h.frame();
+        assert_eq!(h.ui().get_r_importance(), 2);
+    }
+
     #[test]
     fn an_html_reply_quotes_the_original_in_its_html_part() {
         let h = Harness::new("html-reply");
@@ -3916,7 +4005,8 @@ mod tests {
             <p style=\"color:#336\">Noon at <b>Rua Augusta</b>?</p>\
             <img src=\"https://t.example.invalid/p.gif\">\r\n";
         let mut db = Db::open(&h.path).unwrap();
-        db.set_body(h.message, raw, "Noon", false).unwrap();
+        db.set_body(h.message, raw, "Noon", false, Default::default())
+            .unwrap();
         let id = h.message;
         h.app(|a| a.select_message(id));
         h.ui().invoke_reply();
@@ -4047,6 +4137,37 @@ mod tests {
         );
         assert_eq!(c.db.count_drafts().unwrap(), 0);
         assert!(d.row.is_none() && d.message_id.is_empty());
+    }
+
+    #[test]
+    fn importance_is_saved_and_sent() {
+        use db::Importance;
+        let c = Cache::new("importance");
+        let mut d = typed(c.account);
+        d.importance = Importance::High;
+        assert_eq!(
+            store(&c.db, &mut d, "me@example.org").unwrap(),
+            Stored::Inserted
+        );
+        let row = d.row.expect("saved");
+        let (back, _) = load(&Db::open(&c.path).unwrap(), row).unwrap().unwrap();
+        assert_eq!(back.importance, Importance::High);
+        // Sent with it.
+        let account = c.db.accounts().unwrap().remove(0);
+        let raw = mail::smtp::build_raw(outgoing(&account, back)).unwrap();
+        assert_eq!(mail::mime::parse_header(&raw).importance, Importance::High);
+        // Back to normal: saved, and sent with neither header.
+        d.importance = Importance::Normal;
+        d.dirty = true;
+        assert_eq!(
+            store(&c.db, &mut d, "me@example.org").unwrap(),
+            Stored::Updated
+        );
+        let (back, _) = load(&c.db, row).unwrap().unwrap();
+        assert_eq!(back.importance, Importance::Normal);
+        let raw = mail::smtp::build_raw(outgoing(&account, back)).unwrap();
+        let raw = String::from_utf8(raw).unwrap();
+        assert!(!raw.contains("Importance:") && !raw.contains("X-Priority:"));
     }
 
     #[test]
@@ -4372,6 +4493,43 @@ mod tests {
         assert!(!h.ui().get_composing());
         assert_eq!(h.app(|a| a.drafts.len()), 0);
         assert_eq!(Db::open(&h.path).unwrap().count_drafts().unwrap(), 0);
+    }
+
+    /// High or Low importance (or another From account) is not writing:
+    /// a composer with nothing typed is still dropped silently on Esc,
+    /// never saved here or copied to the server's Drafts.
+    #[test]
+    fn importance_alone_does_not_keep_a_draft() {
+        let h = Harness::new("importance-empty");
+        h.ui().invoke_compose();
+        h.frame();
+        h.ui().invoke_c_set_importance(1);
+        h.ui().invoke_c_set_importance(2);
+        assert_eq!(h.ui().get_c_importance(), 2);
+        assert_eq!(Db::open(&h.path).unwrap().count_drafts().unwrap(), 0);
+        assert!(!h.app(|a| a.drafts.active().unwrap().keep()));
+        h.ui().invoke_c_close();
+        h.frame();
+        assert!(!h.ui().get_composing());
+        assert_ne!(h.status(), "Draft saved");
+        assert_eq!(h.app(|a| a.drafts.len()), 0);
+        assert_eq!(Db::open(&h.path).unwrap().count_drafts().unwrap(), 0);
+
+        // A reply has recipients and a subject: High importance on it is a
+        // choice, saved with it.
+        let id = h.message;
+        h.app(|a| a.select_message(id));
+        h.ui().invoke_reply();
+        h.frame();
+        h.ui().invoke_c_set_importance(1);
+        h.ui().invoke_c_close();
+        h.frame();
+        assert_eq!(h.status(), "Draft saved");
+        let db = Db::open(&h.path).unwrap();
+        assert_eq!(db.count_drafts().unwrap(), 1);
+        let row = db.draft_for_message(id).unwrap().expect("saved");
+        let (d, _) = load(&db, row).unwrap().unwrap();
+        assert_eq!(d.importance, db::Importance::High);
     }
 
     #[test]
@@ -5663,6 +5821,17 @@ mod tests {
         h.ui().invoke_c_close();
         h.frame();
         assert_eq!(db.count_drafts().unwrap(), 0);
+        // Nor does another From account or High importance on it.
+        h.app(|a| a.compose_new());
+        h.ui().invoke_c_from_changed(1);
+        h.ui().invoke_c_set_importance(1);
+        h.frame();
+        assert_eq!(h.ui().get_c_body(), "\n\n-- \nMe at Work");
+        assert_eq!(db.count_drafts().unwrap(), 0);
+        h.ui().invoke_c_close();
+        h.frame();
+        assert_eq!(db.count_drafts().unwrap(), 0);
+        assert_eq!(h.app(|a| a.drafts.len()), 0);
 
         // Another From account swaps the untouched signature.
         h.app(|a| a.compose_new());
@@ -6084,7 +6253,9 @@ mod tests {
         assert_eq!(open(), None);
         assert_eq!(ui.get_selected_count(), 1);
         assert!(
-            menu_has(ui, "Mark as read") && menu_has(ui, "Flag") && menu_has(ui, "Report junk")
+            menu_has(ui, "Mark as read")
+                && menu_has(ui, "Mark as important")
+                && menu_has(ui, "Report junk")
         );
         assert!(!h.app(|a| a.db.message(ids[2]).unwrap().unwrap().seen));
         // On a row of a larger selection: the selection stays.
@@ -6392,7 +6563,7 @@ mod tests {
         ui.invoke_set_filter(2);
         h.frame();
         assert_eq!(listed(), 0);
-        assert_eq!(ui.get_list_empty(), "No flagged messages");
+        assert_eq!(ui.get_list_empty(), "No important messages");
         ui.set_search_text("nothing like it".into());
         ui.invoke_search_edited("nothing like it".into());
         h.frame();
@@ -6736,7 +6907,7 @@ mod tests {
         let open = |raw: &[u8]| {
             Db::open(&h.path)
                 .unwrap()
-                .set_body(id, raw, "", false)
+                .set_body(id, raw, "", false, Default::default())
                 .unwrap();
             h.app(|a| {
                 a.open = None;
@@ -6816,7 +6987,7 @@ mod tests {
         let open = |raw: String| {
             Db::open(&h.path)
                 .unwrap()
-                .set_body(id, raw.as_bytes(), "", false)
+                .set_body(id, raw.as_bytes(), "", false, Default::default())
                 .unwrap();
             h.app(|a| {
                 a.open = None;
@@ -7038,7 +7209,8 @@ mod tests {
         });
         assert_eq!(h.status(), "Couldn't download this message: timed out");
         let raw = b"Subject: Report\r\n\r\nQ3\r\n";
-        db.set_body(id, raw, "Q3", false).unwrap();
+        db.set_body(id, raw, "Q3", false, Default::default())
+            .unwrap();
         h.app(|a| {
             a.raw_wait = Some((id, original::RawUse::Forward));
             // Another message's body changes nothing.
@@ -8645,7 +8817,7 @@ mod tests {
             "Reply all\tCtrl+Shift+R",
             "Forward\tCtrl+Shift+F",
             "Mark as unread\tCtrl+U",
-            "Flag\tInsert",
+            "Mark as important\tCtrl+Shift+G",
             "Archive\tBackspace",
             "Delete\tDel",
             "Save as .eml\tCtrl+S",

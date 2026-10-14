@@ -2243,6 +2243,52 @@ mod tests {
         server.finish();
     }
 
+    /// The sender's importance comes in the same header FETCH: no extra
+    /// command per message.
+    #[test]
+    fn header_fetch_reads_importance() {
+        let reply = [
+            header_fetch(1, 1, "", "Subject: plain\r\n\r\n"),
+            header_fetch(
+                2,
+                2,
+                "",
+                "Subject: urgent\r\nX-Priority: 1 (Highest)\r\n\r\n",
+            ),
+            header_fetch(3, 3, "", "Subject: later\r\nImportance: low\r\n\r\n"),
+        ]
+        .concat()
+            + "{tag} OK FETCH completed\r\n";
+        let mut script = login_steps(PLAIN_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 SELECT "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect(
+                "a4 UID FETCH 1:3 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS \
+                 (FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE IMPORTANCE X-PRIORITY \
+                 X-MSMAIL-PRIORITY)])",
+            ),
+            Step::Send(leak(reply)),
+        ]);
+        script.extend(logout_steps("a5 LOGOUT"));
+        let server = FakeServer::start(script);
+
+        let mut imap = Imap::connect_plain(server.addr, "user", "pass").unwrap();
+        imap.select("INBOX").unwrap();
+        let headers = imap.fetch_headers(&[1, 2, 3]).unwrap();
+        let got: Vec<_> = headers.iter().map(|h| (h.uid, h.importance)).collect();
+        assert_eq!(
+            got,
+            [
+                (1, db::Importance::Normal),
+                (2, db::Importance::High),
+                (3, db::Importance::Low)
+            ]
+        );
+        imap.logout();
+        server.finish();
+    }
+
     #[test]
     fn dates_and_quoting() {
         assert_eq!(message_date(0, Some(100)), 100);

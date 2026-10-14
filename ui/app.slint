@@ -2251,7 +2251,7 @@ export component AppWindow inherits Window {
     callback list-escape();
     callback clear-search();
     in-out property <bool> focus-page;
-    // 0 everything, 1 unread, 2 flagged; what an empty list says.
+    // 0 everything, 1 unread, 2 important (\Flagged); what an empty list says.
     in-out property <int> list-filter;
     in property <string> list-empty: @tr("Nothing here");
     // The account shown is in its first download: 1 while its size is not
@@ -2320,6 +2320,9 @@ export component AppWindow inherits Window {
     in property <string> r-body;
     in property <bool> r-flagged;
     in property <bool> r-unread;
+    // The importance its sender set (`Importance::code`: 0 normal, 1 high,
+    // 2 low): a line under the To line, never the user's Important.
+    in property <int> r-importance;
     // The open message is in a server Drafts folder (saved on another
     // device or in webmail): no Reply or Reply all, an InfoBar instead.
     in property <bool> r-server-draft;
@@ -2439,7 +2442,7 @@ export component AppWindow inherits Window {
     // for a selection across accounts.
     in property <bool> move-possible;
     // Which of the reader bar's labels show: a bit per button in drop order
-    // (1 Forward, 2 Reply all, 4 Move, 8 Flag, 16 Mark as read, 32 Reply,
+    // (1 Forward, 2 Reply all, 4 Move, 8 Mark as important, 16 Mark as read, 32 Reply,
     // 64 Delete, 128 Archive), for the tests.
     out property <int> cmd-labels;
     callback reply();
@@ -2472,7 +2475,7 @@ export component AppWindow inherits Window {
     in property <[MenuCommand]> more-menu-3;
     in property <[MenuCommand]> more-menu-4;
     in property <[MenuCommand]> more-menu-5;
-    // A row's quick action (0 Archive, 1 Delete, 2 Flag, 3 Read) on that
+    // A row's quick action (0 Archive, 1 Delete, 2 Important, 3 Read) on that
     // message only: it never opens it.
     callback message-quick(/* id */ int, /* action */ int);
     // "Select messages" (the list's "..." menu): check boxes on the rows.
@@ -2566,6 +2569,10 @@ export component AppWindow inherits Window {
     in-out property <string> c-subject;
     in-out property <string> c-body;
     in-out property <bool> c-show-cc;
+    // The importance it is sent with (`Importance::code`: 0 normal, 1 high,
+    // 2 low), set with the formatting bar's two toggles.
+    in property <int> c-importance;
+    callback c-set-importance(int);
     in property <[AttachmentRow]> c-attachments;
     // "Attachments 18.4 MB of 25 MB" (sent size), and its level: 0 fine,
     // 1 from 80%, 2 over the limit (Send is off).
@@ -3244,6 +3251,9 @@ export component AppWindow inherits Window {
         KeyBinding { keys: @keys(Control + "s"); enabled: root.reading; activated => { root.save-eml(); } }
         // Never while typing a search: these keys would reach the list.
         KeyBinding { keys: @keys(Insert); enabled: root.reading && !search.has-focus; activated => { root.toggle-flag(); } }
+        // Mark as important without an Insert key (laptops); a chord, so it
+        // also works from the search box.
+        KeyBinding { keys: @keys(Control + Shift + "g"); enabled: root.reading; activated => { root.toggle-flag(); } }
         // The page and text fields take their own Ctrl+A and Esc first.
         KeyBinding { keys: @keys(Control + "a"); enabled: root.reading; activated => { root.select-all-rows(); } }
         // Esc closes the folder pane first, when it is open over the content.
@@ -3605,7 +3615,7 @@ export component AppWindow inherits Window {
                     if root.selected-folder >= 0 && !root.list-drafts: HorizontalLayout {
                         padding-left: Theme.s1;
                         SelectorBar {
-                            items: [@tr("All"), @tr("Unread"), @tr("Flagged")];
+                            items: [@tr("All"), @tr("Unread"), @tr("filter" => "Important")];
                             selected <=> root.list-filter;
                             picked(i) => { root.set-filter(i); }
                         }
@@ -4225,14 +4235,16 @@ export component AppWindow inherits Window {
                             // The button the arrows last reached (Tab returns to it).
                             property <int> current;
                             function go(i: int) {
-                                self.current = mod(i + 7, 7);
+                                self.current = mod(i + 9, 9);
                                 if self.current == 0 { f-bold.focus(); }
                                 else if self.current == 1 { f-italic.focus(); }
                                 else if self.current == 2 { f-link.focus(); }
                                 else if self.current == 3 { f-bullets.focus(); }
                                 else if self.current == 4 { f-numbers.focus(); }
                                 else if self.current == 5 { f-quote.focus(); }
-                                else { f-preview.focus(); }
+                                else if self.current == 6 { f-preview.focus(); }
+                                else if self.current == 7 { f-high.focus(); }
+                                else { f-low.focus(); }
                             }
                             key-pressed(e) => {
                                 if e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
@@ -4272,6 +4284,28 @@ export component AppWindow inherits Window {
                                             body.focus();
                                         }
                                     }
+                                }
+                                Rectangle { width: 1px; Rectangle { height: 20px; background: Theme.stroke; } }
+                                // Importance: two ToggleButtons, at most one
+                                // on (as in Outlook); turning the one on off
+                                // sends the message as normal.
+                                f-high := IconButton {
+                                    icon: Icons.important;
+                                    tooltip: @tr("High importance");
+                                    width: 32px;
+                                    checkable: true;
+                                    checked: root.c-importance == 1;
+                                    tab-stop: fmt-bar.current == 7;
+                                    clicked => { root.c-set-importance(root.c-importance == 1 ? 0 : 1); }
+                                }
+                                f-low := IconButton {
+                                    icon: Icons.low-importance;
+                                    tooltip: @tr("Low importance");
+                                    width: 32px;
+                                    checkable: true;
+                                    checked: root.c-importance == 2;
+                                    tab-stop: fmt-bar.current == 8;
+                                    clicked => { root.c-set-importance(root.c-importance == 2 ? 0 : 2); }
                                 }
                             }
                         }
@@ -4498,8 +4532,8 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         alignment: center;
                         spacing: Theme.s1;
-                        IconButton { icon: Icons.flag-filled; label: @tr("Flag"); tooltip: @tr("Flag (Insert)"); clicked => { root.mark-flagged(true); } }
-                        IconButton { icon: Icons.flag; label: @tr("Remove flag"); clicked => { root.mark-flagged(false); } }
+                        IconButton { icon: Icons.flag-filled; label: @tr("Mark as important"); tooltip: @tr("Mark as important (Ctrl+Shift+G)"); clicked => { root.mark-flagged(true); } }
+                        IconButton { icon: Icons.flag; label: @tr("Remove importance"); clicked => { root.mark-flagged(false); } }
                     }
                     HorizontalLayout {
                         alignment: center;
@@ -4772,7 +4806,7 @@ export component AppWindow inherits Window {
                         delete-text := Text { visible: false; height: 0; accessible-role: none; text: @tr("Delete"); font-size: Theme.body; }
                         move-text := Text { visible: false; height: 0; accessible-role: none; text: @tr("Move"); font-size: Theme.body; }
                         read-text := Text { visible: false; height: 0; accessible-role: none; text: root.r-unread ? @tr("Mark as read") : @tr("Mark as unread"); font-size: Theme.body; }
-                        flag-text := Text { visible: false; height: 0; accessible-role: none; text: root.r-flagged ? @tr("Remove flag") : @tr("Flag"); font-size: Theme.body; }
+                        flag-text := Text { visible: false; height: 0; accessible-role: none; text: root.r-flagged ? @tr("Remove importance") : @tr("Mark as important"); font-size: Theme.body; }
                         // The image bar's two button labels (below).
                         images-text := Text { visible: false; height: 0; accessible-role: none; text: @tr("Load images") + @tr("Always load from this sender"); font-size: Theme.body; }
                         // 4 px apart, so a button's outside focus ring stays
@@ -4842,7 +4876,7 @@ export component AppWindow inherits Window {
                                 icon: root.r-flagged ? Icons.flag-filled : Icons.flag;
                                 height: b-archive.height;
                                 label: cmd-bar.show-flag ? flag-text.text : "";
-                                tooltip: root.r-flagged ? @tr("Remove flag (Insert)") : @tr("Flag (Insert)");
+                                tooltip: root.r-flagged ? @tr("Remove importance (Ctrl+Shift+G)") : @tr("Mark as important (Ctrl+Shift+G)");
                                 tab-stop: cmd-bar.stop == 7;
                                 clicked => { root.mark-flagged(!root.r-flagged); }
                             }
@@ -5074,6 +5108,32 @@ export component AppWindow inherits Window {
                                         accessible-label: @tr("Date: {0}", self.text);
                                         font-size: Theme.caption;
                                         color: Theme.text-2;
+                                    }
+                                    // The importance its sender set, as plain
+                                    // Caption text (docs/WINUI3.md "High
+                                    // importance"): High leads with the list's
+                                    // bold "!" in TextPrimary, Low is a quiet
+                                    // note. Passive; the "!" is hidden from screen
+                                    // readers, which read the sentence.
+                                    if root.r-importance == 1 || root.r-importance == 2: HorizontalLayout {
+                                        spacing: Theme.s1;
+                                        if root.r-importance == 1: Text {
+                                            text: "!";
+                                            font-family: Theme.text-font;
+                                            font-size: Theme.body;
+                                            font-weight: 700;
+                                            color: Theme.text;
+                                            vertical-alignment: center;
+                                            accessible-role: none;
+                                        }
+                                        Text {
+                                            text: root.r-importance == 1 ? @tr("Sent with high importance") : @tr("Sent with low importance");
+                                            font-size: Theme.caption;
+                                            color: Theme.text-2;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                 }
                                 // List-Unsubscribe, never fetched by itself

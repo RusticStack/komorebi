@@ -5,6 +5,54 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
+## [Unreleased]
+
+### Added
+
+- Sender-set importance: the `Importance`, `X-Priority` and
+  `X-MSMail-Priority` headers are read in the same header FETCH as the
+  rest of a list row (no extra round trip). A high-importance message
+  shows a bold "!" in the text colour before its date ("High importance"
+  to screen readers), apart from the user's amber Important flag; a
+  low-importance one a small Down arrow in the secondary text colour
+  ("Low importance"). The reader says "Sent with high importance" (after
+  the same "!") or "Sent with low importance" under the To line.
+- The composer's formatting bar has High importance and Low importance
+  toggles; the message is sent with `Importance` and `X-Priority`
+  headers (none for normal mail), and the choice is saved with the draft
+  and its server copy. Changing it, or the From account, on an empty new
+  message keeps nothing (Esc still drops it silently).
+- Local data: the cache moves to schema v13, adding `messages.priority`
+  and `drafts.importance` (both default to normal). Headers already
+  cached are not fetched again and the upgrade does not scan the cache
+  (so the first start stays fast). Instead a message cached before v13
+  gets its importance from its body: when the body is downloaded (the
+  background prefetch or opening it), or, if it was already downloaded,
+  when it is opened (the reader reads it from the cached copy and the row
+  keeps it). Until then its row shows none. No extra round trip. The step
+  is one way: 0.3.0 leaves a v13 cache as it is and does not open it.
+
+### Changed
+
+- Read and unread rows look more different: an unread row has its
+  sender, subject and date semibold in the text colour and an 8 px accent
+  dot before the sender; a read row is regular in the secondary text
+  colour (still 4.5:1 on every plate; the window text colour under high
+  contrast). The old dot at the end of the subject line is gone, and the
+  row's text sits 12 px further right so read and unread rows line up.
+  Local data: none.
+- Flags are now "important" messages: Mark as important / Remove
+  importance (row menu, quick actions, reader and selection buttons) and
+  an Important filter tab ("No important messages" when empty). Still the
+  IMAP `\Flagged` flag, so other clients keep showing them as flagged or
+  starred. The row marker is a 14 px amber flag (Fluent 2 marigold, apart
+  from the red of drafts and failed sends) at the end of the subject line;
+  hovering a row shows an outline one there, and clicking it marks or
+  unmarks that row only. Ctrl+Shift+G does what Insert does, for
+  keyboards without an Insert key. Local data: none (no schema change).
+  On a draft or an Outbox row the flag is only shown: screen readers hear
+  "Important" once, in the row's name, not again as a disabled button.
+
 ## [0.3.0] - 2026-10-13
 
 The rewrite: a small Slint app in place of the GPUI/AI prototype. This

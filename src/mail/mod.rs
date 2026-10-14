@@ -1303,6 +1303,7 @@ impl Worker {
             references: draft.refs,
             message_id: draft.message_id.clone(),
             calendar: None,
+            importance: draft.importance,
         };
         let raw = smtp::build_draft(out, row)?;
         // Signed in (and a stale connection replaced) first, so the APPEND
@@ -2013,12 +2014,15 @@ fn prefetch_batch(
         .filter_map(|(uid, raw)| {
             let (id, _, _) = batch.iter().find(|m| m.1 == uid)?;
             let body = mime::parse_body(&raw);
-            Some((*id, raw, body.preview(), !body.attachments.is_empty()))
+            let attach = !body.attachments.is_empty();
+            Some((*id, raw, body.preview(), attach, body.importance))
         })
         .collect();
     let items: Vec<_> = parsed
         .iter()
-        .map(|(id, raw, preview, attach)| (*id, raw.as_slice(), preview.as_str(), *attach))
+        .map(|(id, raw, preview, attach, importance)| {
+            (*id, raw.as_slice(), preview.as_str(), *attach, *importance)
+        })
         .collect();
     db.set_bodies(&items)?;
     let stored = items.len();
@@ -2105,7 +2109,8 @@ fn next_sync_folder(rx: &Receiver<Job>, backlog: &mut VecDeque<Job>) -> Option<(
 
 pub fn store_body(db: &mut Db, id: i64, raw: &[u8]) -> Result<()> {
     let body = mime::parse_body(raw);
-    db.set_body(id, raw, &body.preview(), !body.attachments.is_empty())
+    let attach = !body.attachments.is_empty();
+    db.set_body(id, raw, &body.preview(), attach, body.importance)
 }
 
 /// A folder's server name and cached UIDVALIDITY.
@@ -2571,15 +2576,15 @@ hello
 ";
         // The second row names a message that does not exist: the batch fails.
         let bad = [
-            (missing[0].0, raw, "hello", false),
-            (i64::MAX, raw, "hello", false),
+            (missing[0].0, raw, "hello", false, Default::default()),
+            (i64::MAX, raw, "hello", false, Default::default()),
         ];
         assert!(db.set_bodies(&bad).is_err());
         let again = db.missing_bodies(f.id, 300, PREFETCH_MAX_SIZE).unwrap();
         assert_eq!(again.len(), 2, "nothing was stored; the next pass retries");
         let good = [
-            (missing[0].0, raw, "hello", false),
-            (missing[1].0, raw, "hello", true),
+            (missing[0].0, raw, "hello", false, Default::default()),
+            (missing[1].0, raw, "hello", true, Default::default()),
         ];
         db.set_bodies(&good).unwrap();
         assert!(
@@ -2635,8 +2640,14 @@ MIME-Version: 1.0
                 if variant == 0 {
                     for m in &missing {
                         let b = mime::parse_body(&raw);
-                        db.set_body(m.0, &raw, &b.preview(), !b.attachments.is_empty())
-                            .unwrap();
+                        db.set_body(
+                            m.0,
+                            &raw,
+                            &b.preview(),
+                            !b.attachments.is_empty(),
+                            b.importance,
+                        )
+                        .unwrap();
                     }
                     old.push(t.elapsed().as_secs_f64() * 1e3);
                 } else {
@@ -2645,12 +2656,12 @@ MIME-Version: 1.0
                             .iter()
                             .map(|m| {
                                 let b = mime::parse_body(&raw);
-                                (m.0, b.preview(), !b.attachments.is_empty())
+                                (m.0, b.preview(), !b.attachments.is_empty(), b.importance)
                             })
                             .collect();
                         let items: Vec<_> = parsed
                             .iter()
-                            .map(|(id, p, a)| (*id, raw.as_slice(), p.as_str(), *a))
+                            .map(|(id, p, a, i)| (*id, raw.as_slice(), p.as_str(), *a, *i))
                             .collect();
                         db.set_bodies(&items).unwrap();
                     }

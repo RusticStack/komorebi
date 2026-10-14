@@ -112,6 +112,13 @@ export global Theme {
     out property <color> text-3: contrast ? hc-text : dark ? #ffffff87 : #00000072;
     out property <color> text-disabled: contrast ? hc-gray : dark ? #ffffff5d : #0000005c;
     out property <color> text-inverse: contrast ? hc-text : dark ? #000000e4 : #ffffff;
+    // A read message row (docs/WINUI3.md "ListView item"): its sender and
+    // subject, and its date and preview, a step under an unread row's
+    // TextPrimary. Tertiary measures 3.3:1 on the light card (5.1:1 on the
+    // dark one, 4.6:1 under a dark hover), so the metadata stays Secondary
+    // (6.0:1 and 7.8:1 at worst, on a hovered row).
+    out property <color> row-read-text: text-2;
+    out property <color> row-read-meta: text-2;
 
     // Brand, from the Windows accent ramp as WinUI uses it
     // (docs/WINUI3.md "Accent ramp").
@@ -162,6 +169,11 @@ export global Theme {
     out property <color> info-bg: contrast ? hc-window : dark ? #ffffff08 : #f6f6f680;
     // SystemFillColorAttention: the informational InfoBar's icon.
     out property <color> attention: contrast ? hc-text : dark ? ramp[5] : ramp[3];
+    // An important message's marker (a message row): Fluent 2 marigold,
+    // shade30 on light and the primary on dark, apart from the Critical red
+    // of a draft or a failed send. 6.1:1 on the light card (5.6:1 under a
+    // hovered or selected row), 6.6:1 on the dark card (5.4:1 hovered).
+    out property <color> important: contrast ? hc-text : dark ? #eaa300 : #835b00;
 
     // Type ramp (Fluent 2), scaled by the Rust side for the Windows text
     // size (docs/WINUI3.md "Text size").
@@ -245,6 +257,10 @@ export global Icons {
     out property <string> attach: "\u{E723}";
     out property <string> flag: "\u{E7C1}";
     out property <string> flag-filled: "\u{EB4B}";
+    // Important ("!"): the sender set high importance; and the composer's
+    // High and Low importance toggles (Low: Down).
+    out property <string> important: "\u{E8C9}";
+    out property <string> low-importance: "\u{E74B}";
     out property <string> settings: "\u{E713}";
     out property <string> add: "\u{E710}";
     out property <string> dismiss: "\u{E711}";

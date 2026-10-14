@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 /// How long a sync worker waits for another connection's write lock.
 const WORKER_BUSY: Duration = Duration::from_secs(10);
@@ -105,6 +105,8 @@ CREATE TABLE messages (
     has_attach INTEGER NOT NULL DEFAULT 0,
     preview TEXT NOT NULL DEFAULT '',
     has_body INTEGER NOT NULL DEFAULT 0,
+    -- The importance the sender set (`Importance`): 0 normal, 1 high, 2 low.
+    priority INTEGER NOT NULL DEFAULT 0,
     UNIQUE(folder_id, uid)
 );
 -- Matches the list's ORDER BY exactly, so a folder lists without a sort.
@@ -160,7 +162,9 @@ CREATE TABLE drafts (
     server_rev INTEGER NOT NULL DEFAULT 0,
     server_folder INTEGER REFERENCES folders(id) ON DELETE SET NULL,
     server_uidvalidity INTEGER,
-    server_uid INTEGER
+    server_uid INTEGER,
+    -- The importance it is sent with (`Importance`).
+    importance INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX drafts_state ON drafts(state, updated DESC, id DESC);
 CREATE INDEX drafts_reply ON drafts(reply_to_msg);
@@ -333,6 +337,51 @@ ALTER TABLE accounts ADD COLUMN imap_pin BLOB;
 ALTER TABLE accounts ADD COLUMN smtp_pin BLOB;
 ALTER TABLE folders ADD COLUMN role_override TEXT NOT NULL DEFAULT '';
 "#;
+
+/// v13 keeps the importance a message's sender set and the one a draft
+/// is sent with (`Importance`). Messages cached before start normal: their
+/// headers aren't fetched again, and the cached bodies aren't scanned here
+/// (first launch after the upgrade stays fast). A body stored from now on
+/// fills it in (`set_body`, `set_bodies`), and the reader reads it from
+/// an already cached body when the message opens.
+const MIGRATE_V12_TO_V13: &str = r#"
+ALTER TABLE messages ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE drafts ADD COLUMN importance INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// A stored body's row: preview, attachment, `has_body`, and the sender's
+/// importance where the row has none yet (a header-fetched one stays).
+const SET_BODY_SQL: &str = "UPDATE messages SET preview = ?2, has_attach = ?3, has_body = 1,
+     priority = CASE WHEN priority = 0 THEN ?4 ELSE priority END WHERE id = ?1";
+
+/// A message's importance: what its sender set (the `Importance`,
+/// `X-Priority` or `X-MSMail-Priority` header) or what a draft is sent
+/// with. Stored as [`Importance::code`]; any other number reads as normal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Importance {
+    #[default]
+    Normal,
+    High,
+    Low,
+}
+
+impl Importance {
+    pub fn code(self) -> i64 {
+        match self {
+            Importance::Normal => 0,
+            Importance::High => 1,
+            Importance::Low => 2,
+        }
+    }
+
+    pub fn from_code(code: i64) -> Self {
+        match code {
+            1 => Importance::High,
+            2 => Importance::Low,
+            _ => Importance::Normal,
+        }
+    }
+}
 
 /// The cache was made by a newer Komorebi (its schema version is higher):
 /// it is left as it is, never deleted or migrated down.
@@ -508,6 +557,8 @@ pub struct Header {
     pub answered: bool,
     pub has_attach: bool,
     pub preview: String,
+    /// The importance its sender set.
+    pub importance: Importance,
     /// A local draft replies to this message.
     pub has_draft: bool,
     pub folder_id: i64,
@@ -530,6 +581,8 @@ pub struct NewHeader {
     pub flagged: bool,
     pub answered: bool,
     pub has_attach: bool,
+    /// The importance its sender set (`mime::importance`).
+    pub importance: Importance,
 }
 
 /// Everything the reader and composer need about one message.
@@ -548,6 +601,8 @@ pub struct Message {
     pub date: i64,
     pub seen: bool,
     pub flagged: bool,
+    /// The importance its sender set, as cached.
+    pub importance: Importance,
     pub raw: Option<Vec<u8>>,
 }
 
@@ -841,6 +896,8 @@ pub struct DraftRow {
     pub message_id: String,
     /// Unix seconds of the last save.
     pub updated: i64,
+    /// The importance it is sent with.
+    pub importance: Importance,
 }
 
 /// A draft's copy in the server's Drafts folder of account `account_id`.
@@ -965,7 +1022,7 @@ pub struct OutboxEntry {
     pub body: String,
 }
 
-const DRAFT_COLUMNS: &str = "id, account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,     cc_addrs, bcc_addrs, subject, body, message_id, updated, quoted_html";
+const DRAFT_COLUMNS: &str = "id, account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,     cc_addrs, bcc_addrs, subject, body, message_id, updated, quoted_html, importance";
 
 impl DraftRow {
     fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Self> {
@@ -984,6 +1041,7 @@ impl DraftRow {
             message_id: r.get(11)?,
             updated: r.get(12)?,
             quoted_html: r.get(13)?,
+            importance: Importance::from_code(r.get(14)?),
         })
     }
 }
@@ -1091,6 +1149,7 @@ impl Db {
             (9, RSVP),
             (10, MIGRATE_V10_TO_V11),
             (11, MIGRATE_V11_TO_V12),
+            (12, MIGRATE_V12_TO_V13),
         ] {
             if version != from {
                 continue;
@@ -1628,7 +1687,7 @@ impl Db {
                         has_attach, preview, to_addrs,
                         EXISTS(SELECT 1 FROM drafts
                                WHERE reply_to_msg = messages.id AND state = 0),
-                        folder_id, account_id
+                        folder_id, account_id, priority
                  FROM messages WHERE id = ?1",
             )?
             .query_row([id], |r| {
@@ -1646,6 +1705,7 @@ impl Db {
                     has_draft: r.get(10)?,
                     folder_id: r.get(11)?,
                     account_id: r.get(12)?,
+                    importance: Importance::from_code(r.get(13)?),
                 })
             })
             .optional()?)
@@ -1685,8 +1745,8 @@ impl Db {
             let mut stmt = tx.prepare_cached(
                 "INSERT OR IGNORE INTO messages (account_id, folder_id, uid, msgid, subject,
                     from_name, from_addr, to_addrs, cc_addrs, date, size, seen, flagged,
-                    answered, has_attach)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    answered, has_attach, priority)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             )?;
             let (role, me) = index_context(&tx, folder_id)?;
             let mut index = tx.prepare_cached(UPSERT_ADDRESS)?;
@@ -1707,6 +1767,7 @@ impl Db {
                     h.flagged,
                     h.answered,
                     h.has_attach,
+                    h.importance.code(),
                 ])?;
                 // A row already cached was indexed when it was stored.
                 if added == 1 {
@@ -1923,7 +1984,7 @@ impl Db {
             .query_row(
                 "SELECT id, account_id, folder_id, uid, msgid, subject, from_name, from_addr,
                         to_addrs, cc_addrs, date, seen, flagged,
-                        (SELECT raw FROM bodies WHERE message_id = messages.id)
+                        (SELECT raw FROM bodies WHERE message_id = messages.id), priority
                  FROM messages WHERE id = ?1",
                 [id],
                 |r| {
@@ -1942,31 +2003,43 @@ impl Db {
                         seen: r.get(11)?,
                         flagged: r.get(12)?,
                         raw: r.get(13)?,
+                        importance: Importance::from_code(r.get(14)?),
                     })
                 },
             )
             .optional()?)
     }
 
-    pub fn set_body(&mut self, id: i64, raw: &[u8], preview: &str, has_attach: bool) -> Result<()> {
+    /// Store a fetched body with what its parse found: the preview, an
+    /// attachment, and the sender's importance (filled in only where the
+    /// row has none: mail cached before v13 had no importance column).
+    pub fn set_body(
+        &mut self,
+        id: i64,
+        raw: &[u8],
+        preview: &str,
+        has_attach: bool,
+        importance: Importance,
+    ) -> Result<()> {
         let tx = self.write()?;
         tx.execute(
             "INSERT OR REPLACE INTO bodies (message_id, raw) VALUES (?1, ?2)",
             params![id, raw],
         )?;
         tx.execute(
-            "UPDATE messages SET preview = ?2, has_attach = ?3, has_body = 1 WHERE id = ?1",
-            params![id, preview, has_attach],
+            SET_BODY_SQL,
+            params![id, preview, has_attach, importance.code()],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    /// Store several fetched bodies (`id`, raw, preview, has attachment) in
+    /// Store several fetched bodies (`id`, raw, preview, has attachment,
+    /// importance; see [`Db::set_body`]) in
     /// one transaction: one write-lock acquisition and one commit for the
     /// batch (docs/PERF.md 3.2, 5.1). All or nothing, so a failure leaves
     /// every message still `has_body = 0` and the next prefetch pass retries.
-    pub fn set_bodies(&mut self, items: &[(i64, &[u8], &str, bool)]) -> Result<()> {
+    pub fn set_bodies(&mut self, items: &[(i64, &[u8], &str, bool, Importance)]) -> Result<()> {
         if items.is_empty() {
             return Ok(());
         }
@@ -1975,15 +2048,23 @@ impl Db {
             let mut put = tx.prepare_cached(
                 "INSERT OR REPLACE INTO bodies (message_id, raw) VALUES (?1, ?2)",
             )?;
-            let mut mark = tx.prepare_cached(
-                "UPDATE messages SET preview = ?2, has_attach = ?3, has_body = 1 WHERE id = ?1",
-            )?;
-            for (id, raw, preview, has_attach) in items {
+            let mut mark = tx.prepare_cached(SET_BODY_SQL)?;
+            for (id, raw, preview, has_attach, importance) in items {
                 put.execute(params![id, raw])?;
-                mark.execute(params![id, preview, has_attach])?;
+                mark.execute(params![id, preview, has_attach, importance.code()])?;
             }
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// A message's sender importance where its row has none yet (mail
+    /// cached before v13, read from its cached body as it opens).
+    pub fn set_importance(&self, id: i64, importance: Importance) -> Result<()> {
+        self.conn.execute(
+            "UPDATE messages SET priority = ?2 WHERE id = ?1 AND priority = 0",
+            params![id, importance.code()],
+        )?;
         Ok(())
     }
 
@@ -2108,8 +2189,9 @@ impl Db {
     pub fn insert_draft(&self, d: &DraftRow) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO drafts (account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,
-                cc_addrs, bcc_addrs, subject, body, message_id, created, updated, quoted_html)
-             VALUES (?1, ?2, (SELECT id FROM messages WHERE id = ?3), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13)",
+                cc_addrs, bcc_addrs, subject, body, message_id, created, updated, quoted_html,
+                importance)
+             VALUES (?1, ?2, (SELECT id FROM messages WHERE id = ?3), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14)",
             params![
                 d.account_id,
                 d.kind,
@@ -2124,6 +2206,7 @@ impl Db {
                 d.message_id,
                 chrono::Utc::now().timestamp(),
                 d.quoted_html,
+                d.importance.code(),
             ],
         )?;
         let id = self.conn.last_insert_rowid();
@@ -2142,7 +2225,7 @@ impl Db {
                     reply_to_msg = (SELECT id FROM messages WHERE id = ?4),
                     in_reply_to = ?5, refs = ?6, to_addrs = ?7, cc_addrs = ?8, bcc_addrs = ?9,
                     subject = ?10, body = ?11, message_id = ?12, updated = ?13,
-                    quoted_html = ?14, rev = rev + 1
+                    quoted_html = ?14, importance = ?15, rev = rev + 1
                  WHERE id = ?1 AND state = 0",
             )?
             .execute(params![
@@ -2160,6 +2243,7 @@ impl Db {
                 d.message_id,
                 chrono::Utc::now().timestamp(),
                 d.quoted_html,
+                d.importance.code(),
             ])?;
         Ok(changed > 0)
     }
@@ -3606,7 +3690,10 @@ mod tests {
     const DROP_V7: &str = "ALTER TABLE accounts DROP COLUMN signature; DROP TABLE settings;";
     /// Undo v8 (after v9).
     const DROP_V8: &str = "DROP TABLE addresses; ALTER TABLE accounts DROP COLUMN addr_backfill;";
-    /// Undo v12 (run first: it is the newest).
+    /// Undo v13 (run first: it is the newest).
+    const DROP_V13: &str = "ALTER TABLE messages DROP COLUMN priority;
+        ALTER TABLE drafts DROP COLUMN importance;";
+    /// Undo v12 (after v13).
     const DROP_V12: &str = "ALTER TABLE accounts DROP COLUMN imap_user;
         ALTER TABLE accounts DROP COLUMN smtp_user; ALTER TABLE accounts DROP COLUMN imap_pin;
         ALTER TABLE accounts DROP COLUMN smtp_pin; ALTER TABLE folders DROP COLUMN role_override;";
@@ -3622,7 +3709,7 @@ mod tests {
     /// Turn a current database back into v2 (no fingerprint columns).
     fn downgrade_to_v2(conn: &Connection) {
         conn.execute_batch(&format!(
-            "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
+            "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
              ALTER TABLE folders DROP COLUMN sync_uidnext;
              ALTER TABLE folders DROP COLUMN sync_messages;
              ALTER TABLE folders DROP COLUMN sync_hms;
@@ -3732,10 +3819,11 @@ mod tests {
             .unwrap();
         db.insert_headers(acc, f, &[header(1, 1, "a")]).unwrap();
         let id = db.message_ids(&[f], "").unwrap()[0];
-        db.set_body(id, b"raw", "preview", false).unwrap();
+        db.set_body(id, b"raw", "preview", false, Default::default())
+            .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
             ))
             .unwrap();
 
@@ -3806,7 +3894,8 @@ mod tests {
         db.set_uidvalidity(f, 7).unwrap();
         db.insert_headers(acc, f, &[header(1, 1, "a")]).unwrap();
         let id = db.message_ids(&[f], "").unwrap()[0];
-        db.set_body(id, b"raw", "preview", false).unwrap();
+        db.set_body(id, b"raw", "preview", false, Default::default())
+            .unwrap();
         downgrade_to_v2(&db.conn);
 
         let db = Db::init(db.conn).unwrap();
@@ -3962,7 +4051,7 @@ mod tests {
     fn a_v11_cache_migrates_to_the_new_shape() {
         let old = Db::in_memory().unwrap();
         old.conn
-            .execute_batch(&format!("{DROP_V12} PRAGMA user_version = 11;"))
+            .execute_batch(&format!("{DROP_V13} {DROP_V12} PRAGMA user_version = 11;"))
             .unwrap();
         let migrated = Db::init(old.conn).unwrap();
         let new = Db::in_memory().unwrap();
@@ -4044,7 +4133,8 @@ mod tests {
             .unwrap();
         let missing = db.missing_bodies(f, 10, 1_000_000).unwrap();
         assert_eq!(missing.iter().map(|m| m.1).collect::<Vec<_>>(), [2, 1]);
-        db.set_body(missing[0].0, b"raw", "preview", true).unwrap();
+        db.set_body(missing[0].0, b"raw", "preview", true, Default::default())
+            .unwrap();
         assert_eq!(db.missing_bodies(f, 10, 1_000_000).unwrap().len(), 1);
         let m = db.message(missing[0].0).unwrap().unwrap();
         assert_eq!(m.raw.as_deref(), Some(&b"raw"[..]));
@@ -4062,7 +4152,8 @@ mod tests {
         let headers: Vec<_> = (1..=400).map(|u| header(u, u as i64, "m")).collect();
         db.insert_headers(acc, f, &headers).unwrap();
         for (id, _, _) in db.missing_bodies(f, 300, 1_000_000).unwrap() {
-            db.set_body(id, b"raw", "", false).unwrap();
+            db.set_body(id, b"raw", "", false, Default::default())
+                .unwrap();
         }
         // The 100 older ones are outside the window, so nothing is missing.
         assert!(db.missing_bodies(f, 300, 1_000_000).unwrap().is_empty());
@@ -4097,11 +4188,12 @@ mod tests {
             .unwrap();
         db.insert_headers(acc, f, &[header(1, 1, "a")]).unwrap();
         let id = db.message_ids(&[f], "").unwrap()[0];
-        db.set_body(id, b"raw", "preview", false).unwrap();
+        db.set_body(id, b"raw", "preview", false, Default::default())
+            .unwrap();
         db.allow_remote("news@shop.example").unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
             ))
             .unwrap();
 
@@ -4320,7 +4412,7 @@ mod tests {
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
                  ALTER TABLE drafts DROP COLUMN next_try; ALTER TABLE drafts DROP COLUMN last_error;
                  PRAGMA user_version = 5;"
             ))
@@ -4347,7 +4439,7 @@ mod tests {
         let acc = account(&db);
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
             ))
             .unwrap();
 
@@ -4424,8 +4516,14 @@ mod tests {
         db.insert_headers(acc, f, &[header(1, 100, "One"), header(2, 200, "Two")])
             .unwrap();
         let id = db.message_ids(&[f], "").unwrap()[0];
-        db.set_body(id, b"Subject: Two\r\n\r\nHi", "Hi", false)
-            .unwrap();
+        db.set_body(
+            id,
+            b"Subject: Two\r\n\r\nHi",
+            "Hi",
+            false,
+            Default::default(),
+        )
+        .unwrap();
         db.insert_draft(&draft(acc)).unwrap();
         let counts = |db: &Db| -> Vec<i64> {
             ["folders", "messages", "bodies", "drafts"]
@@ -4656,7 +4754,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
             ))
             .unwrap();
 
@@ -4686,7 +4784,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
             ))
             .unwrap();
 
@@ -4704,7 +4802,9 @@ example.com"
         let acc = account(&db);
         db.set_setting("undo_send_secs", "10").unwrap();
         db.conn
-            .execute_batch(&format!("{DROP_V12} {DROP_V11} PRAGMA user_version = 10;"))
+            .execute_batch(&format!(
+                "{DROP_V13} {DROP_V12} {DROP_V11} PRAGMA user_version = 10;"
+            ))
             .unwrap();
 
         let db = Db::init(db.conn).unwrap();
@@ -4722,12 +4822,11 @@ example.com"
         let db = Db::in_memory().unwrap();
         let acc = account(&db);
         db.conn
-            .execute_batch(&format!("{DROP_V12} PRAGMA user_version = 11;"))
+            .execute_batch(&format!("{DROP_V13} {DROP_V12} PRAGMA user_version = 11;"))
             .unwrap();
 
         let db = Db::init(db.conn).unwrap();
         assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 12);
         let a = db.accounts().unwrap().remove(0);
         assert_eq!(
             (a.id, a.email.as_str(), a.name.as_str()),
@@ -4753,8 +4852,117 @@ example.com"
         assert_eq!(over, "");
         // A second init changes nothing.
         let db = Db::init(db.conn).unwrap();
-        assert_eq!(user_version(&db.conn).unwrap(), 12);
+        assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(db.accounts().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrates_v12_to_v13() {
+        let db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let f = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        db.conn
+            .execute_batch(&format!(
+                "{DROP_V13}
+                 INSERT INTO messages (id, account_id, folder_id, uid, subject)
+                     VALUES (1, {acc}, {f}, 10, 'Old');
+                 INSERT INTO drafts (id, account_id, message_id, created, updated)
+                     VALUES (1, {acc}, '<d@x>', 1, 1);
+                 PRAGMA user_version = 12;"
+            ))
+            .unwrap();
+
+        let mut db = Db::init(db.conn).unwrap();
+        assert_eq!(user_version(&db.conn).unwrap(), 13);
+        assert_eq!(SCHEMA_VERSION, 13);
+        // Rows cached before read as normal.
+        let h = db.header(1).unwrap().unwrap();
+        assert_eq!(
+            (h.subject.as_str(), h.importance),
+            ("Old", Importance::Normal)
+        );
+        assert_eq!(db.draft(1).unwrap().unwrap().importance, Importance::Normal);
+        // New rows keep theirs.
+        db.insert_headers(
+            acc,
+            f,
+            &[NewHeader {
+                uid: 11,
+                importance: Importance::High,
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let id: i64 = db
+            .conn
+            .query_row("SELECT id FROM messages WHERE uid = 11", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(db.header(id).unwrap().unwrap().importance, Importance::High);
+        let mut d = db.draft(1).unwrap().unwrap();
+        d.importance = Importance::Low;
+        assert!(db.update_draft(&d).unwrap());
+        assert_eq!(db.draft(1).unwrap().unwrap().importance, Importance::Low);
+        // An unknown code reads as normal.
+        db.conn
+            .execute("UPDATE messages SET priority = 7 WHERE id = 1", [])
+            .unwrap();
+        assert_eq!(
+            db.header(1).unwrap().unwrap().importance,
+            Importance::Normal
+        );
+        assert_eq!(
+            db.message(id).unwrap().unwrap().importance,
+            Importance::High
+        );
+    }
+
+    /// Mail cached before v13 learns its importance from a body stored
+    /// later (the prefetch or an open's fetch) or read as it opens; a row
+    /// that already has one keeps it.
+    #[test]
+    fn stored_bodies_fill_in_a_missing_importance() {
+        let mut db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let f = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        let headers: Vec<NewHeader> = [
+            Importance::Normal,
+            Importance::Low,
+            Importance::Normal,
+            Importance::Normal,
+        ]
+        .into_iter()
+        .zip(1..)
+        .map(|(importance, uid)| NewHeader {
+            uid,
+            importance,
+            ..Default::default()
+        })
+        .collect();
+        db.insert_headers(acc, f, &headers).unwrap();
+        let id = |uid: u32| -> i64 {
+            db.conn
+                .query_row("SELECT id FROM messages WHERE uid = ?1", [uid], |r| {
+                    r.get(0)
+                })
+                .unwrap()
+        };
+        let (a, b, c, d) = (id(1), id(2), id(3), id(4));
+        let of = |db: &Db, id| db.header(id).unwrap().unwrap().importance;
+        db.set_body(a, b"x", "", false, Importance::High).unwrap();
+        db.set_bodies(&[(b, b"x".as_slice(), "", false, Importance::High)])
+            .unwrap();
+        assert_eq!(of(&db, a), Importance::High);
+        assert_eq!(of(&db, b), Importance::Low, "a header-fetched one stays");
+        db.set_importance(c, Importance::Low).unwrap();
+        db.set_importance(a, Importance::Low).unwrap();
+        assert_eq!(of(&db, c), Importance::Low);
+        assert_eq!(of(&db, a), Importance::High);
+        db.set_body(d, b"x", "", false, Importance::Normal).unwrap();
+        assert_eq!(of(&db, d), Importance::Normal);
     }
 
     #[test]
@@ -4848,8 +5056,14 @@ example.com"
         };
         db.finish_folder(inbox, fp).unwrap();
         let id = db.message_ids(&[inbox], "").unwrap()[0];
-        db.set_body(id, b"Subject: Two\r\n\r\nHi", "Hi", false)
-            .unwrap();
+        db.set_body(
+            id,
+            b"Subject: Two\r\n\r\nHi",
+            "Hi",
+            false,
+            Default::default(),
+        )
+        .unwrap();
         db.rebuild_addresses(acc).unwrap();
         db.backfill_addresses(acc, 100).unwrap();
         let mut d = draft(acc);
@@ -5037,7 +5251,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
+                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
             ))
             .unwrap();
 

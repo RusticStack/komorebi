@@ -385,6 +385,8 @@ impl Model for Rows {
                 tag
             },
             problem: false,
+            high_importance: h.importance == crate::db::Importance::High,
+            low_importance: h.importance == crate::db::Importance::Low,
         })
     }
 

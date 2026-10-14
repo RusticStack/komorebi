@@ -4,13 +4,15 @@
 use super::html::html_to_text;
 use super::ical;
 use super::render::{InlinePart, RenderInput};
-use crate::db::NewHeader;
+use crate::db::{Importance, NewHeader};
 use mail_parser::{Address, Message, MessageParser, MessagePart, MimeHeaders, PartType};
 use std::collections::HashSet;
 
 /// The header fields fetched during sync. Kept small so a first sync of a
 /// large folder is mostly envelope data.
-pub const HEADER_FIELDS: &str = "FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE";
+/// The three priority fields are a few bytes each, in the same FETCH.
+pub const HEADER_FIELDS: &str =
+    "FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE IMPORTANCE X-PRIORITY X-MSMAIL-PRIORITY";
 
 /// Build a list row from the header bytes returned by
 /// `BODY.PEEK[HEADER.FIELDS (...)]`.
@@ -34,7 +36,65 @@ pub fn parse_header(raw: &[u8]) -> NewHeader {
                 .subtype()
                 .is_some_and(|s| s.eq_ignore_ascii_case("mixed"))
     });
+    h.importance = importance(&msg);
     h
+}
+
+/// A priority header's value is read up to this many bytes.
+const MAX_PRIORITY_LEN: usize = 64;
+
+/// The importance the sender set: `Importance` (RFC 2156: high, normal,
+/// low), else `X-Priority` (its leading digit: 1 and 2 high, 3 normal, 4
+/// and 5 low), else `X-MSMail-Priority` (high, normal, low). The first
+/// field of each name counts; a value that reads as none of these is
+/// normal.
+pub fn importance(msg: &Message) -> Importance {
+    let value = |field: &str| {
+        msg.headers_raw()
+            .find(|(name, _)| name.eq_ignore_ascii_case(field))
+            .map(|(_, v)| priority_value(v))
+    };
+    let word = |v: &str| {
+        // A trailing comment, as in `high (urgent)`, is ignored.
+        let w = v.split(['(', ' ', '\t', ';']).next().unwrap_or_default();
+        if w.eq_ignore_ascii_case("high") || w.eq_ignore_ascii_case("urgent") {
+            Some(Importance::High)
+        } else if w.eq_ignore_ascii_case("low") || w.eq_ignore_ascii_case("non-urgent") {
+            Some(Importance::Low)
+        } else if w.eq_ignore_ascii_case("normal") {
+            Some(Importance::Normal)
+        } else {
+            None
+        }
+    };
+    if let Some(i) = value("Importance").and_then(|v| word(&v)) {
+        return i;
+    }
+    if let Some(i) = value("X-Priority").and_then(|v| match v.bytes().next() {
+        Some(b'1' | b'2') => Some(Importance::High),
+        Some(b'3') => Some(Importance::Normal),
+        Some(b'4' | b'5') => Some(Importance::Low),
+        _ => None,
+    }) {
+        return i;
+    }
+    value("X-MSMail-Priority")
+        .and_then(|v| word(&v))
+        .unwrap_or_default()
+}
+
+/// A raw header value, unfolded and trimmed, at most
+/// [`MAX_PRIORITY_LEN`] bytes of it read.
+fn priority_value(raw: &str) -> String {
+    let mut end = raw.len().min(MAX_PRIORITY_LEN);
+    while !raw.is_char_boundary(end) {
+        end -= 1;
+    }
+    raw.get(..end)
+        .unwrap_or_default()
+        .replace(['\r', '\n'], " ")
+        .trim()
+        .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +125,10 @@ pub struct Body {
     /// The meeting invitation the message carries ([`calendar_part`]), if
     /// it reads as one.
     pub invite: Option<Box<ical::Event>>,
+    /// The importance its sender set ([`importance`]), read from the
+    /// headers this parse already has: the reader's mark, and the row's
+    /// for mail cached before the column existed.
+    pub importance: Importance,
 }
 
 /// How an encrypted message is encrypted. Nothing is ever decrypted.
@@ -285,6 +349,7 @@ fn body_of(msg: &Message, text: String, encrypted: Option<Encryption>) -> Body {
         references,
         reply_to,
         auth: auth_headers(msg),
+        importance: importance(msg),
         invite: calendar_part(msg)
             .filter(|_| encrypted.is_none())
             .and_then(|p| ical::parse(p.contents()).map(Box::new)),
@@ -735,6 +800,64 @@ mod tests {
         assert_eq!(h.msgid, "abc@example.com");
         assert!(h.has_attach);
         assert!(h.date > 0);
+    }
+
+    #[test]
+    fn importance_headers() {
+        use crate::db::Importance::{High, Low, Normal};
+        let of = |headers: &str| {
+            parse_header(format!("From: a@b.c\r\n{headers}Subject: x\r\n\r\n").as_bytes())
+                .importance
+        };
+        // None set, and the plain row has none.
+        assert_eq!(of(""), Normal);
+        assert_eq!(parse_header(HEADER).importance, Normal);
+        // Importance (RFC 2156), any case, with a comment or extra space.
+        assert_eq!(of("Importance: high\r\n"), High);
+        assert_eq!(of("importance:   HIGH (urgent)\r\n"), High);
+        assert_eq!(of("Importance: Low\r\n"), Low);
+        assert_eq!(of("Importance: normal\r\n"), Normal);
+        // X-Priority: its leading digit.
+        assert_eq!(of("X-Priority: 1\r\n"), High);
+        assert_eq!(of("X-Priority: 2 (High)\r\n"), High);
+        assert_eq!(of("X-Priority: 3 (Normal)\r\n"), Normal);
+        assert_eq!(of("X-Priority: 4\r\n"), Low);
+        assert_eq!(of("X-Priority: 5 (Lowest)\r\n"), Low);
+        // X-MSMail-Priority.
+        assert_eq!(of("X-MSMail-Priority: High\r\n"), High);
+        assert_eq!(of("X-MSMail-Priority: Low\r\n"), Low);
+        // A folded value.
+        assert_eq!(of("Importance:\r\n high\r\n"), High);
+        // Importance wins, then X-Priority, then X-MSMail-Priority.
+        assert_eq!(of("X-Priority: 5\r\nImportance: high\r\n"), High);
+        assert_eq!(of("X-MSMail-Priority: Low\r\nX-Priority: 1\r\n"), High);
+        assert_eq!(of("Importance: normal\r\nX-Priority: 1\r\n"), Normal);
+        // A value that reads as none falls through to the next field.
+        assert_eq!(of("Importance: whenever\r\nX-Priority: 1\r\n"), High);
+        // The first field of a name counts.
+        assert_eq!(of("Importance: low\r\nImportance: high\r\n"), Low);
+        // Junk is normal.
+        for junk in [
+            "Importance: \r\n",
+            "Importance: highest\r\n",
+            "X-Priority: 0\r\n",
+            "X-Priority: 9\r\n",
+            "X-Priority: urgent\r\n",
+            "X-MSMail-Priority: 1\r\n",
+            "Importance: \u{fe0f}\u{fe0f}\r\n",
+        ] {
+            assert_eq!(of(junk), Normal, "{junk:?}");
+        }
+        // A long value is read only to its cap (cut inside a character
+        // too), and its start still counts.
+        let long = format!("Importance: high{}\r\n", " (é)".repeat(5000));
+        assert_eq!(of(&long), High);
+        let long = format!("X-Priority: {}1\r\n", " ".repeat(5000));
+        assert_eq!(of(&long), Normal);
+        assert_eq!(
+            priority_value(&format!("x{}", "é".repeat(100))).len(),
+            MAX_PRIORITY_LEN - 1
+        );
     }
 
     #[test]

@@ -36,7 +36,7 @@
 //! accounts and of the folders with subfolders are printed.
 
 use anyhow::{Context, Result, bail};
-use komorebi::db::{Db, DraftRow, NewAccount, NewHeader, Outbox};
+use komorebi::db::{Db, DraftRow, Importance, NewAccount, NewHeader, Outbox};
 use komorebi::mail::{compose_html, mime, smtp};
 use komorebi::providers::{Security, Server};
 use komorebi::role::Role;
@@ -151,6 +151,15 @@ fn main() -> Result<()> {
                 seen: uid + 200 < count || rng.below(10) != 0,
                 flagged: rng.below(40) == 0,
                 answered: rng.below(8) == 0,
+                // Every 13th from the third newest: the sender set high
+                // importance; every 13th from the eighth newest, low
+                // (outside the random stream, so the rest of the cache
+                // stays as it was).
+                importance: match (count - uid) % 13 {
+                    2 => Importance::High,
+                    7 => Importance::Low,
+                    _ => Importance::Normal,
+                },
                 ..NewHeader::default()
             }
         })
@@ -216,7 +225,13 @@ fn main() -> Result<()> {
             m.subject,
             text.replace('\n', "\r\n"),
         );
-        db.set_body(id, raw.as_bytes(), &mime::preview(&text), false)?;
+        db.set_body(
+            id,
+            raw.as_bytes(),
+            &mime::preview(&text),
+            false,
+            Default::default(),
+        )?;
     }
     let mut added = 0;
     if let Some(dir) = eml_dir {
@@ -247,7 +262,13 @@ fn main() -> Result<()> {
                 })
                 .context("added message vanished")?;
             let body = mime::parse_body(&raw);
-            db.set_body(id, &raw, &body.preview(), header.has_attach)?;
+            db.set_body(
+                id,
+                &raw,
+                &body.preview(),
+                header.has_attach,
+                Default::default(),
+            )?;
             added += 1;
         }
     }
@@ -266,7 +287,7 @@ fn main() -> Result<()> {
             .first()
             .context("added reply vanished")?;
         let body = mime::parse_body(&raw);
-        db.set_body(id, &raw, &body.preview(), false)?;
+        db.set_body(id, &raw, &body.preview(), false, Default::default())?;
     }
     if drafts {
         let newest = db.message_ids(&[inbox], "")?.first().copied();

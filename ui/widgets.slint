@@ -127,6 +127,8 @@ export struct MailRow {
     // one account), "Account · Folder" in a search of all folders.
     tag: string,
     problem: bool,    // an Outbox message that failed or may not have gone
+    high-importance: bool, // its sender set high importance (not the user's Important)
+    low-importance: bool,  // its sender set low importance
 }
 
 export struct AttachmentRow {
@@ -355,7 +357,7 @@ export component IconButton inherits Rectangle {
     // A Tab stop, pressed with Space or Enter; off: reached only by the
     // arrows of its toolbar.
     in property <bool> tab-stop: true;
-    // A toggle (flag, unread): shown filled while on, and its state for
+    // A toggle (important, unread): shown filled while on, and its state for
     // screen readers.
     in property <bool> checkable;
     in property <bool> checked;
@@ -945,9 +947,11 @@ export component NavRow inherits Rectangle {
 
 // A message row as a WinUI ListView item (docs/WINUI3.md "ListView
 // item"): a subtle backplate inset 4,2 when hovered, pressed or selected,
-// and a 3 px accent pill while selected; the text keeps its colours
-// (HighlightText on the plate under a contrast theme). Unread rows are
-// semibold with an accent date. No dividers: the plates separate rows.
+// and a 3 px accent pill while selected; the text keeps its colours in
+// every plate state (HighlightText on the plate under a contrast theme).
+// Unread rows are semibold in TextPrimary with an 8 px accent dot before
+// the sender; read rows are regular in TextSecondary (`row-read-text`,
+// `row-read-meta`). No dividers: the plates separate rows.
 // A row's quick action (docs/WINUI3.md "ListView item"): a 28 px subtle
 // button that takes no focus and is no Tab stop (the row keeps the keys),
 // with its tooltip and accessible name.
@@ -1001,15 +1005,15 @@ export component MailItem inherits Rectangle {
     callback clicked(/* ctrl */ bool, /* shift */ bool);
     // A right-click, at this window position (for the row menu).
     callback context(/* x */ length, /* y */ length);
-    // A quick action on this row only: 0 Archive, 1 Delete, 2 Flag or
-    // Remove flag, 3 Mark as read or unread. It never opens the row.
+    // A quick action on this row only: 0 Archive, 1 Delete, 2 Mark as
+    // important or Remove importance, 3 Mark as read or unread. It never opens the row.
     callback quick(int);
     // Its check box: add it to the selection or take it out.
     callback check();
 
     accessible-role: list-item;
     accessible-label: (mail.unread ? @tr("Unread") + ", " : "") + (mail.draft ? @tr("Draft") + ", " : "") + mail.sender + ", " + mail.subject + ", " + mail.date + (mail.tag != "" ? ", " + mail.tag : "")
-        + (mail.flagged ? ", " + @tr("Flagged") : "") + (mail.attach ? ", " + @tr("Has attachment") : "") + (mail.answered ? ", " + @tr("Replied") : "")
+        + (mail.flagged ? ", " + @tr("Important") : "") + (mail.high-importance ? ", " + @tr("High importance") : "") + (mail.low-importance ? ", " + @tr("Low importance") : "") + (mail.attach ? ", " + @tr("Has attachment") : "") + (mail.answered ? ", " + @tr("Replied") : "")
         + (mail.tag != "" ? ", " + @tr("in {0}", mail.tag) : "");
     accessible-item-selected: root.selected;
     accessible-action-default => { root.clicked(false, false); }
@@ -1022,6 +1026,8 @@ export component MailItem inherits Rectangle {
     property <color> plate: root.down ? (root.selected ? Theme.selected : Theme.pressed)
         : root.hover ? (root.selected ? Theme.pressed : Theme.hover)
         : root.selected ? Theme.selected : transparent;
+    // The unread dot's slot: after the 16 px padding (and the check box).
+    property <length> dot-x: root.checks ? Theme.s4 + 28px : Theme.s4;
     // Quick actions only where they show (rows are many).
     property <bool> quick-shown: root.quick-actions && (root.hover || root.ring);
 
@@ -1072,9 +1078,10 @@ export component MailItem inherits Rectangle {
 
         lines := VerticalLayout {
             // ListViewItem padding 16,0,12,0 (the check box's 28 px more
-            // while it shows); 9 above and below fit the three lines in
-            // 76 px.
-            padding-left: root.checks ? Theme.s4 + 28px : Theme.s4;
+            // while it shows), then the unread dot's 8 px slot and 4 px, on
+            // every line so they stay aligned; 9 above and below fit the
+            // three lines in 76 px.
+            padding-left: root.dot-x + 8px + Theme.s1;
             padding-right: Theme.s3;
             padding-top: 9px;
             padding-bottom: 9px;
@@ -1085,7 +1092,7 @@ export component MailItem inherits Rectangle {
                     text: mail.sender;
                     font-size: Theme.body;
                     font-weight: mail.unread ? 600 : 400;
-                    color: Theme.on-fill(root.lit, Theme.text);
+                    color: Theme.on-fill(root.lit, mail.unread ? Theme.text : Theme.row-read-text);
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
@@ -1097,13 +1104,29 @@ export component MailItem inherits Rectangle {
                     vertical-alignment: center;
                 }
                 if mail.problem: Icon { text: Icons.error; font-size: 12px; color: Theme.on-fill(root.lit, Theme.danger); }
+                // The sender set high importance: a bold "!" in the text
+                // colour (neither the user's amber Important flag nor the
+                // red of errors), first among the status icons. The icon
+                // fonts' Important glyph is an outline too thin at this size.
+                if mail.high-importance: Text {
+                    text: "!";
+                    font-family: Theme.text-font;
+                    font-size: Theme.body;
+                    font-weight: 700;
+                    color: Theme.on-fill(root.lit, Theme.text);
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+                // Low importance: the composer's Down glyph, small and in
+                // TextSecondary like the other status icons (quieter than
+                // the "!"); the row's accessible name says it.
+                if mail.low-importance: Icon { text: Icons.low-importance; font-size: 12px; color: Theme.on-fill(root.lit, Theme.text-2); }
                 if mail.answered: Icon { text: Icons.reply; font-size: 12px; color: Theme.on-fill(root.lit, Theme.text-2); }
                 if mail.attach: Icon { text: Icons.attach; font-size: 12px; color: Theme.on-fill(root.lit, Theme.text-2); }
-                if mail.flagged: Icon { text: Icons.flag-filled; font-size: 12px; color: Theme.on-fill(root.lit, Theme.danger); }
                 Text {
                     text: mail.date;
                     font-size: Theme.caption;
-                    color: Theme.on-fill(root.lit, Theme.text-2);
+                    color: Theme.on-fill(root.lit, mail.unread ? Theme.text : Theme.row-read-meta);
                     font-weight: mail.unread ? 600 : 400;
                     vertical-alignment: center;
                 }
@@ -1114,18 +1137,60 @@ export component MailItem inherits Rectangle {
                     text: mail.subject == "" ? @tr("(no subject)") : mail.subject;
                     font-size: Theme.body;
                     font-weight: mail.unread ? 600 : 400;
-                    color: Theme.on-fill(root.lit, Theme.text);
+                    color: Theme.on-fill(root.lit, mail.unread ? Theme.text : Theme.row-read-text);
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                // Unread: a 6 px accent dot at the end of line 2, under the
-                // date (never beside the selection pill).
-                if mail.unread: Rectangle {
-                    width: 6px;
-                    height: 6px;
-                    y: (parent.height - 6px) / 2;
-                    border-radius: 3px;
-                    background: Theme.on-fill(root.lit, Theme.accent);
+                // The important marker at the subject's end, clear of the
+                // quick actions over the date: a 14 px amber flag on an
+                // important row, an outline one on a hovered row of messages.
+                // A click toggles it on this row only (the row's quick
+                // action 2), without selecting or opening the row. The slot
+                // is there on every row of messages, hovered or not, so the
+                // subject never re-elides on hover.
+                if root.quick-actions || mail.flagged: Rectangle {
+                    width: 20px;
+                    horizontal-stretch: 0;
+                    if root.quick-actions && (mail.flagged || root.hover): Rectangle {
+                        property <bool> on: mail.flagged;
+                        property <string> tip: self.on ? @tr("Remove importance (Ctrl+Shift+G)") : @tr("Mark as important (Ctrl+Shift+G)");
+                        accessible-role: button;
+                        accessible-label: self.tip;
+                        accessible-action-default => { root.quick(2); }
+                        border-radius: Theme.radius;
+                        // Under a contrast theme the row's plate is already
+                        // Highlight: an outline in HighlightText instead of a fill.
+                        background: Theme.contrast ? transparent : mark-ta.pressed ? Theme.pressed : mark-ta.has-hover ? Theme.hover : transparent;
+                        border-width: Theme.contrast && mark-ta.has-hover ? 1px : 0;
+                        border-color: Theme.hc-highlight-text;
+                        mark-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            pointer-event(e) => {
+                                if e.kind == PointerEventKind.down {
+                                    Focus.keyboard = false;
+                                }
+                            }
+                            clicked => { root.quick(2); }
+                        }
+                        Icon {
+                            text: parent.on ? Icons.flag-filled : Icons.flag;
+                            font-size: 14px;
+                            color: Theme.on-fill(root.lit, parent.on ? Theme.important : Theme.text-2);
+                        }
+                        TipTimer {
+                            text: parent.tip;
+                            hover: mark-ta.has-hover;
+                            pressed: mark-ta.pressed;
+                        }
+                    }
+                    // A draft or an Outbox entry: the flag only shows, and
+                    // stays out of the accessibility tree (the row's label
+                    // already says Important).
+                    if !root.quick-actions && mail.flagged: Icon {
+                        text: Icons.flag-filled;
+                        font-size: 14px;
+                        color: Theme.on-fill(root.lit, Theme.important);
+                    }
                 }
             }
             HorizontalLayout {
@@ -1152,11 +1217,23 @@ export component MailItem inherits Rectangle {
                 Text {
                     text: mail.preview;
                     font-size: Theme.caption;
-                    color: Theme.on-fill(root.lit, Theme.text-2);
+                    color: Theme.on-fill(root.lit, mail.unread ? Theme.text-2 : Theme.row-read-meta);
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
             }
+        }
+
+        // Unread: an 8 px accent dot in the leading slot, centred on the
+        // sender's line (9 px clear of the selection pill at x 4 to 7, and
+        // after the check box while it shows).
+        if mail.unread: Rectangle {
+            x: root.dot-x;
+            y: line1.y + (line1.height - 8px) / 2;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.on-fill(root.lit, Theme.accent);
         }
 
         // The check box (a pointer target of its own; the row's keys are
@@ -1219,7 +1296,7 @@ export component MailItem inherits Rectangle {
                 }
                 QuickAction {
                     icon: mail.flagged ? Icons.flag-filled : Icons.flag;
-                    tooltip: mail.flagged ? @tr("Remove flag (Insert)") : @tr("Flag (Insert)");
+                    tooltip: mail.flagged ? @tr("Remove importance (Ctrl+Shift+G)") : @tr("Mark as important (Ctrl+Shift+G)");
                     lit: root.lit;
                     clicked => { root.quick(2); }
                 }

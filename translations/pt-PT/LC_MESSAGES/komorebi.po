@@ -442,11 +442,11 @@ msgstr "Reencaminhar como anexo"
 msgid "Mark as unread"
 msgstr "Marcar como não lida"
 
-msgid "Flag"
-msgstr "Sinalizar"
+msgid "Mark as important"
+msgstr "Marcar como importante"
 
-msgid "Remove flag"
-msgstr "Remover sinalização"
+msgid "Remove importance"
+msgstr "Desmarcar como importante"
 
 msgid "Archive"
 msgstr "Arquivar"
@@ -496,8 +496,12 @@ msgstr "Todas"
 msgid "Unread"
 msgstr "Não lidas"
 
-msgid "Flagged"
-msgstr "Sinalizadas"
+msgctxt "filter"
+msgid "Important"
+msgstr "Importantes"
+
+msgid "Important"
+msgstr "Importante"
 
 msgid "Messages"
 msgstr "Mensagens"
@@ -644,6 +648,12 @@ msgstr "Data: {0}"
 
 msgid "To: {0}   Cc: {1}"
 msgstr "Para: {0}   Cc: {1}"
+
+msgid "Sent with high importance"
+msgstr "Enviada com importância alta"
+
+msgid "Sent with low importance"
+msgstr "Enviada com importância baixa"
 
 msgid "Accept"
 msgstr "Aceitar"
@@ -1061,8 +1071,8 @@ msgstr "A Caixa de saída está vazia. As mensagens aguardam aqui enquanto são 
 msgid "No unread messages"
 msgstr "Sem mensagens não lidas"
 
-msgid "No flagged messages"
-msgstr "Sem mensagens sinalizadas"
+msgid "No important messages"
+msgstr "Sem mensagens importantes"
 
 msgid "Loading …"
 msgstr "A carregar …"
@@ -1598,8 +1608,8 @@ msgstr "Marcar como lida (Ctrl+Q)"
 msgid "Mark as unread (Ctrl+U)"
 msgstr "Marcar como não lida (Ctrl+U)"
 
-msgid "Flag (Insert)"
-msgstr "Sinalizar (Insert)"
+msgid "Mark as important (Ctrl+Shift+G)"
+msgstr "Marcar como importante (Ctrl+Shift+G)"
 
 msgid "Clear selection"
 msgstr "Limpar seleção"
@@ -1616,8 +1626,8 @@ msgstr "Reencaminhar como novo rascunho (Ctrl+Shift+F)"
 msgid "Forward (Ctrl+Shift+F)"
 msgstr "Reencaminhar (Ctrl+Shift+F)"
 
-msgid "Remove flag (Insert)"
-msgstr "Remover sinalização (Insert)"
+msgid "Remove importance (Ctrl+Shift+G)"
+msgstr "Desmarcar como importante (Ctrl+Shift+G)"
 
 msgid "This message hasn't been downloaded yet. It downloads when Komorebi can reach the server."
 msgstr "Esta mensagem ainda não foi transferida. Será transferida quando o Komorebi conseguir contactar o servidor."
@@ -2047,12 +2057,12 @@ msgid "Mark as read / Mark as unread"
 msgstr "Marcar como lida / Marcar como não lida"
 
 msgctxt "shortcut key"
-msgid "Insert"
-msgstr "Insert"
+msgid "Insert or Ctrl+Shift+G"
+msgstr "Insert ou Ctrl+Shift+G"
 
 msgctxt "shortcut"
-msgid "Flag / Remove flag"
-msgstr "Sinalizar / Remover sinalização"
+msgid "Mark as important / Remove importance"
+msgstr "Marcar / desmarcar como importante"
 
 msgctxt "shortcut key"
 msgid "Backspace"
@@ -2189,6 +2199,12 @@ msgstr "Pré-visualizar"
 
 msgid "Preview the message as it is sent"
 msgstr "Pré-visualizar a mensagem tal como é enviada"
+
+msgid "High importance"
+msgstr "Importância alta"
+
+msgid "Low importance"
+msgstr "Importância baixa"
 
 msgid "Marks like **bold**, _italic_ and “- ” lists are sent as formatting. Preview shows how the message looks."
 msgstr "Marcas como **negrito**, _itálico_ e listas com “- ” são enviadas como formatação. Pré-visualizar mostra o aspeto da mensagem."
