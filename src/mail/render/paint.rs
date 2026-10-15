@@ -66,6 +66,9 @@ pub struct GlyphCache {
 pub const MAX_CACHE_BYTES: usize = 4 * 1024 * 1024;
 /// Layers painted per colour glyph.
 const MAX_LAYERS: usize = 256;
+/// The plate under a dark logo on a clear ground in a dimmed message: a
+/// soft light grey, so it reads as the logo's paper, not a glaring box.
+const PLATE: [u8; 4] = [236, 236, 236, 255];
 /// The largest colour glyph bitmap side, in device px (bigger ones are
 /// drawn as plain outlines).
 const MAX_COLOR_PX: u32 = 512;
@@ -276,6 +279,24 @@ pub fn render_at(
                     (d.w / iw, d.h / ih)
                 };
                 let area = clip.as_ref().map_or(d, dev);
+                // A dark logo on a clear ground in a dimmed message: a light
+                // plate (the page's original white, softened) behind it.
+                if doc.dimmed && clip.is_none() && im.dark_on_clear {
+                    let plate = paint_of(PLATE);
+                    if *radius > 0.5 {
+                        if let Some(p) = rrect(area, radius * scale) {
+                            pm.fill_path(
+                                &p,
+                                &plate,
+                                FillRule::Winding,
+                                Transform::identity(),
+                                None,
+                            );
+                        }
+                    } else if let Some(r) = tiny_skia::Rect::from_xywh(d.x, d.y, d.w, d.h) {
+                        pm.fill_rect(r, &plate, Transform::identity(), None);
+                    }
+                }
                 let unit = (sx - 1.0).abs() < 0.01 && (sy - 1.0).abs() < 0.01;
                 if unit && *radius <= 0.5 {
                     // Pre-scaled at layout: a plain clipped src-over copy.

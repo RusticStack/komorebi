@@ -2928,6 +2928,53 @@ impl Db {
         Ok(changed > 0)
     }
 
+    /// The saved draft linked to the server copy `copy`, if any.
+    pub fn draft_for_server_copy(&self, copy: &ServerCopy) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM drafts WHERE state = 0 AND server_folder = ?1
+                   AND server_uidvalidity = ?2 AND server_uid = ?3",
+                params![copy.folder_id, copy.uidvalidity, copy.uid],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Make a draft saved elsewhere (the message in the server's Drafts
+    /// folder behind `copy`) editable: a saved draft from `d` with
+    /// `files` as its attachments, linked to `copy` as its server copy and
+    /// marked as already uploaded, so nothing is copied again until it is
+    /// edited, and its next copy replaces that one. A draft already linked
+    /// to `copy` is returned as it is, so opening twice never makes two.
+    pub fn adopt_server_draft(
+        &self,
+        d: &DraftRow,
+        copy: &ServerCopy,
+        files: &[(String, String, Vec<u8>)],
+    ) -> Result<i64> {
+        if let Some(id) = self.draft_for_server_copy(copy)? {
+            return Ok(id);
+        }
+        let id = self.insert_draft(d)?;
+        let filed = (|| -> Result<()> {
+            for (name, mime, data) in files {
+                self.add_draft_file(id, name, mime, data)?;
+            }
+            self.conn.execute(
+                "UPDATE drafts SET server_rev = rev, server_folder = ?2,
+                    server_uidvalidity = ?3, server_uid = ?4 WHERE id = ?1",
+                params![id, copy.folder_id, copy.uidvalidity, copy.uid],
+            )?;
+            Ok(())
+        })();
+        if let Err(e) = filed {
+            self.delete_draft(id).ok();
+            return Err(e);
+        }
+        Ok(id)
+    }
+
     /// Whether `id` is a saved draft (`state` 0), not a message in the
     /// outbox: those are never opened for editing from a stale list.
     pub fn is_saved_draft(&self, id: i64) -> Result<bool> {
@@ -6391,6 +6438,35 @@ example.com"
         // The answers go with their account.
         db.remove_account(acc).unwrap();
         assert_eq!(db.rsvp(acc, "u@x", "").unwrap(), None);
+    }
+
+    #[test]
+    fn a_server_draft_is_adopted_once_with_its_attachments() {
+        let tmp = TempDb::new("adopt-server-draft");
+        let db = Db::open(&tmp.0).unwrap();
+        let acc = account(&db);
+        let drafts = db
+            .upsert_folder(acc, "Drafts", "Drafts", 0, Role::Drafts)
+            .unwrap();
+        let copy = ServerCopy {
+            account_id: acc,
+            folder_id: drafts,
+            uidvalidity: 7,
+            uid: 12,
+        };
+        let files = [("a.txt".to_string(), "text/plain".to_string(), b"x".to_vec())];
+        let id = db.adopt_server_draft(&draft(acc), &copy, &files).unwrap();
+        assert_eq!(
+            db.adopt_server_draft(&draft(acc), &copy, &files).unwrap(),
+            id
+        );
+        assert_eq!(db.draft_files(id).unwrap().len(), 1);
+        assert_eq!(db.draft_for_server_copy(&copy).unwrap(), Some(id));
+        // Already uploaded: nothing to copy until it changes.
+        assert!(db.drafts_to_upload(acc).unwrap().is_empty());
+        // The server's message is its copy: discarding removes that one.
+        assert_eq!(db.delete_draft(id).unwrap(), Some(copy));
+        assert_eq!(db.draft_for_server_copy(&copy).unwrap(), None);
     }
 
     #[test]

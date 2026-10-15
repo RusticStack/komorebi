@@ -62,7 +62,7 @@ use crate::secrets;
 use anyhow::{Context, Result, anyhow};
 pub use errors::{Attention, Class, Problem, Say};
 use errors::{is_connection_error, is_parse_error};
-use idle::{IdleHandle, Idler, spawn_idle};
+use idle::{IdleHandle, IdleWatch, Idler, spawn_idle};
 use imap::{FolderStatus, Imap, Statuses};
 use lettre::address::Envelope;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -390,6 +390,8 @@ pub struct Workers {
     resume: Arc<AtomicU64>,
     /// Stops the IDLE thread when the workers are dropped.
     idle: IdleHandle,
+    /// What the IDLE thread and the sync worker tell each other.
+    idle_watch: Arc<IdleWatch>,
     /// The missing Sent folder was said once.
     sent_noted: Arc<std::sync::atomic::AtomicBool>,
     /// Every job goes to the channel and nothing runs (`Workers::capture`).
@@ -426,6 +428,7 @@ impl Workers {
             auth_failed,
             resume: Arc::new(AtomicU64::new(0)),
             idle,
+            idle_watch: Arc::default(),
             sent_noted: Arc::default(),
             capture: true,
         };
@@ -439,13 +442,15 @@ impl Workers {
         let auth_failed = errors::Latch::default();
         let resume = Arc::new(AtomicU64::new(0));
         let (ready, ready_rx) = channel();
+        let idle_watch = Arc::new(IdleWatch::default());
         let idle = spawn_idle(
             Idler::new(
                 account.clone(),
                 Box::new(connect_account),
                 notify.clone(),
                 auth_failed.clone(),
-            ),
+            )
+            .with_watch(idle_watch.clone()),
             ready_rx,
         );
         let mut ready = Some(ready);
@@ -459,6 +464,7 @@ impl Workers {
             auth_failed,
             resume,
             idle,
+            idle_watch,
             sent_noted: Arc::default(),
             capture: false,
         };
@@ -496,6 +502,7 @@ impl Workers {
             unselect_when_idle: false,
             drafts_noted: false,
             sent_noted: self.sent_noted.clone(),
+            idle_watch: self.idle_watch.clone(),
             resume: self.resume.clone(),
             resume_seen: self.resume.load(Ordering::Relaxed),
             parked: Vec::new(),
@@ -643,6 +650,9 @@ struct Worker {
     /// The account's missing Sent folder was said (shared by its workers
     /// and send threads).
     sent_noted: Arc<std::sync::atomic::AtomicBool>,
+    /// Told what each steady-state inbox pass found, to judge whether IDLE
+    /// announces new mail on this server.
+    idle_watch: Arc<IdleWatch>,
     /// [`Workers::resumed`]'s count, and the value this worker last acted
     /// on.
     resume: Arc<AtomicU64>,
@@ -1133,7 +1143,12 @@ impl Worker {
                 self.with_imap(|imap, notify| {
                     sync_folder(imap, db, f, notify, &pending, st, full, &mut ramp)
                 })
-                .map(drop)
+                .map(|stats| {
+                    // Only a steady-state pass says anything about IDLE.
+                    if f.role == Role::Inbox && stats.delta {
+                        self.idle_watch.observe(stats.new);
+                    }
+                })
             });
             if result.is_ok()
                 && f.role == Role::Inbox
@@ -2382,6 +2397,7 @@ mod tests {
             unselect_when_idle: false,
             drafts_noted: false,
             sent_noted: Arc::default(),
+            idle_watch: Arc::default(),
             resume: Arc::default(),
             resume_seen: 0,
             parked: Vec::new(),
@@ -4458,6 +4474,67 @@ MIME-Version: 1.0
             (now.folder_id, now.uidvalidity, now.uid),
             (drafts.id, 7, 13)
         );
+    }
+
+    /// A draft saved on another device, opened for editing: nothing is
+    /// uploaded until it changes, the draft is not duplicated, and the
+    /// save then replaces exactly the server's message (one copy).
+    #[test]
+    fn an_adopted_server_draft_is_replaced_not_duplicated() {
+        let mut db = Db::in_memory().unwrap();
+        let (drafts, local) = draft_setup(&mut db);
+        db.delete_draft(local).unwrap();
+        let copy = db::ServerCopy {
+            account_id: drafts.account_id,
+            folder_id: drafts.id,
+            uidvalidity: 7,
+            uid: 12,
+        };
+        let from_server = db::DraftRow {
+            account_id: drafts.account_id,
+            to: "you@example.com".into(),
+            subject: "Plans".into(),
+            body: "Written on the phone".into(),
+            message_id: "<d1@example.com>".into(),
+            ..Default::default()
+        };
+        let row = db.adopt_server_draft(&from_server, &copy, &[]).unwrap();
+        // Opening it again finds it.
+        assert_eq!(
+            db.adopt_server_draft(&from_server, &copy, &[]).unwrap(),
+            row
+        );
+        assert_eq!(db.draft_ids("").unwrap(), [row]);
+        // Nothing to upload until it is edited.
+        assert!(db.drafts_to_upload(drafts.account_id).unwrap().is_empty());
+        db.update_draft(&db::DraftRow {
+            id: row,
+            body: "Edited".into(),
+            ..from_server
+        })
+        .unwrap();
+        let mut script = login_steps(UIDPLUS_CAPS);
+        script.extend(append_steps(
+            r#"a3 APPEND "Drafts" (\Draft) {"#,
+            "{tag} OK [APPENDUID 7 13] APPEND completed\r\n",
+        ));
+        script.extend(find_steps(
+            "* SEARCH 12 13\r\n{tag} OK SEARCH completed\r\n",
+        ));
+        script.extend([
+            Step::Expect(r"a6 UID STORE 12 +FLAGS.SILENT (\Deleted)"),
+            Step::Send("{tag} OK STORE completed\r\n"),
+            Step::Expect("a7 UID EXPUNGE 12"),
+            Step::Send("* 1 EXPUNGE\r\n{tag} OK EXPUNGE completed\r\n"),
+        ]);
+        script.extend(logout_steps("a8 LOGOUT"));
+        let (lines, events) = save_draft_through(&mut db, script, row);
+        assert!(events.is_empty(), "{events:?}");
+        assert!(lines.iter().any(|l| l.contains("Edited")), "{lines:?}");
+        // Only the old message is removed; the new one is now the copy.
+        let expunges: Vec<_> = lines.iter().filter(|l| l.contains("EXPUNGE")).collect();
+        assert_eq!(expunges, ["a7 UID EXPUNGE 12"]);
+        assert_eq!(db.delete_draft(row).unwrap().unwrap().uid, 13);
     }
 
     #[test]

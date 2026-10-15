@@ -569,6 +569,13 @@ struct App {
     reopen_tabs: bool,
     /// The read-only message windows (`windows.rs`).
     popouts: windows::PopOuts,
+    /// Composer windows (`windows::ComposerWin`), one draft each.
+    cwins: Vec<windows::ComposerWin>,
+    /// The draft whose composer window an event is running for
+    /// ([`App::in_composer`]).
+    scoped: Option<composer::DraftId>,
+    /// Outbox rows sent from a composer window: Undo reopens them in one.
+    sent_from_window: HashSet<i64>,
     /// A draft started now opens in a tab of its own whatever shows (a
     /// reply from a message window).
     draft_tab: bool,
@@ -796,6 +803,9 @@ pub fn install_with(
         tabs_timer: Timer::default(),
         reopen_tabs: settings.reopen_tabs,
         popouts: windows::PopOuts::new(settings.popout_size),
+        cwins: Vec::new(),
+        scoped: None,
+        sent_from_window: HashSet::new(),
         draft_tab: false,
     };
     // The view the window last showed (a folder still there), else the
@@ -980,6 +990,25 @@ fn on_ui(f: Box<dyn FnOnce(&mut App) + Send>) {
     .ok();
 }
 
+/// A `mailto:` link from the command line (or a second launch): a prefilled
+/// composer in the main window. Never sent.
+pub fn open_mailto(m: Mailto) {
+    with_app(|a| {
+        a.show_main_window();
+        a.compose_mailto(m);
+    });
+}
+
+/// Windows asks the app to end (the installer's Restart Manager, or a
+/// sign-out): really quit, saving first, even when it lives in the tray.
+pub fn end_session() {
+    with_app(|a| {
+        if !a.notes.quitting {
+            a.quit_now();
+        }
+    });
+}
+
 /// Show a status line that stays until the user dismisses it (or another
 /// status replaces it).
 pub fn notice(text: &str) {
@@ -1022,6 +1051,20 @@ pub fn open_windows(n: usize) {
             a.open_window(id);
         }
     });
+}
+
+/// Snapshots (`KOMOREBI_SNAPSHOT_ACTION=composer-window`): the composer
+/// showing moves to a composer window of its own, the size of the main
+/// one; that window is returned for the snapshot.
+pub fn sample_composer_window() -> Option<AppWindow> {
+    with_app(|a| {
+        let id = a.drafts.active_id()?;
+        a.open_draft_window(id);
+        let ui = a.composer_window(id)?;
+        ui.window().set_size(a.ui().window().size());
+        Some(ui)
+    })
+    .flatten()
 }
 
 /// Snapshot QA: made-up attachments in the composer showing.
@@ -1631,6 +1674,9 @@ fn wire(ui: &AppWindow) {
     ui.on_forward(|| {
         with_app(|a| a.forward());
     });
+    ui.on_edit_server_draft(|| {
+        with_app(|a| a.edit_server_draft());
+    });
     ui.on_archive(|| {
         with_app(|a| a.archive());
     });
@@ -1796,6 +1842,7 @@ fn wire(ui: &AppWindow) {
     });
     onboarding::wire(ui);
     composer::rich::wire(ui);
+    composer::recipients::wire(ui);
     signatures::wire(ui);
     ui.on_update_action(|which| {
         with_app(|a| a.update_action(which));
@@ -1993,6 +2040,9 @@ fn wire(ui: &AppWindow) {
     ui.on_open_window(|| {
         with_app(|a| a.open_current_window());
     });
+    ui.on_bring_popped(|| {
+        with_app(|a| a.bring_popped());
+    });
     // The message windows close first (none outlives this one); drafts
     // are saved and held moves sent before the window goes, and where the
     // window is and its tabs, for the next start.
@@ -2005,6 +2055,7 @@ fn wire(ui: &AppWindow) {
         })
         .unwrap_or(false);
         if !to_tray {
+            with_app(|a| a.close_composer_windows());
             slint::quit_event_loop().ok();
         }
         slint::CloseRequestResponse::HideWindow
@@ -2046,7 +2097,11 @@ impl App {
                 }
             })
             .collect();
-        ui.set_c_from_options(ModelRc::new(VecModel::from(from)));
+        let from = ModelRc::new(VecModel::from(from));
+        for w in &self.cwins {
+            w.ui.set_c_from_options(from.clone());
+        }
+        ui.set_c_from_options(from);
         // The accounts may have moved: the open draft's From follows.
         if let Some(d) = self.drafts.active_id().and_then(|id| self.drafts.get(id))
             && let Some(i) = self.accounts.iter().position(|a| a.id == d.account_id)
@@ -2240,7 +2295,8 @@ impl App {
                 name: form.name.trim().to_string(),
                 imap,
                 smtp,
-                save_sent: form.save_sent,
+                // A preset's own default can only turn the copy off.
+                save_sent: form.save_sent && providers::save_sent_default(form_preset(&form)),
                 imap_user,
                 smtp_user,
             })
@@ -2792,7 +2848,9 @@ impl App {
         {
             self.view = View::AllInboxes;
         }
-        if self.open.as_ref().is_some_and(|o| o.msg.account_id == id) {
+        // A message tab keeps what it shows, with the moved-or-deleted
+        // warning ([App::refresh_message_tabs]); the Mail tab's pane empties.
+        if self.in_mail_tab() && self.open.as_ref().is_some_and(|o| o.msg.account_id == id) {
             self.close_reader();
         }
         self.load_accounts().ok();
@@ -3482,6 +3540,7 @@ impl App {
         ui.set_list_filter(0);
         ui.set_search_all(false);
         ui.set_selected_folder(view.code());
+        self.clear_popped();
         self.close_reader();
         self.outbox_open = None;
         ui.set_o_show(false);
@@ -4199,6 +4258,7 @@ impl App {
     // ------------------------------------------------------------ reader
 
     fn select_message(&mut self, id: i64) {
+        self.clear_popped();
         let ui = self.ui();
         if ui.get_composing() {
             if self.in_mail_tab() {
@@ -4962,6 +5022,7 @@ impl App {
                 let old =
                     std::mem::replace(&mut self.folders, self.db.folders().unwrap_or_default());
                 self.leave_vanished(&old);
+                self.refresh_message_tabs();
                 self.rebuild_nav();
                 self.land();
                 self.settle_view();
@@ -5113,10 +5174,11 @@ impl App {
     /// account's inbox.
     fn leave_vanished(&mut self, old: &[Folder]) {
         let gone = |folders: &[Folder], id: i64| folders.iter().all(|f| f.id != id);
-        if self
-            .open
-            .as_ref()
-            .is_some_and(|o| gone(&self.folders, o.msg.folder_id))
+        if self.in_mail_tab()
+            && self
+                .open
+                .as_ref()
+                .is_some_and(|o| gone(&self.folders, o.msg.folder_id))
         {
             self.close_reader();
         }

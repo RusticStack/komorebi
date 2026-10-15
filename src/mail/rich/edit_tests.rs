@@ -451,3 +451,28 @@ fn autoformat_starts_a_list_only_at_a_line_start() {
     let c = type_at(&mut e, 0, "* ");
     assert!(e.autoformat(c).is_none(), "a list item already");
 }
+
+#[test]
+fn a_fragment_is_the_selection_with_its_formatting() {
+    let mut e = ed("one two\nthree four");
+    assert!(e.format_chars(4, 7, &CharOp::Bold));
+    // "two, three": the bold word and the next paragraph's start.
+    let f = e.fragment(4, 13).unwrap();
+    assert_eq!(super::emit::plain(&f).trim_end(), "two\nthree");
+    let html = super::emit::html(&f, super::emit::Mode::Send);
+    assert!(html.contains("<strong>two</strong>"), "{html}");
+    assert!(!html.contains("one") && !html.contains("four"), "{html}");
+    // Backwards, the same; empty, none.
+    assert_eq!(e.fragment(13, 4), Some(f));
+    assert_eq!(e.fragment(5, 5), None);
+    // A signature at the end is left out of a whole-message copy.
+    let mut s = ed("hi");
+    assert!(s.set_signature(Some(SignatureBlock::new(
+        vec![Block::Para(Para::text("Ana"))],
+        None,
+        None
+    ))));
+    let len = s.text().len();
+    let f = s.fragment(0, len).unwrap();
+    assert_eq!(super::emit::plain(&f).trim_end(), "hi");
+}

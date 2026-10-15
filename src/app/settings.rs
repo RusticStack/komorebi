@@ -150,6 +150,7 @@ fn set_tokens(ui: &AppWindow, system: &SystemTheme, shown: Option<&SystemTheme>)
         t.set_hc_button_text(hc[7]);
     }
     t.set_animate(system.animate);
+    t.set_caret_blink(i64::from(system.caret_blink_ms));
     let size = |px: f32| theme::scaled(px, system.text_scale);
     t.set_caption(size(12.0));
     t.set_body(size(14.0));
@@ -186,6 +187,7 @@ fn color_scheme(system: &SystemTheme, theme: ThemeChoice) -> slint::language::Co
 fn apply_theme(ui: &AppWindow, system: &SystemTheme, theme: ThemeChoice) {
     let scheme = color_scheme(system, theme);
     let dark = scheme == slint::language::ColorScheme::Dark;
+    theme::set_menu_theme(dark && system.contrast.is_none());
     ui.global::<crate::Palette>().set_color_scheme(scheme);
     let layer = ui.global::<Theme>().get_layer();
     let caption = theme::caption_color(system, [layer.red(), layer.green(), layer.blue()]);

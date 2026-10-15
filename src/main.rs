@@ -118,10 +118,17 @@ fn main() -> anyhow::Result<()> {
     // the window stays hidden and the tray icon is the way in (it shows if
     // the tray can't be made). The loop runs until Quit or a real close,
     // so a window hidden to the tray keeps the app alive.
+    // A mail link (`komorebi.exe "mailto:..."`) opens a prefilled composer
+    // (never sent) and shows the window even with `--minimized`.
+    let link = komorebi::launch::mailto_from_args(std::env::args().skip(1));
     if !komorebi::notify::launched_minimized(std::env::args().skip(1))
         || komorebi::dev_var("KOMOREBI_SNAPSHOT").is_some()
+        || link.is_some()
     {
         ui.show()?;
+    }
+    if let Some(m) = link {
+        slint::Timer::single_shot(std::time::Duration::ZERO, move || app::open_mailto(m));
     }
     slint::run_event_loop_until_quit()?;
     ui.hide().ok();
@@ -153,6 +160,12 @@ fn watch_window_events(ui: &AppWindow, mut started: Option<Instant>) {
             window.with_winit_window(mark_winit_window);
             window.with_winit_window(set_icons);
             window.with_winit_window(watch_appearance);
+            // The Text size slider may only write the registry.
+            if !snapshot {
+                komorebi::theme::watch_text_scale(|| {
+                    let _ = slint::invoke_from_event_loop(app::system_theme_changed);
+                });
+            }
             window.with_winit_window(install_chrome);
             // Slint pushed the bar before the window had its scale.
             push_regions();
@@ -680,8 +693,8 @@ unsafe extern "system" fn appearance_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        WM_DWMCOLORIZATIONCOLORCHANGED, WM_NCDESTROY, WM_SETTINGCHANGE, WM_SYSCOLORCHANGE,
-        WM_THEMECHANGED,
+        WM_DWMCOLORIZATIONCOLORCHANGED, WM_ENDSESSION, WM_NCDESTROY, WM_SETTINGCHANGE,
+        WM_SYSCOLORCHANGE, WM_THEMECHANGED,
     };
     thread_local! {
         static PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -702,6 +715,11 @@ unsafe extern "system" fn appearance_proc(
                     PENDING.set(false);
                 }
             }
+        }
+        // Windows is ending the app (the installer's Restart Manager, or a
+        // sign-out) and it has agreed: really quit, from the event loop.
+        WM_ENDSESSION if wparam != 0 => {
+            slint::invoke_from_event_loop(app::end_session).ok();
         }
         WM_NCDESTROY => {
             // SAFETY: the subclass installed in `watch_appearance`.
@@ -731,6 +749,32 @@ pub fn dress_popout(ui: &AppWindow) {
 /// app's window (a second start finds the main one) and never gets the
 /// app-drawn bar.
 pub fn watch_popout(ui: &AppWindow, placed: impl Fn(u32, u32) + 'static) {
+    watch_secondary(ui, placed, |_| {});
+}
+
+/// A file dragged over a composer window, the drag gone, or the file
+/// dropped there.
+pub enum FileDrag {
+    Hover,
+    Left,
+    Dropped(std::path::PathBuf),
+}
+
+/// A composer window's window events: as [`watch_popout`], and `files`
+/// hears files dragged over it and dropped on it.
+pub fn watch_composer_window(
+    ui: &AppWindow,
+    placed: impl Fn(u32, u32) + 'static,
+    files: impl Fn(FileDrag) + 'static,
+) {
+    watch_secondary(ui, placed, files);
+}
+
+fn watch_secondary(
+    ui: &AppWindow,
+    placed: impl Fn(u32, u32) + 'static,
+    files: impl Fn(FileDrag) + 'static,
+) {
     use slint::ComponentHandle;
     use slint::winit_030::winit::event::WindowEvent;
     use slint::winit_030::{EventResult, WinitWindowAccessor};
@@ -740,6 +784,12 @@ pub fn watch_popout(ui: &AppWindow, placed: impl Fn(u32, u32) + 'static) {
         if !std::mem::replace(&mut dressed, true) {
             window.with_winit_window(set_icons);
             window.with_winit_window(watch_appearance);
+        }
+        match event {
+            WindowEvent::HoveredFile(_) => files(FileDrag::Hover),
+            WindowEvent::HoveredFileCancelled => files(FileDrag::Left),
+            WindowEvent::DroppedFile(path) => files(FileDrag::Dropped(path.clone())),
+            _ => {}
         }
         if let WindowEvent::Resized(_) = event
             && let Some(ui) = weak.upgrade()
@@ -857,8 +907,14 @@ fn single_instance(db_path: &Path) -> bool {
     }
     // SAFETY: a valid handle from CreateMutexW.
     unsafe { CloseHandle(handle) };
-    // A window hidden to the tray is shown by the running copy itself.
-    komorebi::win_shell::signal_existing_instance();
+    // A `mailto:` URL goes to the running copy, which opens a composer with
+    // it (and comes forward by itself); otherwise it is asked to come
+    // forward. A window hidden to the tray is shown by the running copy.
+    let handed = komorebi::launch::handoff_payload(std::env::args().skip(1))
+        .is_some_and(|p| komorebi::win_shell::send_mailto_to_existing_instance(&p));
+    if !handed {
+        komorebi::win_shell::signal_existing_instance();
+    }
     if let Some(hwnd) = app_window(window_mark(db_path)) {
         // SAFETY: a window handle just found; a stale one fails harmlessly.
         unsafe {
@@ -940,6 +996,13 @@ pub(crate) fn release_app_mutex() {
     let _ = handle;
 }
 
+thread_local! {
+    /// The window a snapshot action asks to be drawn instead of the main
+    /// one (`composer-window`).
+    static SNAPSHOT_WINDOW: std::cell::RefCell<Option<AppWindow>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Development aid: render the window (optionally at `KOMOREBI_SIZE=WxH`),
 /// save it as a BMP, and exit. Used to check layouts without screen capture.
 fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
@@ -1006,6 +1069,21 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 ui.invoke_compose();
                 app::sample_attachments();
             }
+            // A formatted message moved to a composer window of its own
+            // (Ctrl+O): `composer-window` snapshots that window,
+            // `composer-window:main` the main one with the pane's
+            // placeholder.
+            "composer-window" | "composer-window:main" => {
+                ui.invoke_compose();
+                let to = "Ana Silva <ana@example.com>";
+                ui.set_c_to(to.into());
+                ui.invoke_c_edited(ComposeField::To, to.into());
+                app::sample_rich(false);
+                let win = app::sample_composer_window();
+                if action == "composer-window" {
+                    SNAPSHOT_WINDOW.with(|w| *w.borrow_mut() = win);
+                }
+            }
             // A new message whose To address is wrong, then Send: the
             // inline error under To, which has the focus (nothing is sent).
             "compose-invalid" => {
@@ -1014,6 +1092,28 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 ui.set_c_to(to.into());
                 ui.invoke_c_edited(ComposeField::To, to.into());
                 ui.invoke_send();
+            }
+            // A new message with recipients as chips, one of them wrong,
+            // Cc shown, and an address being typed into To.
+            "compose-recipients" => {
+                ui.invoke_compose();
+                ui.invoke_c_reveal(ComposeField::Cc);
+                for (field, text) in [
+                    (
+                        ComposeField::Cc,
+                        "\"Doe, Jane\" <jane@example.com>, rui@example.pt",
+                    ),
+                    (
+                        ComposeField::To,
+                        "Ana Silva <ana@example.pt>, joao@, Maria Santos <maria@example.pt>; pe",
+                    ),
+                ] {
+                    match field {
+                        ComposeField::To => ui.set_c_to(text.into()),
+                        _ => ui.set_c_cc(text.into()),
+                    }
+                    ui.invoke_c_edited(field, text.into());
+                }
             }
             // A new message with no recipient, then Send: "Add a recipient
             // to send." under To.
@@ -1495,6 +1595,10 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
     let weak = ui.as_weak();
     slint::Timer::single_shot(at, move || {
         let Some(ui) = weak.upgrade() else { return };
+        // A secondary window the action opened, else the main one.
+        let ui = SNAPSHOT_WINDOW
+            .with(|w| w.borrow_mut().take())
+            .unwrap_or(ui);
         dump_title_bar(&ui);
         let t = Instant::now();
         let snapshot = ui.window().take_snapshot();

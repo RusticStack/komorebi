@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::mail::mime::Body;
+use composer::DraftId;
 use std::collections::HashSet;
 
 /// A new window's size in logical px, until one has been resized.
@@ -33,6 +34,12 @@ pub(super) struct PopOuts {
     next: u32,
     /// The last window's size in logical px (setting `popout_size`).
     pub(super) size: Option<(u32, u32)>,
+    /// The draft the main window's reading pane showed before it went to
+    /// a composer window: the pane says so until that window goes.
+    popped: Option<DraftId>,
+    /// Files dropped on a composer window, attached together (a drop of
+    /// several arrives one file at a time).
+    dropped: Vec<PathBuf>,
 }
 
 impl PopOuts {
@@ -41,6 +48,8 @@ impl PopOuts {
             list: Vec::new(),
             next: 0,
             size,
+            popped: None,
+            dropped: Vec::new(),
         }
     }
 
@@ -676,6 +685,309 @@ fn wire_popout(ui: &AppWindow, wid: u32) {
         // After this event: the window's own callback is running.
         Timer::single_shot(Duration::ZERO, move || {
             with_app(|a| a.close_popout(wid));
+        });
+        slint::CloseRequestResponse::HideWindow
+    });
+}
+
+/// A composer window: one draft, with its own view state (the draft shown,
+/// its suggestions, body pane and preview sequence), swapped in while an
+/// event of this window runs ([`App::in_composer`]), so typing here never
+/// moves the main window's draft.
+pub(super) struct ComposerWin {
+    pub(super) draft: DraftId,
+    pub(super) ui: AppWindow,
+    view: DraftView,
+}
+
+/// What a composer window holds while it is not in view.
+#[derive(Default)]
+struct DraftView {
+    active: Option<DraftId>,
+    suggest: Option<composer::Suggest>,
+    pane: composer::rich::Pane,
+    preview_seq: u64,
+}
+
+impl App {
+    /// The composer window holding draft `id`.
+    pub(super) fn composer_window(&self, id: DraftId) -> Option<AppWindow> {
+        self.cwins
+            .iter()
+            .find(|w| w.draft == id)
+            .map(|w| w.ui.clone_strong())
+    }
+
+    /// The drafts held by composer windows.
+    pub(super) fn windowed_drafts(&self) -> Vec<DraftId> {
+        self.cwins.iter().map(|w| w.draft).collect()
+    }
+
+    fn swap_draft_view(&mut self, view: &mut DraftView) {
+        self.drafts.swap_view(&mut view.active, &mut view.suggest);
+        self.swap_body_pane(&mut view.pane);
+        std::mem::swap(&mut self.preview_seq, &mut view.preview_seq);
+    }
+
+    /// Run `f` with composer window `id`'s view in place of the main
+    /// window's: the active draft is `id`, and the composer view, the body
+    /// editor and the preview draw into that window. None when no window
+    /// holds `id` or the draft is gone (sent: a second Send does nothing).
+    pub(super) fn in_composer<R>(
+        &mut self,
+        id: DraftId,
+        f: impl FnOnce(&mut App) -> R,
+    ) -> Option<R> {
+        if !self.drafts.contains(id) {
+            return None;
+        }
+        if self.scoped == Some(id) {
+            return Some(f(self));
+        }
+        let i = self.cwins.iter().position(|w| w.draft == id)?;
+        let mut view = std::mem::take(&mut self.cwins[i].view);
+        view.active = Some(id);
+        let outer = self.scoped.replace(id);
+        self.swap_draft_view(&mut view);
+        let r = f(self);
+        self.swap_draft_view(&mut view);
+        self.scoped = outer;
+        if let Some(w) = self.cwins.iter_mut().find(|w| w.draft == id) {
+            w.view = view;
+        }
+        Some(r)
+    }
+
+    /// `f` in draft `id`'s composer window when one holds it, otherwise on
+    /// the main window's view.
+    pub(super) fn in_draft_view<R: Default>(
+        &mut self,
+        id: Option<DraftId>,
+        f: impl FnOnce(&mut App) -> R,
+    ) -> R {
+        match id {
+            Some(id) if self.scoped != Some(id) && self.cwins.iter().any(|w| w.draft == id) => {
+                self.in_composer(id, f).unwrap_or_default()
+            }
+            _ => f(self),
+        }
+    }
+
+    /// Draft `id` in a composer window of its own ("Open in new window",
+    /// Ctrl+O on a composer tab or the reading pane's draft). It leaves the
+    /// main window: its tab is dropped, or the reading pane's composer
+    /// closes. A window that has it already comes forward.
+    pub(super) fn open_draft_window(&mut self, id: DraftId) {
+        if let Some(ui) = self.composer_window(id) {
+            crate::bring_to_front(&ui);
+            return;
+        }
+        if !self.drafts.contains(id) {
+            return;
+        }
+        let ui = match AppWindow::new() {
+            Ok(ui) => ui,
+            Err(e) => {
+                return self.set_status(&text::detail(&anyhow::anyhow!("{e}")), true);
+            }
+        };
+        // Saved as it stands before it moves.
+        self.save_draft(id);
+        if let Some(i) = self.tabs.find(tabs::TabKind::Draft(id)) {
+            if i == self.tabs.active() {
+                self.drop_active_tab();
+            } else {
+                self.tabs.remove(i);
+                self.show_tabs();
+            }
+        } else if self.drafts.active_id() == Some(id) {
+            let main = self.ui();
+            main.set_composing(false);
+            main.set_c_suggestions(ModelRc::default());
+            // The pane says where the draft went.
+            self.popouts.popped = Some(id);
+            main.set_draft_popped(true);
+        }
+        self.drafts.set_tabbed(id, false);
+        if self.drafts.active_id() == Some(id) {
+            self.drafts.hide();
+        }
+        self.dress_window(&ui);
+        ui.set_tab_kind(2);
+        ui.set_c_from_options(self.ui().get_c_from_options());
+        wire_composer(&ui, id);
+        composer::rich::wire_for(&ui, Some(id));
+        self.place_window(&ui);
+        crate::watch_composer_window(
+            &ui,
+            move |w, h| {
+                with_app(|a| a.popouts.size = Some((w, h)));
+            },
+            move |drag| composer_file(id, drag),
+        );
+        self.cwins.push(ComposerWin {
+            draft: id,
+            ui: ui.clone_strong(),
+            view: DraftView::default(),
+        });
+        self.in_composer(id, |a| {
+            a.ed_reset(composer::rich::BODY);
+            a.show_draft();
+        });
+        ui.show().ok();
+    }
+
+    /// Saved draft `row` in a composer window (Undo send from one).
+    pub(super) fn open_saved_in_window(&mut self, row: i64) {
+        if let Some(id) = self.drafts.find_row(row) {
+            return self.open_draft_window(id);
+        }
+        match composer::load(&self.db, row) {
+            Ok(Some((mut draft, _))) => {
+                self.prepare_draft(&mut draft);
+                let id = self.drafts.add(draft);
+                self.open_draft_window(id);
+            }
+            Ok(None) => self.set_status(&t!(invoke_draft_gone), true),
+            Err(e) => self.set_status(
+                &t!(invoke_could_not_open_draft, format!("{e:#}").into()),
+                true,
+            ),
+        }
+    }
+
+    /// Composer window of draft `id` goes (closed, sent, discarded): from
+    /// the screen now, its window once the event that closed it is over.
+    pub(super) fn drop_composer_window(&mut self, id: DraftId) {
+        let Some(i) = self.cwins.iter().position(|w| w.draft == id) else {
+            return;
+        };
+        let w = self.cwins.remove(i);
+        w.ui.hide().ok();
+        if self.popouts.popped == Some(id) {
+            self.clear_popped();
+        }
+        Timer::single_shot(Duration::ZERO, move || drop(w));
+    }
+
+    /// The main window's pane no longer stands for a popped-out draft.
+    pub(super) fn clear_popped(&mut self) {
+        if self.popouts.popped.take().is_some() {
+            self.ui().set_draft_popped(false);
+        }
+    }
+
+    /// "Bring to front" in the main window's pane: the composer window of
+    /// the draft that left it.
+    pub(super) fn bring_popped(&mut self) {
+        match self.popouts.popped {
+            Some(id) if self.cwins.iter().any(|w| w.draft == id) => self.open_draft_window(id),
+            _ => self.clear_popped(),
+        }
+    }
+
+    /// Every composer window goes (the main window closes or the app
+    /// quits): each draft is saved first, as a close of its window saves.
+    pub(super) fn close_composer_windows(&mut self) {
+        for id in self.windowed_drafts() {
+            self.in_composer(id, |a| a.save_draft(id));
+        }
+        for w in std::mem::take(&mut self.cwins) {
+            w.ui.hide().ok();
+        }
+        self.clear_popped();
+    }
+
+    /// Close (Esc, Ctrl+W, the caption's close) on composer window `id`:
+    /// the draft is saved as Esc saves it.
+    pub(super) fn close_composer_window(&mut self, id: DraftId) {
+        if self.in_composer(id, App::close_composer).is_none() {
+            // Its draft went already: only the window is left.
+            self.drop_composer_window(id);
+        }
+    }
+}
+
+/// A file dragged over composer window `id`, or dropped on it: it goes in
+/// that window's draft.
+fn composer_file(id: DraftId, drag: crate::FileDrag) {
+    with_app(|a| {
+        let hover = move |a: &App, on: bool| {
+            if let Some(ui) = a.composer_window(id) {
+                ui.set_file_hover(on);
+            }
+        };
+        match drag {
+            crate::FileDrag::Hover => hover(a, true),
+            crate::FileDrag::Left => hover(a, false),
+            crate::FileDrag::Dropped(path) => {
+                if a.popouts.dropped.is_empty() {
+                    Timer::single_shot(Duration::ZERO, move || {
+                        with_app(|a| {
+                            let paths = std::mem::take(&mut a.popouts.dropped);
+                            if a.in_composer(id, |a| a.attach_dropped(paths)).is_none() {
+                                // Its draft went meanwhile (sent).
+                                hover(a, false);
+                            }
+                        });
+                    });
+                }
+                a.popouts.dropped.push(path);
+            }
+        }
+    });
+}
+
+/// Composer window `id`'s callbacks: each runs with its draft in view.
+fn wire_composer(ui: &AppWindow, id: DraftId) {
+    composer::recipients::wire(ui);
+    fn run<R: Default>(id: DraftId, f: impl FnOnce(&mut App) -> R) -> R {
+        with_app(|a| a.in_composer(id, f).unwrap_or_default()).unwrap_or_default()
+    }
+    ui.on_send(move || run(id, App::send));
+    ui.on_c_send_anyway(move || run(id, App::send_anyway));
+    ui.on_discard(move || run(id, App::discard));
+    ui.on_discard_confirmed(move || run(id, App::discard_confirmed));
+    ui.on_attach(move || composer::attach_files_to(id));
+    ui.on_c_paste_files(move || run(id, App::paste_files));
+    ui.on_remove_attachment(move |i| run(id, |a| a.remove_attachment(i)));
+    ui.on_c_edited(move |field, text| run(id, |a| a.draft_edited(field, &text)));
+    ui.on_c_left(move |field| run(id, |a| a.draft_left(field)));
+    ui.on_c_suggest_accept(move |index| run(id, |a| a.accept_suggestion(index)));
+    ui.on_c_suggest_close(move || run(id, App::close_suggestions));
+    ui.on_c_from_changed(move |index| run(id, |a| a.draft_account(index)));
+    ui.on_c_reveal(move |field| run(id, |a| a.reveal_cc(field)));
+    ui.on_c_set_importance(move |code| run(id, |a| a.draft_importance(code)));
+    ui.on_c_close(move || {
+        with_app(|a| a.close_composer_window(id));
+    });
+    ui.on_c_unfold_quote(move || run(id, App::unfold_quote));
+    ui.on_c_preview_render(move |width, dark, first| {
+        run(id, |a| a.render_preview(width, dark, first));
+    });
+    ui.on_c_format(move |action, anchor, cursor| {
+        run(id, |a| a.format_body(action, anchor, cursor))
+    });
+    ui.on_c_link(move |url, anchor, cursor| run(id, |a| a.link_body(&url, anchor, cursor)));
+    ui.on_c_unformat(move || run(id, App::unformat_body));
+    let rich = ui.global::<crate::Rich>();
+    rich.on_pick_signature(move |i| run(id, |a| a.pick_signature(i)));
+    rich.on_set_rich(move |on| run(id, |a| a.set_rich(on)));
+    // New mail (Ctrl+N): a composer tab in the main window.
+    ui.on_compose(|| {
+        with_app(|a| a.in_main_tab(App::compose_new));
+    });
+    ui.on_close_window(move || {
+        with_app(|a| a.close_composer_window(id));
+    });
+    ui.on_tab_key(move |key| {
+        if key == 5 {
+            with_app(|a| a.close_composer_window(id));
+        }
+    });
+    ui.window().on_close_requested(move || {
+        Timer::single_shot(Duration::ZERO, move || {
+            with_app(|a| a.close_composer_window(id));
         });
         slint::CloseRequestResponse::HideWindow
     });

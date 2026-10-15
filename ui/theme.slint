@@ -32,6 +32,9 @@ export global Theme {
     in property <color> hc-button-text: #ffffff;
     // Windows animation effects are on; off, every duration is 0 ms.
     in property <bool> animate: true;
+    // The text caret's blink, half a cycle (Windows' caret blink rate);
+    // 0 ms: a steady caret (no blinking set, or animation effects off).
+    in property <duration> caret-blink: 0ms;
     out property <duration> fast: animate ? 167ms : 0ms;
     out property <duration> faster: animate ? 83ms : 0ms;
     // The onboarding flow (docs/WINUI3.md "Onboarding"): a step's

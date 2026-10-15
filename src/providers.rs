@@ -35,6 +35,14 @@ pub struct Preset {
     pub domain: &'static str,
     pub imap: (&'static str, u16),
     pub smtp: (&'static str, u16),
+    /// Whether a new account on this preset saves a copy of what it sends
+    /// to its Sent folder. SMTP never does that by itself, so it is on
+    /// unless the provider is known to save sent mail on the server.
+    /// Postale.io is known (from live tests) not to, so it is on;
+    /// Purelymail has no documentation either way, so it keeps the
+    /// general default (on), and a duplicate is avoided by the Message-ID
+    /// lookup of the Sent folder. Existing accounts keep their stored choice.
+    pub save_sent: bool,
 }
 
 /// Presets in the order of the account form's provider list (Purelymail,
@@ -45,12 +53,14 @@ pub const PRESETS: &[Preset] = &[
         domain: "purelymail.com",
         imap: ("imap.purelymail.com", 993),
         smtp: ("smtp.purelymail.com", 465),
+        save_sent: true,
     },
     Preset {
         name: "Postale.io",
         domain: "postale.io",
         imap: ("mail.postale.io", 993),
         smtp: ("mail.postale.io", 465),
+        save_sent: true,
     },
 ];
 
@@ -68,6 +78,14 @@ pub fn guess(email: &str) -> Option<usize> {
 /// Whether `email` is on preset `index`'s own domain.
 pub fn on_own_domain(index: usize, email: &str) -> bool {
     guess(email) == Some(index)
+}
+
+/// The default of "save a copy to Sent" for a new account on preset
+/// `index` (`None`: another server, where the general default, on, holds).
+pub fn save_sent_default(index: Option<usize>) -> bool {
+    index
+        .and_then(|i| PRESETS.get(i))
+        .is_none_or(|p| p.save_sent)
 }
 
 impl Preset {
@@ -102,6 +120,17 @@ mod tests {
         assert_eq!(PRESETS[0].smtp.0, "smtp.purelymail.com");
         assert_eq!(PRESETS[1].imap.0, "mail.postale.io");
         assert_eq!(PRESETS[1].smtp.0, "mail.postale.io");
+    }
+
+    #[test]
+    fn sent_copy_defaults_follow_the_preset() {
+        // Postale.io does not save sent mail itself (live tests): on.
+        assert!(PRESETS[1].save_sent);
+        // Purelymail is undocumented: the general default.
+        assert!(PRESETS[0].save_sent);
+        assert!(save_sent_default(None));
+        assert!(save_sent_default(Some(1)));
+        assert!(save_sent_default(Some(99)));
     }
 
     #[test]

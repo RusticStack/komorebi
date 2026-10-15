@@ -61,6 +61,9 @@ pub struct SystemTheme {
     pub animate: bool,
     /// "Show accent colour on title bars and window borders" is on.
     pub prevalence: bool,
+    /// The text caret's blink: half a cycle in ms (`GetCaretBlinkTime`);
+    /// 0 when it does not blink (no blinking set, or animation effects off).
+    pub caret_blink_ms: u32,
 }
 
 impl Default for SystemTheme {
@@ -72,15 +75,33 @@ impl Default for SystemTheme {
             text_scale: 1.0,
             animate: true,
             prevalence: false,
+            caret_blink_ms: DEFAULT_BLINK_MS,
         }
     }
 }
+
+/// Windows' default caret blink (half a cycle).
+pub const DEFAULT_BLINK_MS: u32 = 530;
 
 /// Windows' appearance settings, with the development switches over them.
 pub fn read() -> SystemTheme {
     let mut theme = read_system();
     dev_overrides(&mut theme);
     theme
+}
+
+/// The caret's blink from `GetCaretBlinkTime` (`raw`): 0 (steady) when it
+/// is INFINITE, when animation effects are off, or when the editor should
+/// hold still (a snapshot); a failed read (0) is Windows' default. Kept
+/// within 100 to 5000 ms.
+pub fn caret_blink(raw: u32, animate: bool) -> u32 {
+    if !animate || raw == u32::MAX {
+        return 0;
+    }
+    if raw == 0 {
+        return DEFAULT_BLINK_MS;
+    }
+    raw.clamp(100, 5000)
 }
 
 /// The ramp from `AccentPalette`: 32 bytes, 8 entries of `[R, G, B, A]`,
@@ -199,6 +220,11 @@ fn dev_overrides(theme: &mut SystemTheme) {
     }
     if var("KOMOREBI_ANIMATE").as_deref() == Some("0") {
         theme.animate = false;
+        theme.caret_blink_ms = 0;
+    }
+    // A snapshot shows the caret, never a blink's off half.
+    if crate::dev_var("KOMOREBI_SNAPSHOT").is_some() {
+        theme.caret_blink_ms = 0;
     }
 }
 
@@ -262,6 +288,8 @@ fn read_system() -> SystemTheme {
     let mut animate: windows_sys::core::BOOL = 1;
     // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL.
     unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&raw mut animate).cast(), 0) };
+    // SAFETY: a plain read with no arguments.
+    let blink = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCaretBlinkTime() };
     SystemTheme {
         ramp,
         dark: light == 0,
@@ -269,6 +297,7 @@ fn read_system() -> SystemTheme {
         text_scale: factor as f32 / 100.0,
         animate: animate != 0,
         prevalence: prevalence == Some(1),
+        caret_blink_ms: caret_blink(blink, animate != 0),
     }
 }
 
@@ -372,9 +401,131 @@ fn read_build() -> u32 {
     0
 }
 
+/// The uxtheme `PreferredAppMode` for native menus (the tray menu, the
+/// window's system menu): ForceDark (2) or ForceLight (3).
+pub fn menu_mode(dark: bool) -> i32 {
+    if dark { 2 } else { 3 }
+}
+
+/// Native menus dark or light with the app (docs/WINUI3.md "MenuFlyout / ToolTip / Flyout"): the
+/// undocumented uxtheme `SetPreferredAppMode` (ordinal 135) then
+/// `FlushMenuThemes` (ordinal 136), as Explorer and the Windows Terminal
+/// do. Only on build 18362 and later (1809's ordinal 135 takes a BOOL);
+/// anything missing is skipped quietly.
+#[cfg(windows)]
+pub fn set_menu_theme(dark: bool) {
+    use windows_sys::Win32::System::LibraryLoader::{
+        GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
+    };
+    if windows_build() < 18362 {
+        return;
+    }
+    let name = wide("uxtheme.dll");
+    // SAFETY: a NUL-terminated system DLL name; the module stays loaded
+    // for the process (uxtheme is loaded by every themed window anyway).
+    let module = unsafe {
+        LoadLibraryExW(
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            LOAD_LIBRARY_SEARCH_SYSTEM32,
+        )
+    };
+    if module.is_null() {
+        return;
+    }
+    // SAFETY: lookups by ordinal (a pointer value below 0x10000).
+    let (set, flush) = unsafe {
+        (
+            GetProcAddress(module, 135 as *const u8),
+            GetProcAddress(module, 136 as *const u8),
+        )
+    };
+    let (Some(set), Some(flush)) = (set, flush) else {
+        return;
+    };
+    // SAFETY: the signatures these ordinals have had since build 18362:
+    // `PreferredAppMode SetPreferredAppMode(PreferredAppMode)` and
+    // `void FlushMenuThemes()`.
+    unsafe {
+        let set: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(set);
+        let flush: unsafe extern "system" fn() = std::mem::transmute(flush);
+        set(menu_mode(dark));
+        flush();
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_menu_theme(_: bool) {}
+
+/// Call `changed` (from a background thread) whenever a value under
+/// `HKCU\Software\Microsoft\Accessibility` changes: the Text size slider
+/// writes `TextScaleFactor` there without always sending
+/// `WM_SETTINGCHANGE`. One thread waiting in the kernel, never polling;
+/// it ends quietly if the key cannot be watched.
+#[cfg(windows)]
+pub fn watch_text_scale(changed: impl Fn() + Send + 'static) {
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, KEY_NOTIFY, REG_NOTIFY_CHANGE_LAST_SET, RegCloseKey,
+        RegNotifyChangeKeyValue, RegOpenKeyExW,
+    };
+    let spawned = std::thread::Builder::new()
+        .name("text-scale".into())
+        .spawn(move || {
+            let path = wide(r"Software\Microsoft\Accessibility");
+            let mut key: HKEY = std::ptr::null_mut();
+            // SAFETY: a NUL-terminated key name and an out-pointer.
+            let status =
+                unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, path.as_ptr(), 0, KEY_NOTIFY, &mut key) };
+            if status != 0 {
+                return;
+            }
+            loop {
+                // SAFETY: an open key; synchronous, so it returns on a change.
+                let status = unsafe {
+                    RegNotifyChangeKeyValue(
+                        key,
+                        0,
+                        REG_NOTIFY_CHANGE_LAST_SET,
+                        std::ptr::null_mut(),
+                        0,
+                    )
+                };
+                if status != 0 {
+                    break;
+                }
+                changed();
+            }
+            // SAFETY: the key opened above.
+            unsafe { RegCloseKey(key) };
+        });
+    let _ = spawned;
+}
+
+#[cfg(not(windows))]
+pub fn watch_text_scale(_: impl Fn() + Send + 'static) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caret_blink_follows_windows() {
+        assert_eq!(caret_blink(530, true), 530);
+        assert_eq!(caret_blink(1200, true), 1200);
+        // "No blinking" (INFINITE) and animation effects off: steady.
+        assert_eq!(caret_blink(u32::MAX, true), 0);
+        assert_eq!(caret_blink(530, false), 0);
+        // A failed read is the default; odd values are kept in range.
+        assert_eq!(caret_blink(0, true), DEFAULT_BLINK_MS);
+        assert_eq!(caret_blink(5, true), 100);
+        assert_eq!(caret_blink(60_000, true), 5000);
+    }
+
+    #[test]
+    fn menu_mode_forces_dark_or_light() {
+        assert_eq!(menu_mode(true), 2);
+        assert_eq!(menu_mode(false), 3);
+    }
 
     #[test]
     fn accent_palette_is_reversed_into_dark3_to_light3() {

@@ -334,10 +334,165 @@ pub(super) fn clipboard_html() -> Option<String> {
     None
 }
 
+/// The CF_HTML header (Version 0.9, four ten-digit offsets).
+const CF_HEADER: &str =
+    "Version:0.9\r\nStartHTML:{a}\r\nEndHTML:{b}\r\nStartFragment:{c}\r\nEndFragment:{d}\r\n";
+
+/// A CF_HTML ("HTML Format") clipboard block for the HTML document `html`
+/// (its `<body>` content is the fragment): the header's byte offsets, then
+/// the document with the fragment comments, NUL-terminated.
+pub(super) fn cf_html_block(html: &str) -> Vec<u8> {
+    const START: &str = "<!--StartFragment-->";
+    const END: &str = "<!--EndFragment-->";
+    let (head, body, tail) = match (html.find("<body>"), html.rfind("</body>")) {
+        (Some(a), Some(b)) if a + 6 <= b => (
+            html.get(..a + 6).unwrap_or_default(),
+            html.get(a + 6..b).unwrap_or_default(),
+            html.get(b..).unwrap_or_default(),
+        ),
+        _ => ("<html><body>", html, "</body></html>"),
+    };
+    let doc = format!("{head}{START}{body}{END}{tail}");
+    // Each `{x}` placeholder (3 bytes) becomes ten digits.
+    let header_len = CF_HEADER.len() + 4 * 7;
+    let start_frag = header_len + head.len() + START.len();
+    let end_frag = start_frag + body.len();
+    let end_html = header_len + doc.len();
+    let mut out = CF_HEADER
+        .replace("{a}", &format!("{header_len:010}"))
+        .replace("{b}", &format!("{end_html:010}"))
+        .replace("{c}", &format!("{start_frag:010}"))
+        .replace("{d}", &format!("{end_frag:010}"));
+    out.push_str(&doc);
+    let mut out = out.into_bytes();
+    out.push(0);
+    out
+}
+
+/// Put `text` (plain) and `html` (a whole HTML document) on the clipboard
+/// together, for Ctrl+C and Cut in the composer. False: the clipboard
+/// would not take the text (another program holds it).
+#[cfg(windows)]
+pub(super) fn set_clipboard_rich(text: &str, html: &str) -> bool {
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{
+        GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock,
+    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
+    /// `CF_UNICODETEXT` (its constant lives in the Ole feature).
+    const CF_UNICODETEXT: u32 = 13;
+    struct Close;
+    impl Drop for Close {
+        fn drop(&mut self) {
+            // SAFETY: only made after OpenClipboard succeeded.
+            unsafe { CloseClipboard() };
+        }
+    }
+    // Windows text: CRLF line ends, UTF-16, NUL-terminated.
+    let crlf = text.replace("\r\n", "\n").replace('\n', "\r\n");
+    let wide: Vec<u8> = crlf
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_ne_bytes)
+        .collect();
+    let block = cf_html_block(html);
+    let name: Vec<u16> = "HTML Format\0".encode_utf16().collect();
+    let put = |fmt: u32, bytes: &[u8]| -> bool {
+        // SAFETY: the block is allocated, filled within its size between
+        // GlobalLock and GlobalUnlock, then handed to the clipboard (which
+        // owns it from then on) or freed if it is refused.
+        unsafe {
+            let h = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+            if h.is_null() {
+                return false;
+            }
+            let ptr = GlobalLock(h).cast::<u8>();
+            if ptr.is_null() {
+                GlobalFree(h);
+                return false;
+            }
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+            GlobalUnlock(h);
+            if SetClipboardData(fmt, h).is_null() {
+                GlobalFree(h);
+                return false;
+            }
+            true
+        }
+    };
+    // SAFETY: `name` is NUL-terminated; the clipboard is opened on this
+    // thread, owned by the active window (so EmptyClipboard gives it an
+    // owner and SetClipboardData is accepted), and closed by `Close`.
+    unsafe {
+        let format = RegisterClipboardFormatW(name.as_ptr());
+        if OpenClipboard(GetActiveWindow()) == 0 {
+            return false;
+        }
+        let _close = Close;
+        if EmptyClipboard() == 0 {
+            return false;
+        }
+        let plain = put(CF_UNICODETEXT, &wide);
+        if format != 0 {
+            put(format, &block);
+        }
+        plain
+    }
+}
+
+#[cfg(not(windows))]
+pub(super) fn set_clipboard_rich(_: &str, _: &str) -> bool {
+    false
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cf_html_block_round_trips_its_fragment() {
+        let html = "<html><head></head><body><div><b>Olá</b> mundo</div></body></html>";
+        let block = cf_html_block(html);
+        assert_eq!(block.last(), Some(&0));
+        assert_eq!(
+            cf_html_fragment(&block).as_deref(),
+            Some("<div><b>Olá</b> mundo</div>")
+        );
+        let head = String::from_utf8_lossy(&block[..40]).into_owned();
+        assert!(
+            head.starts_with("Version:0.9\r\nStartHTML:0000000105\r\n"),
+            "{head}"
+        );
+        // Not a whole document: wrapped in one.
+        let block = cf_html_block("<i>x</i>");
+        assert_eq!(cf_html_fragment(&block).as_deref(), Some("<i>x</i>"));
+    }
+
+    #[test]
+    fn copied_formatting_pastes_back() {
+        // What Ctrl+C puts on the clipboard, read back as Ctrl+V reads it.
+        let mut doc = komorebi::mail::rich::Doc::from_plain("Olá mundo");
+        if let Some(komorebi::mail::rich::Block::Para(p)) = doc.blocks.first_mut() {
+            p.runs.iter_mut().for_each(|r| r.style.b = true);
+        }
+        let html = komorebi::mail::rich::emit::html(&doc, komorebi::mail::rich::emit::Mode::Send);
+        let frag = cf_html_fragment(&cf_html_block(&html)).unwrap();
+        let back = komorebi::mail::compose_html::sanitize(&frag)
+            .and_then(|h| komorebi::mail::rich::import::lossy(&h))
+            .unwrap();
+        assert_eq!(
+            komorebi::mail::rich::emit::plain(&back).trim_end(),
+            "Olá mundo"
+        );
+        assert!(
+            komorebi::mail::rich::emit::needs_html(&back),
+            "the bold is kept"
+        );
+    }
 
     #[test]
     fn cf_html_gives_its_fragment() {

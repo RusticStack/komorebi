@@ -121,6 +121,9 @@ pub(in crate::app) struct Pane {
     hold_window: bool,
     /// A move of the window is waiting for the event to end.
     window_due: bool,
+    /// The message's length in characters when the proxy holds only a
+    /// part of it (0: all of it), for the screen reader's description.
+    long_chars: i32,
     /// Painted pieces by key.
     images: HashMap<u64, Image>,
     /// Stored quotes being laid out, by key.
@@ -316,6 +319,25 @@ impl App {
         Some((editor, pane, engine, logos))
     }
 
+    /// The window editor `id` draws into: the signature editor lives in
+    /// Settings (the main window); the body editor in the window showing
+    /// the active draft ([`App::active_ui`]).
+    fn ed_window(&self, id: i32) -> Option<AppWindow> {
+        if id == SIG {
+            self.ui.upgrade()
+        } else {
+            self.ui.upgrade().map(|_| self.active_ui())
+        }
+    }
+
+    /// Swap the body editor's pane with a composer window's
+    /// (`App::in_composer`).
+    pub(in crate::app) fn swap_body_pane(&mut self, pane: &mut Pane) {
+        if let Some(p) = self.ed.panes.get_mut(slot(BODY)) {
+            std::mem::swap(p, pane);
+        }
+    }
+
     /// Put the caret of editor `id` at `offset` (shown at the next
     /// [`App::ed_show`]).
     pub(in crate::app) fn ed_set_caret(&mut self, id: i32, offset: usize) {
@@ -338,7 +360,7 @@ impl App {
     /// `push`: the projection changed (put it into the proxy); `select`:
     /// set the selection into the proxy; `scroll`: keep the caret in view.
     pub(in crate::app) fn ed_show(&mut self, id: i32, push: bool, select: bool, scroll: bool) {
-        let Some(ui) = self.ui.upgrade() else {
+        let Some(ui) = self.ed_window(id) else {
             return;
         };
         let scale = ui.window().scale_factor();
@@ -448,6 +470,11 @@ impl App {
                 pane.pushed = SharedString::from(part);
                 pane.ws = ws;
                 pane.we = we;
+                pane.long_chars = if (ws, we) == (0, text_now.len()) {
+                    0
+                } else {
+                    i32::try_from(text_now.chars().count()).unwrap_or(i32::MAX)
+                };
             }
             let (pws, pwe) = (pane.ws, pane.we);
             let rel = |o: usize| i32::try_from(o.clamp(pws, pwe) - pws).unwrap_or(i32::MAX);
@@ -469,6 +496,7 @@ impl App {
                 scroll_y: pane.top,
                 scroll_seq: pane.scroll_seq,
                 empty: is_blank(editor),
+                long_chars: pane.long_chars,
             };
             (state, fmt)
         };
@@ -481,7 +509,12 @@ impl App {
             rich.set_body_fmt(fmt);
         }
         for (key, html, width, dark) in jobs {
-            spawn_quote(id, key, html, width, dark, scale);
+            let draft = if id == SIG {
+                None
+            } else {
+                self.drafts.active_id()
+            };
+            spawn_quote(draft, id, key, html, width, dark, scale);
         }
         // Once the event that moved the caret is over.
         for id in rewindow {
@@ -542,7 +575,7 @@ impl App {
             d.touched = true;
             d.dirty = true;
         }
-        self.ui().set_c_guard(SharedString::new());
+        self.active_ui().set_c_guard(SharedString::new());
         self.schedule_autosave();
     }
 
@@ -627,6 +660,7 @@ impl App {
     pub(in crate::app) fn ed_key(&mut self, id: i32, key: EdKey, shift: bool) -> bool {
         match key {
             EdKey::Paste => return self.ed_paste(id),
+            EdKey::Copy | EdKey::Cut => return self.ed_copy(id, key == EdKey::Cut),
             EdKey::Undo | EdKey::Redo => {
                 let Some((editor, pane, _, _)) = self.ed_parts(id) else {
                     return false;
@@ -730,8 +764,10 @@ impl App {
 
     /// A toolbar button or a formatting key.
     pub(in crate::app) fn ed_act(&mut self, id: i32, action: EdAction, arg: i32) {
-        if action == EdAction::Color {
-            self.ui().global::<Rich>().set_last_color(arg);
+        if action == EdAction::Color
+            && let Some(ui) = self.ed_window(id)
+        {
+            ui.global::<Rich>().set_last_color(arg);
         }
         let Some((editor, pane, _, _)) = self.ed_parts(id) else {
             return;
@@ -847,6 +883,37 @@ impl App {
         self.ed_show(id, false, true, true);
     }
 
+    /// Ctrl+C and Ctrl+X: the selection on the clipboard as plain text and
+    /// HTML (the model's own, as sent), the whole of it even where the proxy
+    /// holds only a part; Cut then deletes it. False: there is no formatted
+    /// fragment (nothing selected, or a signature or quote inside it) or
+    /// the clipboard is busy, and the proxy copies the plain text.
+    fn ed_copy(&mut self, id: i32, cut: bool) -> bool {
+        let Some((editor, pane, _, _)) = self.ed_parts(id) else {
+            return false;
+        };
+        let (a, b) = (pane.anchor.min(pane.cursor), pane.anchor.max(pane.cursor));
+        let Some(frag) = editor.fragment(a, b) else {
+            return false;
+        };
+        let html = model::emit::html(&frag, model::Mode::Send);
+        let text = model::emit::plain(&frag);
+        if !files::set_clipboard_rich(text.trim_end_matches('\n'), &html) {
+            return false;
+        }
+        if cut {
+            let Some(caret) = editor.replace(a, b, "", (a, b)) else {
+                return true;
+            };
+            pane.anchor = caret;
+            pane.cursor = caret;
+            pane.goal_x = None;
+            self.ed_changed(id);
+            self.ed_show(id, true, true, true);
+        }
+        true
+    }
+
     /// Ctrl+V: formatted text from the clipboard (sanitized, then what the
     /// model holds of it). False: there is none, and the proxy pastes the
     /// plain text.
@@ -872,7 +939,15 @@ impl App {
 }
 
 /// Lay out a stored quote (the full renderer) on a thread of its own.
-fn spawn_quote(id: i32, key: u64, html: String, width: f32, dark: bool, scale: f32) {
+fn spawn_quote(
+    draft: Option<DraftId>,
+    id: i32,
+    key: u64,
+    html: String,
+    width: f32,
+    dark: bool,
+    scale: f32,
+) {
     let run = move || {
         let mut engine = Engine::new();
         let input = rnd::RenderInput {
@@ -893,7 +968,9 @@ fn spawn_quote(id: i32, key: u64, html: String, width: f32, dark: bool, scale: f
             &rnd::Deadline::after(rnd::LAYOUT_BUDGET),
         )
         .ok();
-        on_ui(Box::new(move |a| a.ed_quote_done(id, key, doc)));
+        on_ui(Box::new(move |a| {
+            a.in_draft_view(draft, |a| a.ed_quote_done(id, key, doc));
+        }));
     };
     std::thread::Builder::new()
         .name("quote".into())
@@ -902,32 +979,46 @@ fn spawn_quote(id: i32, key: u64, html: String, width: f32, dark: bool, scale: f
         .ok();
 }
 
-/// Connect `Rich`'s calls.
+/// Connect `Rich`'s calls on the main window.
 pub(in crate::app) fn wire(ui: &AppWindow) {
+    wire_for(ui, None);
+}
+
+/// Connect `Rich`'s calls; on a composer window (`draft`), each runs with
+/// that window's draft and body pane in view (`App::in_composer`).
+pub(in crate::app) fn wire_for(ui: &AppWindow, draft: Option<DraftId>) {
     let rich = ui.global::<Rich>();
-    rich.on_edited(|id, text, anchor, cursor| {
-        with_app(|a| a.ed_edited(id, &text, anchor, cursor));
+    rich.on_edited(move |id, text, anchor, cursor| {
+        in_view(draft, |a| a.ed_edited(id, &text, anchor, cursor));
     });
-    rich.on_moved(|id, anchor, cursor| {
-        with_app(|a| a.ed_moved(id, anchor, cursor));
+    rich.on_moved(move |id, anchor, cursor| {
+        in_view(draft, |a| a.ed_moved(id, anchor, cursor));
     });
-    rich.on_key(|id, key, shift| with_app(|a| a.ed_key(id, key, shift)).unwrap_or(false));
-    rich.on_point(|id, x, y, kind| {
-        with_app(|a| a.ed_point(id, x, y, kind));
+    rich.on_key(move |id, key, shift| in_view(draft, |a| a.ed_key(id, key, shift)));
+    rich.on_point(move |id, x, y, kind| {
+        in_view(draft, |a| a.ed_point(id, x, y, kind));
     });
-    rich.on_geometry(|id, w, top, h| {
-        with_app(|a| a.ed_geometry(id, w, top, h));
+    rich.on_geometry(move |id, w, top, h| {
+        in_view(draft, |a| a.ed_geometry(id, w, top, h));
     });
-    rich.on_restyle(|id| {
-        with_app(|a| a.ed_show(id, false, false, false));
+    rich.on_restyle(move |id| {
+        in_view(draft, |a| a.ed_show(id, false, false, false));
     });
-    rich.on_act(|id, action, arg| {
-        with_app(|a| a.ed_act(id, action, arg));
+    rich.on_act(move |id, action, arg| {
+        in_view(draft, |a| a.ed_act(id, action, arg));
     });
-    rich.on_link(|id, url| with_app(|a| a.ed_link(id, &url)).unwrap_or(false));
-    rich.on_insert_table(|id, rows, cols| {
-        with_app(|a| a.ed_insert_table(id, rows, cols));
+    rich.on_link(move |id, url| in_view(draft, |a| a.ed_link(id, &url)));
+    rich.on_insert_table(move |id, rows, cols| {
+        in_view(draft, |a| a.ed_insert_table(id, rows, cols));
     });
+}
+
+/// `f` on the app state, in composer window `draft`'s view when given.
+pub(in crate::app) fn in_view<R: Default>(
+    draft: Option<DraftId>,
+    f: impl FnOnce(&mut App) -> R,
+) -> R {
+    with_app(|a| a.in_draft_view(draft, f)).unwrap_or_default()
 }
 
 #[cfg(test)]

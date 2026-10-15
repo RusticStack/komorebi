@@ -4,9 +4,9 @@
 // The Rust side (src/app/onboarding.rs) decides how the servers are found,
 // runs the check and saves the account; the page holds the form as typed,
 // so a typed password is gone as soon as the page closes.
-import { ComboBox, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { Theme, Icons, Motion } from "theme.slint";
-import { Focus, Icon, Button, IconButton, HyperlinkButton, TextField, ComposeBody, CheckBox, InfoBar, Severity, ProgressRing, ProgressBar, RadioButtons, ComboEdge, BrandMark, StepIndicator, OnboardCard, ProviderChip, TipTimer } from "widgets.slint";
+import { Focus, Icon, Button, IconButton, HyperlinkButton, TextField, ComposeBody, CheckBox, InfoBar, Severity, ProgressRing, ProgressBar, RadioButtons, ComboBox, BrandMark, StepIndicator, OnboardCard, ProviderChip, TipTimer } from "widgets.slint";
 import { ServerPorts, Discovery, ServerFields, AccountForm, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow } from "forms.slint";
 
 // Rules that live in Rust, where they are tested.
@@ -66,6 +66,27 @@ component StepButtons inherits Rectangle {
 
 // One of the welcome's three values: a 20 px glyph in a 36 px accent-tinted
 // square, the title in Body Strong and a Caption line.
+// A step card's body: its height moves from the previous step's card
+// (`last`) to its own content's (`target`), and follows the content as it
+// grows or shrinks; 0 ms with animation effects off. Clipped only while
+// it moves, so focus rings at the edges stay whole.
+component StepBody inherits Rectangle {
+    in property <length> target;
+    in-out property <length> last;
+    property <length> shown: root.last > 0 ? root.last : root.target;
+    height: root.shown;
+    clip: root.shown != root.target;
+    animate shown { duration: Theme.normal; easing: Motion.ease-out; }
+    init => {
+        root.shown = root.target;
+        root.last = root.target;
+    }
+    changed target => {
+        root.shown = root.target;
+        root.last = root.target;
+    }
+}
+
 component ValueRow inherits HorizontalLayout {
     in property <string> icon;
     in property <string> title;
@@ -456,6 +477,12 @@ export component OnboardingPage inherits Rectangle {
     // The welcome's entrance: after the first frame, which is drawn still.
     // Drawn at once while animations are off.
     property <bool> entered: !Theme.animate;
+    // It rises 8 px as it fades in (docs/FLUENT2.md "Motion": enter).
+    property <length> enter-rise: root.entered ? 0 : 8px;
+    animate enter-rise { duration: Theme.gentle; easing: Motion.ease-out; }
+    // The last step card's body height (StepBody), so the next one grows
+    // or shrinks from it.
+    property <length> card-h;
     Timer {
         interval: 1ms;
         running: !root.entered;
@@ -495,7 +522,7 @@ export component OnboardingPage inherits Rectangle {
             wide-hero := HorizontalLayout {
                 visible: root.window-wide;
                 x: (welcome.visible-width - self.width) / 2;
-                y: welcome.top;
+                y: welcome.top + root.enter-rise;
                 width: min(welcome.visible-width - 2 * Theme.s6, 440px + Theme.s12 + 360px);
                 height: self.preferred-height;
                 spacing: Theme.s12;
@@ -578,7 +605,7 @@ export component OnboardingPage inherits Rectangle {
             narrow-hero := VerticalLayout {
                 visible: !root.window-wide;
                 x: (welcome.visible-width - self.width) / 2;
-                y: welcome.top;
+                y: welcome.top + root.enter-rise;
                 width: min(welcome.visible-width - 2 * Theme.s4, 480px);
                 height: self.preferred-height;
                 alignment: start;
@@ -686,7 +713,6 @@ export component OnboardingPage inherits Rectangle {
                             accessible-label: @tr("settings language" => "Language");
                             selected(v) => { root.language-changed(self.current-index); }
                         }
-                        ComboEdge { }
                     }
                 }
                 VerticalLayout {
@@ -723,13 +749,14 @@ export component OnboardingPage inherits Rectangle {
                 // ---- 1 Your email
                 if root.view == 1: OnboardCard {
                     narrow: steps.narrow-card;
-                    Rectangle {
+                    StepBody {
                         opacity: root.fade;
-                        height: email-col.preferred-height;
+                        target: email-col.preferred-height;
+                        last <=> root.card-h;
                         Rectangle {
                             email-col := VerticalLayout {
                                 y: root.rise;
-                                height: parent.height;
+                                height: self.preferred-height;
                                 Text {
                                     text: @tr("What's your email address?");
                                     font-family: Theme.display-font;
@@ -781,13 +808,14 @@ export component OnboardingPage inherits Rectangle {
                 // ---- 2 Sign in (the chip and the password), or manual setup
                 if root.view == 2: OnboardCard {
                     narrow: steps.narrow-card;
-                    Rectangle {
+                    StepBody {
                         opacity: root.fade;
-                        height: sign-col.preferred-height;
+                        target: sign-col.preferred-height;
+                        last <=> root.card-h;
                         Rectangle {
                             sign-col := VerticalLayout {
                                 y: root.rise;
-                                height: parent.height;
+                                height: self.preferred-height;
                                 // The title: the address elided, whole in the tooltip.
                                 if !root.manual: Rectangle {
                                     height: title-text.preferred-height;
@@ -918,7 +946,6 @@ export component OnboardingPage inherits Rectangle {
                                                 accessible-label: @tr("IMAP security");
                                                 selected(v) => { root.imap-port = ServerPorts.port-for-security(true, 1 - root.imap-security, root.imap-security, root.imap-port); }
                                             }
-                                            ComboEdge { }
                                         }
                                     }
                                     if root.cert-imap != "": CertLine {
@@ -964,7 +991,6 @@ export component OnboardingPage inherits Rectangle {
                                                 accessible-label: @tr("SMTP security");
                                                 selected(v) => { root.smtp-port = ServerPorts.port-for-security(false, 1 - root.smtp-security, root.smtp-security, root.smtp-port); }
                                             }
-                                            ComboEdge { }
                                         }
                                     }
                                     if root.cert-smtp != "": CertLine {
@@ -1193,13 +1219,14 @@ export component OnboardingPage inherits Rectangle {
                 // ---- 3 Make it yours
                 if root.view == 3: OnboardCard {
                     narrow: steps.narrow-card;
-                    Rectangle {
+                    StepBody {
                         opacity: root.fade;
-                        height: yours-col.preferred-height;
+                        target: yours-col.preferred-height;
+                        last <=> root.card-h;
                         Rectangle {
                             yours-col := VerticalLayout {
                                 y: root.rise;
-                                height: parent.height;
+                                height: self.preferred-height;
                                 Text {
                                     text: @tr("Make it yours");
                                     font-family: Theme.display-font;

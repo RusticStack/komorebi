@@ -9,6 +9,7 @@ pub mod diag;
 pub mod fetch;
 pub mod fold;
 pub mod i18n;
+pub mod launch;
 pub mod mail;
 pub mod notify;
 pub mod onboard;

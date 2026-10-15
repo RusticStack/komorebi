@@ -4,10 +4,10 @@
 //! [`super::Workers`] still closes the job channels.
 
 use super::errors::{Latch, is_parse_error, is_refusal};
-use super::imap::WaitOutcome;
+use super::imap::{Imap, WaitOutcome};
 use super::{Connect, Event, Notify};
 use crate::db::Account;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,6 +29,87 @@ const IDLE_REFUSALS: u32 = 3;
 /// How often `stop` is checked while waiting for the first sync.
 const IDLE_SLICE: Duration = Duration::from_millis(200);
 
+/// Delivered messages in a row, found by a steady-state pass while an IDLE
+/// connection was up and silent, after which the server is taken to never
+/// announce new mail over IDLE (Dovecot on Postale.io reports only flag
+/// changes). Conservative on purpose: five misses, no hit in between.
+pub(super) const IDLE_SILENT_AFTER: u32 = 5;
+
+/// Whether IDLE announces newly delivered mail on this server: a pure state
+/// machine fed by the sync worker after each inbox pass.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct IdleHealth {
+    missed: u32,
+    last_session: Option<u64>,
+    silent: bool,
+}
+
+impl IdleHealth {
+    /// One steady-state inbox pass found `found` new messages. `woke`:
+    /// IDLE woke the sync since the previous pass. `session`: the live IDLE
+    /// connection, if any. Counts a miss only when the same connection was
+    /// up through the whole interval (mail that arrived while IDLE was
+    /// down or reconnecting proves nothing), a hit (any wake) resets the
+    /// count, and a pass that found nothing changes nothing.
+    pub(super) fn observe(&mut self, found: usize, woke: bool, session: Option<u64>) {
+        let steady = session.is_some() && session == self.last_session;
+        self.last_session = session;
+        if self.silent || found == 0 || !steady {
+            return;
+        }
+        if woke {
+            self.missed = 0;
+        } else {
+            self.missed = self.missed.saturating_add(1);
+            self.silent = self.missed >= IDLE_SILENT_AFTER;
+        }
+    }
+
+    /// IDLE is judged useless for new mail on this server (until restart).
+    pub(super) fn silent(&self) -> bool {
+        self.silent
+    }
+}
+
+/// What the IDLE thread and the sync worker tell each other: wakes, the live
+/// connection and the verdict of [`IdleHealth`].
+#[derive(Debug, Default)]
+pub(super) struct IdleWatch {
+    woke: AtomicBool,
+    /// The live IDLE connection's number; 0 when none.
+    session: AtomicU64,
+    next: AtomicU64,
+    health: Mutex<IdleHealth>,
+}
+
+impl IdleWatch {
+    pub(super) fn started(&self) {
+        let id = self.next.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+        self.session.store(id, Ordering::Relaxed);
+    }
+
+    pub(super) fn ended(&self) {
+        self.session.store(0, Ordering::Relaxed);
+    }
+
+    pub(super) fn woke(&self) {
+        self.woke.store(true, Ordering::Relaxed);
+    }
+
+    /// An inbox pass (steady state) found `found` new messages.
+    pub(super) fn observe(&self, found: usize) {
+        let woke = self.woke.swap(false, Ordering::Relaxed);
+        let session = Some(self.session.load(Ordering::Relaxed)).filter(|&s| s != 0);
+        if let Ok(mut h) = self.health.lock() {
+            h.observe(found, woke, session);
+        }
+    }
+
+    pub(super) fn silent(&self) -> bool {
+        self.health.lock().is_ok_and(|h| h.silent())
+    }
+}
+
 /// The IDLE thread's state.
 pub(super) struct Idler {
     account: Account,
@@ -42,6 +123,8 @@ pub(super) struct Idler {
     sock: Arc<Mutex<Option<std::net::TcpStream>>>,
     /// How long one IDLE runs ([`IDLE_WAIT`]; short in tests).
     wait: Duration,
+    /// Shared with the sync worker: wakes in, the silent-server verdict out.
+    watch: Arc<IdleWatch>,
 }
 
 /// How one IDLE connection ended.
@@ -127,7 +210,14 @@ impl Idler {
             kicked: Arc::default(),
             sock: Arc::default(),
             wait: IDLE_WAIT,
+            watch: Arc::default(),
         }
+    }
+
+    /// Share `watch` with the sync worker, which feeds it the inbox passes.
+    pub(super) fn with_watch(mut self, watch: Arc<IdleWatch>) -> Self {
+        self.watch = watch;
+        self
     }
 
     fn stopped(&self) -> bool {
@@ -240,15 +330,31 @@ impl Idler {
         if catch_up {
             changed();
         }
+        self.watch.started();
+        let end = self.idle_loop(imap, changed);
+        self.watch.ended();
+        end
+    }
+
+    fn idle_loop(&self, mut imap: Imap, changed: impl Fn()) -> IdleEnd {
         loop {
             match imap.idle(self.wait) {
                 Ok(WaitOutcome::MailboxChanged) => {
                     if !self.nap(IDLE_DEBOUNCE) {
                         return IdleEnd::Stopped;
                     }
+                    self.watch.woke();
                     changed();
                 }
-                Ok(WaitOutcome::TimedOut) => {}
+                Ok(WaitOutcome::TimedOut) => {
+                    // The server never announced delivered mail over this
+                    // connection: give the connection back (the timer's
+                    // passes find new mail, as for a server without IDLE).
+                    if self.watch.silent() {
+                        imap.logout();
+                        return IdleEnd::Quit;
+                    }
+                }
                 // A shutdown from `IdleHandle` ends the read with an error.
                 Err(_) if self.stopped() => return IdleEnd::Stopped,
                 // A tagged NO or BAD: no IDLE here; or a reply the stream
@@ -371,6 +477,125 @@ mod tests {
         drop(release);
         let sent = server.finish();
         assert_eq!(sent.iter().filter(|l| *l == "DONE").count(), 2);
+    }
+
+    fn watch_after(passes: &[(usize, bool, Option<u64>)]) -> IdleHealth {
+        let mut h = IdleHealth::default();
+        for &(found, woke, session) in passes {
+            h.observe(found, woke, session);
+        }
+        h
+    }
+
+    #[test]
+    fn silent_idle_is_judged_only_after_repeated_misses() {
+        let miss = (1, false, Some(1));
+        // The first pass only learns the connection; then five misses.
+        let mut h = IdleHealth::default();
+        for i in 0..=IDLE_SILENT_AFTER {
+            assert!(!h.silent(), "pass {i}");
+            h.observe(miss.0, miss.1, miss.2);
+        }
+        assert!(h.silent());
+        // Four misses are not enough.
+        let four = vec![miss; IDLE_SILENT_AFTER as usize];
+        assert!(!watch_after(&four).silent());
+    }
+
+    #[test]
+    fn a_wake_a_quiet_pass_or_a_new_connection_never_counts_as_a_miss() {
+        let miss = (1, false, Some(1));
+        // A wake with new mail resets the count.
+        let mut passes = vec![miss; 4];
+        passes.push((1, true, Some(1)));
+        passes.extend(vec![miss; 4]);
+        assert!(!watch_after(&passes).silent());
+        // Passes with nothing new change nothing.
+        let mut passes = vec![miss; 4];
+        passes.extend(vec![(0, false, Some(1)); 50]);
+        passes.push(miss);
+        passes.push(miss);
+        assert!(watch_after(&passes).silent());
+        // Mail found while IDLE was down, or on a connection that just
+        // changed, proves nothing.
+        assert!(!watch_after(&vec![(1, false, None); 20]).silent());
+        let alternating: Vec<_> = (1..40).map(|i| (1, false, Some(i))).collect();
+        assert!(!watch_after(&alternating).silent());
+    }
+
+    #[test]
+    fn the_verdict_is_final_for_the_session() {
+        let mut passes = vec![(1, false, Some(1)); 10];
+        passes.extend(vec![(1, true, Some(1)); 10]);
+        assert!(watch_after(&passes).silent());
+    }
+
+    #[test]
+    fn the_watch_feeds_the_machine_from_wakes_and_connections() {
+        let w = IdleWatch::default();
+        w.started();
+        w.observe(0);
+        for _ in 0..IDLE_SILENT_AFTER {
+            assert!(!w.silent());
+            w.observe(2);
+        }
+        assert!(w.silent());
+        // A wake is consumed by the next pass.
+        let w = IdleWatch::default();
+        w.started();
+        w.observe(0);
+        for _ in 0..20 {
+            w.woke();
+            w.observe(1);
+        }
+        assert!(!w.silent());
+        // Without a connection nothing is judged.
+        let w = IdleWatch::default();
+        for _ in 0..20 {
+            w.observe(1);
+        }
+        assert!(!w.silent());
+    }
+
+    #[test]
+    fn a_silent_server_gets_its_idle_connection_back() {
+        let mut db = Db::in_memory().unwrap();
+        setup(&mut db, 7, &[]);
+        let mut script = login_steps(IDLE_CAPS);
+        script.extend([
+            Step::Expect(r#"a3 EXAMINE "INBOX""#),
+            Step::Send(SELECT_OK),
+            Step::Expect("a4 IDLE"),
+            Step::Send("+ idling\r\n"),
+            Step::Expect("DONE"),
+            Step::Send("a4 OK IDLE terminated\r\n"),
+        ]);
+        script.extend(logout_steps("a5 LOGOUT"));
+        let server = FakeServer::start(script);
+        let (events, rx) = channel();
+        let events = Mutex::new(events);
+        let (ready, ready_rx) = channel();
+        ready.send((1, "INBOX".to_string())).unwrap();
+        let watch = Arc::new(IdleWatch::default());
+        let mut idler = Idler::new(
+            db.accounts().unwrap().remove(0),
+            connect_plain(server.addr),
+            Arc::new(move |e| {
+                events.lock().unwrap().send(e).ok();
+            }),
+            Latch::default(),
+        )
+        .with_watch(watch.clone());
+        idler.wait = Duration::from_millis(300);
+        // The verdict is in before the first IDLE ends.
+        *watch.health.lock().unwrap() = IdleHealth {
+            silent: true,
+            ..Default::default()
+        };
+        let _handle = spawn_idle(idler, ready_rx);
+        // The thread logs out and is gone: no reconnect, no event.
+        assert!(exits_within(&rx, Duration::from_secs(5)));
+        server.finish();
     }
 
     #[test]

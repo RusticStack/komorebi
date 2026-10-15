@@ -174,6 +174,10 @@ fallbacks Windows itself shows when transparency is off, on battery saver,
 when the window is inactive, or before build 22000 (mica.md): base
 #F3F3F3 / #202020, flyouts #F9F9F9 / #2C2C2C, smoke #4D000000.
 
+Mica is a non-goal: the software renderer draws opaque pixels, and a GPU
+renderer or a DWM backdrop would cost the launch budget, so Mica is not used,
+for performance.
+
 Precomposited (`round(top·a + bottom·(1−a))`) on Komorebi's two surfaces,
 **layer** = SolidBackgroundFillColorBase and **card** = LayerFillColorAlt
 over the base (#FFFFFF / #2B2B2B). Contrast is against that surface.
@@ -1570,10 +1574,8 @@ None in `ui/app.slint` or `ui/widgets.slint`. Since
 After the native round the std `LineEdit`, `CheckBox` and `Spinner` are gone (Komorebi's
 `TextField`, `CheckBox`, `ProgressRing`), and since the final polish pass
 the Settings signature is a named-signature picker (a `ComboBox`, see
-"Composer toolbar" and "Signatures page"); only the std `ComboBox` still
-draws Slint's derived accent (in its open list) and has no HC palette
-(accepted near match; `ComboEdge` gives every one its
-edge).
+"Composer toolbar" and "Signatures page"); the `ComboBox` is our own widget (`ui/widgets.slint`, below), with HC
+colours and no animation.
 
 ### Components (`ui/widgets.slint`)
 Each follows the section named, with its HC column:
@@ -1594,10 +1596,12 @@ Each follows the section named, with its HC column:
   transparent there; Komorebi follows "every control keeps its stroke"),
   Highlight hovered, HighlightText pressed, GrayText disabled
   (`Button_themeresources.xaml`).
-- `ComboEdge`: drawn over every std `ComboBox` (the composer's From, the
-  General choices and the account form's Provider and IMAP / SMTP
-  security), the Button's elevation edge, or under HC the 1 px
-  ButtonText border Slint's style lacks.
+- `ComboBox`: our own drop-down (it replaced Slint's, which had no HC
+  colours and faded its border and chevron over 200 ms and 150 ms with
+  animation effects off): a Button's face (the same tokens, the elevation
+  edge, Highlight on hover under HC), a Flyout list of 36 px items, six in
+  view, no animation. Space, Enter, F4 or Alt+Down open it; the arrows step
+  through the values, also closed.
 - `FieldButton` (a TextField's clear / reveal and the SearchBox's query
   glyph) keeps WinUI's 28 × 24 plate; its pointer area is 32 × 32, the
   field's full height (FLUENT2 "Layout and spacing").

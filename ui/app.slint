@@ -1,13 +1,14 @@
-import { ComboBox, ListView, ScrollView, AboutSlint, Palette } from "std-widgets.slint";
+import { ListView, ScrollView, AboutSlint, Palette } from "std-widgets.slint";
 import { Theme, Icons, Tip } from "theme.slint";
 import { Tr } from "tr.slint";
 import { Shortcuts, ShortcutRow } from "shortcuts.slint";
 import { ServerPorts, Discovery, ServerFields, AccountForm, GroupHeader, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow } from "forms.slint";
 import { OnboardingPage, Onboard } from "onboarding.slint";
+import { Recipients, RecipientChip, RecipientField } from "chips.slint";
 import { Rich, Sigs, SigRow, RichBody, RichToolbar, EdState, EdFormat, EdPiece, EdRect, EdAction, EdKey } from "editor.slint";
-import { NavItem, MenuCommand, MailRow, AttachmentRow, AccountRow, FolderOption, Focus, FocusRing, FocusTrap, Icon, Button, IconButton, HyperlinkButton, NavRow, MailItem, Chip, FieldLabel, ComposeBody, TextField, CheckBox, ToggleSwitch, Severity, InfoBar, ContentDialog, ProgressRing, ProgressBar, SelectorBar, SettingsCard, SettingsSurface, SearchBox, ScopeBox, CaptionButton, BarRect, TipTimer, Flyout, FlyoutItem, ComboEdge, ScrollThumb, RadioButtons, RadioItem, Expander, TeachingTip, PressKeys, TabItem, TabStrip } from "widgets.slint";
+import { NavItem, MenuCommand, MailRow, AttachmentRow, AccountRow, FolderOption, Focus, FocusRing, FocusTrap, Icon, Button, IconButton, HyperlinkButton, NavRow, MailItem, Chip, FieldLabel, ComposeBody, TextField, CheckBox, ToggleSwitch, Severity, InfoBar, ContentDialog, ProgressRing, ProgressBar, SelectorBar, SettingsCard, SettingsSurface, SearchBox, ScopeBox, CaptionButton, BarRect, TipTimer, Flyout, FlyoutItem, ComboBox, ScrollThumb, RadioButtons, RadioItem, Expander, TeachingTip, PressKeys, TabItem, TabStrip } from "widgets.slint";
 
-export { TabItem, Theme, Palette, Severity, Tr, ServerPorts, Discovery, ServerFields, AccountForm, Onboard, Rich, Sigs, SigRow, EdState, EdFormat, EdPiece, EdRect, EdAction, EdKey }
+export { Recipients, RecipientChip, TabItem, Theme, Palette, Severity, Tr, ServerPorts, Discovery, ServerFields, AccountForm, Onboard, Rich, Sigs, SigRow, EdState, EdFormat, EdPiece, EdRect, EdAction, EdKey }
 
 // One folder role of the account form (Edit account > Folders): the folders
 // to choose from (the first is "Automatic": what the server marks) and the
@@ -1154,7 +1155,6 @@ component SettingsPage inherits Rectangle {
                                             accessible-label: @tr("Signature for new messages");
                                             selected => { Sigs.set-defaults(root.edit-id, self.current-index, sig-reply.current-index); }
                                         }
-                                        ComboEdge { }
                                     }
                                 }
                                 VerticalLayout {
@@ -1170,7 +1170,6 @@ component SettingsPage inherits Rectangle {
                                             accessible-label: @tr("Signature for replies and forwards");
                                             selected => { Sigs.set-defaults(root.edit-id, sig-new.current-index, self.current-index); }
                                         }
-                                        ComboEdge { }
                                     }
                                 }
                                 HorizontalLayout {
@@ -1229,7 +1228,6 @@ component SettingsPage inherits Rectangle {
                                                 accessible-label: label;
                                                 selected(v) => { root.choose-role(i, self.current-index); }
                                             }
-                                            ComboEdge { }
                                         }
                                     }
                                 }
@@ -1301,7 +1299,6 @@ component SettingsPage inherits Rectangle {
                                                         accessible-label: @tr("IMAP security");
                                                         selected(v) => { root.imap-port = ServerPorts.port-for-security(true, 1 - root.imap-security, root.imap-security, root.imap-port); }
                                                     }
-                                                    ComboEdge { }
                                                 }
                                             }
                                             // The sign-in name shows under the
@@ -1355,7 +1352,6 @@ component SettingsPage inherits Rectangle {
                                                         accessible-label: @tr("SMTP security");
                                                         selected(v) => { root.smtp-port = ServerPorts.port-for-security(false, 1 - root.smtp-security, root.smtp-security, root.smtp-port); }
                                                     }
-                                                    ComboEdge { }
                                                 }
                                             }
                                             CertLine {
@@ -1714,7 +1710,6 @@ component SettingsPage inherits Rectangle {
                                 accessible-label: row.label;
                                 selected(v) => { root.general-changed(i, self.current-index); }
                             }
-                            ComboEdge { x: choice.x; y: choice.y; width: choice.width; height: choice.height; }
                         }
                         SettingsCard {
                             header: @tr("Flash the taskbar button");
@@ -1785,7 +1780,6 @@ component SettingsPage inherits Rectangle {
                                     root.language-note = true;
                                 }
                             }
-                            ComboEdge { x: language-choice.x; y: language-choice.y; width: language-choice.width; height: language-choice.height; }
                         }
                         // The window is redrawn in the new language at once;
                         // what a running part made before (a line already
@@ -1814,7 +1808,6 @@ component SettingsPage inherits Rectangle {
                                 accessible-label: @tr("Message format");
                                 selected => { Rich.defaults-changed(self.current-index, Rich.def-font, Rich.def-size, Rich.def-color); }
                             }
-                            ComboEdge { x: format-choice.x; y: format-choice.y; width: format-choice.width; height: format-choice.height; }
                         }
                         SettingsSurface {
                             height: font-col.preferred-height;
@@ -1843,7 +1836,6 @@ component SettingsPage inherits Rectangle {
                                             accessible-label: @tr("Font");
                                             selected => { Rich.defaults-changed(Rich.def-format, self.current-index, Rich.def-size, Rich.def-color); }
                                         }
-                                        ComboEdge { }
                                     }
                                     Rectangle {
                                         width: 72px;
@@ -1856,7 +1848,6 @@ component SettingsPage inherits Rectangle {
                                             accessible-label: @tr("Font size");
                                             selected => { Rich.defaults-changed(Rich.def-format, Rich.def-font, self.current-index, Rich.def-color); }
                                         }
-                                        ComboEdge { }
                                     }
                                     Rectangle {
                                         width: 160px;
@@ -1869,7 +1860,6 @@ component SettingsPage inherits Rectangle {
                                             accessible-label: @tr("Font colour");
                                             selected => { Rich.defaults-changed(Rich.def-format, Rich.def-font, Rich.def-size, self.current-index - 1); }
                                         }
-                                        ComboEdge { }
                                     }
                                 }
                                 // A sample line in the font, size and colour
@@ -2477,6 +2467,10 @@ export component AppWindow inherits Window {
     callback open-tab(/* id */ int, /* background */ bool);
     callback open-current-tab();
     callback open-window();
+    // A draft from the reading pane went to a composer window of its own:
+    // the pane says so, with a way to bring that window forward.
+    in property <bool> draft-popped;
+    callback bring-popped();
     // The tab's message was moved or deleted on the server: readable, its
     // actions off.
     in property <bool> r-gone;
@@ -2637,6 +2631,7 @@ export component AppWindow inherits Window {
     callback reply();
     callback reply-all();
     callback forward();
+    callback edit-server-draft();
     callback archive();
     callback delete();
     callback toggle-read();
@@ -3206,7 +3201,9 @@ export component AppWindow inherits Window {
         }
     }
     // Nothing while there is no account: the welcome has the whole window.
-    property <length> nav-width: !root.mail-shown || !root.mail-tab || root.detail-only ? 0
+    // Settings keep the pane from a message or draft tab too.
+    out property <bool> pane-shown: root.mail-shown && (root.mail-tab || root.show-settings) && !root.detail-only;
+    property <length> nav-width: !root.pane-shown ? 0
         : root.compact ? Theme.rail-width : Theme.rail-width + root.fold-extra;
     // What the full pane adds to the rail from 1040 px. WinUI's
     // NavigationView animates Expanded to Compact: only a press of the
@@ -3310,7 +3307,7 @@ export component AppWindow inherits Window {
     // reader's first control (toolbar, composer field, selection or Outbox
     // buttons) takes the focus each time `pane-seq` changes.
     property <int> pane-seq;
-    property <bool> reader-target: root.composing || root.has-message || root.o-show || root.selected-count > 0;
+    property <bool> reader-target: root.composing || root.has-message || root.o-show || root.selected-count > 0 || (root.draft-popped && !root.one-pane);
     function pane-of-focus() -> int {
         if strip.has-focus {
             return 3;
@@ -3421,7 +3418,8 @@ export component AppWindow inherits Window {
         // Settings: the folders and the page.
         if root.show-settings {
             Focus.keyboard = true;
-            if p == 0 {
+            // No pane (a message window): the page is the one stop.
+            if p == 0 || root.nav-width == 0 {
                 root.settings-refocus += 1;
             } else {
                 nav.focus();
@@ -3984,7 +3982,7 @@ export component AppWindow inherits Window {
             moved(from, to) => { root.tab-move(from, to); }
             menu(i, x, y) => {
                 root.menu-tab = i;
-                root.menu-tab-message = root.tabs[i].kind == 1;
+                root.menu-tab-message = root.tabs[i].kind != 0;
                 root.menu-tab-right = i + 1 < root.tabs.length;
                 tab-menu.show({ x: x, y: y });
             }
@@ -4653,7 +4651,7 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             spacing: Theme.s2;
                             FieldLabel { text: @tr("From"); width: composer.label-w; }
-                            // The std ComboBox, with a Button's edge (ComboEdge).
+                            // Our ComboBox (ui/widgets.slint).
                             Rectangle {
                                 horizontal-stretch: 1;
                                 ComboBox {
@@ -4664,7 +4662,6 @@ export component AppWindow inherits Window {
                                     accessible-label: @tr("From");
                                     selected => { root.c-from-changed(self.current-index); }
                                 }
-                                ComboEdge { }
                             }
                         }
                         HorizontalLayout {
@@ -4675,7 +4672,7 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 horizontal-stretch: 1;
                                 height: to-field.height;
-                                to-field := TextField {
+                                to-field := RecipientField {
                                     property <int> focus-seq: root.c-focus-seq;
                                     // F6 into the composer lands here.
                                     property <int> pane: root.pane-seq;
@@ -4697,7 +4694,7 @@ export component AppWindow inherits Window {
                                     changed caret-seq => {
                                         if root.c-focus == ComposeField.to {
                                             self.focus();
-                                            self.set-selection-offsets(root.c-caret, root.c-caret);
+                                            self.caret-to-end();
                                         }
                                     }
                                     init => { if root.c-focus == ComposeField.to { self.focus(); } }
@@ -4728,7 +4725,7 @@ export component AppWindow inherits Window {
                         if root.c-show-cc: HorizontalLayout {
                             spacing: Theme.s2;
                             FieldLabel { text: @tr("Cc"); width: composer.label-w; }
-                            TextField {
+                            RecipientField {
                                 property <int> focus-seq: root.c-focus-seq;
                                 text <=> root.c-cc;
                                 accessible-label: @tr("Cc");
@@ -4744,7 +4741,7 @@ export component AppWindow inherits Window {
                                 changed caret-seq => {
                                     if root.c-focus == ComposeField.cc {
                                         self.focus();
-                                        self.set-selection-offsets(root.c-caret, root.c-caret);
+                                        self.caret-to-end();
                                     }
                                 }
                                 init => { if root.c-focus == ComposeField.cc { self.focus(); } }
@@ -4754,7 +4751,7 @@ export component AppWindow inherits Window {
                         if root.c-show-cc: HorizontalLayout {
                             spacing: Theme.s2;
                             FieldLabel { text: @tr("Bcc"); width: composer.label-w; }
-                            TextField {
+                            RecipientField {
                                 property <int> focus-seq: root.c-focus-seq;
                                 text <=> root.c-bcc;
                                 accessible-label: @tr("Bcc");
@@ -4770,7 +4767,7 @@ export component AppWindow inherits Window {
                                 changed caret-seq => {
                                     if root.c-focus == ComposeField.bcc {
                                         self.focus();
-                                        self.set-selection-offsets(root.c-caret, root.c-caret);
+                                        self.caret-to-end();
                                     }
                                 }
                                 init => { if root.c-focus == ComposeField.bcc { self.focus(); } }
@@ -5048,7 +5045,25 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                if !root.composing && !root.has-message && !root.o-show && root.selected-count == 0: VerticalLayout {
+                if !root.composing && !root.has-message && !root.o-show && root.selected-count == 0 && root.draft-popped: VerticalLayout {
+                    alignment: center;
+                    spacing: Theme.s3;
+                    padding: Theme.s4;
+                    Icon { text: Icons.compose; font-size: 40px; color: Theme.text-disabled; }
+                    Text {
+                        text: @tr("This message is open in its own window");
+                        font-size: Theme.body;
+                        color: Theme.text-2;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        Button { label: @tr("Bring to front"); clicked => { root.bring-popped(); } }
+                    }
+                }
+
+                if !root.composing && !root.has-message && !root.o-show && root.selected-count == 0 && !root.draft-popped: VerticalLayout {
                     alignment: center;
                     spacing: Theme.s2;
                     Icon { text: Icons.read; font-size: 40px; color: Theme.text-disabled; }
@@ -5758,13 +5773,15 @@ export component AppWindow inherits Window {
                                 }
                             }
                             // A draft from the server's Drafts folder: where it
-                            // came from and how to go on with it here:
-                            // editing it in place is deferred.
+                            // came from and how to go on with it here: Edit
+                            // opens it in the composer, and saving replaces it.
                             if root.r-server-draft: VerticalLayout {
                                 InfoBar {
                                     severity: Severity.info;
-                                    message: @tr("This draft was saved on another device or in webmail. To keep writing it here, use Forward as new draft.");
+                                    message: @tr("This draft was saved on another device or in webmail. To keep writing it here, select Edit.");
+                                    action-text: root.detail-only ? "" : @tr("Edit");
                                     closable: false;
+                                    action => { root.edit-server-draft(); }
                                 }
                             }
                             // A reply to this message in progress (in memory or
@@ -6408,7 +6425,7 @@ export component AppWindow inherits Window {
         Rectangle {
             // The welcome has the whole window until the first account; a
             // message or draft tab, and a message window, have no pane.
-            visible: root.mail-shown && root.mail-tab && !root.detail-only;
+            visible: root.pane-shown;
             x: 0;
             y: root.content-top;
             // Follows the animated width; the rows switch at once.
@@ -6502,6 +6519,17 @@ export component AppWindow inherits Window {
                     // The overlay has been scrolled to the selected folder
                     // since it opened.
                     property <bool> revealed;
+                    // The sliding selection pill's top in the list; placed
+                    // at once the first time, then it slides.
+                    property <length> pill-y;
+                    property <bool> pill-placed;
+                    // A new selection slides; a reflow moves it with its row.
+                    property <bool> pill-slide;
+                    function pill-to(y: length, slide: bool) {
+                        self.pill-slide = slide && self.pill-placed;
+                        self.pill-y = y;
+                        self.pill-placed = true;
+                    }
                     function step(d: int) {
                         root.nav-cursor = clamp(root.nav-cursor + d, 0, root.shown-nav.length - 1);
                     }
@@ -6584,11 +6612,18 @@ export component AppWindow inherits Window {
                                 // Settings, while shown, is the one selected item.
                                 selected: !root.show-settings && i == root.shown-pill;
                                 ring: nav.has-focus && Focus.keyboard && self.current;
+                                own-pill: false;
                                 changed current => { if self.current { nav.ensure-visible(self.y, self.height); } }
+                                changed selected => { if self.selected { nav.pill-to(self.y + self.pill-y, true); } }
+                                changed y => { if self.selected { nav.pill-to(self.y + self.pill-y, false); } }
+                                changed pill-y => { if self.selected { nav.pill-to(self.y + self.pill-y, false); } }
                                 // The overlay opens on the selected folder (its rows
                                 // are made anew as it opens); once, as folding
                                 // makes them anew too.
                                 init => {
+                                    if self.selected {
+                                        nav.pill-to(self.y + self.pill-y, false);
+                                    }
                                     if root.pane-open && self.selected && !nav.revealed {
                                         nav.revealed = true;
                                         nav.ensure-visible(self.y, self.height);
@@ -6619,6 +6654,18 @@ export component AppWindow inherits Window {
                                     nav.focus();
                                 }
                             }
+                        }
+                        // The selection pill (3x16, accent), sliding between
+                        // rows (0 ms with animation effects off).
+                        Rectangle {
+                            x: 0;
+                            y: nav.pill-y;
+                            width: 3px;
+                            height: 16px;
+                            border-radius: 2px;
+                            visible: nav.pill-placed && !root.show-settings && root.shown-pill >= 0 && root.shown-pill < root.shown-nav.length;
+                            background: Theme.on-fill(true, Theme.accent);
+                            animate y { duration: nav.pill-slide ? Theme.normal : 0ms; easing: cubic-bezier(0, 0, 0, 1); }
                         }
                     }
                     // The list's thin scroll bar, its thumb in the pane's

@@ -306,7 +306,7 @@ pub(super) fn parse_setting(value: &str) -> (Vec<Reopen>, usize) {
 // ------------------------------------------------------------ the app side
 
 use super::composer::{self, Draft};
-use super::{App, t, with_app};
+use super::{App, View, t, with_app};
 use crate::TabItem;
 use slint::{ModelRc, Timer, TimerMode, VecModel};
 use std::time::Duration;
@@ -638,6 +638,10 @@ impl App {
     /// Draft `id`, in memory, in a tab of its own right of the active one;
     /// shown unless `background`.
     pub(super) fn open_draft_tab(&mut self, id: DraftId, background: bool) {
+        // In a composer window already: that window comes forward.
+        if self.composer_window(id).is_some() {
+            return self.open_draft_window(id);
+        }
         if let Some(i) = self.tabs.find(TabKind::Draft(id)) {
             if !background {
                 self.activate_tab(i);
@@ -826,14 +830,28 @@ impl App {
                     self.activate_tab(k);
                 }
             }
-            3 => {
-                if let Some(TabKind::Message(id)) = self.tabs.get(i).map(|t| t.kind) {
+            3 => match self.tabs.get(i).map(|t| t.kind) {
+                Some(TabKind::Message(id)) => {
                     self.open_window(id);
                     if let Some(j) = self.tabs.find_message(id) {
                         self.close_tab(j);
                     }
                 }
-            }
+                // The draft leaves its tab for a composer window.
+                Some(TabKind::Draft(id)) => self.open_draft_window(id),
+                Some(TabKind::Saved(row)) => {
+                    self.open_saved_in_window(row);
+                    if let Some(j) = self.tabs.find(TabKind::Saved(row)) {
+                        if j == self.tabs.active() {
+                            self.drop_active_tab();
+                        } else {
+                            self.tabs.remove(j);
+                            self.show_tabs();
+                        }
+                    }
+                }
+                _ => {}
+            },
             4 => self.reopen_closed(),
             _ => {}
         }
@@ -863,6 +881,17 @@ impl App {
     /// of its own; from its tab, the tab closes.
     pub(super) fn open_current_window(&mut self) {
         if self.ui().get_composing() {
+            // The draft showing, in a composer window of its own.
+            if let Some(id) = self.drafts.active_id() {
+                self.open_draft_window(id);
+            }
+            return;
+        }
+        // A draft row in the Drafts folder, in a composer window.
+        if self.view == View::Drafts && self.in_mail_tab() {
+            if let Some(row) = self.current_row() {
+                self.open_saved_in_window(row);
+            }
             return;
         }
         let Some(id) = self.current_message() else {

@@ -17,6 +17,7 @@ use komorebi::mail::rich as model;
 use komorebi::mail::rich::edit::Editor;
 
 mod markup;
+pub(super) mod recipients;
 pub(super) mod rich;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -681,6 +682,13 @@ impl Drafts {
         }
     }
 
+    /// Swap the shown draft and its suggestions with a composer window's
+    /// (`App::in_composer`): nothing is dropped.
+    pub fn swap_view(&mut self, active: &mut Option<DraftId>, suggest: &mut Option<Suggest>) {
+        std::mem::swap(&mut self.active, active);
+        std::mem::swap(&mut self.suggest, suggest);
+    }
+
     /// No draft is shown (the composer went with it into a tab).
     pub fn hide(&mut self) {
         self.active = None;
@@ -1047,7 +1055,7 @@ impl App {
     /// still downloading): the open message, or a message window's.
     pub(super) fn reply_to(&mut self, msg: &db::Message, body: Option<&Body>, all: bool) {
         // A draft in the server's Drafts folder is not mail to answer (its
-        // InfoBar offers Forward instead; editing it in place is deferred).
+        // InfoBar offers Edit instead).
         if self.folder_role(msg.folder_id) == Role::Drafts {
             return;
         }
@@ -1072,6 +1080,56 @@ impl App {
         }
         draft.quote_text(msg, strip_signature(&body.text), &heads);
         self.start_draft(draft);
+    }
+
+    /// Edit the open draft that lies in the server's Drafts folder (saved
+    /// on another device or in webmail): its text and attachments become a
+    /// saved draft of this PC linked to the server's message, so saving it
+    /// replaces that message and the folder keeps one copy. Opening it
+    /// again finds the same draft.
+    pub(super) fn edit_server_draft(&mut self) {
+        let Some(open) = &self.open else { return };
+        let (msg, body) = (open.msg.clone(), open.body.clone());
+        if self.folder_role(msg.folder_id) != Role::Drafts {
+            return;
+        }
+        let (Some(body), Some(raw)) = (body, msg.raw.as_deref()) else {
+            return self.set_status(&t!(invoke_still_downloading), false);
+        };
+        let Ok(Some(folder)) = self.db.folder(msg.folder_id) else {
+            return;
+        };
+        let copy = db::ServerCopy {
+            account_id: msg.account_id,
+            folder_id: msg.folder_id,
+            uidvalidity: folder.uidvalidity,
+            uid: msg.uid,
+        };
+        let fields = mime::draft_fields(raw);
+        let row = db::DraftRow {
+            account_id: msg.account_id,
+            to: msg.to.clone(),
+            cc: msg.cc.clone(),
+            bcc: fields.bcc,
+            subject: msg.subject.clone(),
+            body: body.text.clone(),
+            in_reply_to: fields.in_reply_to,
+            refs: fields.references,
+            message_id: msg.msgid.clone(),
+            importance: msg.importance,
+            ..Default::default()
+        };
+        let files: Vec<(String, String, Vec<u8>)> = mime::attachments(raw, |_| true)
+            .into_iter()
+            .map(|(name, data)| (name, String::new(), data))
+            .collect();
+        match self.db.adopt_server_draft(&row, &copy, &files) {
+            Ok(id) => {
+                self.drafts_changed(None, true);
+                self.open_saved(id);
+            }
+            Err(e) => self.set_status(&text::detail(&e), true),
+        }
     }
 
     pub(super) fn forward(&mut self) {
@@ -1115,6 +1173,7 @@ impl App {
     /// pane). From a message or draft tab, the new draft gets a tab of its
     /// own to the right. A new draft gets its account's signature.
     pub(super) fn start_draft(&mut self, mut draft: Draft) {
+        self.clear_popped();
         self.prepare_draft(&mut draft);
         if !self.in_mail_tab() || self.draft_tab {
             let id = self.drafts.add(draft);
@@ -1159,6 +1218,10 @@ impl App {
     /// tab comes forward if it has one; from a message or draft tab it gets
     /// a tab of its own.
     fn resume_draft(&mut self, id: DraftId) {
+        // In a composer window already: that window comes forward.
+        if self.composer_window(id).is_some() {
+            return self.open_draft_window(id);
+        }
         if let Some(i) = self.tabs.find(tabs::TabKind::Draft(id)) {
             return self.activate_tab(i);
         }
@@ -1384,17 +1447,36 @@ impl App {
             });
             return;
         }
-        if let Some(id) = self.drafts.active_id()
-            && self.save_draft(id)
-        {
-            self.save_to_server(id, false);
+        let mut ids: Vec<DraftId> = self.drafts.active_id().into_iter().collect();
+        ids.extend(self.windowed_drafts());
+        for id in ids {
+            if self.save_draft(id) {
+                self.save_to_server(id, false);
+            }
+        }
+    }
+
+    /// The window whose composer view shows draft `id`. Every composer
+    /// view writes through here (or [`App::active_ui`]) rather than
+    /// through the main window, so that a composer window of its own can
+    /// answer for the draft it holds. Today that is always the main window.
+    pub(super) fn composer_ui(&self, id: DraftId) -> AppWindow {
+        self.composer_window(id).unwrap_or_else(|| self.ui())
+    }
+
+    /// The window showing the active draft: the main window when no draft
+    /// is active.
+    pub(super) fn active_ui(&self) -> AppWindow {
+        match self.drafts.active_id() {
+            Some(id) => self.composer_ui(id),
+            None => self.ui(),
         }
     }
 
     /// Push the active draft into the composer and show it, focusing To
     /// for a message without recipients and otherwise the top of the body.
     pub(super) fn show_draft(&mut self) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         let accounts: Vec<i64> = self.accounts.iter().map(|a| a.id).collect();
         let Some(d) = self.drafts.active_mut() else {
             return;
@@ -1454,7 +1536,7 @@ impl App {
         let text = at.map_or_else(String::new, |t| {
             t!(invoke_draft_saved_at, format::time(t).into())
         });
-        self.ui().set_c_saved(text.into());
+        self.active_ui().set_c_saved(text.into());
     }
 
     /// "Show quoted text": the folded quote goes back into the body,
@@ -1465,14 +1547,14 @@ impl App {
         };
         if let Some(ed) = d.rich.as_mut() {
             if ed.fold_quote(false) {
-                self.ui().set_c_quote_folded(false);
+                self.active_ui().set_c_quote_folded(false);
                 self.ed_show(rich::BODY, true, true, false);
             }
             return;
         }
         if d.unfold_quote() {
             let body = SharedString::from(d.body.as_str());
-            let ui = self.ui();
+            let ui = self.active_ui();
             ui.set_c_body(body);
             ui.set_c_quote_folded(false);
         }
@@ -1480,7 +1562,7 @@ impl App {
 
     /// The composer's texts, again in the language shown.
     pub(super) fn repush_composer(&mut self) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         let Some(d) = self.drafts.active() else {
             return;
         };
@@ -1540,7 +1622,7 @@ impl App {
         };
         let before = d.body.clone();
         self.draft_edited(ComposeField::Body, &after);
-        self.ui().set_c_body(after.as_str().into());
+        self.active_ui().set_c_body(after.as_str().into());
         self.first_format();
         if let Some(d) = self.drafts.active_mut() {
             d.unformat = Some(Unformat {
@@ -1560,7 +1642,7 @@ impl App {
             return;
         }
         self.format_hint_seen = true;
-        self.ui().set_c_format_hint(true);
+        self.active_ui().set_c_format_hint(true);
         if let Err(e) = self.db.set_setting("format_hint_seen", "1") {
             self.set_status(&text::detail(&e), true);
         }
@@ -1576,25 +1658,29 @@ impl App {
         self.preview_want = (width, dark);
         if first {
             self.preview_timer.stop();
-            let ui = self.ui();
+            let ui = self.active_ui();
             ui.set_c_preview_image(slint::Image::default());
             ui.set_c_preview_height(0.0);
             ui.set_c_preview_cut(false);
             ui.set_c_preview_failed(false);
             return self.start_preview();
         }
+        let id = self.drafts.active_id();
         self.preview_timer
-            .start(TimerMode::SingleShot, PREVIEW_DEBOUNCE, || {
-                with_app(|a| a.start_preview());
+            .start(TimerMode::SingleShot, PREVIEW_DEBOUNCE, move || {
+                with_app(|a| a.in_draft_view(id, App::start_preview));
             });
     }
 
     fn start_preview(&mut self) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         if !ui.get_c_preview() {
             return;
         }
-        let Some(d) = self.drafts.active() else {
+        let Some(id) = self.drafts.active_id() else {
+            return;
+        };
+        let Some(d) = self.drafts.get(id) else {
             return;
         };
         let html = match &d.rich {
@@ -1611,7 +1697,9 @@ impl App {
         let seq = self.preview_seq;
         let render = move || {
             let page = preview_page(html, width, scale, dark);
-            on_ui(Box::new(move |a| a.show_preview(seq, page)));
+            on_ui(Box::new(move |a| {
+                a.in_draft_view(Some(id), |a| a.show_preview(id, seq, page));
+            }));
         };
         // Layout recurses per nesting level: the reader worker's stack.
         let spawned = std::thread::Builder::new()
@@ -1623,9 +1711,16 @@ impl App {
         }
     }
 
-    fn show_preview(&mut self, seq: u64, page: Result<PreviewPage, render::RenderError>) {
-        let ui = self.ui();
-        if seq != self.preview_seq || !ui.get_c_preview() {
+    /// A preview of draft `id` is ready: drawn in the window holding it,
+    /// unless a later render was started or another draft took the view.
+    fn show_preview(
+        &mut self,
+        id: DraftId,
+        seq: u64,
+        page: Result<PreviewPage, render::RenderError>,
+    ) {
+        let ui = self.composer_ui(id);
+        if seq != self.preview_seq || self.drafts.active_id() != Some(id) || !ui.get_c_preview() {
             return;
         }
         match page {
@@ -1659,7 +1754,7 @@ impl App {
             return BodyEdit::default();
         };
         self.draft_edited(ComposeField::Body, &u.before);
-        self.ui().set_c_body(u.before.as_str().into());
+        self.active_ui().set_c_body(u.before.as_str().into());
         body_edit(u.anchor, u.cursor)
     }
 
@@ -1670,14 +1765,14 @@ impl App {
 
     /// Move the keyboard focus to a composer field.
     fn focus_field(&self, field: ComposeField) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         ui.set_c_focus(field);
         ui.set_c_focus_seq(ui.get_c_focus_seq().wrapping_add(1));
     }
 
     /// The inline address errors and why Send is off.
     fn show_send_state(&self) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         let (errors, block, need) = match self.drafts.active() {
             Some(d) => (d.errors.clone(), d.send_block(), d.need_recipient),
             None => Default::default(),
@@ -1709,7 +1804,7 @@ impl App {
             .drafts
             .active()
             .map_or(0, |d| encoded_size(attachments_size(&d.attachments)));
-        let ui = self.ui();
+        let ui = self.active_ui();
         ui.set_c_attachments(ModelRc::new(VecModel::from(rows)));
         ui.set_c_attach_total(
             t!(
@@ -1733,7 +1828,7 @@ impl App {
             self.suggest(field, cursor);
         }
         // The guard bar asked about the draft as it was.
-        self.ui().set_c_guard(SharedString::new());
+        self.active_ui().set_c_guard(SharedString::new());
         self.schedule_autosave();
         if field == ComposeField::Subject {
             self.retitle_draft_tab();
@@ -1762,7 +1857,7 @@ impl App {
 
     /// Put `text` in a composer field (the draft is not changed).
     fn show_field(&self, field: ComposeField, text: &str) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         let text = SharedString::from(text);
         match field {
             ComposeField::To => ui.set_c_to(text),
@@ -1809,7 +1904,7 @@ impl App {
     /// Show `suggest` under its field, the first one highlighted (`None`:
     /// hide them).
     fn show_suggestions(&mut self, suggest: Option<Suggest>) {
-        let ui = self.ui();
+        let ui = self.active_ui();
         let rows: Vec<Suggestion> = suggest
             .iter()
             .flat_map(|s| &s.items)
@@ -1847,7 +1942,7 @@ impl App {
         let (text, caret) = complete_address(d.field(s.field), s.cursor, &mailbox);
         self.show_field(s.field, &text);
         self.draft_edited(s.field, &text);
-        let ui = self.ui();
+        let ui = self.active_ui();
         ui.set_c_focus(s.field);
         ui.set_c_caret(i32::try_from(caret).unwrap_or(i32::MAX));
         ui.set_c_caret_seq(ui.get_c_caret_seq().wrapping_add(1));
@@ -1899,7 +1994,7 @@ impl App {
             }
         } else if d.resign(&block) {
             let body = SharedString::from(d.body.as_str());
-            self.ui().set_c_body(body);
+            self.active_ui().set_c_body(body);
         }
         if let Some(draft) = self.drafts.active_id() {
             self.save_draft(draft);
@@ -1928,7 +2023,7 @@ impl App {
     /// it is blank ([`Draft::is_empty`]).
     pub(super) fn draft_importance(&mut self, code: i32) {
         let importance = db::Importance::from_code(code.into());
-        self.ui().set_c_importance(importance.code() as i32);
+        self.active_ui().set_c_importance(importance.code() as i32);
         let Some(d) = self.drafts.active_mut() else {
             return;
         };
@@ -1952,7 +2047,7 @@ impl App {
         if let Some(d) = self.drafts.active_mut() {
             d.show_cc = true;
         }
-        self.ui().set_c_show_cc(true);
+        self.active_ui().set_c_show_cc(true);
         self.focus_field(field);
     }
 
@@ -1983,6 +2078,10 @@ impl App {
     /// Esc or Close: save the draft and hide the composer (see
     /// [`App::park_composer`]); in a composer tab, close the tab.
     pub(super) fn close_composer(&mut self) {
+        if self.scoped.is_some() {
+            self.park_composer();
+            return self.hide_composer();
+        }
         if !self.in_mail_tab() {
             let i = self.tabs.active();
             return self.close_tab(i);
@@ -2008,6 +2107,10 @@ impl App {
     }
 
     fn hide_composer(&mut self) {
+        // In a composer window (closed, sent, discarded): the window goes.
+        if let Some(id) = self.scoped {
+            return self.drop_composer_window(id);
+        }
         // Sent or discarded in a composer tab: the tab goes with it.
         if let tabs::TabKind::Draft(id) = self.tabs.active_kind()
             && !self.drafts.contains(id)
@@ -2025,14 +2128,14 @@ impl App {
     /// Discard: a draft with something the user wrote asks first.
     pub(super) fn discard(&mut self) {
         match self.drafts.active() {
-            Some(d) if d.keep() => self.ui().set_c_confirm_discard(true),
+            Some(d) if d.keep() => self.active_ui().set_c_confirm_discard(true),
             _ => self.discard_confirmed(),
         }
     }
 
     /// Drop the active draft with its saved row and attachment copies.
     pub(super) fn discard_confirmed(&mut self) {
-        self.ui().set_c_confirm_discard(false);
+        self.active_ui().set_c_confirm_discard(false);
         if let Some(id) = self.drafts.active_id()
             && let Some(d) = self.drafts.remove(id)
             && let Some(row) = d.row
@@ -2090,7 +2193,7 @@ impl App {
         }
         let guard = if anyway { None } else { send_guard(d) };
         let account_id = d.account_id;
-        self.ui()
+        self.composer_ui(id)
             .set_c_guard(guard.map(text::guard).unwrap_or_default().into());
         if guard.is_some() {
             return;
@@ -2120,6 +2223,9 @@ impl App {
             return;
         };
         let reply_to = d.reply_to;
+        if self.scoped.is_some() {
+            self.sent_from_window.insert(row);
+        }
         self.hide_composer();
         self.drafts_changed(reply_to, true);
         self.queue_send(
@@ -2289,8 +2395,13 @@ impl App {
                 self.pending_sends.remove(&row);
                 self.clear_undo(UndoOffer::Send(row));
                 self.outbox_changed();
-                // In a tab of its own, beside what shows now.
-                self.open_saved_in_tab(row);
+                // Where it was sent from: a window of its own, or a tab
+                // beside what shows now.
+                if self.sent_from_window.remove(&row) {
+                    self.open_saved_in_window(row);
+                } else {
+                    self.open_saved_in_tab(row);
+                }
                 let reply_to = self.drafts.active().and_then(|d| d.reply_to);
                 self.drafts_changed(reply_to, true);
             }
@@ -2479,22 +2590,34 @@ pub(super) fn spawn_build(job: BuildJob) {
 // re-enter.
 
 pub(super) fn attach_files() {
-    let Some(target) = with_app(|a| a.drafts.active_id()).flatten() else {
-        return;
-    };
+    if let Some(target) = with_app(|a| a.drafts.active_id()).flatten() {
+        attach_files_to(target);
+    }
+}
+
+/// Attach files picked in the system dialog to draft `target` (the dialog
+/// runs outside the app state).
+pub(super) fn attach_files_to(target: DraftId) {
     let Some(paths) = rfd::FileDialog::new()
         .set_title(t!(invoke_dlg_attach_files))
         .pick_files()
     else {
         return;
     };
-    with_app(|a| a.attach_paths(target, paths));
+    with_app(|a| a.in_draft_view(Some(target), |a| a.attach_paths(target, paths)));
 }
 
 impl App {
     /// Attach files dropped on the window or pasted, to the draft showing
-    /// (none showing: ignored).
+    /// (none showing: ignored). In a composer window's view, to its draft.
     pub(super) fn attach_dropped(&mut self, paths: Vec<PathBuf>) {
+        if let Some(id) = self.scoped {
+            self.composer_ui(id).set_file_hover(false);
+            if !paths.is_empty() {
+                self.attach_paths(id, paths);
+            }
+            return;
+        }
         let ui = self.ui();
         ui.set_file_hover(false);
         if ui.get_show_settings() || paths.is_empty() {
@@ -2533,7 +2656,9 @@ impl App {
             .map_or(0, |d| attachments_size(&d.attachments));
         let read = move || {
             let (added, errors) = read_files(&paths, total);
-            on_ui(Box::new(move |a| a.add_attachments(target, added, errors)));
+            on_ui(Box::new(move |a| {
+                a.in_draft_view(Some(target), |a| a.add_attachments(target, added, errors));
+            }));
         };
         if let Err(e) = background("attach", Box::new(read)) {
             self.set_status(&t!(invoke_could_not_attach, e.to_string().into()), true);
@@ -2571,7 +2696,7 @@ impl App {
         if self.drafts.active_id() == Some(target) {
             self.show_compose_attachments();
             self.show_send_state();
-            self.ui().set_c_guard(SharedString::new());
+            self.active_ui().set_c_guard(SharedString::new());
         }
         // The copies are made now, once, not by the autosave.
         if !self.save_draft(target) {
@@ -3983,6 +4108,33 @@ mod tests {
     }
 
     #[test]
+    fn the_composer_view_follows_its_draft() {
+        let h = Harness::new("view_follows");
+        h.ui().invoke_compose();
+        h.frame();
+        let first = h.app(|a| a.drafts.active_id()).unwrap();
+        type_into(h.ui(), ComposeField::Subject, "First");
+        h.ui().invoke_compose();
+        h.frame();
+        let second = h.app(|a| a.drafts.active_id()).unwrap();
+        assert_ne!(first, second);
+        h.ui().set_c_preview(true);
+        h.frame();
+        // A preview finished for a draft no longer showing is dropped...
+        let seq = h.app(|a| a.preview_seq);
+        h.app(|a| a.show_preview(first, seq, Err(render::RenderError::Malformed)));
+        assert!(!h.ui().get_c_preview_failed());
+        // ...and the showing draft's own is drawn.
+        h.app(|a| a.show_preview(second, seq, Err(render::RenderError::Malformed)));
+        assert!(h.ui().get_c_preview_failed());
+        // The first draft kept what was typed in it.
+        assert_eq!(
+            h.app(|a| a.drafts.get(first).map(|d| d.subject.clone())),
+            Some("First".to_string())
+        );
+    }
+
+    #[test]
     fn a_second_compose_opens_a_tab_and_switching_round_trips() {
         let h = Harness::new("switch");
         h.ui().invoke_compose();
@@ -5235,6 +5387,162 @@ mod tests {
         let ids = db.outbox_ids("").unwrap();
         let id = *ids.first()?;
         Some((id, db.outbox_entry(id).unwrap()?.state))
+    }
+
+    #[test]
+    fn a_composer_window_keeps_its_own_draft_and_close_saves_it() {
+        let h = Harness::new("cwin-close");
+        h.app(|a| a.compose_new());
+        type_into(h.ui(), ComposeField::Subject, "Windowed");
+        h.frame();
+        let first = h.app(|a| a.drafts.active_id().unwrap());
+        // Ctrl+O: the draft leaves the main window for one of its own.
+        h.app(|a| a.open_current_window());
+        h.frame();
+        assert!(!h.ui().get_composing());
+        let w = h.app(|a| a.composer_window(first)).unwrap();
+        assert!(w.get_composing());
+        assert_eq!(w.get_c_subject(), "Windowed");
+        assert_eq!(h.app(|a| a.drafts.active_id()), None);
+
+        // Another draft in the main window; typing in the window never
+        // moves it.
+        h.app(|a| a.compose_new());
+        let second = h.app(|a| a.drafts.active_id().unwrap());
+        assert_ne!(first, second);
+        type_into(&w, ComposeField::Body, "From the window");
+        h.frame();
+        assert_eq!(h.app(|a| a.drafts.active_id()), Some(second));
+        let body = h.app(|a| a.drafts.get(first).unwrap().body.clone());
+        assert!(body.starts_with("From the window"), "{body}");
+        assert!(!h.ui().get_c_body().contains("From the window"));
+
+        // Closing the window saves the draft as Esc does.
+        w.invoke_c_close();
+        h.frame();
+        assert!(h.app(|a| a.composer_window(first)).is_none());
+        let row = h.app(|a| a.drafts.get(first).and_then(|d| d.row));
+        assert!(row.is_some(), "saved");
+        assert_eq!(h.app(|a| a.drafts.active_id()), Some(second));
+        assert!(h.ui().get_composing());
+    }
+
+    #[test]
+    fn send_from_a_composer_window_once_and_undo_reopens_it_there() {
+        let h = Harness::new("cwin-send");
+        let _jobs = hold_builds(&h);
+        write_message(&h);
+        let id = h.app(|a| a.drafts.active_id().unwrap());
+        h.app(|a| a.open_draft_window(id));
+        h.frame();
+        let w = h.app(|a| a.composer_window(id)).unwrap();
+        w.invoke_send();
+        h.frame();
+        let (row, _) = outbox_row(&h).unwrap();
+        assert!(
+            h.app(|a| a.composer_window(id)).is_none(),
+            "the window went"
+        );
+        assert!(!h.app(|a| a.drafts.contains(id)));
+        // A second Send from the closed window does nothing.
+        w.invoke_send();
+        h.frame();
+        let db = Db::open(&h.path).unwrap();
+        assert_eq!(db.outbox_ids("").unwrap().len(), 1);
+        // Undo: back in a window of its own, not in a tab.
+        h.app(|a| a.undo_send(row));
+        h.frame();
+        assert_eq!(h.app(|a| a.cwins.len()), 1);
+        assert!(!h.ui().get_composing());
+    }
+
+    #[test]
+    fn a_popped_out_draft_leaves_a_placeholder_and_comes_forward_once() {
+        let h = Harness::new("cwin-popped");
+        h.app(|a| a.compose_new());
+        type_into(h.ui(), ComposeField::Subject, "Popped");
+        h.frame();
+        let id = h.app(|a| a.drafts.active_id().unwrap());
+        h.app(|a| a.open_current_window());
+        h.frame();
+        // The reading pane says where the draft went.
+        assert!(!h.ui().get_composing());
+        assert!(h.ui().get_draft_popped());
+        let row = h.app(|a| a.drafts.get(id).and_then(|d| d.row)).unwrap();
+        // Bring to front, Ctrl+O on its row, a click on its row in Drafts:
+        // the one window comes forward, the main window never shows it.
+        h.ui().invoke_bring_popped();
+        h.app(|a| a.open_saved_in_window(row));
+        h.app(|a| a.open_saved(row));
+        h.frame();
+        assert_eq!(h.app(|a| a.cwins.len()), 1);
+        assert!(!h.ui().get_composing());
+        // Files dropped on the window go to its draft: the main window
+        // starts no new message for them.
+        let w = h.app(|a| a.composer_window(id)).unwrap();
+        w.set_file_hover(true);
+        h.app(|a| a.in_composer(id, |a| a.attach_dropped(vec![std::env::temp_dir()])));
+        assert!(!w.get_file_hover());
+        assert!(!h.ui().get_composing());
+        assert_eq!(h.app(|a| a.drafts.ids().len()), 1);
+        // The window closes: the placeholder goes with it.
+        w.invoke_c_close();
+        h.frame();
+        assert!(!h.ui().get_draft_popped());
+    }
+
+    #[test]
+    fn drafts_row_and_tab_open_in_a_window_and_quitting_saves_them() {
+        let h = Harness::new("cwin-open");
+        h.app(|a| a.compose_new());
+        type_into(h.ui(), ComposeField::Subject, "From the row");
+        h.frame();
+        let first = h.app(|a| a.drafts.active_id().unwrap());
+        let row = h.app(|a| {
+            a.save_draft(first);
+            let row = a.drafts.get(first).and_then(|d| d.row).unwrap();
+            a.close_composer();
+            row
+        });
+        // Ctrl+O on its row in the Drafts folder.
+        h.app(|a| {
+            a.set_view(View::Drafts);
+            a.rows.select(|s, _| s.single(row));
+            a.open_current_window();
+        });
+        h.frame();
+        let found = h.app(|a| a.drafts.find_row(row)).unwrap();
+        assert!(h.app(|a| a.composer_window(found)).is_some());
+        assert!(!h.ui().get_composing());
+
+        // A composer tab: "Open in new window" from the tab strip.
+        h.app(|a| a.go_to_mail_tab());
+        h.app(|a| a.compose_new());
+        type_into(h.ui(), ComposeField::Subject, "From the tab");
+        h.frame();
+        let second = h.app(|a| a.drafts.active_id().unwrap());
+        h.app(|a| a.pane_draft_aside());
+        let tab = h
+            .app(|a| a.tabs.find(tabs::TabKind::Draft(second)))
+            .unwrap();
+        h.app(|a| a.tab_command(tab, 3));
+        h.frame();
+        assert!(
+            h.app(|a| a.tabs.find(tabs::TabKind::Draft(second)))
+                .is_none()
+        );
+        let w = h.app(|a| a.composer_window(second)).unwrap();
+
+        // Typing, then the app quits: every window's draft is saved.
+        type_into(&w, ComposeField::Body, "Last words");
+        h.app(|a| {
+            a.before_close();
+            a.close_composer_windows();
+        });
+        assert_eq!(h.app(|a| a.cwins.len()), 0);
+        let saved = h.app(|a| a.drafts.get(second).and_then(|d| d.row)).unwrap();
+        let (draft, _) = load(&Db::open(&h.path).unwrap(), saved).unwrap().unwrap();
+        assert!(draft.body.starts_with("Last words"), "{}", draft.body);
     }
 
     #[test]

@@ -310,6 +310,50 @@ mod tests {
     }
 
     #[test]
+    fn authserv_id_styles() {
+        let v = |id: &str, host: &str| auth_verdict(&h(&[&format!("{id}; dmarc=fail")]), host);
+        // The host name itself, and a name under the same registrable domain.
+        assert_eq!(v("imap.mail.example.net", HOST), Some(Reason::Dmarc));
+        assert_eq!(v("mx7.mail.example.net", HOST), Some(Reason::Dmarc));
+        // The registrable domain alone, in any case, with a trailing dot.
+        assert_eq!(v("EXAMPLE.NET", HOST), Some(Reason::Dmarc));
+        assert_eq!(v("example.net.", HOST), Some(Reason::Dmarc));
+        // A foreign domain, a look-alike and a suffix trick are not trusted.
+        assert_eq!(v("mx.example.org", HOST), None);
+        assert_eq!(v("example.net.evil.example", HOST), None);
+        assert_eq!(v("notexample.net", HOST), None);
+        // An id that is not a host name (an IP literal, junk) is not trusted.
+        assert_eq!(v("[192.0.2.1]", HOST), None);
+        assert_eq!(v("a/b", HOST), None);
+        // No header, no id, or an empty IMAP host: no notice.
+        assert_eq!(auth_verdict(&h(&["; dmarc=fail"]), HOST), None);
+        assert_eq!(auth_verdict(&h(&[""]), HOST), None);
+        assert_eq!(v("example.net", ""), None);
+    }
+
+    #[test]
+    fn a_header_above_the_trusted_one_cannot_forge_a_notice() {
+        let real_pass = "mx.example.net; dmarc=pass";
+        let forged = "mx.example.net; dmarc=fail";
+        // Further hops put their own ids on top: foreign ones are skipped
+        // and the account's server still decides.
+        let hop = "relay.other.example; dmarc=fail";
+        assert_eq!(auth_verdict(&h(&[hop, real_pass, forged]), HOST), None);
+        // A sender's copy sits below the server's, never above it.
+        assert_eq!(
+            auth_verdict(&h(&[hop, forged, real_pass]), HOST),
+            Some(Reason::Dmarc)
+        );
+        // Only the first MAX_AUTH_HEADERS are read, so a flood of foreign
+        // headers cannot push the server's out of view into a forged one.
+        let mut many = vec![hop.to_string(); MAX_AUTH_HEADERS];
+        many.push(forged.to_string());
+        assert_eq!(auth_verdict(&many, HOST), None);
+        // Without a header of the account's server nothing is trusted.
+        assert_eq!(auth_verdict(&h(&[hop]), HOST), None);
+    }
+
+    #[test]
     fn spf_and_dkim_must_both_fail_with_nothing_passing() {
         let v = |r: &str| auth_verdict(&h(&[&format!("mx.example.net; {r}")]), HOST);
         assert_eq!(v("spf=fail; dkim=fail"), Some(Reason::SpfDkim));

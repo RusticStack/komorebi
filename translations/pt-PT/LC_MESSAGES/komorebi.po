@@ -17,6 +17,13 @@ msgctxt "suggestion"
 msgid "{0}, {1}"
 msgstr "{0}, {1}"
 
+msgctxt "recipient"
+msgid "{0}, {1}"
+msgstr "{0}, {1}"
+
+msgid "Not a valid address"
+msgstr "Endereço inválido"
+
 msgid "Forget certificate"
 msgstr "Esquecer certificado"
 
@@ -592,6 +599,12 @@ msgstr "Cancelar (Esc)"
 
 msgid "Message body"
 msgstr "Corpo da mensagem"
+
+msgid "This message is open in its own window"
+msgstr "Esta mensagem está aberta numa janela própria"
+
+msgid "Bring to front"
+msgstr "Trazer para a frente"
 
 msgid "Select a draft to keep writing"
 msgstr "Selecione um rascunho para continuar a escrever"
@@ -1547,8 +1560,8 @@ msgstr "Voltar à lista (Esc)"
 msgid "Forward as new draft"
 msgstr "Reencaminhar como novo rascunho"
 
-msgid "This draft was saved on another device or in webmail. To keep writing it here, use Forward as new draft."
-msgstr "Este rascunho foi guardado noutro dispositivo ou no webmail. Para continuar a escrevê-lo aqui, utilize Reencaminhar como novo rascunho."
+msgid "This draft was saved on another device or in webmail. To keep writing it here, select Edit."
+msgstr "Este rascunho foi guardado noutro dispositivo ou no webmail. Para continuar a escrevê-lo aqui, selecione Editar."
 
 msgid "Folders (Close navigation)"
 msgstr "Pastas (Fechar navegação)"
@@ -2773,6 +2786,11 @@ msgstr "Alinhar à esquerda"
 
 msgid "Paste as plain text"
 msgstr "Colar como texto simples"
+
+msgid "Long message of {n} character. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end."
+msgid_plural "Long message of {n} characters. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end."
+msgstr[0] "Mensagem longa de {n} carácter. O leitor de ecrã lê a parte à volta do cursor; as teclas de seta movem-na, e Ctrl+Home e Ctrl+End vão para o início e para o fim."
+msgstr[1] "Mensagem longa de {n} caracteres. O leitor de ecrã lê a parte à volta do cursor; as teclas de seta movem-na, e Ctrl+Home e Ctrl+End vão para o início e para o fim."
 
 msgid "{0} × {1} table"
 msgstr "Tabela de {0} × {1}"

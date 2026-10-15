@@ -11,6 +11,21 @@ pub struct ImageData {
     pub pix: Pixmap,
     pub nat_w: u32,
     pub nat_h: u32,
+    /// Dark marks on a transparent ground (a black logo): in a dimmed
+    /// message it is painted on a light plate, or it would vanish into the
+    /// dark page.
+    pub dark_on_clear: bool,
+}
+
+/// Whether pixels with a clear ground and dark marks need a light plate:
+/// at least a tenth of them are see-through (alpha under 128), and the
+/// rest are dark on average (luma under 96 of 255). Counts from
+/// [`decode`]'s single pass.
+pub fn needs_plate(total: u64, clear: u64, solid: u64, luma_sum: u64) -> bool {
+    total > 0
+        && clear.saturating_mul(10) >= total
+        && solid > 0
+        && luma_sum < solid.saturating_mul(96)
 }
 
 /// Encoded bytes accepted per image.
@@ -46,6 +61,7 @@ pub fn decode(bytes: &[u8], target_w: u32, budget: &mut u64) -> Option<ImageData
         return None;
     };
     let mut pix = Pixmap::new(w, h)?;
+    let (mut clear, mut solid, mut luma) = (0u64, 0u64, 0u64);
     for (dst, src) in pix
         .data_mut()
         .as_chunks_mut::<4>()
@@ -56,7 +72,22 @@ pub fn decode(bytes: &[u8], target_w: u32, budget: &mut u64) -> Option<ImageData
         let a = u32::from(src[3]);
         let pm = |c: u8| (u32::from(c).wrapping_mul(a).wrapping_add(127) / 255) as u8;
         *dst = [pm(src[0]), pm(src[1]), pm(src[2]), src[3]];
+        // At most 16 M pixels of luma 255 each: the sums never wrap.
+        if a < 128 {
+            clear = clear.wrapping_add(1);
+        } else {
+            solid = solid.wrapping_add(1);
+            // Rec. 601 luma, in integers (at most 255).
+            let y = u32::from(src[0])
+                .wrapping_mul(299)
+                .wrapping_add(u32::from(src[1]).wrapping_mul(587))
+                .wrapping_add(u32::from(src[2]).wrapping_mul(114))
+                / 1000;
+            luma = luma.wrapping_add(u64::from(y));
+        }
     }
+    let total = u64::from(w).saturating_mul(u64::from(h));
+    let dark_on_clear = needs_plate(total, clear, solid, luma);
     // Pre-scale big images once to their display size (area average).
     if target_w > 0 && u64::from(target_w).saturating_mul(3) / 2 < u64::from(w) {
         let th = u64::from(h)
@@ -72,6 +103,7 @@ pub fn decode(bytes: &[u8], target_w: u32, budget: &mut u64) -> Option<ImageData
         pix,
         nat_w: w,
         nat_h: h,
+        dark_on_clear,
     })
 }
 
@@ -252,6 +284,20 @@ fn decode_webp(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plate_only_for_dark_marks_on_a_clear_ground() {
+        // A black logo on a transparent ground.
+        assert!(needs_plate(100, 60, 40, 40 * 10));
+        // A white logo on a transparent ground: readable on a dark page.
+        assert!(!needs_plate(100, 60, 40, 40 * 250));
+        // An opaque photo, and a dark one with only a few clear corners.
+        assert!(!needs_plate(100, 0, 100, 100 * 20));
+        assert!(!needs_plate(100, 4, 96, 96 * 20));
+        // All see-through: nothing to show.
+        assert!(!needs_plate(100, 100, 0, 0));
+        assert!(!needs_plate(0, 0, 0, 0));
+    }
 
     #[test]
     fn rejects_non_images_and_oversized_headers() {

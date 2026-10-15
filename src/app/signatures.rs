@@ -81,7 +81,7 @@ impl App {
             }
             None => -1,
         };
-        self.ui().global::<Rich>().set_sig_current(current);
+        self.active_ui().global::<Rich>().set_sig_current(current);
     }
 
     /// A pick from the composer's Signature menu: it replaces the
@@ -114,10 +114,12 @@ impl App {
                 .map_or_else(String::new, |s| composer::signature_block(&s.body_text));
             d.replace_signature(&new);
             let body = SharedString::from(d.body.as_str());
-            self.ui().set_c_body(body);
+            self.active_ui().set_c_body(body);
             self.schedule_autosave();
         }
-        self.ui().global::<Rich>().set_sig_current(index.max(-1));
+        self.active_ui()
+            .global::<Rich>()
+            .set_sig_current(index.max(-1));
     }
 
     /// The message's format from its More menu: plain text (asked first)
@@ -155,7 +157,7 @@ impl App {
         d.touched = true;
         d.dirty = true;
         let (formatted, body) = (d.rich.is_some(), SharedString::from(d.body.as_str()));
-        let ui = self.ui();
+        let ui = self.active_ui();
         ui.set_c_body(body);
         ui.set_c_rich(formatted);
         ui.set_c_quote_folded(false);

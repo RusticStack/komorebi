@@ -7,6 +7,85 @@ changes in the local data (the cache, its folders and Credential Manager).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-15
+
+### Added
+
+- Composer polish: Ctrl+C and Cut put the selection on the clipboard as
+  formatted HTML and plain text (the whole selection, even on a long
+  message), and pasting it back keeps the formatting; the colour flyout
+  moves with the arrow keys (Home, End, Enter, Esc); the caret blinks at
+  the Windows rate and stays steady with animation effects off; on a
+  message over 16 KB the screen reader is told its length and how to
+  move through it. In the dark theme a dark logo on a clear ground in a
+  dimmed message gets a light plate, so it no longer vanishes.
+- To, Cc and Bcc show recipients as person tokens: a comma, a semicolon,
+  Enter or leaving the field turns an address into a chip, a wrong address
+  shows in the error style, and a chip is removed with its x or Backspace,
+  selected with the arrow keys and copied with Ctrl+C. Drafts and sending
+  keep the same address text.
+- A draft saved on another device or in webmail opens for editing: Edit on
+  a message in the server's Drafts folder makes a draft of this computer
+  from its text and attachments, linked to the server's message, so saving
+  replaces it and Discard removes it (one copy). The draft files are
+  written to the drafts folder beside the cache; nothing else changes in
+  the local data.
+- `mailto:` links: `komorebi.exe "mailto:..."` (what Windows runs for a mail
+  link once Komorebi is chosen in Settings > Default apps) opens a composer
+  with the address, cc, bcc, subject and body filled in, never sent, with no
+  attachments taken from the link; a second start hands the link to the
+  running copy and exits. Anything else on the command line is ignored. No
+  change to the local data.
+- The update check and download are tested end to end against a local HTTPS
+  server (newer, same, tampered, wrongly signed, redirected away, progress).
+- A draft can open in a window of its own (Ctrl+O on the composer): closing it saves the draft, Send and Undo send work from it, and several can be open at once.
+- Composer windows also open from a draft row in the Drafts folder (Ctrl+O)
+  and from a composer tab's "Open in new window"; files dropped on one
+  attach to its draft; the reading pane says where a popped-out draft went,
+  with Bring to front; quitting saves every open window's draft, and a
+  draft already in a window brings that window forward. No change to the
+  local data.
+
+### Fixed
+
+- The installer: a silent update now starts Komorebi again afterwards (Restart
+  Manager does not restart a program that already quit); the app quits when
+  Windows asks it to end (the installer's close request, or sign-out) even
+  when it lives in the tray with its window hidden; the "Komorebi is running"
+  text says how to quit a tray-only copy (English and European Portuguese).
+- Settings opened from a message or draft tab keep the folder pane, and F6
+  there cycles only the regions that show. A message tab whose account is
+  removed, or whose folder vanishes, keeps its message and says it was moved
+  or deleted on the server (active or background tab). No change to the
+  local data.
+
+### Changed
+
+- The drop-down lists (Settings, the composer's From, the account form, the
+  editor's table size) are Komorebi's own: contrast colours under a Windows
+  contrast theme, and no fade when animation effects are off. No change to
+  the local data.
+- `scripts/check-pins.ps1` fails with a readable message when the Slint
+  compiler no longer declares the TextInput properties the composer's body
+  editor reads.
+- Servers whose IDLE never announces delivered mail (Dovecot on Postale.io)
+  lose their IDLE connection for the session after five such messages
+  found by the timer's passes while it was silent, saving a connection; the
+  timer already finds the mail. Presets now carry a "save a copy to Sent"
+  default (on for both). The sender notice's trust rule for
+  `Authentication-Results` is unchanged, now covered by tests and described
+  in the README. No change to the local data.
+- Windows 11 look: the tray and system menus follow the dark theme, the
+  text size follows the Windows slider at once, the navigation pill slides
+  between folders, and the onboarding welcome rises in while the step card
+  grows or shrinks between steps (at once, with no motion, when animation effects are off).
+  No change to the local data.
+- The composer now writes its view, preview and formatted body editor
+  through the window holding the draft (groundwork for the composer in a
+  window of its own; still the main window). A preview that finishes after
+  another draft took the composer is no longer drawn over it. No change to
+  the local data.
+
 ## [0.4.1] - 2026-10-15
 
 ### Added

@@ -40,6 +40,34 @@ pub fn parse_header(raw: &[u8]) -> NewHeader {
     h
 }
 
+/// The header fields a draft keeps that the cached row does not: Bcc, and
+/// the Message-IDs of In-Reply-To and References (each `<id>`, space
+/// separated), as a draft saved elsewhere carries them.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct DraftFields {
+    pub bcc: String,
+    pub in_reply_to: String,
+    pub references: String,
+}
+
+pub fn draft_fields(raw: &[u8]) -> DraftFields {
+    let Some(msg) = MessageParser::default().parse_headers(raw) else {
+        return DraftFields::default();
+    };
+    let ids = |v: Option<&[std::borrow::Cow<'_, str>]>| {
+        v.unwrap_or_default()
+            .iter()
+            .map(|id| format!("<{}>", id.trim_matches(['<', '>'])))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    DraftFields {
+        bcc: addresses(msg.bcc()),
+        in_reply_to: ids(msg.in_reply_to().as_text_list()),
+        references: ids(msg.references().as_text_list()),
+    }
+}
+
 /// A priority header's value is read up to this many bytes.
 const MAX_PRIORITY_LEN: usize = 64;
 
@@ -784,6 +812,17 @@ fn addresses(address: Option<&Address>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn draft_fields_read_bcc_and_reply_ids() {
+        let raw = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: Hidden <h@x.org>, i@x.org\r\n\
+            In-Reply-To: <p2@x>\r\nReferences: <p1@x> <p2@x>\r\nSubject: s\r\n\r\nbody";
+        let f = draft_fields(raw);
+        assert_eq!(f.bcc, "Hidden <h@x.org>, i@x.org");
+        assert_eq!(f.in_reply_to, "<p2@x>");
+        assert_eq!(f.references, "<p1@x> <p2@x>");
+        assert_eq!(draft_fields(b"Subject: s\r\n\r\nx"), DraftFields::default());
+    }
+
     use super::*;
 
     const HEADER: &[u8] = b"From: Jane Doe <jane@example.com>\r\nTo: Me <me@example.org>, bob@example.org\r\nSubject: =?UTF-8?B?SGVsbG8g8J+mgA==?=\r\nDate: Tue, 4 Jun 2026 10:00:00 +0200\r\nMessage-ID: <abc@example.com>\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n";

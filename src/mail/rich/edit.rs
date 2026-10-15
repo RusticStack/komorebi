@@ -1676,6 +1676,48 @@ impl Editor {
         Some(Pos::para(pos.flow, at.saturating_add(n).saturating_sub(1)))
     }
 
+    /// The formatted content of `a..b` as a document of its own (for the
+    /// clipboard's HTML): its paragraphs and tables, cut at the ends. A
+    /// signature or a stored quote at either end is left out (they are
+    /// copied as plain text); `None` for an empty range or one with such a
+    /// block inside it.
+    pub fn fragment(&self, a: usize, b: usize) -> Option<Doc> {
+        let (a, b) = (a.min(b), a.max(b).min(self.text.len()));
+        let plain = |t: usize| {
+            matches!(
+                self.doc.blocks.get(t),
+                Some(Block::Para(_) | Block::Table(_))
+            )
+        };
+        let top_at = |o: usize| -> Option<usize> { Some(self.line(self.locate(o)?.0)?.pos.top()) };
+        let (mut ta, mut tb) = (top_at(a)?, top_at(b)?);
+        let (mut a, mut b) = (a, b);
+        // Signature and quote blocks at the ends drop out.
+        while ta < tb && !plain(ta) {
+            ta = ta.saturating_add(1);
+            a = self.lines.iter().find(|l| l.pos.top() == ta)?.start;
+        }
+        while tb > ta && !plain(tb) {
+            tb = tb.saturating_sub(1);
+            b = self.lines.iter().rfind(|l| l.pos.top() == tb)?.end();
+        }
+        if a >= b || !(ta..=tb).all(plain) {
+            return None;
+        }
+        let base = self.lines.iter().find(|l| l.pos.top() == ta)?.start;
+        let mut ed = Editor::new(Doc {
+            font: self.doc.font,
+            size: self.doc.size,
+            color: self.doc.color,
+            blocks: self.doc.blocks.get(ta..=tb)?.to_vec(),
+        });
+        let (a, b) = (a.checked_sub(base)?, b.checked_sub(base)?);
+        let end = ed.text().len();
+        ed.replace(b, end, "", (b, end))?;
+        ed.replace(0, a, "", (0, a))?;
+        Some(ed.doc)
+    }
+
     /// The signature block, if the message has one.
     pub fn signature(&self) -> Option<&SignatureBlock> {
         self.doc.blocks.iter().find_map(|b| match b {

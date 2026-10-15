@@ -640,3 +640,126 @@ fn delete_in_a_message_tab_never_acts_on_a_draft_row() {
     assert!(!h.ui().get_c_confirm_discard());
     assert_eq!(Db::open(&h.path).unwrap().count_drafts().unwrap(), 1);
 }
+
+/// A message in a second folder ("Work", with an unread header), its id.
+fn work_message(h: &Harness) -> i64 {
+    let (account, inbox) = h.app(|a| {
+        let f = a.folders.iter().find(|f| f.role == Role::Inbox).unwrap();
+        (f.account_id, f.id)
+    });
+    let mut db = Db::open(&h.path).unwrap();
+    let work = db
+        .upsert_folder(account, "Work", "Work", 0, Role::Other)
+        .unwrap();
+    db.insert_headers(
+        account,
+        work,
+        &[NewHeader {
+            uid: 9,
+            msgid: "w9@example.org".into(),
+            subject: "Elsewhere".into(),
+            from_addr: "cy@example.org".into(),
+            to: "me@example.org".into(),
+            date: 1_700_000_009,
+            ..Default::default()
+        }],
+    )
+    .unwrap();
+    let id = db.message_ids(&[work], "").unwrap()[0];
+    db.retain_folders(account, &[inbox, work]).unwrap();
+    h.app(|a| {
+        a.folders = a.db.folders().unwrap_or_default();
+        a.reload_rows();
+    });
+    id
+}
+
+fn drop_work_folder(h: &Harness) {
+    let (account, inbox) = h.app(|a| {
+        let f = a.folders.iter().find(|f| f.role == Role::Inbox).unwrap();
+        (f.account_id, f.id)
+    });
+    Db::open(&h.path)
+        .unwrap()
+        .retain_folders(account, &[inbox])
+        .unwrap();
+    h.app(|a| a.on_event(Event::FolderChanged { folder_id: None }));
+    h.frame();
+}
+
+#[test]
+fn a_vanished_folder_marks_the_open_message_tab_gone() {
+    let h = Harness::new("tabfolder");
+    let id = work_message(&h);
+    h.ui().invoke_open_tab(id as i32, false);
+    h.frame();
+    assert_eq!(h.ui().get_r_subject(), "Elsewhere");
+    drop_work_folder(&h);
+    assert!(h.ui().get_r_gone(), "the tab says the message is gone");
+    assert!(h.ui().get_tabs().row_data(1).unwrap().gone);
+    assert_eq!(h.app(|a| a.tabs.len()), 2, "the tab stays, readable");
+}
+
+#[test]
+fn a_vanished_folder_marks_a_background_message_tab_gone() {
+    let h = Harness::new("tabfolder2");
+    let id = work_message(&h);
+    h.ui().invoke_open_tab(id as i32, false);
+    h.frame();
+    h.app(|a| a.go_to_mail_tab());
+    drop_work_folder(&h);
+    assert!(h.ui().get_tabs().row_data(1).unwrap().gone);
+    h.app(|a| a.activate_tab(1));
+    h.frame();
+    assert!(h.ui().get_r_gone());
+}
+
+#[test]
+fn a_removed_account_marks_its_message_tabs_gone() {
+    let h = Harness::new("tabaccount");
+    let (second, _) = more_messages(&h);
+    h.app(|a| a.forget_password = std::rc::Rc::new(|_| Ok(())));
+    h.ui().invoke_open_tab(second as i32, false);
+    h.frame();
+    let account = h.app(|a| a.accounts[0].id);
+    h.app(|a| a.remove_account_now(account));
+    h.frame();
+    assert!(h.ui().get_r_gone());
+    assert!(h.ui().get_tabs().row_data(1).unwrap().gone);
+    assert_eq!(h.app(|a| a.tabs.len()), 2);
+}
+
+#[test]
+fn a_removed_account_marks_a_background_tab_gone() {
+    let h = Harness::new("tabaccount2");
+    let (second, _) = more_messages(&h);
+    h.app(|a| a.forget_password = std::rc::Rc::new(|_| Ok(())));
+    h.ui().invoke_open_tab(second as i32, false);
+    h.frame();
+    h.app(|a| a.go_to_mail_tab());
+    let account = h.app(|a| a.accounts[0].id);
+    h.app(|a| a.remove_account_now(account));
+    h.app(|a| a.activate_tab(1));
+    h.frame();
+    assert!(h.ui().get_r_gone());
+    assert!(h.ui().get_tabs().row_data(1).unwrap().gone);
+}
+
+#[test]
+fn settings_from_a_message_tab_keep_the_pane_and_f6_stays_visible() {
+    let h = Harness::new("tabsettings");
+    let (second, _) = more_messages(&h);
+    h.ui().invoke_open_tab(second as i32, false);
+    h.frame();
+    let ui = h.ui();
+    assert_ne!(ui.get_tab_kind(), 0);
+    ui.set_show_settings(true);
+    h.frame();
+    assert!(
+        ui.get_pane_shown(),
+        "the folder pane shows beside Settings on a message tab"
+    );
+    ui.set_show_settings(false);
+    h.frame();
+    assert!(!ui.get_pane_shown());
+}

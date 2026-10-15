@@ -27,6 +27,7 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM, LRESULT,
     WPARAM,
 };
+use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegDeleteValueW,
@@ -40,9 +41,9 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     FindWindowExW, GetCursorPos, IDI_APPLICATION, LoadIconW, MF_CHECKED, MF_SEPARATOR, MF_STRING,
-    PostMessageW, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-    WNDCLASSW,
+    PostMessageW, RegisterClassW, RegisterWindowMessageW, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
+    SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP, WM_CONTEXTMENU,
+    WM_COPYDATA, WM_ENDSESSION, WM_LBUTTONUP, WM_NULL, WM_QUERYENDSESSION, WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::notify::Target;
@@ -68,7 +69,7 @@ const CMD_PAUSE: usize = 3;
 const CMD_QUIT: usize = 4;
 
 /// What the shell tells the app. Delivered on the UI thread.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShellEvent {
     /// Tray left click or the Open menu item.
     Open,
@@ -83,6 +84,9 @@ pub enum ShellEvent {
     ToastClicked(Target),
     /// A second launch asked this instance to come forward.
     ActivateRequested,
+    /// A second launch handed over a `mailto:` URL: open a prefilled
+    /// composer (it is never sent).
+    Mailto(crate::mail::render::links::Mailto),
 }
 
 /// Translated menu labels, supplied by the app from the `Tr` global.
@@ -183,6 +187,38 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         MSG_ACTIVATE => {
             emit(ShellEvent::ActivateRequested);
             0
+        }
+        // The installer's Restart Manager (or a sign-out) asks the app to
+        // end: agree, and when told it is ending, really quit (a window
+        // hidden to the tray would otherwise keep the app, and its files,
+        // alive).
+        WM_QUERYENDSESSION => 1,
+        WM_ENDSESSION => {
+            if wp != 0 {
+                emit(ShellEvent::Quit);
+            }
+            0
+        }
+        WM_COPYDATA => {
+            // SAFETY: for WM_COPYDATA, WM_ENDSESSION, WM_QUERYENDSESSION, lParam points to a COPYDATASTRUCT that
+            // stays valid for the call.
+            let Some(cds) = (unsafe { (lp as *const COPYDATASTRUCT).as_ref() }) else {
+                return 0;
+            };
+            let len = cds.cbData as usize;
+            let bytes = if cds.lpData.is_null() || len > crate::launch::MAX_URL_BYTES {
+                &[][..]
+            } else {
+                // SAFETY: lpData points to cbData readable bytes.
+                unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, len) }
+            };
+            match crate::launch::decode_handoff(cds.dwData, bytes) {
+                Some(m) => {
+                    emit(ShellEvent::Mailto(m));
+                    1
+                }
+                None => 0,
+            }
         }
         m if is_taskbar_created(m, TASKBAR_CREATED.load(Ordering::Relaxed)) => {
             // Explorer restarted and lost our icon; add it again.
@@ -453,6 +489,41 @@ pub fn signal_existing_instance() -> bool {
     unsafe {
         let hwnd = FindWindowExW(null_mut(), null_mut(), class.as_ptr(), null());
         !hwnd.is_null() && PostMessageW(hwnd, MSG_ACTIVATE, 0, 0) != 0
+    }
+}
+
+/// Hands a `mailto:` URL (UTF-8 `payload`, from `launch::handoff_payload`)
+/// to the running instance, which opens a composer with it. True if it was
+/// delivered; false if no instance window was found (no tray) or it did not
+/// answer in two seconds. The payload is a plain copy; nothing is sent.
+pub fn send_mailto_to_existing_instance(payload: &[u8]) -> bool {
+    let class = wide(CLASS_NAME);
+    let Ok(len) = u32::try_from(payload.len()) else {
+        return false;
+    };
+    let data = COPYDATASTRUCT {
+        dwData: crate::launch::COPYDATA_MAILTO,
+        cbData: len,
+        lpData: payload.as_ptr() as *mut c_void,
+    };
+    // SAFETY: class is NUL-terminated; `data` and the payload outlive the
+    // synchronous SendMessageTimeoutW, which copies the data across.
+    unsafe {
+        let hwnd = FindWindowExW(null_mut(), null_mut(), class.as_ptr(), null());
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut result: usize = 0;
+        SendMessageTimeoutW(
+            hwnd,
+            WM_COPYDATA,
+            0,
+            &data as *const COPYDATASTRUCT as LPARAM,
+            SMTO_ABORTIFHUNG,
+            2000,
+            &mut result,
+        ) != 0
+            && result == 1
     }
 }
 

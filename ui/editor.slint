@@ -4,8 +4,8 @@
 // text, the caret, IME, dead keys, the clipboard's plain text and the
 // screen reader's view (src/app/composer/rich.rs keeps both in step).
 import { Theme, Icons } from "theme.slint";
-import { ComboBox, ScrollView } from "std-widgets.slint";
-import { Focus, FocusRing, Icon, IconButton, InputFrame, Button, ComboEdge } from "widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Focus, FocusRing, Icon, IconButton, InputFrame, Button, ComboBox } from "widgets.slint";
 
 // One painted band of the page, in page coordinates (logical px), drawn
 // 1:1 at the device scale.
@@ -42,6 +42,9 @@ export struct EdState {
     scroll-seq: int,
     // Nothing written yet: the placeholder shows.
     empty: bool,
+    // The message's length in characters when the hidden input holds only
+    // the part around the caret (over 16 KB); 0 when it holds all of it.
+    long-chars: int,
 }
 
 // The formatting at the caret (or common to the selection), for the
@@ -78,7 +81,7 @@ export enum EdAction {
     undo, redo, show-quote, edit-quote,
 }
 
-export enum EdKey { up, down, page-up, page-down, home, end, doc-start, doc-end, select-all, tab, back-tab, paste, undo, redo }
+export enum EdKey { up, down, page-up, page-down, home, end, doc-start, doc-end, select-all, tab, back-tab, paste, undo, redo, copy, cut }
 
 // The two editors' state and the calls into Rust. `id` 0 is the
 // composer's body, 1 the signature being edited in Settings.
@@ -220,7 +223,13 @@ export component RichBody inherits InputFrame {
     // While the controller's text and selection go in, the input's own
     // caret moves are not the user's.
     property <bool> pushing;
+    // The caret's off half of a blink; every move or edit shows it again.
+    property <bool> caret-off;
+    property <length> caret-at: root.state.caret.x + root.state.caret.y;
+    changed caret-at => { root.caret-off = false; }
+    changed has-focus => { root.caret-off = false; }
     changed seq => {
+        root.caret-off = false;
         root.pushing = true;
         if root.state.push-text {
             input.text = root.state.text;
@@ -315,6 +324,11 @@ export component RichBody inherits InputFrame {
         } else if e.text == "v" || e.text == "V" {
             // Formatted text from the clipboard; plain text pastes as usual.
             return Rich.key(root.id, EdKey.paste, false);
+        } else if e.text == "c" || e.text == "C" {
+            // Plain text and HTML (the input copies plain text if not).
+            return Rich.key(root.id, EdKey.copy, false);
+        } else if e.text == "x" || e.text == "X" {
+            return Rich.key(root.id, EdKey.cut, false);
         } else {
             return false;
         }
@@ -368,11 +382,19 @@ export component RichBody inherits InputFrame {
             Menu {
                 MenuItem {
                     title: @tr("Cut");
-                    activated => { input.cut(); }
+                    activated => {
+                        if !Rich.key(root.id, EdKey.cut, false) {
+                            input.cut();
+                        }
+                    }
                 }
                 MenuItem {
                     title: @tr("Copy");
-                    activated => { input.copy(); }
+                    activated => {
+                        if !Rich.key(root.id, EdKey.copy, false) {
+                            input.copy();
+                        }
+                    }
                 }
                 MenuItem {
                     title: @tr("Paste");
@@ -463,6 +485,9 @@ export component RichBody inherits InputFrame {
                             accessible-role: text-input;
                             accessible-label: root.label;
                             accessible-placeholder-text: root.placeholder-text;
+                            // A long message: the screen reader has the part
+                            // around the caret, which moves with it.
+                            accessible-description: root.state.long-chars > 0 ? @tr("Long message of {n} character. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end." | "Long message of {n} characters. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end." % root.state.long-chars) : "";
                             edited => {
                                 Rich.edited(root.id, self.text, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
                             }
@@ -484,13 +509,19 @@ export component RichBody inherits InputFrame {
                             }
                         }
                     }
-                    // The caret (WinUI: 1 px wide at 100 %), in the text colour.
+                    // The caret (WinUI: 1 px wide at 100 %), in the text colour,
+                    // blinking at Windows' rate; only its own pixels redraw.
                     if input.has-focus && root.state.sel.length == 0: Rectangle {
                         x: root.state.caret.x;
                         y: root.state.caret.y;
                         width: max(1px, root.state.caret.w);
                         height: root.state.caret.h;
-                        background: Theme.text;
+                        background: root.caret-off ? transparent : Theme.text;
+                    }
+                    Timer {
+                        interval: Theme.caret-blink;
+                        running: Theme.caret-blink > 0ms && input.has-focus && root.state.sel.length == 0;
+                        triggered => { root.caret-off = !root.caret-off; }
                     }
                     // What the IME is composing, under the caret's line start
                     // (the page shows the text once committed).
@@ -542,7 +573,29 @@ component Swatch inherits Rectangle {
     in property <bool> automatic;
     in property <string> name;
     in property <bool> current;
+    // The grid wants the keyboard here (arrow keys, the flyout opening).
+    in property <bool> want-focus;
     callback picked;
+    // An arrow key: the swatch it moves to, by its index step.
+    callback step(int);
+    callback cancel;
+    callback got-focus;
+    changed want-focus => {
+        if self.want-focus {
+            fs.focus();
+        }
+    }
+    init => {
+        if self.want-focus {
+            fs.focus();
+        }
+    }
+    property <bool> focused: fs.has-focus;
+    changed focused => {
+        if self.focused {
+            root.got-focus();
+        }
+    }
     accessible-role: button;
     accessible-label: root.name;
     accessible-checkable: true;
@@ -556,6 +609,17 @@ component Swatch inherits Rectangle {
                 root.picked();
                 return accept;
             }
+            if e.text == Key.Escape {
+                root.cancel();
+                return accept;
+            }
+            // Four to a row (docs/WINUI3.md "Composer toolbar").
+            if e.text == Key.LeftArrow { root.step(-1); return accept; }
+            if e.text == Key.RightArrow { root.step(1); return accept; }
+            if e.text == Key.UpArrow { root.step(-4); return accept; }
+            if e.text == Key.DownArrow { root.step(4); return accept; }
+            if e.text == Key.Home { root.step(-100); return accept; }
+            if e.text == Key.End { root.step(100); return accept; }
             reject
         }
     }
@@ -603,6 +667,20 @@ component Swatch inherits Rectangle {
 export component ColorGrid inherits Rectangle {
     in property <int> current;
     callback picked(int);
+    callback cancel();
+    // The swatch with the keyboard: the current colour as the flyout opens.
+    property <int> focus-i: root.current + 1;
+    // An arrow from swatch `i`: one along, or a row up or down (staying put
+    // past the grid's edge); Home and End: the first and the last.
+    function step(i: int, d: int) {
+        if d <= -100 {
+            root.focus-i = 0;
+        } else if d >= 100 {
+            root.focus-i = 10;
+        } else if i + d >= 0 && i + d <= 10 {
+            root.focus-i = i + d;
+        }
+    }
     property <length> cell: 88px;
     width: 4 * root.cell + 2 * Theme.s2;
     height: 3 * root.row-h + 2 * Theme.s2;
@@ -628,7 +706,11 @@ export component ColorGrid inherits Rectangle {
             automatic: i == 0;
             name: Rich.color-name(i - 1);
             current: root.current == i - 1;
+            want-focus: root.focus-i == i;
             picked => { root.picked(i - 1); }
+            step(d) => { root.step(i, d); }
+            cancel => { root.cancel(); }
+            got-focus => { root.focus-i = i; }
         }
     }
 }
@@ -809,6 +891,7 @@ export component RichToolbar inherits Rectangle {
                 color-popup.close();
                 Rich.act(root.id, EdAction.color, i);
             }
+            cancel => { color-popup.close(); }
         }
     }
     table-popup := PopupWindow {
@@ -839,7 +922,6 @@ export component RichToolbar inherits Rectangle {
                 accessible-label: @tr("Font");
                 selected => { Rich.act(root.id, EdAction.font, self.current-index); }
             }
-            ComboEdge { }
         }
         if !root.compact: Rectangle {
             width: 64px;
@@ -852,7 +934,6 @@ export component RichToolbar inherits Rectangle {
                 accessible-label: @tr("Font size");
                 selected => { Rich.act(root.id, EdAction.size, self.current-index); }
             }
-            ComboEdge { }
         }
         bar := FocusScope {
             focus-on-click: false;

@@ -1769,8 +1769,13 @@ fn prescale_images(doc: &mut Doc, scale: f32, budget: &mut u64) {
                     continue;
                 };
                 *budget = budget.saturating_sub(px);
-                let (nat_w, nat_h) = (im.nat_w, im.nat_h);
-                doc.images.push(ImageData { pix, nat_w, nat_h });
+                let (nat_w, nat_h, dark_on_clear) = (im.nat_w, im.nat_h, im.dark_on_clear);
+                doc.images.push(ImageData {
+                    pix,
+                    nat_w,
+                    nat_h,
+                    dark_on_clear,
+                });
                 let k = doc.images.len().saturating_sub(1);
                 done.insert(key, k);
                 k

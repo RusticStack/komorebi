@@ -450,22 +450,6 @@ export component IconButton inherits Rectangle {
     FocusRing { shown: fs.has-focus; }
 }
 
-// Over a std ComboBox, filling it (docs/WINUI3.md "ComboBox"): a
-// Button's elevation edge, or under a contrast theme the 1 px ButtonText
-// border Slint's style does not draw (docs/WINUI3.md "High contrast").
-export component ComboEdge inherits Rectangle {
-    border-width: Theme.contrast ? 1px : 0;
-    border-radius: Theme.radius;
-    border-color: Theme.control-stroke;
-    Rectangle {
-        x: Theme.radius;
-        y: Theme.dark ? 0 : parent.height - 1px;
-        width: parent.width - 2 * Theme.radius;
-        height: 1px;
-        background: Theme.contrast ? transparent : Theme.control-stroke-edge;
-    }
-}
-
 // A link-styled button ("Unsubscribe", "Update password"; docs/WINUI3.md
 // "HyperlinkButton"): accent text over subtle fills, a Tab stop pressed
 // with Space or Enter.
@@ -594,6 +578,11 @@ export component NavRow inherits Rectangle {
     in property <string> tooltip;
     // Each change takes the keyboard focus (Settings closing hands it back).
     in property <int> focus-seq;
+    // False where the list draws one sliding pill over its rows
+    // (NavigationView's indicator moves from item to item).
+    in property <bool> own-pill: true;
+    // The pill's top, in the row.
+    out property <length> pill-y: root.gap + (root.compact ? 8px : (root.height - root.gap - 16px) / 2);
     changed focus-seq => { fs.focus(); }
     out property <bool> has-focus: fs.has-focus;
     callback clicked;
@@ -807,7 +796,7 @@ export component NavRow inherits Rectangle {
             width: 3px;
             height: 16px;
             border-radius: 2px;
-            background: root.selected ? Theme.on-fill(true, Theme.accent) : transparent;
+            background: root.selected && root.own-pill ? Theme.on-fill(true, Theme.accent) : transparent;
         }
         // The icon: a 16 px box after the expander slot, or the rail's
         // 40x24 box at the top of the item; an account's 20 px initial tile.
@@ -2958,6 +2947,207 @@ export component FlyoutItem inherits Rectangle {
             }
         }
         FocusRing { shown: fs.has-focus; }
+    }
+}
+
+// A drop-down list (docs/WINUI3.md "ComboBox"), replacing Slint's own,
+// whose colours come from its style (no contrast theme) and whose border
+// and chevron fade over 200 ms and 150 ms whatever Windows animation
+// effects say. The face is a Button's (the same tokens, so a contrast
+// theme and the elevation edge come with them), the list a Flyout, and
+// nothing here animates. Keys: Space, Enter, Alt+Down or F4 open the list,
+// the arrows step through the values (also while it is closed, as in
+// WinUI), Enter and Escape close it.
+export component ComboBox inherits Rectangle {
+    in property <[string]> model;
+    in property <bool> enabled: true;
+    in-out property <int> current-index: 0;
+    out property <string> current-value: root.model[root.current-index];
+    out property <bool> has-focus: fs.has-focus && root.enabled;
+    callback selected(current-value: string);
+
+    forward-focus: fs;
+    accessible-role: combobox;
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-value: root.current-value;
+    accessible-action-expand => { root.open(); }
+
+    min-width: 64px;
+    preferred-width: 160px;
+    height: 32px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+
+    property <int> visible-items: min(6, root.model.length);
+    property <bool> hover: root.enabled && ta.has-hover;
+    property <bool> down: root.enabled && ta.pressed;
+    // Hovered or pressed under a contrast theme: Highlight text on
+    // Highlight (as a Button).
+    property <bool> lit: Theme.contrast && (root.hover || root.down);
+
+    function open() {
+        if root.enabled && root.model.length > 0 {
+            popup.show();
+        }
+    }
+    function select(index: int) {
+        if root.enabled && index >= 0 && index < root.model.length && index != root.current-index {
+            root.current-index = index;
+            root.selected(root.current-value);
+        }
+    }
+
+    border-radius: Theme.radius;
+    background: root.lit ? Theme.hc-highlight-text : !root.enabled ? Theme.control-disabled
+        : root.down ? Theme.control-pressed : root.hover ? Theme.control-hover : Theme.control;
+    border-width: 1px;
+    border-color: root.lit ? Theme.hc-highlight : Theme.control-stroke;
+    // The elevation edge of a Button (none pressed, disabled or under a
+    // contrast theme).
+    if !Theme.contrast && root.enabled && !root.down: Rectangle {
+        x: Theme.radius;
+        y: Theme.dark ? 0 : root.height - 1px;
+        width: root.width - 2 * Theme.radius;
+        height: 1px;
+        background: Theme.control-stroke-edge;
+    }
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        focus-gained(reason) => {
+            if reason == FocusReason.tab-navigation {
+                Focus.keyboard = true;
+            }
+        }
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return || e.text == Key.F4
+                || (e.text == Key.DownArrow && e.modifiers.alt) {
+                root.open();
+                return accept;
+            }
+            if e.modifiers.alt || e.modifiers.control {
+                return reject;
+            }
+            if e.text == Key.DownArrow {
+                root.select(root.current-index + 1);
+                return accept;
+            }
+            if e.text == Key.UpArrow {
+                root.select(root.current-index - 1);
+                return accept;
+            }
+            reject
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+                fs.focus();
+            }
+        }
+        clicked => { root.open(); }
+    }
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        spacing: Theme.s2;
+        Text {
+            horizontal-stretch: 1;
+            text: root.current-value;
+            font-size: Theme.body;
+            color: root.lit ? Theme.hc-highlight : !root.enabled ? Theme.text-disabled : root.down ? Theme.text-2 : Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+        Icon {
+            text: Icons.chevron-down;
+            font-size: 12px;
+            width: 12px;
+            color: root.lit ? Theme.hc-highlight : !root.enabled ? Theme.text-disabled : Theme.text-2;
+        }
+    }
+    FocusRing { shown: fs.has-focus; radius: Theme.radius; }
+
+    // Under the face, as wide as it; 36 px items, six in view.
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + Theme.s1;
+        width: root.width;
+        height: root.visible-items * 36px + 4px;
+        close-policy: close-on-click-outside;
+        forward-focus: list-keys;
+        list-keys := FocusScope {
+            key-pressed(e) => {
+                if e.text == Key.DownArrow {
+                    root.select(root.current-index + 1);
+                    return accept;
+                }
+                if e.text == Key.UpArrow {
+                    root.select(root.current-index - 1);
+                    return accept;
+                }
+                if e.text == Key.Return || e.text == Key.Escape || e.text == " " {
+                    popup.close();
+                    return accept;
+                }
+                reject
+            }
+            Flyout {
+                ScrollView {
+                    content-y: -max(0, root.current-index - root.visible-items + 1) * 36px;
+                    VerticalLayout {
+                        for value[index] in root.model: Rectangle {
+                            height: 36px;
+                            accessible-role: list-item;
+                            accessible-label: value;
+                            accessible-item-selected: index == root.current-index;
+                            accessible-action-default => {
+                                root.select(index);
+                                popup.close();
+                            }
+                            Rectangle {
+                                x: Theme.s1;
+                                y: 2px;
+                                width: parent.width - 2 * Theme.s1;
+                                height: parent.height - 4px;
+                                border-radius: Theme.radius;
+                                background: item-ta.pressed ? Theme.pressed
+                                    : item-ta.has-hover || index == root.current-index ? Theme.selected : transparent;
+                                item-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.select(index);
+                                        popup.close();
+                                    }
+                                }
+                                Rectangle {
+                                    x: 0;
+                                    width: 3px;
+                                    height: 16px;
+                                    border-radius: 1.5px;
+                                    background: Theme.on-fill(true, Theme.accent);
+                                    visible: index == root.current-index;
+                                }
+                                Text {
+                                    x: 11px;
+                                    width: parent.width - 22px;
+                                    text: value;
+                                    font-size: Theme.body;
+                                    color: Theme.on-fill(item-ta.has-hover || item-ta.pressed || index == root.current-index, Theme.text);
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

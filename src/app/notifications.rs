@@ -132,6 +132,10 @@ impl App {
         use komorebi::win_shell::ShellEvent;
         match event {
             ShellEvent::Open | ShellEvent::ActivateRequested => self.show_main_window(),
+            ShellEvent::Mailto(m) => {
+                self.show_main_window();
+                self.compose_mailto(m);
+            }
             ShellEvent::CheckMail => self.refresh(),
             ShellEvent::TogglePause => {
                 self.notes.paused = !self.notes.paused;
@@ -140,12 +144,7 @@ impl App {
                 }
                 self.save_setting("notify_paused", if self.notes.paused { "1" } else { "0" });
             }
-            ShellEvent::Quit => {
-                self.notes.quitting = true;
-                self.before_close();
-                self.notes.shell = None;
-                slint::quit_event_loop().ok();
-            }
+            ShellEvent::Quit => self.quit_now(),
             ShellEvent::ToastClicked(target) => {
                 self.show_main_window();
                 if matches!(self.db.message(target.message_id), Ok(Some(_))) {
@@ -153,6 +152,19 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Really exit (the tray's Quit, or Windows ending the session): save
+    /// drafts and tabs, remove the tray icon, leave the event loop.
+    pub(super) fn quit_now(&mut self) {
+        self.notes.quitting = true;
+        self.before_close();
+        self.close_composer_windows();
+        #[cfg(windows)]
+        {
+            self.notes.shell = None;
+        }
+        slint::quit_event_loop().ok();
     }
 
     /// The window back from the tray (or from behind other windows).

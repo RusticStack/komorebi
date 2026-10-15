@@ -124,6 +124,28 @@ pub fn get_with(url: &str, opts: &Options) -> Result<Vec<u8>, FetchError> {
     .get_with(url, opts)
 }
 
+/// Tests only: [`get_with`] against a local HTTPS server whose certificate
+/// is `root_pem` (loopback addresses allowed). The same redirect, size,
+/// progress and header handling as production.
+#[cfg(test)]
+pub(crate) fn get_with_loopback(
+    url: &str,
+    opts: &Options,
+    root_pem: &[u8],
+) -> Result<Vec<u8>, FetchError> {
+    let root = native_tls::Certificate::from_pem(root_pem)
+        .map_err(|e| FetchError::Network(e.to_string()))?;
+    let tls = TlsConnector::builder()
+        .add_root_certificate(root)
+        .build()
+        .map_err(|e| FetchError::Network(e.to_string()))?;
+    Client {
+        tls,
+        loopback_ok: true,
+    }
+    .get_with(url, opts)
+}
+
 struct Client {
     tls: TlsConnector,
     /// Lets the tests reach their server on 127.0.0.1; never set otherwise.

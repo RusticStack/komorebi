@@ -1,0 +1,295 @@
+// The To, Cc and Bcc fields as person tokens (WinUI TokenizingTextBox,
+// docs/WINUI3.md "TextBox"): a view of the field's text, which stays the
+// draft's model. The entries before the last separator show as chips;
+// the text after it is typed in the field at their end. A comma or a
+// semicolon makes a chip, Enter too; leaving the field shows the typed
+// text as a chip without changing it. Backspace or Left from the start of
+// the text selects the last chip, Left and Right move between them,
+// Backspace or Delete removes the selected one, Ctrl+C copies it. The
+// parsing lives in Rust (src/app/composer/recipients.rs), where it is
+// tested.
+import { Theme, Icons } from "theme.slint";
+import { InputFrame, Icon } from "widgets.slint";
+
+export struct RecipientChip {
+    label: string,
+    addr: string,
+    valid: bool,
+}
+
+export global Recipients {
+    // The chips of an address list.
+    pure callback chips(string) -> [RecipientChip];
+    // The chips' part of a field's text, and the text being typed.
+    pure callback head(string) -> string;
+    pure callback tail(string) -> string;
+    pure callback bytes(string) -> int;
+    // The text without chip `i`; Enter's text; chip `i` as typed.
+    pure callback remove(string, int) -> string;
+    pure callback commit(string) -> string;
+    pure callback entry(string, int) -> string;
+}
+
+component RecipientToken inherits Rectangle {
+    in property <RecipientChip> chip;
+    in property <bool> selected;
+    callback remove;
+    callback clicked;
+    accessible-role: list-item;
+    accessible-label: root.chip.label != root.chip.addr ? @tr("recipient" => "{0}, {1}", root.chip.label, root.chip.addr) : root.chip.addr;
+    accessible-description: root.chip.valid ? "" : @tr("Not a valid address");
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+    property <color> fg: !root.chip.valid ? Theme.danger : Theme.text;
+    height: 24px;
+    width: row.preferred-width;
+    border-radius: Theme.radius-lg;
+    border-width: !root.chip.valid || Theme.contrast ? (root.selected && Theme.contrast ? 2px : 1px) : 0;
+    border-color: Theme.contrast && root.selected ? Theme.hc-highlight : !root.chip.valid ? Theme.danger : Theme.stroke;
+    background: root.selected ? (root.chip.valid ? Theme.accent : Theme.danger) : !root.chip.valid ? Theme.danger-bg : ta.has-hover ? Theme.control-alt-hover : Theme.control-alt;
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    row := HorizontalLayout {
+        padding-left: Theme.s2;
+        padding-right: 2px;
+        spacing: Theme.s1;
+        if !root.chip.valid: Icon {
+            text: Icons.error;
+            font-size: 12px;
+            color: root.selected ? Theme.on-accent : Theme.danger;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.chip.label;
+            font-size: Theme.body;
+            color: root.selected ? Theme.on-accent : root.fg;
+            vertical-alignment: center;
+            max-width: 240px;
+            overflow: elide;
+        }
+        // The small x; a pointer target only (Backspace and Delete are the
+        // keyboard's way), so 200 chips add no tab stops.
+        Rectangle {
+            width: 20px;
+            border-radius: Theme.radius;
+            background: x-ta.pressed ? Theme.pressed : x-ta.has-hover ? Theme.hover : transparent;
+            accessible-role: button;
+            accessible-label: @tr("Remove {0}", root.chip.label);
+            accessible-action-default => { root.remove(); }
+            Icon {
+                text: Icons.dismiss;
+                font-size: 8px;
+                color: root.selected ? Theme.on-accent : root.fg;
+            }
+            x-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.remove(); }
+            }
+        }
+    }
+}
+
+export component RecipientField inherits InputFrame {
+    in-out property <string> text;
+    // Room kept at the end for the links over the field (To's Cc and Bcc).
+    in property <length> end-room;
+    // The field's error message, read with it.
+    in property <string> description;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(text: string);
+
+    public function focus-field() {
+        input.focus();
+    }
+    // The caret at the end of the text being typed (after a suggestion).
+    public function caret-to-end() {
+        input.focus();
+        let n = Recipients.bytes(input.text);
+        input.set-selection-offsets(n, n);
+    }
+
+    // The chips' source: the head while typing, everything once the focus
+    // left; set only when it changes, so typing does not rebuild them.
+    property <string> source;
+    property <[RecipientChip]> chips: Recipients.chips(root.source);
+    // The selected chip (-1: none, the text has the keys).
+    property <int> sel: -1;
+    function sync() {
+        let s = input.has-focus ? Recipients.head(root.text) : root.text;
+        if s != root.source {
+            root.source = s;
+        }
+        let t = Recipients.tail(root.text);
+        if t != input.text {
+            input.text = t;
+        }
+        if root.sel >= root.chips.length {
+            root.sel = -1;
+        }
+    }
+    function set(t: string) {
+        root.text = t;
+        root.edited(t);
+        root.sync();
+    }
+    function drop(i: int) {
+        root.sel = -1;
+        root.set(Recipients.remove(root.text, i));
+        input.focus();
+    }
+    changed text => { root.sync(); }
+    // Its own name for the focus, so a user's `changed has-focus` (the
+    // composer's address check) does not replace this one.
+    property <bool> typing: input.has-focus;
+    changed typing => {
+        if !self.typing {
+            root.sel = -1;
+        }
+        root.sync();
+    }
+    init => { root.sync(); }
+
+    focused: input.has-focus;
+    hover: ta.has-hover;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-value <=> root.text;
+    accessible-description: root.description;
+    accessible-action-set-value(v) => { root.set(v); }
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    min-width: 64px;
+    height: max(32px, input.preferred-height + 11px);
+
+    // Ctrl+C on a chip: through this hidden field, as the reader does.
+    clip := TextInput {
+        read-only: true;
+        width: 0;
+        height: 0;
+        accessible-role: none;
+    }
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => {
+            root.sel = -1;
+            input.focus();
+        }
+    }
+    keys := FocusScope {
+        x: 0;
+        width: root.width - root.end-room;
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(e) => {
+            let n = root.chips.length;
+            let start = input.cursor-position-byte-offset == 0 && input.anchor-position-byte-offset == 0;
+            if e.modifiers.alt {
+                return reject;
+            }
+            if e.modifiers.control {
+                if root.sel >= 0 && (e.text == "c" || e.text == "C") {
+                    clip.text = Recipients.entry(root.text, root.sel);
+                    clip.select-all();
+                    clip.copy();
+                    clip.text = "";
+                    return accept;
+                }
+                return reject;
+            }
+            if e.text == Key.Backspace {
+                if root.sel >= 0 {
+                    root.drop(root.sel);
+                    return accept;
+                }
+                if start && n > 0 {
+                    root.sel = n - 1;
+                    return accept;
+                }
+                return reject;
+            }
+            if e.text == Key.Delete && root.sel >= 0 {
+                root.drop(root.sel);
+                return accept;
+            }
+            if e.text == Key.LeftArrow && !e.modifiers.shift {
+                if root.sel > 0 {
+                    root.sel -= 1;
+                    return accept;
+                }
+                if root.sel == 0 {
+                    return accept;
+                }
+                if start && n > 0 {
+                    root.sel = n - 1;
+                    return accept;
+                }
+                return reject;
+            }
+            if e.text == Key.RightArrow && root.sel >= 0 {
+                root.sel = root.sel + 1 < n ? root.sel + 1 : -1;
+                return accept;
+            }
+            if e.text == Key.Return && !e.modifiers.shift {
+                if root.sel >= 0 {
+                    return accept;
+                }
+                let t = Recipients.commit(root.text);
+                if t != root.text {
+                    root.set(t);
+                    return accept;
+                }
+                return reject;
+            }
+            if e.text == Key.Escape && root.sel >= 0 {
+                root.sel = -1;
+                return accept;
+            }
+            if root.sel >= 0 && e.text != Key.Tab && e.text != Key.Shift {
+                root.sel = -1;
+            }
+            reject
+        }
+        Rectangle {
+            x: 4px;
+            width: parent.width - 4px - 6px;
+            clip: true;
+            // One line: the chips, then the text being typed, kept in view
+            // at its end (the field's height never changes).
+            line := HorizontalLayout {
+                property <length> room: parent.width;
+                x: input.has-focus ? min(0px, room - self.preferred-width) : 0px;
+                width: max(room, self.preferred-width);
+                spacing: Theme.s1;
+                alignment: start;
+                for c[i] in root.chips: VerticalLayout {
+                    alignment: center;
+                    RecipientToken {
+                        chip: c;
+                        selected: i == root.sel;
+                        clicked => {
+                            input.focus();
+                            root.sel = i;
+                        }
+                        remove => { root.drop(i); }
+                    }
+                }
+                input := TextInput {
+                    width: input.has-focus || root.chips.length == 0 ? max(120px, self.preferred-width + self.text-cursor-width) : 0px;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    single-line: true;
+                    font-size: Theme.body;
+                    color: input.has-focus || root.chips.length == 0 ? Theme.text : transparent;
+                    selection-background-color: Theme.selection-bg;
+                    selection-foreground-color: Theme.selection-text;
+                    accessible-role: none;
+                    edited => {
+                        root.sel = -1;
+                        root.set(Recipients.head(root.text) + self.text);
+                    }
+                }
+            }
+        }
+    }
+}

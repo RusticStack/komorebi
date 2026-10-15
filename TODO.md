@@ -21,31 +21,28 @@ caches (see `docs/PERF.md` for the method):
 
 ### Self-update from GitHub releases
 
-- [x] UI: Settings > About > Updates (`src/app/updates.rs`), the quiet
-      "Version X is available" bar, Later until the next day, save and
-      quit after a verified download (`KOMOREBI_SNAPSHOT_ACTION=update:*`).
-- [ ] Download progress: `fetch::get_with` reports no bytes, so the bar
-      is indeterminate; show the share downloaded.
-- [ ] Snapshots still to take: `update:checking`, `uptodate`,
-      `downloading`, `failed` in both languages and sizes, and high
-      contrast.
-- [ ] Release workflow: sign the installer with `examples/sign_update.rs`
-      and upload the `.sha256` and `.sig` files next to it. The installer
-      asset name must stay `komorebi-<version>-setup.exe` (or change
-      `installer_name()` in `src/update.rs` to match).
-- [ ] Installer: silent updates rely on the Restart Manager closing the
-      running app; `AppMutex=Komorebi.App` (a fixed mutex every running
-      copy holds, closed by the self-update just before the installer
-      starts) stops other installs while it runs. Test an update with the
-      app running in the tray and with a second cache open.
+- [ ] Installer, on a real desktop (nothing here was installed): update
+      from the previous release with the app running in the tray (window
+      hidden, close to tray on), with the window open, and with a second
+      cache open. Check that the Restart Manager's close request
+      (`WM_QUERYENDSESSION` then `WM_ENDSESSION`, which the app now
+      answers by quitting) really reaches the hidden tray window, that the
+      silent update starts Komorebi again (the `[Run]` entry for
+      `/RESTARTAPPLICATIONS`; an app older than this change passes that
+      switch too), that it is not elevated after an all-users install,
+      and that the "close it first" text appears for a manual install.
 - [ ] Measure the release exe size with `ed25519-compact` and `sha2`
       (limit 20.0 MB).
 
 ### Installer and release
 
-- [ ] `mailto:` links: the installer registers `komorebi.exe "%1"` for
-      `mailto`, but the app does not yet read it from the command line.
-      It should open a composer, ideally in the running instance.
+- [ ] `mailto:` links on a real desktop: make Komorebi the default mail
+      app in Settings, click a mail link in a browser with the app closed,
+      open in the tray, and open in the window. Known limits: a second
+      launch hands the URL to the running copy through its tray window,
+      so with no tray icon (or while the first copy is still starting) it
+      only comes forward and the link is dropped; with no account the
+      composer says to add one.
 - [ ] Code signing: choose a provider and certificate, then add the
       `SIGN_CERT_PFX` and `SIGN_CERT_PASSWORD` secrets (or replace
       `scripts/sign.ps1` with the provider's step). Until then the binary
@@ -67,98 +64,52 @@ caches (see `docs/PERF.md` for the method):
       tested only on the local fakes (`src/mail/fake.rs`).
 - [ ] Check which `authserv-id` each provider writes in
       `Authentication-Results` (the sender notice trusts the topmost header
-      whose id has the IMAP host's registrable domain), and that the server
-      strips such headers arriving from outside. Until then a provider whose
-      id is in another domain shows no DMARC notice.
-- [ ] Confirm whether Purelymail saves sent mail server-side; if so,
-      default "save a copy to Sent" off for that preset.
-- [ ] Servers that never wake IDLE for new mail: consider dropping the
-      third (IDLE) connection to save a connection.
-- [ ] Open a server draft saved from another device in the composer
-      (deferred until server draft copies are proven on real providers).
+      whose id has the IMAP host's registrable domain; tested for host
+      name, domain, foreign, missing and spoofed headers), and that the
+      server strips such headers arriving from outside. Unverified for every
+      provider: a provider whose id is in another domain shows no DMARC
+      notice.
+- [ ] Confirm whether Purelymail saves sent mail server-side; if so, set
+      `save_sent: false` on its preset in `src/providers.rs`.
+- [ ] Verify the IDLE silent-server detection and the server draft Edit
+      (`IdleHealth`, `adopt_server_draft`) on real Postale.io and Purelymail
+      accounts; both are tested on the local fakes only.
 
 ### Reader and composer
 
-- [ ] Dimmed mail in the dark theme leaves images alone, so a transparent
-      dark logo can vanish ("Show original colours" is the remedy). If this
-      shows up often, put a light plate behind transparent images.
-- [ ] Copying formatted text out of the composer (Ctrl+C copies plain text).
-- [ ] Arrow keys inside the colour flyout (Tab reaches the swatches).
-- [ ] A caret blink in the composer.
-- [ ] Narrator reads only the proxy's part of a message over 16 KB.
-- [ ] Recipients are text, not person tokens.
-
-### Notifications, tray and background mode
-
-- [ ] Per-account notification switch in each account's page.
-- [ ] Re-add the tray icon after an Explorer restart (`TaskbarCreated` is
-      not handled yet).
-- [ ] Snapshots of Settings > General in en and pt-PT at 1280x800 and
-      900x700.
+- [x] Dark logos on a clear ground get a light plate in dimmed mail.
+      Left: the plate follows the whole message being dimmed, not the
+      colour right behind the image, so a dark logo on a mid-tone brand
+      header gets one too.
+- [x] Copying formatted text out of the composer. Left: a selection with a
+      signature or a stored quote inside it (not at its ends) copies plain
+      text only.
+- [x] Arrow keys inside the colour flyout.
+- [x] A caret blink in the composer.
+- [x] Narrator on a message over 16 KB: told its length and that it reads
+      the part around the cursor (Slint gives the proxy one value; a whole
+      long message there would lay out on every key).
+- [ ] Recipient chips stay on one line (the field scrolls to the text being
+      typed); wrapping them onto more lines as the field fills is left.
 
 ### Windows 11 look
 
-- [ ] The native context and More menus can look light in the dark theme (a
-      dark menu needs the undocumented uxtheme `SetPreferredAppMode`).
-- [ ] No Mica: the software renderer draws opaque pixels, so the solid
-      fallback WinUI itself uses is shown.
-- [ ] The text size follows at the next start if the slider sends no
-      `WM_SETTINGCHANGE`.
-- [ ] Slint's standard ComboBox has no contrast colours of its own
-      (`ComboEdge` adds the edge) and keeps its animations when animation
-      effects are off.
-- [ ] The navigation pill jumps instead of sliding.
-- [ ] The onboarding welcome's entrance is opacity only (the 8 px rise
-      needs a transform animation), and the card's height does not animate
-      between steps.
+- Not planned: Mica. The software renderer draws opaque pixels, so Mica is
+  not used, for performance; the solid fallback WinUI itself uses is shown.
+- [ ] Check by hand on Windows that the tray menu and the system menu turn
+      dark with the app (uxtheme ordinals 135/136; snapshots draw no native
+      menu) and that moving the Text size slider resizes the text at once.
 
 ### Tabs and windows
 
+- [ ] Below 720 px (one pane) the reading pane's "open in its own window"
+      placeholder for a popped-out draft is not shown (the list shows);
+      it needs a Back to list there first.
 - [ ] Removing or re-downloading an account, or a folder vanishing, while
       one of its messages shows in a message tab leaves the tab's reader
       empty; it should say the message is gone, as a sync does.
 - [ ] Settings opened from a message tab show without the folder pane, and
       F6 there still aims at the pane.
-- [ ] The composer in a window of its own ("Open in new window" and Ctrl+O
-      on a composer tab or a draft; close saves as Esc does, Send and Undo
-      send work from it, several at once, the main window shows a short
-      placeholder for a popped-out draft). Not started: three parts of the
-      composer are tied to the main window and must be split first.
-      1. `src/app/composer.rs` writes the draft's view through
-         `self.ui()` (32 places: `show_draft`, `show_field`,
-         `focus_field`, `show_send_state`, `show_compose_attachments`,
-         suggestions, preview, `hide_composer`, the guard and saved-at
-         lines). They need a `composer_ui(DraftId)` that returns the
-         window holding that draft, and every composer callback wired in
-         `src/app.rs` (`on_c_*`, about 20) must be wired again on each
-         composer window with its `DraftId` bound, as `wire_popout` does.
-      2. `Drafts` has one `active` draft, which is also what the main
-         window's composer view shows; autosave, the preview worker
-         (`show_preview` by sequence) and suggestions follow `active`. A
-         popped-out draft needs its own view state (suggestions, preview
-         sequence, last edit for autosave) keyed by `DraftId`, so that
-         typing in one window never moves `active` under the other.
-      3. The rich body editor (`src/app/composer/rich.rs`, `EdUi`) has two
-         fixed panes, `BODY` and `SIG`, each drawing into the main
-         window's `Rich` global through the app's one weak main window handle
-         (`ed_show`). A composer
-         window needs a pane of its own (panes keyed by window and editor,
-         each holding its window), and `rich::wire` run on that window.
-      With those three split, the window itself is the cheap part: a second
-      `AppWindow` in a composer-only mode next to `detail_only`
-      (`src/app/windows.rs`), `on_close_requested` calling `park` and
-      `save_draft` for its draft, `undo_send` reopening the draft in a
-      window when it came from one, and the tab dropped with
-      `set_tabbed(id, false)` while the window holds it.
-
-### Maintenance
-
-- [ ] On every Slint upgrade, check the TextInput's internal
-      `anchor-position-byte-offset` and `cursor-position-byte-offset` that
-      `ComposeBody` reads (the formatting test must pass).
-- [ ] An intermittent failure of the reader's resize-debounce test was seen
-      once in a full run; if it returns, capture its name and fix the
-      timing assumption.
 
 ## Deferred on purpose
 
@@ -187,6 +138,10 @@ only.
    - Drag files from Explorer onto the composer (accent border while
      hovering, all files attached, ignored with the composer closed); copy
      files in Explorer and Ctrl+V in the composer.
+   - Composer windows (Ctrl+O on the composer or a Drafts row): files
+     dragged onto one attach to its draft (accent border while hovering);
+     Bring to front in the main window's pane brings it forward; quit from
+     the tray with one open and check the draft is in Drafts.
    - Open on a PDF (Protected View or the downloaded-file warning) and on an
      `.exe` (refused).
    - Server draft copies: write a draft to yourself, wait 30 s, edit it,
@@ -229,7 +184,7 @@ only.
   the maintainer's own testing, nor against real self-hosted servers; see
   "Providers and servers".
 - The local mail cache is plaintext.
-- Release 0.4.0 is published; the installer is not code-signed with a
+- Release 0.4.1 is published; the installer is not code-signed with a
   certificate (updates are verified with an Ed25519 signature instead).
 - Dovecot-style servers that keep a selected folder do not report later
   deliveries on that session. Komorebi handles it by re-selecting before an

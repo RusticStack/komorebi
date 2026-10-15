@@ -1,7 +1,7 @@
 ; Komorebi installer (Inno Setup 6.3 or later). Built by
 ; scripts/build-installer.ps1 and .github/workflows/release.yml:
 ;
-;   ISCC [/DAppVersion=0.4.1] [/DBinDir=<folder>] installer\komorebi.iss
+;   ISCC [/DAppVersion=0.5.0] [/DBinDir=<folder>] installer\komorebi.iss
 ;
 ; The version defaults to the one inside komorebi.exe (BinDir, default
 ; target\release). Output: dist\komorebi-<version>-setup.exe.
@@ -53,7 +53,10 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 ; A running Komorebi (it may sit in the tray) is closed through the Restart
-; Manager before its files change, and started again afterwards. Every
+; Manager before its files change (the app agrees to WM_QUERYENDSESSION and
+; quits on WM_ENDSESSION, tray or not, src/win_shell.rs). Restart Manager
+; only restarts programs registered for it, so a silent update that asks
+; for /RESTARTAPPLICATIONS starts Komorebi itself ([Run], [Code]). Every
 ; running Komorebi also holds the fixed mutex Komorebi.App (src/main.rs,
 ; beside its per-cache single-instance mutex); the self-update closes it
 ; just before it starts this installer, so AppMutex only stops an install
@@ -76,6 +79,13 @@ WizardStyle=modern
 Name: "english"; MessagesFile: "compiler:Default.isl"
 ; The official European Portuguese translation (AO90) that ships with Inno Setup.
 Name: "portuguese"; MessagesFile: "compiler:Languages\Portuguese.isl"
+
+[Messages]
+; The stock text does not say where a tray-only app is: it has no window to close.
+english.SetupAppRunningError=Setup has detected that Komorebi is running.%n%nPlease close it now (if it has no window, right-click the Komorebi icon in the notification area and choose Quit), then click OK to continue, or Cancel to exit.
+portuguese.SetupAppRunningError=O Setup detetou que o Komorebi está em execução.%n%nFeche-o agora (se não tiver janela, clique com o botão direito no ícone do Komorebi na área de notificação e escolha Sair) e clique em OK para continuar, ou em Cancelar para sair.
+english.UninstallAppRunningError=Uninstall has detected that Komorebi is running.%n%nPlease close it now (if it has no window, right-click the Komorebi icon in the notification area and choose Quit), then click OK to continue, or Cancel to exit.
+portuguese.UninstallAppRunningError=O Desinstalar detetou que o Komorebi está em execução.%n%nFeche-o agora (se não tiver janela, clique com o botão direito no ícone do Komorebi na área de notificação e escolha Sair) e clique em OK para continuar, ou em Cancelar para sair.
 
 [CustomMessages]
 english.TaskAutostart=Start Komorebi with Windows (in the notification area)
@@ -123,8 +133,33 @@ Root: HKA; Subkey: "Software\Classes\Komorebi.Url.mailto\shell\open\command"; Va
 
 [Run]
 Filename: "{app}\komorebi.exe"; Description: "{cm:StartKomorebi}"; Flags: nowait postinstall skipifsilent
+; The self-update closes the app, runs this setup silently with
+; /RESTARTAPPLICATIONS and expects Komorebi back: Restart Manager does not
+; restart a program that is gone or never registered, so start it here, as
+; the user who ran setup (never elevated, also for an all-users install).
+Filename: "{app}\komorebi.exe"; Flags: nowait runasoriginaluser; Check: RestartAfterSilentUpdate
 
 [Code]
+// True when the command line holds the switch /Name (any case).
+function SwitchGiven(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/' + Name) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+// Silent setup asked to restart applications (what the self-update passes).
+function RestartAfterSilentUpdate: Boolean;
+begin
+  Result := WizardSilent and SwitchGiven('RESTARTAPPLICATIONS');
+end;
+
 // After the app's files are removed: offer to delete the mail cache too.
 // No is the default (Enter keeps it), and a silent uninstall keeps it.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

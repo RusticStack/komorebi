@@ -42,10 +42,22 @@ foreach ($name in $pinned) {
 }
 
 Write-Output ''
-Write-Output 'Manual check on a Slint bump: ui/widgets.slint and ui/editor.slint read the'
-Write-Output 'TextInput properties anchor-position-byte-offset, cursor-position-byte-offset'
-Write-Output 'and preedit-text, which Slint marks internal and undocumented (the editor needs'
-Write-Output 'the selection and the IME''s composition). Check that the new version still has'
-Write-Output 'them, and test typing, Ctrl+B / Ctrl+K and an IME in a formatted message.'
-
+# Slint marks TextInput's anchor-position-byte-offset, cursor-position-byte-offset
+# and preedit-text internal; ui/widgets.slint (ComposeBody) and ui/editor.slint
+# read them. They must still be declared by the Slint compiler's TextInput
+# (builtin_elements.rs), or the editor loses its selection and the IME's
+# composition. A bump that renames them fails here with the names.
+$meta = cargo metadata --locked --format-version 1 --filter-platform x86_64-pc-windows-msvc | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+$compiler = $meta.packages | Where-Object { $_.name -eq 'i-slint-compiler' } | Select-Object -First 1
+if (-not $compiler) { throw 'i-slint-compiler is not in the dependency tree' }
+$builtins = Get-Content -Raw (Join-Path (Split-Path $compiler.manifest_path) 'builtin_elements.rs')
+foreach ($prop in 'anchor-position-byte-offset', 'cursor-position-byte-offset', 'preedit-text') {
+    if ($builtins -match "property\s*<[^>]+>\s*$([regex]::Escape($prop))\s*;") {
+        Write-Output "ok   TextInput $prop"
+    } else {
+        Write-Output "FAIL Slint $($compiler.version) no longer declares the TextInput property '$prop', which ComposeBody (ui/widgets.slint) and the editor (ui/editor.slint) read. Find its replacement, update both files, and test typing, Ctrl+B / Ctrl+K and an IME in a formatted message."
+        $failed = $true
+    }
+}
 if ($failed) { exit 1 }

@@ -360,7 +360,7 @@ msgstr ""
 msgid "Remove"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/chips.slint
 msgid "Remove {0}"
 msgstr ""
 
@@ -1279,6 +1279,14 @@ msgid "Edit quoted text"
 msgstr ""
 
 #: ui/app.slint
+msgid "This message is open in its own window"
+msgstr ""
+
+#: ui/app.slint
+msgid "Bring to front"
+msgstr ""
+
+#: ui/app.slint
 msgid "Select a draft to keep writing"
 msgstr ""
 
@@ -1457,7 +1465,7 @@ msgid "This message was moved or deleted on the server."
 msgstr ""
 
 #: ui/app.slint
-msgid "This draft was saved on another device or in webmail. To keep writing it here, use Forward as new draft."
+msgid "This draft was saved on another device or in webmail. To keep writing it here, select Edit."
 msgstr ""
 
 #: ui/app.slint
@@ -1695,6 +1703,15 @@ msgstr ""
 msgid "Don't open its links or attachments, reply, or enter a password unless you're sure. If you know the sender, check with them another way. Report junk moves it to your Junk folder."
 msgstr ""
 
+#: ui/chips.slint
+msgctxt "recipient"
+msgid "{0}, {1}"
+msgstr ""
+
+#: ui/chips.slint
+msgid "Not a valid address"
+msgstr ""
+
 #: ui/editor.slint
 msgid "Black"
 msgstr ""
@@ -1767,6 +1784,12 @@ msgstr ""
 #: ui/editor.slint
 msgid "Paste as plain text"
 msgstr ""
+
+#: ui/editor.slint
+msgid "Long message of {n} character. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end."
+msgid_plural "Long message of {n} characters. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end."
+msgstr[0] ""
+msgstr[1] ""
 
 #: ui/editor.slint
 msgid "{0} × {1} table"

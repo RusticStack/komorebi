@@ -203,6 +203,16 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// The newest release from the latest-release JSON, or `Ok(None)` when it
 /// is not newer than `running`.
 pub fn parse_release(json: &[u8], running: Version) -> Result<Option<Release>, UpdateError> {
+    parse_release_at(json, running, RELEASES)
+}
+
+/// [`parse_release`] with the release page and download prefix `releases`
+/// (the project's GitHub one in the app; a local server's in the tests).
+fn parse_release_at(
+    json: &[u8],
+    running: Version,
+    releases: &str,
+) -> Result<Option<Release>, UpdateError> {
     if json.len() > MAX_RELEASE_JSON {
         return Err(UpdateError::TooLarge);
     }
@@ -213,7 +223,7 @@ pub fn parse_release(json: &[u8], running: Version) -> Result<Option<Release>, U
     let tag = raw.tag.ok_or(UpdateError::BadRelease)?;
     let version = parse_version(&tag).ok_or(UpdateError::BadRelease)?;
     let notes_url = raw.html_url.ok_or(UpdateError::BadRelease)?;
-    if !notes_url.starts_with(RELEASES) || notes_url.len() > 512 {
+    if !notes_url.starts_with(releases) || notes_url.len() > 512 {
         return Err(UpdateError::BadRelease);
     }
     if version <= running {
@@ -221,7 +231,7 @@ pub fn parse_release(json: &[u8], running: Version) -> Result<Option<Release>, U
     }
     let name = installer_name(version);
     let find = |n: &str| -> Result<Asset, UpdateError> {
-        let want = format!("{RELEASES}download/{tag}/{n}");
+        let want = format!("{releases}download/{tag}/{n}");
         raw.assets
             .iter()
             .find(|a| a.name == n)
@@ -272,6 +282,36 @@ pub fn verify(
         .map_err(|_| UpdateError::BadSignature)
 }
 
+/// How a URL is fetched ([`fetch::get_with`] in the app).
+type Transport = dyn Fn(&str, &Options) -> Result<Vec<u8>, FetchError>;
+
+/// Where updates come from. [`Source::github`] is the only one the app
+/// uses; the tests build one for a local server (the URLs, the hosts a
+/// redirect may reach, the transport and the key are injected there only).
+struct Source<'a> {
+    latest: &'a str,
+    releases: &'a str,
+    api_ok: &'a dyn Fn(&url::Url) -> bool,
+    asset_ok: &'a dyn Fn(&url::Url) -> bool,
+    get: &'a Transport,
+    key: [u8; 32],
+    running: Version,
+}
+
+impl Source<'static> {
+    fn github() -> Self {
+        Source {
+            latest: LATEST_URL,
+            releases: RELEASES,
+            api_ok: &|u| u.host_str() == Some("api.github.com"),
+            asset_ok: &github_host,
+            get: &fetch::get_with,
+            key: PUBLIC_KEY,
+            running: current(),
+        }
+    }
+}
+
 fn github_host(u: &url::Url) -> bool {
     matches!(
         u.host_str(),
@@ -288,38 +328,43 @@ fn user_agent() -> String {
 /// Asks GitHub for the latest release: `Some` when it is newer than the
 /// running app. Blocks; run it on a short-lived thread.
 pub fn check() -> Result<Option<Release>, UpdateError> {
+    check_from(&Source::github())
+}
+
+fn check_from(src: &Source) -> Result<Option<Release>, UpdateError> {
     let ua = user_agent();
-    let body = fetch::get_with(
-        LATEST_URL,
+    let body = (src.get)(
+        src.latest,
         &Options {
             accept: "application/vnd.github+json",
             max_body: MAX_RELEASE_JSON,
             total: Duration::from_secs(20),
-            redirect_ok: &|u| u.host_str() == Some("api.github.com"),
+            redirect_ok: src.api_ok,
             user_agent: &ua,
             progress: None,
         },
     )?;
-    parse_release(&body, current())
+    parse_release_at(&body, src.running, src.releases)
 }
 
 fn download(
+    src: &Source,
     url: &str,
     max: usize,
     total: Duration,
     progress: Option<&dyn Fn(u64, Option<u64>)>,
 ) -> Result<Vec<u8>, UpdateError> {
-    if !url.starts_with(RELEASES) {
+    if !url.starts_with(src.releases) {
         return Err(UpdateError::BadRelease);
     }
     let ua = user_agent();
-    Ok(fetch::get_with(
+    Ok((src.get)(
         url,
         &Options {
             accept: "application/octet-stream",
             max_body: max,
             total,
-            redirect_ok: &github_host,
+            redirect_ok: src.asset_ok,
             user_agent: &ua,
             progress,
         },
@@ -365,9 +410,18 @@ pub fn fetch_installer(
     temp: &Path,
     progress: &dyn Fn(u64, Option<u64>),
 ) -> Result<PathBuf, UpdateError> {
+    fetch_installer_from(&Source::github(), rel, temp, progress)
+}
+
+fn fetch_installer_from(
+    src: &Source,
+    rel: &Release,
+    temp: &Path,
+    progress: &dyn Fn(u64, Option<u64>),
+) -> Result<PathBuf, UpdateError> {
     let small = Duration::from_secs(20);
-    let sha = download(&rel.sha256.url, MAX_SMALL, small, None)?;
-    let sig = download(&rel.sig.url, MAX_SMALL, small, None)?;
+    let sha = download(src, &rel.sha256.url, MAX_SMALL, small, None)?;
+    let sig = download(src, &rel.sig.url, MAX_SMALL, small, None)?;
     let throttle = std::cell::RefCell::new(Throttle::default());
     let report = |done: u64, total: Option<u64>| {
         if throttle
@@ -378,12 +432,13 @@ pub fn fetch_installer(
         }
     };
     let exe = download(
+        src,
         &rel.installer.url,
         MAX_INSTALLER,
         Duration::from_secs(600),
         Some(&report),
     )?;
-    verify(&exe, &sha, &sig, rel.version, &PUBLIC_KEY)?;
+    verify(&exe, &sha, &sig, rel.version, &src.key)?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -771,6 +826,9 @@ fn string(b: &[u8], mut i: usize) -> Option<(String, usize)> {
         }
     }
 }
+
+#[cfg(test)]
+mod e2e;
 
 #[cfg(test)]
 mod tests {
