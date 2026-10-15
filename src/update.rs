@@ -297,12 +297,18 @@ pub fn check() -> Result<Option<Release>, UpdateError> {
             total: Duration::from_secs(20),
             redirect_ok: &|u| u.host_str() == Some("api.github.com"),
             user_agent: &ua,
+            progress: None,
         },
     )?;
     parse_release(&body, current())
 }
 
-fn download(url: &str, max: usize, total: Duration) -> Result<Vec<u8>, UpdateError> {
+fn download(
+    url: &str,
+    max: usize,
+    total: Duration,
+    progress: Option<&dyn Fn(u64, Option<u64>)>,
+) -> Result<Vec<u8>, UpdateError> {
     if !url.starts_with(RELEASES) {
         return Err(UpdateError::BadRelease);
     }
@@ -315,17 +321,68 @@ fn download(url: &str, max: usize, total: Duration) -> Result<Vec<u8>, UpdateErr
             total,
             redirect_ok: &github_host,
             user_agent: &ua,
+            progress,
         },
     )?)
 }
 
+/// The least time between two progress reports of a download.
+pub const PROGRESS_EVERY: Duration = Duration::from_millis(120);
+
+/// Lets a progress report through at most every [`PROGRESS_EVERY`]: the
+/// first, the last (everything received) and whatever is due in between.
+#[derive(Debug, Default)]
+pub struct Throttle {
+    last: Option<std::time::Instant>,
+}
+
+impl Throttle {
+    pub fn admit(&mut self, now: std::time::Instant, done: u64, total: Option<u64>) -> bool {
+        let finished = total.is_some_and(|t| done >= t);
+        let due = self
+            .last
+            .is_none_or(|l| now.saturating_duration_since(l) >= PROGRESS_EVERY);
+        if finished || due {
+            self.last = Some(now);
+        }
+        finished || due
+    }
+}
+
+/// The fraction `done` of `total`, 0 to 1; `None` without a usable total.
+pub fn fraction(done: u64, total: Option<u64>) -> Option<f32> {
+    total
+        .filter(|&t| t > 0)
+        .map(|t| (done.min(t) as f64 / t as f64) as f32)
+}
+
 /// Downloads and verifies `rel`'s installer, then writes it to a new folder
-/// under `temp` and returns its path. Blocks; run it on a short-lived thread.
-pub fn fetch_installer(rel: &Release, temp: &Path) -> Result<PathBuf, UpdateError> {
+/// under `temp` and returns its path. `progress` hears the installer's
+/// bytes received and its announced size, at most every
+/// [`PROGRESS_EVERY`]. Blocks; run it on a short-lived thread.
+pub fn fetch_installer(
+    rel: &Release,
+    temp: &Path,
+    progress: &dyn Fn(u64, Option<u64>),
+) -> Result<PathBuf, UpdateError> {
     let small = Duration::from_secs(20);
-    let sha = download(&rel.sha256.url, MAX_SMALL, small)?;
-    let sig = download(&rel.sig.url, MAX_SMALL, small)?;
-    let exe = download(&rel.installer.url, MAX_INSTALLER, Duration::from_secs(600))?;
+    let sha = download(&rel.sha256.url, MAX_SMALL, small, None)?;
+    let sig = download(&rel.sig.url, MAX_SMALL, small, None)?;
+    let throttle = std::cell::RefCell::new(Throttle::default());
+    let report = |done: u64, total: Option<u64>| {
+        if throttle
+            .borrow_mut()
+            .admit(std::time::Instant::now(), done, total)
+        {
+            progress(done, total);
+        }
+    };
+    let exe = download(
+        &rel.installer.url,
+        MAX_INSTALLER,
+        Duration::from_secs(600),
+        Some(&report),
+    )?;
     verify(&exe, &sha, &sig, rel.version, &PUBLIC_KEY)?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1004,5 +1061,34 @@ mod tests {
         assert!(auto_due(Some("1"), Some("10000"), 100_000));
         // A clock set back does not stop checks forever.
         assert!(auto_due(None, Some("999999999"), 100_000));
+    }
+
+    #[test]
+    fn progress_is_throttled_but_first_and_last_always_pass() {
+        use std::time::Instant;
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut t = Throttle::default();
+        assert!(t.admit(ms(0), 0, Some(100)));
+        assert!(!t.admit(ms(10), 10, Some(100)));
+        assert!(!t.admit(ms(119), 20, Some(100)));
+        assert!(t.admit(ms(120), 30, Some(100)));
+        assert!(!t.admit(ms(130), 40, Some(100)));
+        // The last report passes at once, so the bar reaches the end.
+        assert!(t.admit(ms(131), 100, Some(100)));
+        // Without a total only time lets a report through.
+        let mut t = Throttle::default();
+        assert!(t.admit(ms(0), 5, None));
+        assert!(!t.admit(ms(50), 9, None));
+        assert!(t.admit(ms(500), 9, None));
+    }
+
+    #[test]
+    fn fraction_needs_a_total_and_never_exceeds_one() {
+        assert_eq!(fraction(0, None), None);
+        assert_eq!(fraction(5, Some(0)), None);
+        assert_eq!(fraction(0, Some(10)), Some(0.0));
+        assert_eq!(fraction(5, Some(10)), Some(0.5));
+        assert_eq!(fraction(20, Some(10)), Some(1.0));
     }
 }

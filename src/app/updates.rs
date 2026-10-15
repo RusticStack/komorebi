@@ -6,7 +6,7 @@
 //! press. The sentences are in `ui/app.slint`, chosen by the numbers set
 //! here (`Phase::code`, `update::error_code`).
 
-use super::{App, background, on_ui, with_app};
+use super::{App, background, format, on_ui, with_app};
 use komorebi::update::{self, Phase, SETTING_AUTO, SETTING_LAST};
 use slint::Timer;
 use std::time::Duration;
@@ -24,6 +24,8 @@ pub(super) struct Updates {
     later_day: Option<i64>,
     /// The last check was the automatic one: its find shows the bar.
     from_auto: bool,
+    /// The installer's bytes received and announced size, while it downloads.
+    progress: Option<(u64, Option<u64>)>,
 }
 
 fn now() -> i64 {
@@ -82,6 +84,20 @@ impl App {
             Phase::Failed(e, _) => update::error_code(e),
             _ => -1,
         });
+        let (done, total) = match (&u.phase, u.progress) {
+            (Phase::Downloading(_), Some(p)) => p,
+            _ => (0, None),
+        };
+        ui.set_up_progress(update::fraction(done, total).unwrap_or(-1.0));
+        let (done_text, total_text) = match total.filter(|&t| t > 0) {
+            Some(t) => (
+                format::size(self.lang, done.min(t) as usize),
+                format::size(self.lang, t as usize),
+            ),
+            None => Default::default(),
+        };
+        ui.set_up_done(done_text.into());
+        ui.set_up_total(total_text.into());
         ui.set_up_retry(u.phase.release().is_some());
         ui.set_up_auto(u.auto);
         ui.set_up_banner(u.banner(update::day_of(now())));
@@ -142,13 +158,26 @@ impl App {
         let Some(rel) = self.updates.phase.start_download() else {
             return;
         };
+        self.updates.progress = None;
         self.show_updates();
         let job = move || {
-            let result = update::fetch_installer(&rel, &std::env::temp_dir());
+            let tell = |done: u64, total: Option<u64>| {
+                on_ui(Box::new(move |app| app.download_progress(done, total)));
+            };
+            let result = update::fetch_installer(&rel, &std::env::temp_dir(), &tell);
             on_ui(Box::new(move |app| app.downloaded(result)));
         };
         if background("update-download", Box::new(job)).is_err() {
             self.updates.phase.downloaded(Err(update::UpdateError::Io));
+            self.show_updates();
+        }
+    }
+
+    /// Bytes of the installer arrived (ignored when no download runs, so a
+    /// late report never changes another state).
+    fn download_progress(&mut self, done: u64, total: Option<u64>) {
+        if matches!(self.updates.phase, Phase::Downloading(_)) {
+            self.updates.progress = Some((done, total));
             self.show_updates();
         }
     }
@@ -212,7 +241,10 @@ impl App {
             "checking" => Phase::Checking,
             "uptodate" => Phase::UpToDate,
             "available" | "banner" => Phase::Available(rel),
-            "downloading" => Phase::Downloading(rel),
+            "downloading" => {
+                self.updates.progress = Some((3_355_443, Some(9_122_611)));
+                Phase::Downloading(rel)
+            }
             "failed" => Phase::Failed(update::UpdateError::Network, None),
             "failed-verify" => Phase::Failed(update::UpdateError::BadSignature, Some(rel)),
             _ => Phase::Idle,

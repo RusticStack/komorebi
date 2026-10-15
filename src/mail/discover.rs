@@ -123,6 +123,7 @@ fn fetch_autoconfig(url: &str, domain: &str) -> Result<Vec<u8>, FetchError> {
             total: FETCH_TIME,
             redirect_ok: &allowed,
             user_agent: fetch::USER_AGENT,
+            progress: None,
         },
     )
 }

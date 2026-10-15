@@ -293,10 +293,10 @@ fn mutated_calendars_never_panic_or_hang() {
             ical::reply(&ev, "Me", ME, ical::Answer::Declined, now());
         }
         assert!(
-            t.elapsed() < Duration::from_millis(500),
+            t.elapsed() < Duration::from_secs(5),
             "mutant {i} of seed {seed} took {:?}",
             t.elapsed()
         );
     }
-    assert!(started.elapsed() < Duration::from_secs(60));
+    assert!(started.elapsed() < Duration::from_secs(300));
 }

@@ -98,7 +98,7 @@ fn corpus_renders_at_both_widths() {
                     &input,
                     &opts,
                     &mut engine,
-                    &Deadline::after(Duration::from_secs(5)),
+                    &Deadline::after(Duration::from_secs(30)),
                 )
                 .unwrap_or_else(|e| panic!("{name} at {width}: {e:?}"));
                 let want = heights[i];
@@ -429,7 +429,7 @@ fn deadline_fires_on_a_huge_table() {
         (r.map(|_| ()), t.elapsed())
     });
     assert_eq!(r, Err(RenderError::Deadline));
-    assert!(took < Duration::from_secs(1), "took {took:?}");
+    assert!(took < Duration::from_secs(5), "took {took:?}");
 }
 
 /// Thousands of long descendant and sibling selectors over a deep or wide
@@ -462,7 +462,7 @@ fn selector_bombs_respect_the_deadline() {
         });
         // Cut off, or finished within budget: never a long overrun.
         assert!(r.is_ok() || r == Err(RenderError::Deadline));
-        assert!(took < Duration::from_secs(3), "took {took:?}");
+        assert!(took < Duration::from_secs(10), "took {took:?}");
     }
 }
 

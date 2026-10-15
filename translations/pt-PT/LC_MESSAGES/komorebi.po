@@ -3208,6 +3208,9 @@ msgstr "A transferência não passou a verificação da assinatura, por isso nã
 msgid "The installer couldn't be saved or started."
 msgstr "Não foi possível guardar ou iniciar o instalador."
 
+msgid "{0} of {1}"
+msgstr "{0} de {1}"
+
 msgid "The installer is checked against the project's signature before it runs."
 msgstr "O instalador é verificado com a assinatura do projeto antes de ser executado."
 

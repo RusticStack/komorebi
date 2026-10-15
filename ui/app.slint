@@ -458,6 +458,11 @@ component SettingsPage inherits Rectangle {
     in property <int> up-error;
     in property <bool> up-retry;
     in property <bool> up-auto;
+    // The download: its fraction (0 to 1, -1 when the size is not known) and
+    // the bytes received and the size, already formatted ("" when unknown).
+    in property <float> up-progress: -1;
+    in property <string> up-done;
+    in property <string> up-total;
     callback update-action(int);
     // The status line (the list's is hidden under the page).
     in property <string> status;
@@ -1973,6 +1978,7 @@ component SettingsPage inherits Rectangle {
                                     : root.up-error == 3 ? @tr("The download was larger than expected, so it was stopped.")
                                     : root.up-error == 4 ? @tr("The download didn't pass the signature check, so it wasn't installed.")
                                     : @tr("The installer couldn't be saved or started."))
+                                : root.up-state == 4 && root.up-total != "" ? @tr("{0} of {1}", root.up-done, root.up-total)
                                 : root.up-state == 4 ? @tr("The installer is checked against the project's signature before it runs.")
                                 : root.up-state == 6 ? @tr("Komorebi closes now and opens again when the update is done.")
                                 : root.up-state == 3 ? @tr("Nothing is downloaded until you press Download and install.")
@@ -1986,18 +1992,26 @@ component SettingsPage inherits Rectangle {
                             height: Theme.s3;
                             ProgressBar {
                                 y: Theme.s1;
-                                indeterminate: true;
+                                indeterminate: root.up-state == 1 || root.up-progress < 0;
+                                value: max(root.up-progress, 0);
                                 accessible-label: root.up-state == 1 ? @tr("Checking for updates") : @tr("Downloading version {0}", root.up-version);
                             }
                         }
                         if root.up-state == 3 || (root.up-state == 5 && root.up-retry): SettingsSurface {
                             height: up-row.preferred-height;
                             up-row := VerticalLayout {
+                                // Under the card's text, not its icon: 16 and
+                                // the 42 px icon column of a SettingsCard.
                                 padding: Theme.s4;
+                                padding-left: Theme.s4 + 42px;
                                 spacing: Theme.s2;
-                                HorizontalLayout {
-                                    alignment: start;
-                                    HyperlinkButton {
+                                // The link's own 11 px inset is taken back, so
+                                // its text starts where the card's does.
+                                Rectangle {
+                                    height: link.height;
+                                    link := HyperlinkButton {
+                                        x: -11px;
+                                        width: self.min-width;
                                         text: @tr("Release notes");
                                         label: @tr("Open the release notes of version {0} in the browser", root.up-version);
                                         clicked => { root.update-action(3); }
@@ -3069,6 +3083,9 @@ export component AppWindow inherits Window {
     in property <bool> up-retry;
     in property <bool> up-auto;
     in property <bool> up-banner;
+    in property <float> up-progress: -1;
+    in property <string> up-done;
+    in property <string> up-total;
     callback update-action(int);
     // About: the version and the folder holding the cache.
     in property <string> about-version;
@@ -6275,6 +6292,9 @@ export component AppWindow inherits Window {
             up-version: root.up-version;
             up-error: root.up-error;
             up-retry: root.up-retry;
+            up-progress: root.up-progress;
+            up-done: root.up-done;
+            up-total: root.up-total;
             up-auto: root.up-auto;
             update-action(which) => { root.update-action(which); }
             copy-text(t) => { root.r-copy-text(t); }

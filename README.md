@@ -626,19 +626,19 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-0.4.0-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-0.4.0-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-0.4.1-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-0.4.1-setup.exe .\SHA256SUMS
 ```
 
-Releases are built by `.github/workflows/release.yml` from a `vX.Y.Z` tag
-that must equal the Cargo version: tests, the release build, its size
-check and the offline boot snapshot, an optional signing step (only when
-the `SIGN_CERT_PFX` and `SIGN_CERT_PASSWORD` secrets exist; see
+Releases are made by hand (see "Signing a release" below), because the
+in-app update accepts only an installer signed with the maintainer's private
+key. `.github/workflows/release.yml` never publishes: run by hand (Actions →
+Release → Run workflow) it is a dry run of tests, the release build, its size
+check and the offline boot snapshot, an optional signing step (only when the
+`SIGN_CERT_PFX` and `SIGN_CERT_PASSWORD` secrets exist; see
 `scripts/sign.ps1`), the Inno Setup installer (`installer/komorebi.iss`),
-the portable zip, `SHA256SUMS`, and a draft release with this version's
-CHANGELOG section and the debug symbols (`.pdb`) as a separate file. Run by
-hand (Actions → Release → Run workflow), it is a dry run that keeps the
-packages as a workflow artifact and publishes nothing.
+the portable zip and `SHA256SUMS`, kept as a workflow artifact. A tag does
+not start it.
 
 ## Install from source
 
@@ -672,16 +672,36 @@ verifies against the public key compiled into `src/update.rs`. The
 signature covers the version and the hash, so an older installer cannot be
 served as a newer one.
 
-```
-cargo run --example sign_update -- sign target\installer\komorebi-0.4.0-setup.exe 0.4.0
+The steps, on the maintainer's machine, from a clean checkout of the
+commit to release (the Cargo version and the top `CHANGELOG.md` section
+already say the new version, here `0.4.1`):
+
+```powershell
+cargo build --release --locked
+pwsh scripts/build-installer.ps1 -Exe target\release\komorebi.exe -Version 0.4.1
+cargo run --example sign_update -- sign dist\komorebi-0.4.1-setup.exe 0.4.1
+gh release create v0.4.1 --title "Komorebi 0.4.1" --notes-file notes.md `
+    dist\komorebi-0.4.1-setup.exe dist\komorebi-0.4.1-setup.exe.sha256 dist\komorebi-0.4.1-setup.exe.sig
 ```
 
-This writes `komorebi-0.4.0-setup.exe.sha256` and `.sig` beside the
-installer; upload all three to the GitHub release tagged `v0.4.0`. The
-private key is read from `%USERPROFILE%\.komorebi-release\update-signing.key`
-(made once with `sign_update -- keygen`, which refuses to overwrite it and
-prints only the public key). Keep it out of the repository and back it up
-offline: losing it means shipping a new public key by hand.
+1. The build writes `target\release\komorebi.exe`; the installer script
+   writes `dist\komorebi-0.4.1-setup.exe` and prints its SHA-256. If an
+   Authenticode certificate is available, sign `komorebi.exe` before the
+   installer and the installer after it with `scripts/sign.ps1`, and only
+   then sign for the update (the Ed25519 signature covers the final bytes).
+2. `sign_update -- sign` writes `komorebi-0.4.1-setup.exe.sha256` and
+   `.sig` beside the installer. The private key is read from
+   `%USERPROFILE%\.komorebi-release\update-signing.key` (made once with
+   `sign_update -- keygen`, which refuses to overwrite it and prints only
+   the public key). Keep it out of the repository and back it up offline:
+   losing it means shipping a new public key by hand.
+3. `gh release create` makes the release and its tag `v0.4.1` and uploads
+   the three files the in-app update needs, under exactly these names; the
+   notes are this version's `CHANGELOG.md` section. Optionally add the
+   portable zip, the `.pdb` and `SHA256SUMS` from the workflow's dry run.
+4. Check it: `cargo run --example sign_update -- verify
+   dist\komorebi-0.4.1-setup.exe 0.4.1`, then Settings → About → Check for
+   updates on an older install.
 
 ## Checks
 

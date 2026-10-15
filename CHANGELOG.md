@@ -7,6 +7,18 @@ changes in the local data (the cache, its folders and Credential Manager).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Added
+
+- Updates: the download shows real progress (a determinate bar and "3.2 MB of 8.7 MB") when the server announces the size; otherwise the bar stays indeterminate. Only the installer download is reported, not its checksum and signature files. New sentence `{0} of {1}`, translated to pt-PT.
+
+### Changed
+
+- The release workflow (`.github/workflows/release.yml`) is manual-only: it builds the installer, zip and checksums as a workflow artifact and publishes nothing; pushing a tag starts nothing. README and CONTRIBUTING describe the manual release steps (release build, `scripts/build-installer.ps1` into `dist\`, `sign_update`, `gh release create`).
+- Tests: a new account's first sync never raises notifications, and mail after it notifies once.
+- Local data: none; no schema change.
+
 ## [0.4.0] - 2026-10-15
 
 ### Added
@@ -523,6 +535,7 @@ everything kept on disk.
   empty. The uninstaller deletes `%LOCALAPPDATA%\komorebi` only if you
   answer Yes, and never touches Credential Manager. No schema change.
 
+[0.4.1]: https://github.com/RusticStack/komorebi/releases/tag/v0.4.1
 [0.4.0]: https://github.com/RusticStack/komorebi/releases/tag/v0.4.0
 [0.3.0]: https://github.com/RusticStack/komorebi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/RusticStack/komorebi/releases/tag/v0.2.0

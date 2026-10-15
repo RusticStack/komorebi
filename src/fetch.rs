@@ -90,6 +90,10 @@ pub struct Options<'a> {
     pub redirect_ok: &'a dyn Fn(&Url) -> bool,
     /// The `User-Agent` header ([`USER_AGENT`] for images and autoconfig).
     pub user_agent: &'a str,
+    /// Told the bytes received so far and the announced total (from
+    /// `Content-Length`, if any) as a 200 body arrives, on the calling
+    /// thread, once per block read. Not called for redirects or errors.
+    pub progress: Option<&'a dyn Fn(u64, Option<u64>)>,
 }
 
 impl Options<'_> {
@@ -101,6 +105,7 @@ impl Options<'_> {
             total: TOTAL_TIMEOUT,
             redirect_ok: &|_| true,
             user_agent: USER_AGENT,
+            progress: None,
         }
     }
 }
@@ -201,7 +206,7 @@ impl Client {
         let mut r = BufReader::new(stream);
         let head = read_head(&mut r, opts.max_body)?;
         match head.status {
-            200 => read_body(&mut r, &head, opts.max_body).map(Ok),
+            200 => read_body(&mut r, &head, opts.max_body, opts.progress).map(Ok),
             301 | 302 | 303 | 307 | 308 => head.location.map(Err).ok_or(FetchError::BadResponse),
             s => Err(FetchError::Status(s)),
         }
@@ -389,7 +394,20 @@ fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> 
     }
 }
 
-fn read_body(r: &mut impl BufRead, head: &Head, max_body: usize) -> Result<Vec<u8>, FetchError> {
+/// The block a body is read in, so progress can be reported.
+const BLOCK: usize = 64 * 1024;
+
+fn read_body(
+    r: &mut impl BufRead,
+    head: &Head,
+    max_body: usize,
+    progress: Option<&dyn Fn(u64, Option<u64>)>,
+) -> Result<Vec<u8>, FetchError> {
+    let tell = |done: usize, total: Option<usize>| {
+        if let Some(p) = progress {
+            p(done as u64, total.map(|t| t as u64));
+        }
+    };
     let mut body = Vec::new();
     if head.chunked {
         loop {
@@ -408,17 +426,26 @@ fn read_body(r: &mut impl BufRead, head: &Head, max_body: usize) -> Result<Vec<u
             if read_line(r, 2)?.trim() != "" {
                 return Err(FetchError::BadResponse);
             }
+            tell(body.len(), None);
         }
     }
     if let Some(n) = head.length {
         body.resize(n, 0);
-        r.read_exact(&mut body)?;
+        tell(0, Some(n));
+        let mut at = 0;
+        while at < n {
+            let end = n.min(at + BLOCK);
+            r.read_exact(&mut body[at..end])?;
+            at = end;
+            tell(at, Some(n));
+        }
         return Ok(body);
     }
     r.take(max_body as u64 + 1).read_to_end(&mut body)?;
     if body.len() > max_body {
         return Err(FetchError::TooLarge);
     }
+    tell(body.len(), None);
     Ok(body)
 }
 
@@ -514,6 +541,12 @@ mod tests {
                 b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 5\r\n\r\nimage"
                     .to_vec()
             }
+            "/blocks" => {
+                let n = 3 * BLOCK / 2;
+                let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {n}\r\n\r\n").into_bytes();
+                r.resize(r.len() + n, b'x');
+                r
+            }
             "/xml" => b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n<a/>\r\n".to_vec(),
             "/to-other" => redirect(format!("https://localhost:{port}/img")),
             "/missing" => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
@@ -587,6 +620,46 @@ mod tests {
     }
 
     #[test]
+    fn progress_is_reported_per_block_up_to_the_announced_length() {
+        use std::cell::RefCell;
+        let (port, _) = serve();
+        let c = client();
+        let seen = RefCell::new(Vec::new());
+        let tell = |done: u64, total: Option<u64>| seen.borrow_mut().push((done, total));
+        let any = |_: &Url| true;
+        let get = |path: &str| {
+            c.get_with(
+                &format!("https://127.0.0.1:{port}{path}"),
+                &Options {
+                    accept: "*/*",
+                    max_body: MAX_BODY,
+                    total: Duration::from_secs(5),
+                    redirect_ok: &any,
+                    user_agent: USER_AGENT,
+                    progress: Some(&tell),
+                },
+            )
+        };
+        let n = 3 * BLOCK / 2;
+        assert_eq!(get("/blocks").unwrap().len(), n);
+        let calls = seen.take();
+        let total = Some(n as u64);
+        assert_eq!(
+            calls,
+            vec![(0, total), (BLOCK as u64, total), (n as u64, total)]
+        );
+        // Without a length the total is unknown; a redirect reports only the
+        // body it ends in.
+        assert_eq!(get("/hop/1").unwrap(), b"image");
+        assert_eq!(seen.take(), vec![(0, Some(5)), (5, Some(5))]);
+        assert_eq!(get("/chunked").unwrap(), b"image");
+        assert_eq!(seen.take(), vec![(3, None), (5, None)]);
+        // An error reports nothing.
+        assert_eq!(get("/missing"), Err(FetchError::Status(404)));
+        assert!(seen.take().is_empty());
+    }
+
+    #[test]
     fn options_set_the_accept_header_body_cap_and_redirect_rule() {
         let (port, seen) = serve();
         let c = client();
@@ -602,6 +675,7 @@ mod tests {
                     total: Duration::from_secs(5),
                     redirect_ok,
                     user_agent: USER_AGENT,
+                    progress: None,
                 },
             )
         };
@@ -625,6 +699,7 @@ mod tests {
                     total: Duration::from_secs(5),
                     redirect_ok: ok,
                     user_agent: USER_AGENT,
+                    progress: None,
                 },
             )
         };

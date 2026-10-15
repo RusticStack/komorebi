@@ -50,6 +50,33 @@ impl Notes {
         }
     }
 
+    /// Remember where the cache ends (older mail never notifies) and
+    /// whether an inbox still awaits its first sync.
+    fn begin(&mut self, db: &crate::db::Db) {
+        self.after = db.max_message_id().unwrap_or(0);
+        self.settling = db.inbox_awaits_first_sync().unwrap_or(false);
+    }
+
+    /// The unread inbox mail stored since the last call, as `(account,
+    /// message, sender, subject)`, and the mark moved past it. While an
+    /// inbox is doing its first sync (a new account, or a clean-slate
+    /// upgrade) what is stored is old mail: it is skipped, and notifying
+    /// starts with the call after the sync completed.
+    fn take_new(&mut self, db: &crate::db::Db) -> Vec<(i64, i64, String, String)> {
+        if self.settling {
+            self.after = db.max_message_id().unwrap_or(self.after);
+            self.settling = db.inbox_awaits_first_sync().unwrap_or(false);
+            return Vec::new();
+        }
+        let Ok(found) = db.new_unread_inbox(self.after, READ_AT_MOST) else {
+            return Vec::new();
+        };
+        if let Some(last) = found.last() {
+            self.after = last.1;
+        }
+        found
+    }
+
     /// Whether the tray icon is up (closing to the tray needs it).
     pub(super) fn has_tray(&self) -> bool {
         #[cfg(windows)]
@@ -74,8 +101,7 @@ impl App {
     /// Start notifications: remember where the cache ends (older mail never
     /// notifies) and put the icon in the tray. Not in snapshots.
     pub(super) fn start_notifications(&mut self) {
-        self.notes.after = self.db.max_message_id().unwrap_or(0);
-        self.notes.settling = self.db.inbox_awaits_first_sync().unwrap_or(false);
+        self.notes.begin(&self.db);
         if komorebi::dev_var("KOMOREBI_SNAPSHOT").is_some() {
             return;
         }
@@ -148,18 +174,9 @@ impl App {
     /// The unread count rose: notify about the inbox messages stored since
     /// the last check, if the user wants that and the window is not in front.
     pub(super) fn notify_new_mail(&mut self) {
-        if self.notes.settling {
-            // The first sync of an inbox refetches old mail: move the mark
-            // along with it, and start notifying once it is complete.
-            self.notes.after = self.db.max_message_id().unwrap_or(self.notes.after);
-            self.notes.settling = self.db.inbox_awaits_first_sync().unwrap_or(false);
+        let found = self.notes.take_new(&self.db);
+        if found.is_empty() {
             return;
-        }
-        let Ok(found) = self.db.new_unread_inbox(self.notes.after, READ_AT_MOST) else {
-            return;
-        };
-        if let Some(last) = found.last() {
-            self.notes.after = last.1;
         }
         let events: Vec<NewMessage> = found
             .into_iter()
@@ -325,4 +342,158 @@ fn set_autostart(on: bool) {
     }
     #[cfg(not(windows))]
     let _ = on;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{Db, NewAccount, NewHeader};
+    use crate::providers::{Security, Server};
+    use crate::role::Role;
+
+    /// A throwaway cache file, removed when dropped.
+    struct Temp(std::path::PathBuf);
+
+    impl Temp {
+        fn new(tag: &str) -> (Self, Db) {
+            let path = std::env::temp_dir().join(format!(
+                "komorebi-notes-{tag}-{}.sqlite3",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let db = Db::open(&path).unwrap();
+            (Temp(path), db)
+        }
+    }
+
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            for ext in ["", "-wal", "-shm"] {
+                let mut p = self.0.clone().into_os_string();
+                p.push(ext);
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+
+    fn account(db: &Db) -> (i64, i64) {
+        let server = |host: &str| Server {
+            host: host.into(),
+            port: 993,
+            security: Security::Tls,
+        };
+        let id = db
+            .add_account(&NewAccount {
+                email: "me@example.invalid".into(),
+                name: String::new(),
+                imap: server("imap.example.invalid"),
+                smtp: server("smtp.example.invalid"),
+                save_sent: true,
+                imap_user: String::new(),
+                smtp_user: String::new(),
+            })
+            .unwrap();
+        let inbox = db
+            .upsert_folder(id, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        (id, inbox)
+    }
+
+    fn mail(db: &mut Db, account: i64, folder: i64, uid: u32) {
+        db.insert_headers(
+            account,
+            folder,
+            &[NewHeader {
+                uid,
+                msgid: format!("<{uid}@example.invalid>"),
+                subject: format!("Subject {uid}"),
+                from_addr: "ana@example.invalid".into(),
+                date: 1_700_000_000 + i64::from(uid),
+                ..NewHeader::default()
+            }],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_new_accounts_first_sync_is_silent_and_later_mail_notifies() {
+        let (_guard, mut db) = Temp::new("first");
+        let (acc, inbox) = account(&db);
+        // A new account: its inbox has never completed a sync.
+        assert!(db.inbox_awaits_first_sync().unwrap());
+        let mut notes = Notes::default();
+        notes.begin(&db);
+        assert!(notes.settling);
+
+        // The first sync stores old unread mail, over several passes: none
+        // of it notifies, and the mark follows it.
+        mail(&mut db, acc, inbox, 1);
+        mail(&mut db, acc, inbox, 2);
+        assert!(notes.take_new(&db).is_empty());
+        mail(&mut db, acc, inbox, 3);
+        assert!(notes.take_new(&db).is_empty());
+        assert!(notes.settling);
+        assert_eq!(notes.after, db.max_message_id().unwrap());
+
+        // The sync completes. The pass that completes it still belongs to
+        // it, so it is silent too, and only then is the flag lowered.
+        mail(&mut db, acc, inbox, 4);
+        db.finish_folder(
+            inbox,
+            crate::db::Fp {
+                uidnext: 5,
+                messages: 4,
+                hms: 1,
+            },
+        )
+        .unwrap();
+        assert!(!db.inbox_awaits_first_sync().unwrap());
+        assert!(notes.take_new(&db).is_empty());
+        assert!(!notes.settling);
+
+        // Mail that arrives after it notifies, once.
+        mail(&mut db, acc, inbox, 5);
+        let found = notes.take_new(&db);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, acc);
+        assert_eq!(found[0].2, "ana@example.invalid");
+        assert_eq!(found[0].3, "Subject 5");
+        assert!(notes.take_new(&db).is_empty());
+    }
+
+    #[test]
+    fn a_synced_inbox_never_settles_and_read_mail_does_not_notify() {
+        let (_guard, mut db) = Temp::new("synced");
+        let (acc, inbox) = account(&db);
+        mail(&mut db, acc, inbox, 1);
+        db.finish_folder(
+            inbox,
+            crate::db::Fp {
+                uidnext: 2,
+                messages: 1,
+                hms: 1,
+            },
+        )
+        .unwrap();
+        let mut notes = Notes::default();
+        notes.begin(&db);
+        assert!(!notes.settling);
+        // The cached mail is older than the mark.
+        assert!(notes.take_new(&db).is_empty());
+        // A new message that is already read is not new mail.
+        db.insert_headers(
+            acc,
+            inbox,
+            &[NewHeader {
+                uid: 2,
+                msgid: "<2@example.invalid>".into(),
+                seen: true,
+                ..NewHeader::default()
+            }],
+        )
+        .unwrap();
+        assert!(notes.take_new(&db).is_empty());
+        mail(&mut db, acc, inbox, 3);
+        assert_eq!(notes.take_new(&db).len(), 1);
+    }
 }

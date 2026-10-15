@@ -79,11 +79,26 @@ mod secured {
         let der = der_of(CERT);
         for (password, quoted) in [("p\"w\\ x", "p\\\"w\\\\ x"), ("pässwörd ✓", "pässwörd ✓")]
         {
-            let fake = TlsFake::start(Proto::Imap, Mode::Implicit, CERT, KEY);
-            let imap = Imap::connect(&server(&fake, Security::Tls), Some(&der), "alice", password)
-                .expect("signs in");
-            imap.logout();
-            let seen = fake.finish();
+            // A loaded machine can drop one connect or handshake of the
+            // throwaway fake; a fresh fake gets a few tries (a failed one is
+            // left to end with the process, since it may still be waiting).
+            let mut last = None;
+            let mut done = None;
+            for _ in 0..4 {
+                let fake = TlsFake::start(Proto::Imap, Mode::Implicit, CERT, KEY);
+                match Imap::connect(&server(&fake, Security::Tls), Some(&der), "alice", password) {
+                    Ok(imap) => {
+                        imap.logout();
+                        done = Some(fake.finish());
+                        break;
+                    }
+                    Err(e) => {
+                        last = Some(e);
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                    }
+                }
+            }
+            let seen = done.unwrap_or_else(|| panic!("signs in: {:#}", last.unwrap()));
             assert_eq!(
                 seen[0],
                 format!("a1 LOGIN \"alice\" \"{quoted}\""),

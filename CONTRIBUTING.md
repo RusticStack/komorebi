@@ -66,4 +66,5 @@ For layout changes, verify the window at desktop and narrow widths (the compact 
 ## Releases
 
 - Changes reach `main` only through a pull request with passing checks.
+- Releases are made by the maintainer by hand: release build, `scripts/build-installer.ps1`, `cargo run --example sign_update -- sign <installer> <version>`, then `gh release create` with the installer, its `.sha256` and its `.sig` (README, "Signing a release"). `.github/workflows/release.yml` is manual-only, builds the packages as a workflow artifact and never publishes; pushing a tag starts nothing. The signing key lives outside the repository.
 - If checks pass but product gaps remain, say that clearly. Buildable is not the same as production-complete.

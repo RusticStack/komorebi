@@ -775,6 +775,10 @@ msgid "The installer couldn't be saved or started."
 msgstr ""
 
 #: ui/app.slint
+msgid "{0} of {1}"
+msgstr ""
+
+#: ui/app.slint
 msgid "The installer is checked against the project's signature before it runs."
 msgstr ""
 

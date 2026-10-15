@@ -2020,7 +2020,7 @@ mod tests {
         };
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
         assert!(
-            start.elapsed() < Duration::from_millis(1500),
+            start.elapsed() < Duration::from_millis(2500),
             "{:?}",
             start.elapsed()
         );

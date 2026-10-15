@@ -1861,6 +1861,7 @@ mod tests {
     use slint::Rgb8Pixel;
     use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
     use slint::platform::{Platform, WindowAdapter, WindowEvent};
+    use std::cell::Cell;
 
     #[test]
     fn page_width_snaps_and_clamps() {
@@ -2049,15 +2050,39 @@ mod tests {
 
     // ------------------------------------------------- headless window
 
-    struct TestPlatform(Rc<MinimalSoftwareWindow>, Rc<RefCell<Option<String>>>);
+    struct TestPlatform(
+        Rc<MinimalSoftwareWindow>,
+        Rc<RefCell<Option<String>>>,
+        /// A hand-driven clock for the timers, or the real one when `None`.
+        Option<Rc<Cell<Duration>>>,
+        std::time::Instant,
+    );
 
     impl TestPlatform {
         fn new(window: Rc<MinimalSoftwareWindow>) -> Self {
-            TestPlatform(window, Rc::default())
+            TestPlatform(window, Rc::default(), None, std::time::Instant::now())
+        }
+
+        /// The timers see only `clock`, so a slow machine cannot run a
+        /// debounce out early or late.
+        fn with_clock(window: Rc<MinimalSoftwareWindow>, clock: Rc<Cell<Duration>>) -> Self {
+            TestPlatform(
+                window,
+                Rc::default(),
+                Some(clock),
+                std::time::Instant::now(),
+            )
         }
     }
 
     impl Platform for TestPlatform {
+        fn duration_since_start(&self) -> Duration {
+            match &self.2 {
+                Some(clock) => clock.get(),
+                None => self.3.elapsed(),
+            }
+        }
+
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(self.0.clone())
         }
@@ -2130,7 +2155,13 @@ mod tests {
     #[test]
     fn tile_requests_follow_scroll_and_resize() {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-        slint::platform::set_platform(Box::new(TestPlatform::new(window.clone()))).unwrap();
+        // The timers run on a clock the test moves, not on the machine's.
+        let clock = Rc::new(Cell::new(Duration::from_secs(1)));
+        slint::platform::set_platform(Box::new(TestPlatform::with_clock(
+            window.clone(),
+            clock.clone(),
+        )))
+        .unwrap();
         let ui = AppWindow::new().unwrap();
         ui.window().set_size(slint::PhysicalSize::new(1200, 800));
         ui.show().unwrap();
@@ -2242,7 +2273,7 @@ mod tests {
         ui.window().set_size(slint::PhysicalSize::new(1100, 800));
         frame();
         assert!(layouts(take()).is_empty(), "debounced");
-        std::thread::sleep(RESIZE_DEBOUNCE + Duration::from_millis(50));
+        clock.set(clock.get() + RESIZE_DEBOUNCE + Duration::from_millis(50));
         frame();
         let [(g2, k2)] = layouts(take())[..] else {
             panic!("expected a relayout");
@@ -2280,7 +2311,7 @@ mod tests {
             .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
         ui.window().set_size(slint::PhysicalSize::new(1650, 1200));
         frame();
-        std::thread::sleep(RESIZE_DEBOUNCE + Duration::from_millis(50));
+        clock.set(clock.get() + RESIZE_DEBOUNCE + Duration::from_millis(50));
         frame();
         let relayouts = layouts(take());
         assert_eq!(relayouts.len(), 1);
@@ -2290,7 +2321,7 @@ mod tests {
         // No page within a second: the text view stands in.
         reader.open(8, html("<p>y</p>"), false);
         assert!(ui.get_r_waiting());
-        std::thread::sleep(FALLBACK_AFTER + Duration::from_millis(50));
+        clock.set(clock.get() + FALLBACK_AFTER + Duration::from_millis(50));
         frame();
         assert!(!ui.get_r_waiting() && !ui.get_r_html());
         reader.close();

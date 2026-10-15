@@ -1,7 +1,7 @@
 ; Komorebi installer (Inno Setup 6.3 or later). Built by
 ; scripts/build-installer.ps1 and .github/workflows/release.yml:
 ;
-;   ISCC [/DAppVersion=0.4.0] [/DBinDir=<folder>] installer\komorebi.iss
+;   ISCC [/DAppVersion=0.4.1] [/DBinDir=<folder>] installer\komorebi.iss
 ;
 ; The version defaults to the one inside komorebi.exe (BinDir, default
 ; target\release). Output: dist\komorebi-<version>-setup.exe.

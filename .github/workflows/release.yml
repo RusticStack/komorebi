@@ -1,12 +1,13 @@
 name: Release
 
-# A tag vX.Y.Z (equal to the Cargo version) builds, checks and packages a
-# release, and opens it as a draft GitHub Release to review and publish
-# by hand. Run by hand (workflow_dispatch) it is a dry run: the same
-# build, checks and packages, kept as a workflow artifact, no release.
+# Run by hand only (Actions > Release > Run workflow): a dry run that
+# builds, checks and packages the installer, the portable zip, the debug
+# symbols and SHA256SUMS, and keeps them as a workflow artifact. It never
+# creates a tag or a release. Releases are made by hand with the signed
+# update files, because the in-app update accepts only an installer signed
+# with the maintainer's private key, which never leaves their machine (see
+# README, "Signing a release").
 on:
-  push:
-    tags: ['v*.*.*']
   workflow_dispatch:
 
 concurrency:
@@ -20,7 +21,7 @@ jobs:
   release:
     runs-on: windows-latest
     permissions:
-      contents: write  # the draft release
+      contents: read
     env:
       # Authenticode signing is optional: without these secrets the build
       # is unsigned (see README, "Install"). The self-update signature is
@@ -43,9 +44,6 @@ jobs:
           $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages |
             Where-Object name -eq 'komorebi' | Select-Object -ExpandProperty version
           if (-not $version) { throw 'no komorebi package version' }
-          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}' -ne "v$version") {
-            throw "tag ${{ github.ref_name }} does not match the Cargo version $version"
-          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "Komorebi $version"
 
@@ -151,7 +149,7 @@ jobs:
           }
           Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'notes.md') $notes
 
-      - name: Keep the packages (dry run and tag alike)
+      - name: Keep the packages
         uses: actions/upload-artifact@v4
         with:
           name: komorebi-${{ steps.version.outputs.version }}
@@ -160,13 +158,3 @@ jobs:
             ${{ runner.temp }}/notes.md
             ${{ runner.temp }}/boot.bmp
           if-no-files-found: error
-
-      - name: Draft GitHub Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          name: Komorebi ${{ steps.version.outputs.version }}
-          body_path: ${{ runner.temp }}/notes.md
-          files: dist/*
-          fail_on_unmatched_files: true

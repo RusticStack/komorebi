@@ -119,6 +119,37 @@ caches (see `docs/PERF.md` for the method):
       empty; it should say the message is gone, as a sync does.
 - [ ] Settings opened from a message tab show without the folder pane, and
       F6 there still aims at the pane.
+- [ ] The composer in a window of its own ("Open in new window" and Ctrl+O
+      on a composer tab or a draft; close saves as Esc does, Send and Undo
+      send work from it, several at once, the main window shows a short
+      placeholder for a popped-out draft). Not started: three parts of the
+      composer are tied to the main window and must be split first.
+      1. `src/app/composer.rs` writes the draft's view through
+         `self.ui()` (32 places: `show_draft`, `show_field`,
+         `focus_field`, `show_send_state`, `show_compose_attachments`,
+         suggestions, preview, `hide_composer`, the guard and saved-at
+         lines). They need a `composer_ui(DraftId)` that returns the
+         window holding that draft, and every composer callback wired in
+         `src/app.rs` (`on_c_*`, about 20) must be wired again on each
+         composer window with its `DraftId` bound, as `wire_popout` does.
+      2. `Drafts` has one `active` draft, which is also what the main
+         window's composer view shows; autosave, the preview worker
+         (`show_preview` by sequence) and suggestions follow `active`. A
+         popped-out draft needs its own view state (suggestions, preview
+         sequence, last edit for autosave) keyed by `DraftId`, so that
+         typing in one window never moves `active` under the other.
+      3. The rich body editor (`src/app/composer/rich.rs`, `EdUi`) has two
+         fixed panes, `BODY` and `SIG`, each drawing into the main
+         window's `Rich` global through the app's one weak main window handle
+         (`ed_show`). A composer
+         window needs a pane of its own (panes keyed by window and editor,
+         each holding its window), and `rich::wire` run on that window.
+      With those three split, the window itself is the cheap part: a second
+      `AppWindow` in a composer-only mode next to `detail_only`
+      (`src/app/windows.rs`), `on_close_requested` calling `park` and
+      `save_draft` for its draft, `undo_send` reopening the draft in a
+      window when it came from one, and the tab dropped with
+      `set_tabbed(id, false)` while the window holds it.
 
 ### Maintenance
 
