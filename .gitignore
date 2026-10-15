@@ -8,8 +8,6 @@ test-results
 # Local tooling and editors
 .task
 bin
-.freebuff/
-.claude/
 .vscode/
 .idea/
 .vs/
