@@ -304,11 +304,22 @@ impl Flow {
                     ComposeField::Subject,
                     &format!("{TEST_TAG} flow attachment"),
                 );
-                app.set_draft_field(
-                    ComposeField::Body,
-                    "A new message with an attachment, from Komorebi's app flow test.\n\n\
-                     **Bold** and _italic_ text, and a list:\n\n- one\n- two",
-                );
+                if app.drafts.active().is_some_and(|d| d.rich.is_some()) {
+                    // Formatted: the first words bold, so an HTML part goes.
+                    app.set_draft_field(
+                        ComposeField::Body,
+                        "A new message with an attachment, from Komorebi's app flow test.",
+                    );
+                    if let Some(ed) = app.drafts.active_mut().and_then(|d| d.rich.as_mut()) {
+                        ed.format_chars(0, 5, &komorebi::mail::rich::edit::CharOp::Bold);
+                    }
+                } else {
+                    app.set_draft_field(
+                        ComposeField::Body,
+                        "A new message with an attachment, from Komorebi's app flow test.\n\n\
+                         **Bold** and _italic_ text, and a list:\n\n- one\n- two",
+                    );
+                }
                 if let Some(d) = app.drafts.active_mut() {
                     d.attachments.push(
                         OutAttachment {

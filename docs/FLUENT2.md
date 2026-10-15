@@ -160,6 +160,8 @@ layer and cards: layer #f3f3f3 / #202020, card #ffffff / #2b2b2b.
   dropdowns, inputs: the default), Large 6, XLarge 8 (cards, large
   buttons, dialogs), 2XLarge 12 (popovers, sheets), 3XLarge 16,
   Circular (avatars, pills).
+  Komorebi's tab strip follows WinUI's TabView instead (top corners 8,
+  `docs/WINUI3.md` "TabView"): on Windows that reference wins.
 - Don't round where it makes awkward gaps, don't split one control into
   separately rounded pieces (split button), don't round edge-to-edge
   components.
@@ -256,29 +258,63 @@ layer and cards: layer #f3f3f3 / #202020, card #ffffff / #2b2b2b.
 - Copy: write for action ("Add an account"), point of need, no long
   passive text, inclusive ("Need help?"), set expectations ("This takes
   about a minute").
-- Komorebi's first run (UX final, Stage 4): no tour, no wizard, nothing
-  before the first frame.
+- Komorebi's first run: no tour, nothing before the first frame.
+  **Take action** is a short setup flow that shows the steps remaining
+  (Fluent "Take action", "We'll guide you through 3 quick steps"):
+  **Your email → Sign in → Make it yours**, three steps with a step
+  indicator. Each step asks one question. Every step after the first has
+  Back. The flow can be left at any point (Esc, Back from the email step)
+  and resumed from the welcome. Teaching stays in context (TeachingTips,
+  empty states), never in the flow. The layout, copy and metrics are in
+  docs/WINUI3.md "Onboarding".
   - **Welcome**: the whole window (no folder pane, rail or toggle; the
-    title bar without its search): the icon, "Welcome to Komorebi", what
-    to do ("You need your email address and password; it takes about a
-    minute."), the benefit in Caption ("Your mail stays on this PC and on
-    your server. No ads, no tracking."), the accent Add account, then the
-    subtle links "Need help?" (the README's setup section, through the
-    link prompt), "Privacy" (PRIVACY.md, the same way) and "Settings".
-  - **Take action**: the add form asks only what it needs, in the order a
-    person knows it (Email, Password, Provider, optional name); the
-    provider is guessed from the address when the domain says it; errors
-    are inline under the field, never a disabled button with no reason.
-    Looking the domain up ("Find settings", or Add / Test with Other
-    server and no servers typed) happens only on a press, never on typing.
-  - **Wait**: the check names its steps; Cancel, Back and Esc stay usable;
-    after 3 s the wait says what to check.
-  - **Explain**: a failure keeps the steps inside its InfoBar, scrolls it
-    into view and offers the next step (Set username, Review certificate,
-    the Password box for a rejected password, the other preset for a
-    custom domain).
-  - **Land**: a successful add closes Settings on the new account's Inbox
-    (the list focused); the empty list shows the first download's
-    progress ("Newest messages arrive first") until rows arrive, and the
-    status line "Added … Downloading mail…" stays until the first pass
-    ends.
+    title bar without its search): the brand mark (vector, no image), a
+    headline and a one-sentence subhead with the benefit, the accent "Add
+    your email account" and the time it takes ("It takes about a
+    minute."), three short value rows (private, fast, works with your
+    provider), then the subtle links "Need help?" (the README's setup
+    section, through the link prompt), "Privacy" (PRIVACY.md, the same
+    way) and a compact Language box that switches live, with Settings one
+    press away beside it. Its entrance (opacity, `gentle` and `stagger`)
+    starts after the first frame (at once with Animation effects off).
+  - **Your email**: one field. Continue checks the address inline (never
+    a disabled button), refuses an account already added, and decides how
+    the servers are found. Looking the domain up happens only on a press:
+    **Continue** on the email step (or Find settings on the manual page),
+    never on typing or focus change. A preset domain (`providers::guess`)
+    skips the lookup. The lookup never sends the password. Under
+    `KOMOREBI_OFFLINE` it refuses, and the flow goes straight to manual
+    setup with a one-line note.
+  - **Sign in**: the provider chip says what was found (looking, found,
+    not found with the provider choice inline, or Change for manual
+    setup), then the Password box. Sign in pressed while the lookup still
+    runs waits for it.
+  - **Wait**: the check shows three grouped stages (Connecting securely,
+    Checking your password, Getting ready to send) at once; Back and Esc
+    stay usable and drop the answer; after 3 s the wait reassures, after
+    10 s it says what to check.
+  - **Explain**: a failure is one Critical InfoBar inside the card: a
+    short title, one sentence and one next action (Set username, Review
+    certificate, Try again, Set up manually); the 7 steps and the host
+    names fold under "Show details". A rejected password focuses the
+    Password box with its text selected.
+  - **Make it yours**: the account is already saved; the optional name
+    and signature with a live From preview, Skip or Done. The first
+    download runs meanwhile.
+  - **Land**: "You're all set" with the first download's progress
+    (indeterminate until a folder reports numbers, then "{0} of {1}";
+    never an overall percentage) and "Open your inbox", which closes the
+    flow on the new account's Inbox (the list focused). No auto-advance,
+    no confetti; there is no "Added …" status line.
+
+## Signatures
+
+A signature is a named, formatted block (at most one small logo) that
+starts new mail and replies. Settings > Signatures lists them as Settings
+cards (name, one-line preview, Edit, Delete); deleting asks first and says
+which accounts use it. Each account picks two defaults, one for new messages
+and one for replies and forwards, from a ComboBox that lists None and the
+names. The composer's Signature dropdown replaces the block and can be
+undone. The editor is the composer's, with fewer commands (no table, no
+quote). Use theme tokens only, wrap rather than clip in Portuguese, and keep
+text colours at the system text colour in high contrast.

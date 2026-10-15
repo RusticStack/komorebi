@@ -63,6 +63,9 @@ const MIN_FIT_SCALE: f32 = 0.6;
 const FIT_SLACK: f32 = 4.0;
 /// Laid-out messages kept by the worker.
 const DOC_CACHE: usize = 3;
+/// A message window's reader keeps less: one page and 8 MB of tiles.
+pub const POPOUT_DOC_CACHE: usize = 1;
+pub const POPOUT_TILE_CACHE_BYTES: usize = 8 * 1024 * 1024;
 /// Rasterized tiles kept by the worker (estimated as width x height x 4).
 const TILE_CACHE_BYTES: usize = 24 * 1024 * 1024;
 /// Tiles are requested this many screens below the view, and half a screen
@@ -461,6 +464,9 @@ pub struct Worker {
     latest: Arc<AtomicU64>,
     notify: Notify,
     fetch: Fetch,
+    /// Laid-out pages and tile bytes kept (the main reader's, or a message
+    /// window's smaller ones).
+    caches: (usize, usize),
 }
 
 impl Worker {
@@ -470,7 +476,15 @@ impl Worker {
             latest: Arc::default(),
             notify,
             fetch,
+            caches: (DOC_CACHE, TILE_CACHE_BYTES),
         }
+    }
+
+    /// Keep at most `docs` laid-out pages and `tile_bytes` of tiles. The
+    /// thread ends when this handle is dropped (its channel closes).
+    pub fn with_caches(mut self, docs: usize, tile_bytes: usize) -> Self {
+        self.caches = (docs.max(1), tile_bytes);
+        self
     }
 
     fn spawn(&self) -> Option<Sender<Job>> {
@@ -478,13 +492,14 @@ impl Worker {
         let latest = self.latest.clone();
         let notify = self.notify.clone();
         let fetch = self.fetch.clone();
+        let caches = self.caches;
         std::thread::Builder::new()
             .name("render".into())
             .stack_size(WORKER_STACK)
             .spawn(move || {
                 let images: Arc<Mutex<Images>> = Arc::default();
                 let start = |msg, urls| fetch_images(msg, urls, &images, &fetch, &notify);
-                run(rx, &latest, &*notify, &images, &start)
+                run(rx, &latest, &*notify, &images, &start, caches)
             })
             .ok()?;
         Some(tx)
@@ -613,10 +628,11 @@ fn run(
     notify: &dyn Fn(Reply),
     images: &Mutex<Images>,
     start: &dyn Fn(i64, Vec<String>),
+    (doc_cache, tile_bytes): (usize, usize),
 ) {
     let mut engine = Engine::new();
-    let mut docs: Lru<Key, Doc> = Lru::new(DOC_CACHE);
-    let mut tiles: Lru<(Key, u32), SharedPixelBuffer<Rgba8Pixel>> = Lru::new(TILE_CACHE_BYTES);
+    let mut docs: Lru<Key, Doc> = Lru::new(doc_cache);
+    let mut tiles: Lru<(Key, u32), SharedPixelBuffer<Rgba8Pixel>> = Lru::new(tile_bytes);
     let mut sel: Option<Selection> = None;
     while let Ok(job) = rx.recv() {
         match job {
@@ -1929,7 +1945,14 @@ mod tests {
 
     /// The worker loop without remote images.
     fn run_plain(rx: Receiver<Job>, latest: &AtomicU64, notify: &dyn Fn(Reply)) {
-        run(rx, latest, notify, &Mutex::default(), &|_, _| {});
+        run(
+            rx,
+            latest,
+            notify,
+            &Mutex::default(),
+            &|_, _| {},
+            (DOC_CACHE, TILE_CACHE_BYTES),
+        );
     }
 
     fn html(body: &str) -> Source {
@@ -3268,6 +3291,7 @@ mod tests {
             &|r| replies.borrow_mut().push(r),
             &images,
             &start,
+            (DOC_CACHE, TILE_CACHE_BYTES),
         );
         // Only with consent, only once, and never the tracking pixel or the
         // stylesheet.
@@ -3501,6 +3525,7 @@ mod tests {
             &|r| replies.borrow_mut().push(r),
             &images,
             &start,
+            (DOC_CACHE, TILE_CACHE_BYTES),
         );
         let pages: Vec<(u32, bool, u32)> = replies
             .borrow()

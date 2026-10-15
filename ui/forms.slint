@@ -1,0 +1,199 @@
+// The account form's parts, shared by Settings' account page (app.slint)
+// and the onboarding flow (onboarding.slint): the structs and globals the
+// Rust side fills, the field headers and notes, the check's step list,
+// the certificate line and "Find settings".
+import { Theme, Icons } from "theme.slint";
+import { Icon, Button, HyperlinkButton, ProgressRing } from "widgets.slint";
+
+// The port a server field should show once its security changed: the new
+// default if the field held the old one, else what the user typed (the
+// rule lives in Rust, where it is tested).
+export global ServerPorts {
+    pure callback port-for-security(/* imap */ bool, /* old security */ int, /* new security */ int, /* port */ string) -> string;
+}
+
+// "Find settings": whether an address is one the lookup can use; and the
+// provider an address's domain names (0 Purelymail, 1 Postale.io, -1
+// none: the rule lives in Rust, where it is tested).
+export global Discovery {
+    pure callback email-ok(string) -> bool;
+    pure callback guess-provider(string) -> int;
+}
+
+// The server fields of the account form that "Find settings" may fill.
+export struct ServerFields {
+    imap-host: string,
+    imap-port: string,
+    imap-starttls: bool,
+    imap-user: string,
+    smtp-host: string,
+    smtp-port: string,
+    smtp-starttls: bool,
+    smtp-user: string,
+    smtp-own-login: bool,
+}
+
+export struct AccountForm {
+    id: int,            // the account edited (0: a new one)
+    provider: int,      // index into the provider list; past the presets = manual
+    name: string,
+    email: string,
+    password: string,
+    imap-host: string,
+    imap-port: string,
+    imap-starttls: bool,
+    smtp-host: string,
+    smtp-port: string,
+    smtp-starttls: bool,
+    save-sent: bool,
+    signature: string,
+    imap-user: string,       // the IMAP sign-in name; empty = the email address
+    smtp-user: string,       // the SMTP one, used when smtp-own-login is set
+    smtp-own-login: bool,    // false: the SMTP sign-in is the IMAP one
+}
+
+// A group of settings cards: Body Strong; 24 above (but the first) and 8
+// below come from spacers in the page's 4 px column (a 0 px one below
+// adds a second 4 px gap; docs/WINUI3.md "SettingsCard").
+export component GroupHeader inherits Text {
+    font-size: Theme.body;
+    font-weight: 600;
+    color: Theme.text;
+    wrap: word-wrap;
+}
+
+// A form field's header, above it (docs/WINUI3.md "TextBox": header
+// margin 0,0,0,8; TextFillColorPrimary).
+export component FieldHeader inherits Text {
+    font-size: Theme.body;
+    color: Theme.text;
+    wrap: word-wrap;
+}
+
+// A field's caption under it (Caption TextSecondary), or its error
+// message (`error`: Caption Critical; docs/WINUI3.md "TextBox").
+export component FieldNote inherits Text {
+    in property <bool> error;
+    font-size: Theme.caption;
+    color: root.error ? Theme.danger : Theme.text-2;
+    wrap: word-wrap;
+}
+
+// The account check, step by step: waiting in the quiet colour, the
+// running one with a ring, passed with a check, the failed one in the
+// danger colour, the rest after it skipped (0 waiting, 1 running, 2
+// passed, 3 failed, 4 skipped).
+export component StepList inherits VerticalLayout {
+    in property <[int]> states;
+    spacing: Theme.s1;
+    for name[i] in [
+        @tr("Find the incoming server"),
+        @tr("Connect to the incoming server"),
+        @tr("Secure the connection"),
+        @tr("Sign in to incoming mail"),
+        @tr("Read the folder list"),
+        @tr("Connect to the sending server"),
+        @tr("Sign in to sending mail"),
+    ]: step-row := Rectangle {
+        property <int> state: i < root.states.length ? root.states[i] : 0;
+        height: max(20px, step-text.preferred-height);
+        accessible-role: text;
+        accessible-label: [@tr("{0}, waiting", name), @tr("{0}, in progress", name), @tr("{0}, passed", name), @tr("{0}, failed", name), @tr("{0}, skipped", name)][self.state];
+        HorizontalLayout {
+            spacing: Theme.s2;
+            Rectangle {
+                width: 16px;
+                if step-row.state == 1: ProgressRing {
+                    active: true;
+                    size: 14px;
+                }
+                if step-row.state == 2: Icon {
+                    text: Icons.check-mark;
+                    font-size: 12px;
+                    color: Theme.text;
+                }
+                if step-row.state == 3: Icon {
+                    text: Icons.dismiss;
+                    font-size: 12px;
+                    color: Theme.danger;
+                }
+            }
+            step-text := Text {
+                text: name;
+                font-size: Theme.body;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+                color: step-row.state == 3 ? Theme.danger : step-row.state == 0 || step-row.state == 4 ? Theme.text-3 : Theme.text;
+            }
+        }
+    }
+}
+
+// The line under a manual server in the account form: what vouches for its
+// certificate, and "Forget certificate" while one is saved.
+export component CertLine inherits HorizontalLayout {
+    in property <string> text;
+    in property <bool> pinned;
+    callback forget;
+    spacing: Theme.s2;
+    Text {
+        text: root.text;
+        font-size: Theme.caption;
+        color: Theme.text-2;
+        wrap: word-wrap;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+    Rectangle {
+        width: root.pinned ? forget-btn.min-width : 0;
+        forget-btn := HyperlinkButton {
+            visible: root.pinned;
+            text: @tr("Forget certificate");
+            font-size: Theme.caption;
+            clicked => { root.forget(); }
+        }
+    }
+}
+
+// "Find settings" with its ring, "Looking up settings…" after a second,
+// and the note under it: what it does, or what the lookup found.
+export component FindSettingsRow inherits VerticalLayout {
+    in property <bool> finding;
+    in property <bool> can-find;
+    in property <string> note;
+    callback find();
+    spacing: Theme.s2;
+    HorizontalLayout {
+        alignment: start;
+        spacing: Theme.s2;
+        Button {
+            label: @tr("Find settings");
+            enabled: root.can-find;
+            clicked => { root.find(); }
+        }
+        VerticalLayout {
+            alignment: center;
+            find-ring := ProgressRing {
+                active: root.finding;
+                accessible-label: @tr("Looking up settings");
+            }
+        }
+        Text {
+            text: @tr("Looking up settings\u{a0}…");
+            visible: find-ring.due;
+            accessible-live-region: polite;
+            font-size: Theme.body;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        text: root.note != "" ? root.note : @tr("Fills in the servers for your address. Only your domain name is looked up, and nothing is saved.");
+        font-size: Theme.caption;
+        color: Theme.text-2;
+        wrap: word-wrap;
+        accessible-live-region: polite;
+    }
+}
+

@@ -70,7 +70,7 @@ impl App {
     /// while something is in the way.
     fn tips_due_now(&mut self) {
         self.sync_bar();
-        let compact = self.ui().get_compact();
+        let compact = self.ui().get_folded();
         if self.accounts.is_empty()
             || !self.onboarding.tips_due(compact)
             || self.onboarding.current().is_some()
@@ -87,7 +87,7 @@ impl App {
     /// and tests). Returns the tip shown.
     pub(super) fn start_tips(&mut self) -> Option<Shown> {
         self.sync_bar();
-        let compact = self.ui().get_compact();
+        let compact = self.ui().get_folded();
         let shown = self.onboarding.start(compact);
         self.show_tip(shown);
         shown

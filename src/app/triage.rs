@@ -28,6 +28,9 @@ pub(super) const CMD_PLAIN: i32 = 26;
 pub(super) const CMD_COLOURS: i32 = 27;
 pub(super) const CMD_LOAD_IMAGES: i32 = 28;
 pub(super) const CMD_STOP_IMAGES: i32 = 29;
+/// Open in new tab / in new window (`app::tabs`, `app::windows`).
+pub(super) const CMD_OPEN_TAB: i32 = 30;
+pub(super) const CMD_OPEN_WINDOW: i32 = 31;
 
 /// The quick actions of a row (`message-quick`).
 pub(super) const QUICK_ARCHIVE: i32 = 0;
@@ -213,6 +216,49 @@ pub(super) fn move_levels(nodes: &[tree::TreeNode], included: &[bool]) -> Vec<i3
         .collect()
 }
 
+/// A message window's More menu (`app::windows`): Forward as attachment;
+/// Report junk or Not junk; the view toggles and images. `actions` is off
+/// while its message is gone from the server.
+pub(super) fn popout_menu(
+    junk: bool,
+    html: bool,
+    plain: bool,
+    original: bool,
+    dimmed: bool,
+    blocked: bool,
+    actions: bool,
+) -> [Vec<MenuCommand>; 3] {
+    let junk_entry = if junk {
+        entry(t!(invoke_menu_not_junk), "", actions, CMD_NOT_JUNK)
+    } else {
+        entry(t!(invoke_menu_report_junk), "", actions, CMD_JUNK)
+    };
+    [
+        vec![entry(
+            t!(invoke_menu_forward_attached),
+            "",
+            actions,
+            CMD_FORWARD_ATTACHED,
+        )],
+        vec![junk_entry],
+        vec![
+            check_entry(t!(invoke_menu_plain_text), html || plain, plain, CMD_PLAIN),
+            check_entry(
+                t!(invoke_menu_original_colours),
+                html && !plain && (dimmed || original),
+                original,
+                CMD_COLOURS,
+            ),
+            entry(
+                t!(invoke_menu_load_images),
+                "",
+                html && !plain && blocked,
+                CMD_LOAD_IMAGES,
+            ),
+        ],
+    ]
+}
+
 impl App {
     /// Accelerator text for Backspace in the language shown.
     fn backspace_key(&self) -> String {
@@ -277,6 +323,8 @@ impl App {
         RowMenu {
             groups: [
                 vec![
+                    entry(t!(invoke_menu_open_tab), "Shift+Enter", one, CMD_OPEN_TAB),
+                    entry(t!(invoke_menu_open_window), "Ctrl+O", one, CMD_OPEN_WINDOW),
                     entry(t!(invoke_menu_reply), "Ctrl+R", one && !drafts, CMD_REPLY),
                     entry(
                         t!(invoke_menu_reply_all),
@@ -364,12 +412,15 @@ impl App {
         };
         MoreMenu {
             groups: [
-                vec![entry(
-                    t!(invoke_menu_forward_attached),
-                    "",
-                    true,
-                    CMD_FORWARD_ATTACHED,
-                )],
+                vec![
+                    entry(t!(invoke_menu_open_window), "Ctrl+O", true, CMD_OPEN_WINDOW),
+                    entry(
+                        t!(invoke_menu_forward_attached),
+                        "",
+                        true,
+                        CMD_FORWARD_ATTACHED,
+                    ),
+                ],
                 vec![junk_entry],
                 view,
                 vec![

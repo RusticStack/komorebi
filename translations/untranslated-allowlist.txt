@@ -19,3 +19,11 @@ Português (Portugal)
 Segoe UI
 Segoe MDL2 Assets
 Consolas
+Arial
+Calibri
+Verdana
+Tahoma
+Trebuchet MS
+Georgia
+Times New Roman
+Courier New

@@ -585,6 +585,9 @@ const BRAZILIAN: &[&str] = &[
     "deletar",
     "arquivo",
     "arquivos",
+    // A tab is a "separador" in Portugal.
+    "aba",
+    "abas",
 ];
 
 #[test]

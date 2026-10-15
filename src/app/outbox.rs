@@ -36,7 +36,7 @@ impl App {
                 .filter(|(_, missing)| missing.is_empty())
                 .and_then(|(d, _)| {
                     let account = self.accounts.iter().find(|a| a.id == d.account_id)?;
-                    Some((account.id, composer::outgoing(account, d)))
+                    Some((account.id, composer::outgoing(&self.db, account, d)))
                 });
             match rebuilt {
                 Some((account, outgoing)) => {

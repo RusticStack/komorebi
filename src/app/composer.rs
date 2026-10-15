@@ -13,11 +13,21 @@
 
 use super::*;
 use crate::mail::render;
+use komorebi::mail::rich as model;
+use komorebi::mail::rich::edit::Editor;
 
 mod markup;
+pub(super) mod rich;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct DraftId(u64);
+
+#[cfg(test)]
+impl DraftId {
+    pub(super) fn for_test(n: u64) -> Self {
+        DraftId(n)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -140,6 +150,17 @@ pub(super) struct Draft {
     pub saved_at: Option<i64>,
     /// High or low importance, set in the formatting bar (normal: none).
     pub importance: db::Importance,
+    /// A formatted draft: the document the composer edits (`body`,
+    /// `quote`, `quoted_html` and `signature` are then unused; what is
+    /// saved and sent comes from the document).
+    pub rich: Option<Editor>,
+    /// A reply's or forward's quote as HTML (the original's, or its text),
+    /// for a draft that starts formatted (`Draft::make_rich`).
+    pub rich_quote: Option<String>,
+    /// The formatted document a switch to plain text replaced, and the text
+    /// it left: Ctrl+Z, or switching back while the text is unchanged,
+    /// brings it back.
+    pub unplain: Option<(Editor, String)>,
 }
 
 /// The lines a reply's or forward's quote starts with, in the language
@@ -274,32 +295,70 @@ impl Draft {
     /// the text quote the composer put in the body, for as long as that
     /// text quote stays as it is.
     pub fn quote_html(&mut self, m: &db::Message, original: &str, heads: &Heads) {
-        use mail::compose_html;
-        let (boundary, block) = match self.kind {
-            Kind::New => return,
-            Kind::Reply | Kind::ReplyAll => {
-                let line = attribution(m, heads);
-                let block = compose_html::reply_quote(&line, original);
-                (line, block)
-            }
-            Kind::Forward => {
-                let from = format!("{} <{}>", m.from_name, m.from_addr);
-                let date = format::full_date(heads.lang, m.date);
-                let fields = [
-                    (heads.from.as_str(), from.trim()),
-                    (heads.date.as_str(), date.as_str()),
-                    (heads.to.as_str(), m.to.as_str()),
-                    (heads.subject.as_str(), m.subject.as_str()),
-                ];
-                let block = compose_html::forward_quote(&heads.forwarded, &fields, original);
-                (heads.forwarded.clone(), block)
-            }
+        let Some((boundary, block)) = quote_block(self.kind, m, original, heads) else {
+            return;
         };
-        self.quoted_html = compose_html::attach(&self.full_body(), &boundary, &block);
+        self.quoted_html = mail::compose_html::attach(&self.full_body(), &boundary, &block);
+        self.rich_quote = Some(block);
     }
 
-    /// What is saved and sent: the body with its folded quote, if any.
+    /// For a text message replied to or forwarded: its text as the quote of
+    /// a draft that starts formatted (the HTML original wins).
+    pub fn quote_text(&mut self, m: &db::Message, text: &str, heads: &Heads) {
+        if self.rich_quote.is_none() {
+            self.rich_quote = quote_block(self.kind, m, &text_html(text), heads).map(|q| q.1);
+        }
+    }
+
+    /// Start formatted: the text typed so far (a `mailto:` body; a reply's
+    /// text quote is left out) in the settings' default font, then the
+    /// reply's or forward's quote, folded.
+    pub fn make_rich(
+        &mut self,
+        defaults: (model::FontId, model::SizePt, Option<model::ColorId>),
+        signature: Option<model::SignatureBlock>,
+    ) {
+        let above = match quote_start(&self.body) {
+            Some(i) if self.kind != Kind::New => self.body.get(..i).unwrap_or_default(),
+            _ => self.body.as_str(),
+        };
+        let mut doc = rich::doc_from_text(above.trim_end_matches(['\n', '\r']), defaults);
+        if doc.blocks.is_empty() {
+            doc.blocks.push(model::Block::Para(model::Para::default()));
+        }
+        // The signature under the text after an empty line, above the
+        // quote (as in plain text).
+        if let Some(s) = signature {
+            doc.blocks.push(model::Block::Para(model::Para::default()));
+            doc.blocks.push(model::Block::Signature(s));
+        }
+        if let Some(q) = self
+            .rich_quote
+            .take()
+            .and_then(|h| model::QuoteBlock::new(&h, true))
+        {
+            doc.blocks.push(model::Block::Quote(q));
+        }
+        self.rich = Some(Editor::new(doc));
+        self.body.clear();
+        self.quote = None;
+        self.quoted_html = None;
+        self.signature = None;
+        self.unformat = None;
+    }
+
+    /// The formatted signature in the message (none: plain, or no
+    /// signature).
+    pub fn rich_signature(&self) -> Option<&model::SignatureBlock> {
+        self.rich.as_ref()?.signature()
+    }
+
+    /// What is saved and sent: the body with its folded quote, if any (a
+    /// formatted draft: its plain text).
     pub fn full_body(&self) -> String {
+        if let Some(ed) = &self.rich {
+            return model::plain(ed.doc());
+        }
         match &self.quote {
             Some(q) => with_quote(&self.body, q),
             None => self.body.clone(),
@@ -350,6 +409,13 @@ impl Draft {
             quoted_html: r.quoted_html,
             importance: r.importance,
             saved_at: (r.updated > 0).then_some(r.updated),
+            // Saved formatted: the document back (a draft saved as plain
+            // text stays plain).
+            rich: r
+                .body_rich
+                .as_deref()
+                .and_then(model::from_stored)
+                .map(Editor::new),
             row: Some(r.id),
             // Saved because the user wrote it.
             touched: true,
@@ -371,10 +437,19 @@ impl Draft {
             bcc: self.bcc.clone(),
             subject: self.subject.clone(),
             body: self.full_body(),
-            quoted_html: self.quoted_html.clone(),
+            quoted_html: if self.rich.is_some() {
+                None
+            } else {
+                self.quoted_html.clone()
+            },
             message_id: self.message_id.clone(),
             updated: 0,
             importance: self.importance,
+            body_rich: self
+                .rich
+                .as_ref()
+                .map(|ed| model::html(ed.doc(), model::Mode::Draft)),
+            signature_id: self.rich_signature().and_then(|s| s.source),
         }
     }
 
@@ -422,6 +497,18 @@ impl Draft {
     /// Nothing typed and nothing attached (the signature the app added
     /// doesn't count).
     pub fn is_empty(&self) -> bool {
+        if let Some(ed) = &self.rich {
+            let blank = ed.doc().blocks.iter().all(|b| match b {
+                model::Block::Para(p) => p.is_empty(),
+                model::Block::Signature(s) => s.is_untouched(),
+                _ => false,
+            });
+            return blank
+                && [&self.to, &self.cc, &self.bcc, &self.subject]
+                    .iter()
+                    .all(|s| s.trim().is_empty())
+                && self.attachments.is_empty();
+        }
         let sig = self.signature.as_deref().unwrap_or_default();
         let full = self.full_body();
         let body = match full.find(sig) {
@@ -460,6 +547,25 @@ impl Draft {
         self.body = body;
         self.signature = Some(block.to_string());
         true
+    }
+
+    /// A plain draft's signature picked from the Signature menu: `new` (a
+    /// [`signature_block`], empty for none) takes the place of the block
+    /// the app put in; one edited since stays, and the new one goes where
+    /// a signature goes.
+    pub fn replace_signature(&mut self, new: &str) {
+        let old = self.signature.clone().unwrap_or_default();
+        if old == new {
+            return;
+        }
+        match swap_signature(&self.body, self.kind, &old, new) {
+            Some(body) => self.body = body,
+            None if self.kind == Kind::New => self.body.push_str(new),
+            None => self.body.insert_str(0, new),
+        }
+        self.signature = Some(new.to_string());
+        self.touched = true;
+        self.dirty = true;
     }
 
     /// Worth keeping when another draft takes its place: the user changed
@@ -520,6 +626,9 @@ pub(super) struct Drafts {
     next: u64,
     /// The recipient suggestions showing for the active draft.
     suggest: Option<Suggest>,
+    /// Drafts shown in tabs of their own (`app::tabs`): never dropped when
+    /// another one takes the composer, even with nothing written.
+    tabbed: HashSet<DraftId>,
 }
 
 /// Recipient suggestions from the address index for the address being
@@ -542,18 +651,52 @@ impl Drafts {
     }
 
     /// Make `id` the active draft. The draft it replaces stays if it is
-    /// worth keeping and is dropped otherwise (save it first).
+    /// worth keeping or has a tab, and is dropped otherwise (save it first).
     pub fn switch_to(&mut self, id: DraftId) {
         if !self.items.contains_key(&id) {
             return;
         }
         if let Some(old) = self.active
             && old != id
+            && !self.tabbed.contains(&old)
             && self.items.get(&old).is_some_and(|d| !d.keep())
         {
             self.items.remove(&old);
         }
         self.active = Some(id);
+    }
+
+    /// Add `draft` without showing it (a tab of its own holds it).
+    pub fn add(&mut self, draft: Draft) -> DraftId {
+        self.next += 1;
+        let id = DraftId(self.next);
+        self.items.insert(id, draft);
+        id
+    }
+
+    /// Make `id` the active draft, dropping nothing (a tab switch).
+    pub fn show(&mut self, id: DraftId) {
+        if self.items.contains_key(&id) {
+            self.active = Some(id);
+        }
+    }
+
+    /// No draft is shown (the composer went with it into a tab).
+    pub fn hide(&mut self) {
+        self.active = None;
+    }
+
+    /// Draft `id` has a tab of its own (or no longer has one).
+    pub fn set_tabbed(&mut self, id: DraftId, on: bool) {
+        if on {
+            self.tabbed.insert(id);
+        } else {
+            self.tabbed.remove(&id);
+        }
+    }
+
+    pub fn contains(&self, id: DraftId) -> bool {
+        self.items.contains_key(&id)
     }
 
     pub fn active_id(&self) -> Option<DraftId> {
@@ -602,6 +745,7 @@ impl Drafts {
     /// went.
     pub fn drop_account(&mut self, account: i64) -> bool {
         self.items.retain(|_, d| d.account_id != account);
+        self.tabbed.retain(|id| self.items.contains_key(id));
         let gone = self.active.is_some_and(|id| !self.items.contains_key(&id));
         if gone {
             self.active = None;
@@ -613,6 +757,7 @@ impl Drafts {
         if self.active == Some(id) {
             self.active = None;
         }
+        self.tabbed.remove(&id);
         self.items.remove(&id)
     }
 
@@ -636,7 +781,11 @@ impl Drafts {
 /// none is attached). None: nothing to ask about.
 pub(super) fn send_guard(d: &Draft) -> Option<Guard> {
     let no_subject = d.subject.trim().is_empty();
-    let no_attachment = d.attachments.is_empty() && mentions_attachment(&d.body);
+    let text = match &d.rich {
+        Some(ed) => std::borrow::Cow::Owned(model::plain(ed.doc())),
+        None => std::borrow::Cow::Borrowed(d.body.as_str()),
+    };
+    let no_attachment = d.attachments.is_empty() && mentions_attachment(&text);
     match (no_subject, no_attachment) {
         (true, true) => Some(Guard::Both),
         (true, false) => Some(Guard::NoSubject),
@@ -839,7 +988,7 @@ impl App {
     /// only while the reader shows: never over the composer or Settings.
     pub(super) fn reading(&self) -> bool {
         let ui = self.ui();
-        !ui.get_composing() && !ui.get_show_settings()
+        !ui.get_composing() && !ui.get_show_settings() && !self.tab_gone()
     }
 
     /// The account a new message comes from: the open folder's, or in All
@@ -890,16 +1039,23 @@ impl App {
             return;
         }
         let Some(open) = &self.open else { return };
+        let (msg, body) = (open.msg.clone(), open.body.clone());
+        self.reply_to(&msg, body.as_ref(), all);
+    }
+
+    /// Reply (or Reply all) to `msg`, whose parsed body is `body` (none:
+    /// still downloading): the open message, or a message window's.
+    pub(super) fn reply_to(&mut self, msg: &db::Message, body: Option<&Body>, all: bool) {
         // A draft in the server's Drafts folder is not mail to answer (its
         // InfoBar offers Forward instead; editing it in place is deferred).
-        if self.folder_role(open.msg.folder_id) == Role::Drafts {
+        if self.folder_role(msg.folder_id) == Role::Drafts {
             return;
         }
-        if open.body.is_none() {
+        let Some(body) = body else {
             return self.set_status(&t!(invoke_still_downloading), false);
-        }
+        };
         // A message replied to already: its draft comes back.
-        let message = open.msg.id;
+        let message = msg.id;
         if let Some(id) = self.drafts.find_reply(message) {
             return self.resume_draft(id);
         }
@@ -908,14 +1064,13 @@ impl App {
             Ok(None) => {}
             Err(e) => return self.set_status(&text::detail(&e), true),
         }
-        let Some(open) = &self.open else { return };
-        let Some(body) = &open.body else { return };
-        let me = self.account_email(open.msg.account_id);
+        let me = self.account_email(msg.account_id);
         let heads = Heads::shown(self.lang);
-        let mut draft = Draft::reply(&open.msg, body, &me, all, &heads);
-        if let Some(html) = quotable(open.msg.raw.as_deref()) {
-            draft.quote_html(&open.msg, &html, &heads);
+        let mut draft = Draft::reply(msg, body, &me, all, &heads);
+        if let Some(html) = quotable(msg.raw.as_deref()) {
+            draft.quote_html(msg, &html, &heads);
         }
+        draft.quote_text(msg, strip_signature(&body.text), &heads);
         self.start_draft(draft);
     }
 
@@ -924,7 +1079,13 @@ impl App {
             return;
         }
         let Some(open) = &self.open else { return };
-        let (Some(body), Some(raw)) = (&open.body, open.msg.raw.as_deref()) else {
+        let (msg, body) = (open.msg.clone(), open.body.clone());
+        self.forward_of(&msg, body.as_ref());
+    }
+
+    /// Forward `msg` (the open message, or a message window's).
+    pub(super) fn forward_of(&mut self, msg: &db::Message, body: Option<&Body>) {
+        let (Some(body), Some(raw)) = (body, msg.raw.as_deref()) else {
             return self.set_status(&t!(invoke_still_downloading), false);
         };
         let attachments = mime::attachments(raw, |_| true)
@@ -932,10 +1093,11 @@ impl App {
             .map(|(filename, data)| OutAttachment { filename, data }.into())
             .collect();
         let heads = Heads::shown(self.lang);
-        let mut draft = Draft::forward(&open.msg, body, attachments, &heads);
+        let mut draft = Draft::forward(msg, body, attachments, &heads);
         if let Some(html) = quotable(Some(raw)) {
-            draft.quote_html(&open.msg, &html, &heads);
+            draft.quote_html(msg, &html, &heads);
         }
+        draft.quote_text(msg, &body.text, &heads);
         self.start_draft(draft);
     }
 
@@ -949,30 +1111,67 @@ impl App {
     }
 
     /// Make `draft` the active one and show it; a draft in progress is
-    /// saved and kept. A new draft gets its account's signature.
-    fn start_draft(&mut self, mut draft: Draft) {
-        let block = self.signature_of(draft.account_id);
-        if draft.row.is_none() {
-            draft.sign(&block);
-        } else if block.is_empty() || draft.body.contains(&block) {
-            // Saved earlier: swappable while it holds the current block.
-            draft.signature = Some(block);
+    /// saved and kept (in a tab of its own when it showed in the reading
+    /// pane). From a message or draft tab, the new draft gets a tab of its
+    /// own to the right. A new draft gets its account's signature.
+    pub(super) fn start_draft(&mut self, mut draft: Draft) {
+        self.prepare_draft(&mut draft);
+        if !self.in_mail_tab() || self.draft_tab {
+            let id = self.drafts.add(draft);
+            return self.open_draft_tab(id, false);
         }
-        draft.fold_quote();
-        let parked = self.park();
+        let aside = self.pane_draft_aside();
+        let parked = !aside && self.park();
         self.drafts.open(draft);
         self.show_draft();
-        if parked {
+        if aside {
+            self.set_status(&t!(invoke_draft_kept_in_tab), false);
+        } else if parked {
             self.set_status(&t!(invoke_earlier_draft_saved), false);
         }
     }
 
-    /// Show draft `id`, already in memory, saving the one it replaces.
+    /// A draft's form as the composer edits it: formatted (unless Settings
+    /// say plain text) with its account's signature, the quote folded.
+    pub(super) fn prepare_draft(&self, draft: &mut Draft) {
+        // A new message starts formatted unless Settings says plain text
+        // (a forward as attachment has nothing to format either way).
+        if draft.row.is_none() && draft.rich.is_none() && self.compose_rich {
+            let sig = self
+                .signature_for(draft.account_id, draft.kind)
+                .and_then(|s| s.block());
+            draft.make_rich(self.compose_defaults, sig);
+        }
+        if draft.rich.is_none() {
+            let block = self.signature_of(draft.account_id, draft.kind);
+            if draft.row.is_none() {
+                draft.sign(&block);
+            } else if block.is_empty() || draft.body.contains(&block) {
+                // Saved earlier: swappable while it holds the current block.
+                draft.signature = Some(block);
+            }
+            draft.fold_quote();
+        }
+        draft.rich_quote = None;
+    }
+
+    /// Show draft `id`, already in memory, saving the one it replaces: its
+    /// tab comes forward if it has one; from a message or draft tab it gets
+    /// a tab of its own.
     fn resume_draft(&mut self, id: DraftId) {
+        if let Some(i) = self.tabs.find(tabs::TabKind::Draft(id)) {
+            return self.activate_tab(i);
+        }
+        if !self.in_mail_tab() || self.draft_tab {
+            return self.open_draft_tab(id, false);
+        }
         if self.drafts.active_id() != Some(id) {
-            let parked = self.park();
+            let aside = self.pane_draft_aside();
+            let parked = !aside && self.park();
             self.drafts.switch_to(id);
-            if parked {
+            if aside {
+                self.set_status(&t!(invoke_draft_kept_in_tab), false);
+            } else if parked {
                 self.set_status(&t!(invoke_earlier_draft_saved), false);
             }
         }
@@ -984,6 +1183,9 @@ impl App {
     pub(super) fn open_saved(&mut self, row: i64) {
         if let Some(id) = self.drafts.find_row(row) {
             return self.resume_draft(id);
+        }
+        if let Some(i) = self.tabs.find(tabs::TabKind::Saved(row)) {
+            return self.activate_tab(i);
         }
         match self.db.is_saved_draft(row) {
             Ok(true) => {}
@@ -1130,6 +1332,11 @@ impl App {
         }
     }
 
+    /// [`App::save_to_server`] at once (a draft leaving the composer).
+    pub(super) fn save_to_server_now(&mut self, id: DraftId) {
+        self.save_to_server(id, true);
+    }
+
     /// Have the owning account's sync worker remove a draft's server copy.
     pub(super) fn remove_server_copy(&self, copy: Option<db::ServerCopy>) {
         if let Some(copy) = copy
@@ -1160,7 +1367,7 @@ impl App {
     }
 
     /// An edit: save the active draft two seconds after the last one.
-    fn schedule_autosave(&mut self) {
+    pub(super) fn schedule_autosave(&mut self) {
         self.last_edit = Instant::now();
         if !self.autosave_timer.running() {
             self.autosave_timer
@@ -1208,7 +1415,12 @@ impl App {
         ui.set_c_show_cc(d.show_cc);
         ui.set_c_subject(d.subject.as_str().into());
         ui.set_c_body(d.body.as_str().into());
-        ui.set_c_quote_folded(d.quote.is_some());
+        let formatted = d.rich.is_some();
+        ui.set_c_rich(formatted);
+        ui.set_c_quote_folded(match &d.rich {
+            Some(ed) => ed.has_quote() && ed.quote_folded(),
+            None => d.quote.is_some(),
+        });
         ui.set_c_importance(d.importance.code() as i32);
         ui.set_c_preview(false);
         ui.set_c_guard(SharedString::new());
@@ -1225,6 +1437,11 @@ impl App {
         self.show_send_state();
         self.show_compose_attachments();
         self.show_saved_at();
+        self.ed_reset(rich::BODY);
+        if formatted {
+            self.ed_show(rich::BODY, true, true, false);
+        }
+        self.show_signature_choices();
         self.focus_field(focus);
         ui.set_composing(true);
         self.sync_selection_index();
@@ -1246,6 +1463,13 @@ impl App {
         let Some(d) = self.drafts.active_mut() else {
             return;
         };
+        if let Some(ed) = d.rich.as_mut() {
+            if ed.fold_quote(false) {
+                self.ui().set_c_quote_folded(false);
+                self.ed_show(rich::BODY, true, true, false);
+            }
+            return;
+        }
         if d.unfold_quote() {
             let body = SharedString::from(d.body.as_str());
             let ui = self.ui();
@@ -1373,7 +1597,14 @@ impl App {
         let Some(d) = self.drafts.active() else {
             return;
         };
-        let html = mail::compose_html::preview_html(&d.full_body(), d.quoted_html.as_deref());
+        let html = match &d.rich {
+            Some(ed) if model::needs_html(ed.doc()) => model::html(ed.doc(), model::Mode::Send),
+            Some(ed) => mail::compose_html::preview_html(&model::plain(ed.doc()), None),
+            None => format!(
+                "<div style=\"white-space:pre-wrap\">{}</div>",
+                text_html(&d.full_body())
+            ),
+        };
         let (width, dark) = self.preview_want;
         let scale = ui.window().scale_factor();
         self.preview_seq += 1;
@@ -1419,12 +1650,22 @@ impl App {
         let Some(d) = self.drafts.active_mut() else {
             return BodyEdit::default();
         };
+        // Right after a switch to plain text: the formatted message back.
+        if d.unplain.as_ref().is_some_and(|(_, text)| *text == d.body) {
+            self.set_rich(true);
+            return BodyEdit::default();
+        }
         let Some(u) = d.unformat.take_if(|u| u.after == d.body) else {
             return BodyEdit::default();
         };
         self.draft_edited(ComposeField::Body, &u.before);
         self.ui().set_c_body(u.before.as_str().into());
         body_edit(u.anchor, u.cursor)
+    }
+
+    /// The keyboard focus to the body, plain or formatted.
+    pub(super) fn focus_body(&self) {
+        self.focus_field(ComposeField::Body);
     }
 
     /// Move the keyboard focus to a composer field.
@@ -1494,10 +1735,27 @@ impl App {
         // The guard bar asked about the draft as it was.
         self.ui().set_c_guard(SharedString::new());
         self.schedule_autosave();
+        if field == ComposeField::Subject {
+            self.retitle_draft_tab();
+        }
     }
 
-    /// Set a field of the active draft and show it (as if typed).
+    /// Set a field of the active draft and show it (as if typed). A
+    /// formatted body gets `text` at its start.
     pub(super) fn set_draft_field(&mut self, field: ComposeField, text: &str) {
+        if field == ComposeField::Body
+            && let Some(d) = self.drafts.active_mut()
+            && let Some(ed) = d.rich.as_mut()
+        {
+            if let Some(caret) = ed.replace(0, 0, text, (0, 0)) {
+                d.touched = true;
+                d.dirty = true;
+                self.ed_set_caret(rich::BODY, caret);
+                self.schedule_autosave();
+            }
+            self.ed_show(rich::BODY, true, true, false);
+            return;
+        }
         self.draft_edited(field, text);
         self.show_field(field, text);
     }
@@ -1610,7 +1868,14 @@ impl App {
         let Some(account) = self.accounts.get(index.max(0) as usize) else {
             return;
         };
-        let (id, block) = (account.id, signature_block(&account.signature));
+        let id = account.id;
+        let Some(kind) = self.drafts.active().map(|d| d.kind) else {
+            return;
+        };
+        let sig = self.signature_for(id, kind);
+        let block = sig
+            .as_ref()
+            .map_or_else(String::new, |s| signature_block(&s.body_text));
         let Some(d) = self.drafts.active_mut() else {
             return;
         };
@@ -1622,7 +1887,17 @@ impl App {
         // so Esc still drops it silently (a reply keeps the choice).
         d.touched |= !d.is_empty();
         d.dirty = true;
-        if d.resign(&block) {
+        if let Some(ed) = d.rich.as_mut() {
+            // The new account's signature, while the one there is as the
+            // app put it in.
+            let untouched = ed.signature().is_none_or(|s| s.is_untouched());
+            let new = sig.and_then(|s| s.block());
+            let same = ed.signature().map(|s| s.source) == new.as_ref().map(|s| s.source);
+            if untouched && !same && ed.set_signature(new) {
+                self.ed_show(rich::BODY, true, true, false);
+                self.show_signature_choices();
+            }
+        } else if d.resign(&block) {
             let body = SharedString::from(d.body.as_str());
             self.ui().set_c_body(body);
         }
@@ -1631,12 +1906,20 @@ impl App {
         }
     }
 
-    /// The signature block of an account's mail (empty: none).
-    fn signature_of(&self, account: i64) -> String {
-        self.accounts
-            .iter()
-            .find(|a| a.id == account)
-            .map_or_else(String::new, |a| signature_block(&a.signature))
+    /// The signature an account puts in a new message, or in a reply or
+    /// forward (none: it has none, or the cache could not be read).
+    pub(super) fn signature_for(&self, account: i64, kind: Kind) -> Option<db::Signature> {
+        self.db
+            .default_signature(account, kind != Kind::New)
+            .ok()
+            .flatten()
+    }
+
+    /// The plain-text signature block of an account's mail of `kind`
+    /// (empty: none).
+    fn signature_of(&self, account: i64, kind: Kind) -> String {
+        self.signature_for(account, kind)
+            .map_or_else(String::new, |s| signature_block(&s.body_text))
     }
 
     /// The formatting bar's High or Low importance toggle: `code` is the
@@ -1698,8 +1981,12 @@ impl App {
     }
 
     /// Esc or Close: save the draft and hide the composer (see
-    /// [`App::park_composer`]).
+    /// [`App::park_composer`]); in a composer tab, close the tab.
     pub(super) fn close_composer(&mut self) {
+        if !self.in_mail_tab() {
+            let i = self.tabs.active();
+            return self.close_tab(i);
+        }
         self.park_composer();
         self.hide_composer();
     }
@@ -1720,7 +2007,13 @@ impl App {
         }
     }
 
-    fn hide_composer(&self) {
+    fn hide_composer(&mut self) {
+        // Sent or discarded in a composer tab: the tab goes with it.
+        if let tabs::TabKind::Draft(id) = self.tabs.active_kind()
+            && !self.drafts.contains(id)
+        {
+            return self.drop_active_tab();
+        }
         let ui = self.ui();
         ui.set_c_suggestions(ModelRc::default());
         ui.set_composing(false);
@@ -1829,7 +2122,12 @@ impl App {
         let reply_to = d.reply_to;
         self.hide_composer();
         self.drafts_changed(reply_to, true);
-        self.queue_send(row, account_id, outgoing(&account, d), self.undo_delay);
+        self.queue_send(
+            row,
+            account_id,
+            outgoing(&self.db, &account, d),
+            self.undo_delay,
+        );
     }
 
     /// Build outbox row `row`'s message on a worker and queue it once
@@ -1991,7 +2289,8 @@ impl App {
                 self.pending_sends.remove(&row);
                 self.clear_undo(UndoOffer::Send(row));
                 self.outbox_changed();
-                self.open_saved(row);
+                // In a tab of its own, beside what shows now.
+                self.open_saved_in_tab(row);
                 let reply_to = self.drafts.active().and_then(|d| d.reply_to);
                 self.drafts_changed(reply_to, true);
             }
@@ -2045,11 +2344,26 @@ impl PendingSend {
     }
 }
 
-/// What draft `d` sends from `account`: plain text, or with an HTML
-/// alternative when it has formatting or quotes an HTML message.
-pub(super) fn outgoing(account: &Account, d: Draft) -> Outgoing {
-    let (body, body_html) =
-        mail::compose_html::alternative(&d.full_body(), d.quoted_html.as_deref());
+/// What draft `d` sends from `account`: a formatted draft its text and,
+/// when it needs one, an HTML alternative (with the signature logo); a
+/// plain-text draft its text only.
+pub(super) fn outgoing(db: &Db, account: &Account, d: Draft) -> Outgoing {
+    let (body, body_html, inline) = match &d.rich {
+        // A logo whose picture is gone is left out (`Db::send_parts`).
+        Some(ed) => db.send_parts(ed.doc()).unwrap_or_else(|_| {
+            let mut doc = ed.doc().clone();
+            for b in &mut doc.blocks {
+                if let model::Block::Signature(s) = b {
+                    s.logo = None;
+                }
+            }
+            let (text, html) = model::parts(&doc);
+            (text, html, Vec::new())
+        }),
+        // Plain text is sent as plain text only, as typed: marks such as
+        // `**bold**` or `- ` stay text, and no HTML quote goes with it.
+        None => (d.full_body(), None, Vec::new()),
+    };
     Outgoing {
         from_name: account.name.clone(),
         from_email: account.email.clone(),
@@ -2059,6 +2373,7 @@ pub(super) fn outgoing(account: &Account, d: Draft) -> Outgoing {
         subject: d.subject,
         body,
         body_html,
+        inline,
         attachments: d.attachments.into_iter().map(|a| a.file).collect(),
         in_reply_to: d.in_reply_to,
         references: d.references,
@@ -2586,6 +2901,58 @@ fn attribution(m: &db::Message, heads: &Heads) -> String {
     )
 }
 
+/// The quote below a reply or forward of `m` (`original`: its sanitized
+/// HTML), and the line it starts with in the text quote. `None` for a new
+/// message.
+fn quote_block(
+    kind: Kind,
+    m: &db::Message,
+    original: &str,
+    heads: &Heads,
+) -> Option<(String, String)> {
+    use mail::compose_html;
+    Some(match kind {
+        Kind::New => return None,
+        Kind::Reply | Kind::ReplyAll => {
+            let line = attribution(m, heads);
+            let block = compose_html::reply_quote(&line, original);
+            (line, block)
+        }
+        Kind::Forward => {
+            let from = format!("{} <{}>", m.from_name, m.from_addr);
+            let date = format::full_date(heads.lang, m.date);
+            let fields = [
+                (heads.from.as_str(), from.trim()),
+                (heads.date.as_str(), date.as_str()),
+                (heads.to.as_str(), m.to.as_str()),
+                (heads.subject.as_str(), m.subject.as_str()),
+            ];
+            let block = compose_html::forward_quote(&heads.forwarded, &fields, original);
+            (heads.forwarded.clone(), block)
+        }
+    })
+}
+
+/// Text as HTML that shows it as it is: escaped, each line break kept.
+fn text_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + text.len() / 8);
+    for (i, line) in text.lines().enumerate() {
+        if i > 0 {
+            out.push_str("<br>\n");
+        }
+        for c in line.chars() {
+            match c {
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '&' => out.push_str("&amp;"),
+                '"' => out.push_str("&quot;"),
+                c => out.push(c),
+            }
+        }
+    }
+    out
+}
+
 /// The sanitized HTML body of raw message `raw`, for a reply or forward to
 /// quote (`None`: a text message, or nothing safe to quote).
 fn quotable(raw: Option<&[u8]>) -> Option<String> {
@@ -2633,6 +3000,9 @@ mod tests {
     use slint::Rgb8Pixel;
     use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
     use slint::platform::{Key, Platform, WindowAdapter, WindowEvent};
+
+    mod rich_tests;
+    mod tabs_tests;
 
     fn message(from: &str, to: &str, cc: &str) -> db::Message {
         db::Message {
@@ -3290,10 +3660,15 @@ mod tests {
 
     // ------------------------------------------------ the real app, headless
 
-    struct TestPlatform(Rc<MinimalSoftwareWindow>);
+    /// The first window gets the harness's own adapter; message windows
+    /// (`app::windows`) get one each.
+    struct TestPlatform(Rc<MinimalSoftwareWindow>, Cell<bool>);
 
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            if self.1.replace(true) {
+                return Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer));
+            }
             Ok(self.0.clone())
         }
     }
@@ -3313,7 +3688,8 @@ mod tests {
     impl Harness {
         fn new(name: &str) -> Self {
             let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-            slint::platform::set_platform(Box::new(TestPlatform(window.clone()))).unwrap();
+            slint::platform::set_platform(Box::new(TestPlatform(window.clone(), Cell::new(false))))
+                .unwrap();
             let ui = AppWindow::new().unwrap();
             ui.window().set_size(slint::PhysicalSize::new(1280, 800));
             ui.show().unwrap();
@@ -3322,11 +3698,12 @@ mod tests {
                 std::process::id()
             ));
             remove_db(&path);
-            // English, whatever language Windows is set to.
-            Db::open(&path)
-                .unwrap()
-                .set_setting("language", "en")
-                .unwrap();
+            // English, whatever language Windows is set to; new messages in
+            // plain text (the formatted editor's tests ask for it).
+            let first = Db::open(&path).unwrap();
+            first.set_setting("language", "en").unwrap();
+            first.set_setting("compose_format", "plain").unwrap();
+            drop(first);
             install(&ui, path.clone(), &|_| {}).unwrap();
             let mut db = Db::open(&path).unwrap();
             let server = |host: &str| Server {
@@ -3482,6 +3859,18 @@ mod tests {
         ui.invoke_c_edited(field, text.into());
     }
 
+    /// The formatted draft's text as its input proxy holds it (empty: the
+    /// draft shown is plain, or none is).
+    fn rich_text(h: &Harness) -> String {
+        h.app(|a| {
+            a.drafts
+                .active()
+                .and_then(|d| d.rich.as_ref())
+                .map(|e| e.text().to_string())
+                .unwrap_or_default()
+        })
+    }
+
     #[test]
     fn added_files_update_the_counter_and_are_saved() {
         let h = Harness::new("attach");
@@ -3594,7 +3983,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_compose_keeps_the_first_and_switching_round_trips() {
+    fn a_second_compose_opens_a_tab_and_switching_round_trips() {
         let h = Harness::new("switch");
         h.ui().invoke_compose();
         h.frame();
@@ -3621,13 +4010,16 @@ mod tests {
             a.show_compose_attachments();
         });
 
-        // A reply from the reader takes the composer; the draft is kept.
+        // Selecting a message moves the draft to a tab of its own (in the
+        // background); a reply then takes the reading pane.
         let id = h.message;
         h.app(|a| a.select_message(id));
         assert!(!h.ui().get_composing());
+        assert_eq!(h.status(), "Draft kept in a tab");
+        assert_eq!(h.app(|a| a.tabs.len()), 2);
+        assert_eq!(h.app(|a| a.tabs.active()), 0);
         h.ui().invoke_reply();
         h.frame();
-        assert_eq!(h.status(), "Earlier draft saved in Drafts.");
         assert_eq!(h.ui().get_c_title(), "Reply");
         assert_eq!(h.ui().get_c_to(), "bob@example.org");
         assert_eq!(h.ui().get_c_subject(), "Re: Lunch");
@@ -3638,8 +4030,8 @@ mod tests {
         assert_eq!(h.app(|a| a.drafts.len()), 2);
 
         // Esc on the untouched reply drops it. New mail is always blank
-        // (and dropped again untouched); the first draft comes back from
-        // Drafts, every field as typed.
+        // (and dropped again untouched); the first draft's tab comes back
+        // from Drafts, every field as typed.
         h.ui().invoke_c_close();
         h.frame();
         assert_eq!(h.app(|a| a.drafts.len()), 1);
@@ -3654,6 +4046,7 @@ mod tests {
         h.ui().invoke_message_selected(row.id);
         h.frame();
         assert!(h.ui().get_composing());
+        assert_eq!(h.app(|a| a.tabs.active()), 1, "its tab");
         assert_eq!(h.ui().get_c_title(), "New message");
         assert_eq!(h.ui().get_c_to(), typed[0].1);
         assert_eq!(h.ui().get_c_cc(), typed[1].1);
@@ -3664,11 +4057,18 @@ mod tests {
         assert_eq!(h.ui().get_c_attachments().row_count(), 1);
         assert_eq!(h.ui().get_c_send_reason(), "");
 
-        // New mail while it shows keeps it and starts another.
+        // New mail while it shows keeps it and starts another, in a tab
+        // to its right; switching back finds every field as it was.
         h.ui().invoke_compose();
         h.frame();
         assert_eq!(h.ui().get_c_to(), "");
         assert_eq!(h.app(|a| a.drafts.len()), 2);
+        assert_eq!(h.app(|a| (a.tabs.len(), a.tabs.active())), (3, 2));
+        h.ui().invoke_tab_activate(1);
+        h.frame();
+        assert_eq!(h.ui().get_c_to(), typed[0].1);
+        assert_eq!(h.ui().get_c_body(), typed[4].1);
+        assert_eq!(h.ui().get_c_attachments().row_count(), 1);
     }
 
     #[test]
@@ -3842,15 +4242,30 @@ mod tests {
     /// and undo, and a restored selection is exactly the one computed.
     #[test]
     fn formatting_keys_act_on_the_body_selection() {
+        // A formatted reply; plain-text messages have no formatting keys.
         let h = Harness::new("format");
+        h.app(|a| a.compose_rich = true);
         let id = h.message;
         h.app(|a| a.select_message(id));
         h.ui().invoke_reply();
         h.frame();
-        let first_line = || {
-            let body = String::from(h.ui().get_c_body());
-            assert_eq!(h.app(|a| a.drafts.active().unwrap().body.clone()), body);
-            body.split('\n').next().unwrap_or_default().to_string()
+        let para = || {
+            h.app(|a| {
+                let ed = a.drafts.active().unwrap().rich.as_ref().unwrap();
+                match &ed.doc().blocks[0] {
+                    model::Block::Para(p) => p.clone(),
+                    other => panic!("{other:?}"),
+                }
+            })
+        };
+        let first_line = || para().plain_text();
+        let styled = |text: &str| {
+            para()
+                .runs
+                .iter()
+                .find(|r| r.text.contains(text))
+                .map(|r| r.style.clone())
+                .unwrap_or_default()
         };
         let key = |k: Key| SharedString::from(k);
         let (ctrl, shift) = (Key::Control, Key::Shift);
@@ -3864,81 +4279,70 @@ mod tests {
         // The emoji, selected with Shift+Left, goes bold and back.
         h.keys(&[shift], &key(Key::LeftArrow));
         h.keys(&[ctrl], "b");
-        assert_eq!(first_line(), "ação **😀**");
+        assert!(styled("😀").b && !styled("ação").b);
         h.keys(&[ctrl], "b");
-        assert_eq!(first_line(), "ação 😀");
-        // The restored selection is the emoji: typing replaces it.
+        assert!(!styled("😀").b);
+        // The selection stays: typing replaces it.
         h.keys(&[], "x");
         assert_eq!(first_line(), "ação x");
-        // Ctrl+Z undoes the typing (the field's own undo), then the last
-        // formatting edit (the field undoes the typing and the replaced
-        // selection as two steps).
-        h.keys(&[ctrl], "z");
-        assert_eq!(first_line(), "ação ");
+        // Ctrl+Z undoes the typing, then each formatting edit, in order.
         h.keys(&[ctrl], "z");
         assert_eq!(first_line(), "ação 😀");
         h.keys(&[ctrl], "z");
-        assert_eq!(first_line(), "ação **😀**");
+        assert!(styled("😀").b);
         h.keys(&[ctrl], "z");
-        assert_eq!(first_line(), "ação **😀**");
+        assert!(!styled("😀").b);
 
-        // The whole line: italic around bold, then a list item.
+        // The whole line: italic, then a list item (Shift+8 on a US and a
+        // Portuguese layout), then numbered (Shift+7 on both).
         h.keys(&[], &key(Key::End));
         h.keys(&[shift], &key(Key::Home));
         h.keys(&[ctrl], "i");
-        assert_eq!(first_line(), "_ação **😀**_");
+        assert!(styled("ação").i && styled("😀").i);
         h.keys(&[ctrl, shift], "*");
-        assert_eq!(first_line(), "- _ação **😀**_");
-        // Shift+7 on a Portuguese layout.
+        assert_eq!(para().list, Some((model::ListKind::Bullet, 0)));
+        h.keys(&[ctrl, shift], "(");
+        assert_eq!(para().list, None);
         h.keys(&[ctrl, shift], "/");
-        assert_eq!(first_line(), "1. _ação **😀**_");
+        assert_eq!(para().list, Some((model::ListKind::Number, 0)));
         h.keys(&[ctrl, shift], "7");
-        assert_eq!(first_line(), "_ação **😀**_");
-        let html = mail::compose_html::to_html(&first_line());
-        assert!(html.contains("<i>ação <b>😀</b></i>"), "{html}");
+        assert_eq!(para().list, None);
 
-        // Ctrl+K asks for the address; Esc there closes only the field.
+        // Ctrl+K asks for the address; one that can't be followed is
+        // refused, and Esc there closes only the field.
         h.keys(&[], &key(Key::End));
         h.keys(&[], " ");
         h.keys(&[ctrl], "k");
         h.keys(&[], "javascript:x");
         h.keys(&[], "\n");
-        assert_eq!(first_line(), "_ação **😀**_ ");
+        assert_eq!(first_line(), "ação 😀 ");
         h.keys(&[], "\u{1b}");
         assert!(h.ui().get_composing());
         h.keys(&[], "see");
-        assert_eq!(first_line(), "_ação **😀**_ see");
+        assert_eq!(first_line(), "ação 😀 see");
         h.keys(&[shift, ctrl], &key(Key::LeftArrow));
         h.keys(&[ctrl], "k");
         h.keys(&[], "example.org");
         h.keys(&[], "\n");
-        assert_eq!(first_line(), "_ação **😀**_ [see](https://example.org)");
-        // The caret is after the link, back in the body.
+        assert_eq!(styled("see").link.as_deref(), Some("https://example.org/"));
+        // The caret is after the link, back in the body; what is typed
+        // there is not part of it.
         h.keys(&[], ".");
-        assert_eq!(first_line(), "_ação **😀**_ [see](https://example.org).");
+        assert_eq!(first_line(), "ação 😀 see.");
+        assert_eq!(styled(".").link, None);
 
-        // Ctrl+Shift+Q quotes the line (a letter: no layout moves it),
-        // and again takes the mark off.
+        // Ctrl+Shift+Q quotes the paragraph (a letter: no layout moves
+        // it), and again takes it off.
         h.keys(&[ctrl, shift], "Q");
-        assert_eq!(first_line(), "> _ação **😀**_ [see](https://example.org).");
+        assert_eq!(para().quote, 1);
         h.keys(&[ctrl, shift], "Q");
-        assert_eq!(first_line(), "_ação **😀**_ [see](https://example.org).");
+        assert_eq!(para().quote, 0);
 
-        // Ctrl+Shift+B is still Bcc.
+        // Ctrl+Shift+B is still Bcc; the stored quote is still sent.
         h.keys(&[ctrl, shift], "B");
         assert!(h.ui().get_c_show_cc());
         let body = h.app(|a| a.drafts.active().unwrap().full_body());
-        assert!(body.ends_with("> Noon?"), "{body}");
-        // The first formatting edit showed the one-time caption, saved as
-        // seen, so it never comes back.
-        assert!(h.ui().get_c_format_hint());
-        assert!(
-            Db::open(&h.path)
-                .unwrap()
-                .settings()
-                .unwrap()
-                .format_hint_seen
-        );
+        assert!(body.contains("Noon?"), "{body}");
     }
 
     /// The reader says the importance its sender set; a body cached before
@@ -3997,7 +4401,9 @@ mod tests {
 
     #[test]
     fn an_html_reply_quotes_the_original_in_its_html_part() {
+        // A formatted reply (plain-text messages send no HTML).
         let h = Harness::new("html-reply");
+        h.app(|a| a.compose_rich = true);
         let jobs = hold_builds(&h);
         let raw = b"From: Bob <bob@example.org>\r\nTo: me@example.org\r\nSubject: Lunch\r\n\
             Message-ID: <m1@example.org>\r\nMIME-Version: 1.0\r\n\
@@ -4013,9 +4419,17 @@ mod tests {
         h.frame();
         h.keys(&[], "O");
         h.keys(&[], "k");
-        let quoted = h
-            .app(|a| a.drafts.active().unwrap().quoted_html.clone())
-            .expect("an HTML quote");
+        let quoted = h.app(|a| {
+            let ed = a.drafts.active().unwrap().rich.as_ref().unwrap();
+            ed.doc()
+                .blocks
+                .iter()
+                .find_map(|b| match b {
+                    model::Block::Quote(q) => Some(q.html().to_string()),
+                    _ => None,
+                })
+                .expect("an HTML quote")
+        });
         assert!(quoted.contains("<b>Rua Augusta</b>"), "{quoted}");
         assert!(!quoted.contains("p.gif"), "{quoted}");
 
@@ -4023,29 +4437,28 @@ mod tests {
         h.frame();
         let (row, _) = outbox_row(&h).expect("sent");
         // Saved with the draft, so Undo and a restart keep it.
-        assert_eq!(db.draft(row).unwrap().unwrap().quoted_html, Some(quoted));
+        let saved = db.draft(row).unwrap().unwrap().body_rich.unwrap();
+        assert!(saved.contains("<b>Rua Augusta</b>"), "{saved}");
         assert_eq!(finish_build(&h, &jobs), Ok(true));
         let seq = h.app(|a| a.send_seq);
         h.app(|a| a.send_due(row, seq));
         let sent = db.claim_outbox(row).unwrap().expect("queued").raw;
 
-        // The text part keeps the `> ` quote; the HTML part has the typed
-        // text and the original's sanitized HTML instead.
+        // The text part has the quote as `> ` lines; the HTML part has the
+        // typed text and the original's sanitized HTML instead.
         let text = mime::parse_body(&sent).text;
-        assert!(text.starts_with("Ok\n\nOn "), "{text}");
-        assert!(text.ends_with("> Noon at Rua Augusta?"), "{text}");
+        assert!(text.starts_with("Ok\n"), "{text}");
+        assert!(text.contains("> Noon at Rua Augusta?"), "{text}");
         let html = mime::html_body(&sent).expect("an HTML part");
         assert!(
-            html.contains("<p>Ok</p><div class=\"komorebi_quote\" style=\"margin-top:1em\">On "),
+            html.contains("Ok") && html.contains("<b>Rua Augusta</b>"),
             "{html}"
         );
         assert!(
-            html.contains("<b>Rua Augusta</b>") && !html.contains("&gt; Noon"),
+            !html.contains("&gt; Noon") && !html.contains("p.gif"),
             "{html}"
         );
-        assert!(!html.contains("p.gif"), "{html}");
     }
-
     // ------------------------------------------------ saved drafts
 
     /// A cache file for `store`/`load`, with one account; removed on drop.
@@ -4154,7 +4567,7 @@ mod tests {
         assert_eq!(back.importance, Importance::High);
         // Sent with it.
         let account = c.db.accounts().unwrap().remove(0);
-        let raw = mail::smtp::build_raw(outgoing(&account, back)).unwrap();
+        let raw = mail::smtp::build_raw(outgoing(&c.db, &account, back)).unwrap();
         assert_eq!(mail::mime::parse_header(&raw).importance, Importance::High);
         // Back to normal: saved, and sent with neither header.
         d.importance = Importance::Normal;
@@ -4165,7 +4578,7 @@ mod tests {
         );
         let (back, _) = load(&c.db, row).unwrap().unwrap();
         assert_eq!(back.importance, Importance::Normal);
-        let raw = mail::smtp::build_raw(outgoing(&account, back)).unwrap();
+        let raw = mail::smtp::build_raw(outgoing(&c.db, &account, back)).unwrap();
         let raw = String::from_utf8(raw).unwrap();
         assert!(!raw.contains("Importance:") && !raw.contains("X-Priority:"));
     }
@@ -4543,12 +4956,13 @@ mod tests {
         h.frame();
         h.keys(&[], "O");
         h.keys(&[], "k");
-        // Opening another message parks the reply as Esc does: saved,
-        // and said; the message shows "You started a reply" with Resume.
+        // Opening another message moves the reply to a tab of its own:
+        // saved, and said; the message shows "You started a reply" with
+        // Resume.
         h.app(|a| a.select_message(id));
         assert!(!h.ui().get_composing());
         assert!(tagged(&h));
-        assert_eq!(h.status(), "Draft saved");
+        assert_eq!(h.status(), "Draft kept in a tab");
         assert!(h.ui().get_r_draft_reply());
         let db = Db::open(&h.path).unwrap();
         let row = db.draft_for_message(id).unwrap().expect("saved");
@@ -4556,7 +4970,11 @@ mod tests {
 
         // After a restart, Reply (or Reply all) brings that draft back
         // instead of starting another.
-        h.app(|a| a.drafts = Drafts::default());
+        h.app(|a| {
+            a.drafts = Drafts::default();
+            a.tabs = crate::app::tabs::Tabs::default();
+            a.show_tabs();
+        });
         h.ui().invoke_reply_all();
         h.frame();
         assert!(h.ui().get_composing());
@@ -4657,8 +5075,8 @@ mod tests {
         let jobs = capture_jobs(&h);
         let db = Db::open(&h.path).unwrap();
 
-        // A click on a message parks the draft as Esc does: saved here,
-        // its server copy queued at once, and "Draft saved" said.
+        // A click on a message moves the draft to a tab of its own: saved
+        // here, its server copy queued at once, and that said.
         h.ui().invoke_compose();
         h.frame();
         type_into(h.ui(), ComposeField::To, "ana@example.org");
@@ -4666,14 +5084,16 @@ mod tests {
         h.ui().invoke_message_selected(h.message as i32);
         h.frame();
         assert!(!h.ui().get_composing());
-        assert_eq!(h.status(), "Draft saved");
+        assert_eq!(h.status(), "Draft kept in a tab");
         let row = db.draft_ids("").unwrap()[0];
         assert_eq!(db.draft(row).unwrap().unwrap().subject, "Plans");
         assert_eq!(server_saves(&jobs), [row]);
 
-        // Close (as Esc): the same, once more after an edit.
+        // Close (as Esc; in its tab, the tab closes): the same, once more
+        // after an edit.
         h.app(|a| a.set_status("", false));
         h.app(|a| a.open_saved(row));
+        assert_eq!(h.app(|a| a.tabs.active()), 1, "its tab");
         assert!(h.ui().get_c_saved().starts_with("Draft saved "));
         type_into(h.ui(), ComposeField::Body, "See you");
         h.ui().invoke_c_close();
@@ -5199,10 +5619,10 @@ mod tests {
         fake_store(&h);
         let db = Db::open(&h.path).unwrap();
         let before = db.accounts().unwrap().len();
-        h.ui().set_settings_section(0);
-        h.ui().set_settings_add(true);
-        h.ui().set_show_settings(true);
+        // The onboarding flow's Sign in (Add account opens it).
+        h.ui().invoke_open_onboarding();
         h.frame();
+        assert!(h.ui().get_ob_open());
         let form = AccountForm {
             provider: 0,
             email: "new@purelymail.com".into(),
@@ -5226,7 +5646,7 @@ mod tests {
         h.ui().invoke_cancel_check();
         h.frame();
         assert!(!h.ui().get_a_busy());
-        assert!(h.ui().get_show_settings());
+        assert!(h.ui().get_ob_open());
         assert!(h.ui().get_a_test().iter().next().is_none());
         // The late answer adds nothing, even though every step passed.
         let late = new_account("new@purelymail.com");
@@ -5240,7 +5660,8 @@ mod tests {
             )
         });
         assert_eq!(db.accounts().unwrap().len(), before);
-        assert!(h.ui().get_show_settings());
+        assert!(h.ui().get_ob_open());
+        assert_eq!(h.ui().get_ob_step(), 1);
 
         // Esc while a check runs drops it too (Back and Esc stay usable).
         h.ui().invoke_save_account(form);
@@ -5254,40 +5675,39 @@ mod tests {
     }
 
     #[test]
-    fn an_added_account_lands_on_its_inbox_and_shows_its_first_download() {
+    fn an_added_account_goes_on_to_make_it_yours_and_its_first_download() {
         let h = Harness::new("land-inbox");
         fake_store(&h);
-        h.ui().set_settings_section(0);
-        h.ui().set_settings_add(true);
-        h.ui().set_show_settings(true);
+        h.ui().invoke_open_onboarding();
         h.frame();
         let before = h.ui().get_selected_folder();
         h.app(|a| {
             a.finish_add_account(
-                new_account("ana@example.net"),
+                new_account("ana.silva@example.net"),
                 String::new(),
                 "pw".into(),
                 (None, None),
             )
         });
-        // Settings closed; the line stays (no close button) until the
-        // first download ends.
-        assert!(!h.ui().get_show_settings());
-        assert_eq!(h.status(), "Added ana@example.net. Downloading mail\u{a0}…");
-        assert!(!h.ui().get_status_closable());
+        // Make it yours, the name from the address; no "Added …" line.
+        assert_eq!(h.ui().get_ob_step(), 3);
+        assert!(h.ui().get_ob_open());
+        assert_eq!(h.ui().get_ob_name(), "Ana Silva");
+        assert_eq!(h.ui().get_ob_address(), "ana.silva@example.net");
+        assert_eq!(h.status(), "");
         let db = Db::open(&h.path).unwrap();
         let id = db
             .accounts()
             .unwrap()
             .iter()
-            .find(|a| a.email == "ana@example.net")
+            .find(|a| a.email == "ana.silva@example.net")
             .unwrap()
             .id;
         // No folders yet: the view stays until its Inbox is known.
         assert_eq!(h.ui().get_selected_folder(), before);
 
-        // The folders arrive: the new Inbox opens, the list focused, and
-        // its empty list shows the download starting.
+        // The folders arrive: the new Inbox opens behind the flow, and its
+        // empty list shows the download starting.
         let inbox = db
             .upsert_folder(id, "INBOX", "Inbox", 0, Role::Inbox)
             .unwrap();
@@ -5298,7 +5718,17 @@ mod tests {
             h.ui().get_list_empty(),
             "Downloading your mail\u{a0}… Newest messages arrive first."
         );
-        // Its progress, determinate.
+        // Syncing: the flow's bar is indeterminate until a folder reports
+        // numbers (a small mailbox never does).
+        h.app(|a| {
+            a.on_event(Event::Syncing {
+                account_id: id,
+                active: true,
+                error: None,
+            })
+        });
+        assert_eq!(h.ui().get_ob_sync(), 1);
+        // Its progress, determinate (no overall percentage).
         h.app(|a| {
             a.on_event(Event::Progress {
                 account_id: id,
@@ -5309,11 +5739,21 @@ mod tests {
         });
         assert_eq!(h.ui().get_list_fresh(), 2);
         assert!((h.ui().get_list_fresh_value() - 0.2468).abs() < 0.001);
-        assert_eq!(
-            h.ui().get_list_empty(),
-            "Downloading your mail\u{a0}… 1,234 of 5,000. Newest messages arrive first."
-        );
-        // The first pass ends: the line goes, and an empty folder says so.
+        let text = "Downloading your mail\u{a0}… 1,234 of 5,000. Newest messages arrive first.";
+        assert_eq!(h.ui().get_list_empty(), text);
+        assert_eq!(h.ui().get_ob_sync(), 2);
+        assert_eq!(h.ui().get_ob_sync_text(), text);
+        // A late, smaller count for the same folder never moves it back.
+        h.app(|a| {
+            a.on_event(Event::Progress {
+                account_id: id,
+                folder_id: inbox,
+                done: 1000,
+                total: 5000,
+            })
+        });
+        assert!((h.ui().get_ob_sync_value() - 0.2468).abs() < 0.001);
+        // The first pass ends: an empty folder says so.
         h.app(|a| {
             a.on_event(Event::Syncing {
                 account_id: id,
@@ -5322,9 +5762,91 @@ mod tests {
             })
         });
         assert_eq!(h.status(), "");
-        assert!(h.ui().get_status_closable());
         assert_eq!(h.ui().get_list_fresh(), 0);
         assert_eq!(h.ui().get_list_empty(), "This folder is empty");
+        assert_eq!(h.ui().get_ob_sync(), 3);
+
+        // Done writes the name and signature; then the finish.
+        h.ui()
+            .invoke_onboard_personalise(true, "Ana Silva".into(), "Ana\nExample".into());
+        let saved = db.accounts().unwrap();
+        let a = saved.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            (a.name.as_str(), a.signature.as_str()),
+            ("Ana Silva", "Ana\nExample")
+        );
+        assert_eq!(h.ui().get_ob_step(), 4);
+        // Open your inbox: the flow closes on it.
+        h.ui().invoke_onboard_open_inbox();
+        h.frame();
+        assert!(!h.ui().get_ob_open());
+        assert_eq!(h.ui().get_ob_step(), 0);
+        assert_eq!(h.ui().get_selected_folder(), inbox as i32);
+    }
+
+    #[test]
+    fn skip_writes_nothing_and_continue_never_looks_up_a_preset() {
+        let h = Harness::new("ob-skip");
+        fake_store(&h);
+        h.ui().invoke_open_onboarding();
+        h.frame();
+        let fields = crate::ServerFields {
+            imap_port: "993".into(),
+            smtp_port: "465".into(),
+            ..Default::default()
+        };
+        // Not an address, then one already here: said under the field.
+        h.ui()
+            .invoke_onboard_continue("ana@".into(), fields.clone());
+        assert_eq!(h.ui().get_ob_email_problem(), 1);
+        assert_eq!(h.ui().get_ob_step(), 1);
+        let taken = h.app(|a| a.accounts[0].email.clone());
+        h.ui()
+            .invoke_onboard_continue(taken.to_uppercase().as_str().into(), fields.clone());
+        assert_eq!(h.ui().get_ob_email_problem(), 2);
+        // A preset's address: its settings are built in, nothing is looked
+        // up (no lookup started, none running).
+        let finds = h.app(|a| a.find_seq);
+        h.ui()
+            .invoke_onboard_continue("ana@purelymail.com".into(), fields);
+        assert_eq!(
+            h.app(|a| a.find_seq),
+            finds + 1,
+            "only the reset, no lookup"
+        );
+        assert!(!h.ui().get_a_finding());
+        assert_eq!(h.ui().get_ob_chip(), 2);
+        assert_eq!(h.ui().get_ob_provider(), 0);
+        assert!(!h.ui().get_ob_manual());
+        assert_eq!(h.ui().get_ob_step(), 2);
+
+        // Added; Skip leaves the account as it was saved.
+        h.app(|a| {
+            a.finish_add_account(
+                new_account("ana@purelymail.com"),
+                String::new(),
+                "pw".into(),
+                (None, None),
+            )
+        });
+        let db = Db::open(&h.path).unwrap();
+        let before = db
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.email == "ana@purelymail.com")
+            .unwrap();
+        h.ui()
+            .invoke_onboard_personalise(false, "Someone".into(), "Sig".into());
+        let after = db
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.email == "ana@purelymail.com")
+            .unwrap();
+        assert_eq!(format!("{after:?}"), format!("{before:?}"));
+        assert_eq!(after.name, "");
+        assert_eq!(h.ui().get_ob_step(), 4);
     }
 
     #[test]
@@ -5795,9 +6317,9 @@ mod tests {
     fn new_mail_and_replies_start_with_the_signature() {
         let h = Harness::new("signature");
         let db = Db::open(&h.path).unwrap();
-        let mut me = db.accounts().unwrap().remove(0);
-        me.signature = "Me\nExample Org".into();
-        db.update_account(&me).unwrap();
+        let me = db.accounts().unwrap().remove(0);
+        // Named signatures, each its account's two defaults.
+        db.adopt_signature_text(me.id, "Me\nExample Org").unwrap();
         let work = db
             .add_account(&NewAccount {
                 imap_user: String::new(),
@@ -5809,10 +6331,8 @@ mod tests {
                 save_sent: true,
             })
             .unwrap();
-        let mut w = db.accounts().unwrap().remove(1);
-        assert_eq!(w.id, work);
-        w.signature = "Me at Work".into();
-        db.update_account(&w).unwrap();
+        assert_eq!(db.accounts().unwrap()[1].id, work);
+        db.adopt_signature_text(work, "Me at Work").unwrap();
         h.app(|a| a.load_accounts().unwrap());
 
         h.app(|a| a.compose_new());
@@ -7590,7 +8110,8 @@ mod tests {
             menu(&h),
             [
                 ("Mark all as read".to_string(), true),
-                ("Collapse all".to_string(), true)
+                ("Collapse all".to_string(), true),
+                ("Hide folders".to_string(), true),
             ]
         );
         let inbox = h.app(|a| a.folders.iter().find(|f| f.role == Role::Inbox).unwrap().id);
@@ -7618,6 +8139,7 @@ mod tests {
                 ("Collapse all folders".to_string(), true),
                 ("Refresh".to_string(), true),
                 ("Account settings".to_string(), true),
+                ("Hide folders".to_string(), true),
             ]
         );
         h.ui().invoke_nav_command(me.clone(), NAV_COLLAPSE, 0);
@@ -7682,7 +8204,7 @@ mod tests {
         h.keys(&[Key::Shift], &SharedString::from(Key::F10));
         assert_eq!(
             h.ui().get_nav_menu_extra().row_count(),
-            2,
+            3,
             "the account line's menu was asked for"
         );
         // Also with a message open, when the list's own Shift+F10 is on:
@@ -7697,7 +8219,7 @@ mod tests {
         h.keys(&[Key::Shift], &SharedString::from(Key::F10));
         assert_eq!(
             h.ui().get_nav_menu_extra().row_count(),
-            2,
+            3,
             "the pane's menu, not the row menu"
         );
 
@@ -8133,20 +8655,37 @@ mod tests {
     fn the_formatting_row_is_one_tab_stop() {
         let h = Harness::new("tab-format");
         let ui = h.ui();
+        // A plain-text message has no formatting row: To, its Cc and Bcc
+        // links, Subject, Signature and More (the importance toggles are
+        // in More at this width), then the body.
         ui.invoke_compose();
         h.frame();
-        // To, its Cc and Bcc links, Subject, the formatting row, then the
-        // body.
-        for _ in 0..5 {
+        for _ in 0..6 {
             h.keys(&[], &key(Key::Tab));
         }
         h.keys(&[], "Z");
         assert_eq!(ui.get_c_body(), "Z");
-        // Back on the row (Bold), Right reaches Italic.
-        h.keys(&[Key::Shift], &key(Key::Tab));
+        ui.invoke_c_close();
+        h.frame();
+        // Formatted: the buttons are one stop before Signature; from the
+        // body, Shift+Tab past More and Signature reaches Bold, and Right
+        // goes on to Italic.
+        h.app(|a| a.compose_rich = true);
+        h.app(|a| a.discard_confirmed());
+        ui.invoke_compose();
+        h.frame();
+        assert!(ui.get_c_rich());
+        h.app(|a| a.focus_body());
+        h.frame();
+        h.keys(&[], "Z");
+        assert_eq!(rich_text(&h), "Z");
+        for _ in 0..3 {
+            h.keys(&[Key::Shift], &key(Key::Tab));
+        }
         h.keys(&[], &key(Key::RightArrow));
         h.keys(&[], " ");
-        assert!(ui.get_c_body().contains('_'), "{}", ui.get_c_body());
+        let fmt = ui.global::<crate::Rich>().get_body_fmt();
+        assert!(fmt.i && !fmt.b, "Italic is on for what is typed next");
     }
 
     #[test]
@@ -8245,8 +8784,10 @@ mod tests {
         ui.invoke_dismiss_status();
         ui.set_show_settings(true);
         h.frame();
+        // Accounts, Signatures, then General.
         h.keys(&[], &key(Key::RightArrow));
-        assert_eq!(ui.get_settings_section(), 1);
+        h.keys(&[], &key(Key::RightArrow));
+        assert_eq!(ui.get_settings_section(), 2);
         assert!(!h.app(|a| a.flash));
         for _ in 0..5 {
             h.keys(&[], &key(Key::Tab));
@@ -8261,7 +8802,7 @@ mod tests {
         // A prompt over Settings gives the focus back to the button that
         // asked: Privacy > Remove all data (tabs, diagnostics, logs
         // folder, then it). A destructive question starts on Cancel.
-        ui.set_settings_section(2);
+        ui.set_settings_section(3);
         h.frame();
         ui.set_show_settings(false);
         h.frame();
@@ -9276,6 +9817,8 @@ mod tests {
         let saved = h.app(|a| a.db.settings().unwrap().whats_new_version);
         assert_eq!(saved.as_deref(), Some(tips::VERSION));
         assert!(!h.app(|a| a.show_whats_new_if_due()));
-        assert!(h.status().starts_with("Added ana@example.net"));
+        // The flow says the rest (no status line).
+        assert_eq!(h.status(), "");
+        assert_eq!(h.ui().get_ob_step(), 3);
     }
 }

@@ -48,9 +48,9 @@ getting in the way.
   tile until a sync goes through (its tooltip says "Can't reach
   {server}"; the row's caution button opens the account's page), and the
   status line offers Try now.
-- **Your own server (Other server):** the form asks for your email and
-  password first. "Find settings" (only when pressed, or when you press Add
-  account or Test connection with no server typed) looks your email domain
+- **Your own server (Other server):** adding an account asks for your
+  email first. Continue (for a domain without built-in settings) or "Find
+  settings" in manual setup (only when pressed) looks your email domain
   up in DNS (SRV records) and at its own autoconfig page over HTTPS and
   fills the empty server fields, never one on another domain and never
   with the password; the "Server settings" expander opens the fields by
@@ -75,7 +75,7 @@ getting in the way.
   (IMAP, then SMTP; nothing is sent). Settings → Edit changes an account in
   place, keeping its downloaded mail: name, password (left empty, the saved
   one stays; it is never shown), servers with SSL/TLS or STARTTLS for IMAP
-  and SMTP, the Sent copy and the signature. A new password or other
+  and SMTP, the Sent copy and the two signature choices. A new password or other
   servers are checked the same way before anything is saved, and the error
   says which server refused. Each account in Settings shows its last sync
   ("Up to date, checked 12:41", "Syncing…", "Can't reach …"). A rejected
@@ -85,8 +85,9 @@ getting in the way.
   a card in Settings › Accounts that opens its page: "Sync this account"
   (switched off, it keeps its downloaded mail, shown greyed in the
   navigation, but opens no connections, and mail sent from it waits in
-  the Outbox until it is switched on again), Name, Password, Signature,
-  Folders, Server settings (folded), Download again and Remove (it asks
+  the Outbox until it is switched on again), Name, Password, Signature
+  (one for new messages, one for replies and forwards, picked from the
+  named signatures or None), Folders, Server settings (folded), Download again and Remove (it asks
   first; mail on the server is not affected), with Save, Test connection
   and Cancel pinned at the bottom. Its "…" menu has Move up and Move down
   (the account order); with more than one account, each has a colour dot
@@ -104,8 +105,9 @@ getting in the way.
   Windows 11's own apps: choosing a folder or New mail leaves it, and
   closing it gives the focus back to what opened it. It has four tabs of
   setting cards (switches apply at once). Accounts: the list above (a
-  bar shows a first download's progress), and Add account, which opens
-  the form as a sub-page.
+  bar shows a first download's progress), each opening its account page,
+  and Add account, which opens the same three steps as the first run
+  (below) in the content area.
   General: the theme (System follows Windows, or always Light or Dark;
   an open HTML message is laid out again), how often to check for new
   mail (every 1, 2, 5 or 15 minutes; every folder is still synced in
@@ -249,10 +251,16 @@ getting in the way.
   off the UI thread, folders are refused, and the 100 MB limit holds. A line
   above the attachments counts their size as sent ("Attachments 18.4 MB of
   25 MB"); it turns amber from 80% and red over 25 MB, when Send is off.
-  The account's signature (plain text) starts every new message, reply and
-  forward, below the standard `-- ` line and above the quoted text;
-  picking another From account swaps it while it is unchanged, and the
-  signature of a message replied to is left out of the quote.
+  Signatures are named and kept in one list (Settings > Signatures; the
+  text is formatted, with at most one small logo sent as an embedded
+  `cid:` part). Each account has two defaults, one for new messages and one
+  for replies and forwards, either of which can be None (the account's
+  page has a box for each, and Manage signatures). The default goes under
+  your text after a blank line (the plain-text part has the standard `-- `
+  line) and above the quoted text; the composer's **Signature** menu
+  replaces it (Ctrl+Z puts the old one back), and picking another From
+  account swaps it while it is unchanged. The signature of a message
+  replied to is left out of the quote.
   Drafts are saved on this computer two seconds after you stop typing, and
   at once when the composer closes (Esc), another message takes its place,
   the From account changes or the window closes; attachments are copied
@@ -293,39 +301,41 @@ getting in the way.
   own address), built as mail arrives; for mail cached before this
   version, the first sync after the update fills it in the background.
   There is no address book to edit.
-- **Formatting and HTML replies:** the composer is plain text, and a few
-  Markdown-style markers format the sent message: `**bold**`, `*italic*`
-  or `_italic_`, `- ` and `1. ` lists (two spaces nest one level; a
-  numbered list starts at 1), `> ` quotes and `[label](https://...)`
-  links (bare http(s) addresses become
-  links too; only http, https and mailto links are made). A message with
-  bold, italic, a list or such a link gets an HTML version beside the
-  plain text, whose links read `label (url)`; anything else goes out as
-  plain text only, exactly as typed. A reply to or forward of an HTML
-  message keeps the `> ` quote in the composer and sends the original's
+- **Formatting and HTML replies:** the composer formats text with its own
+  document model: a short list of email-safe fonts and sizes, bold, italic,
+  underline, strikethrough, ten named colours (or Automatic, which sends no
+  colour so the recipient's dark mode still works), bulleted and numbered
+  lists, indent, alignment, links (http, https and mailto), quotes and
+  simple tables (up to 10 by 10, text only). A formatted message goes out as
+  text/plain plus a generated text/html alternative (the plain part reads
+  `label (url)` for links, `- ` and `1. ` for lists, `> ` for quotes, and
+  aligned columns for tables); a message with no formatting goes out as
+  plain text only, exactly as typed, and any message can be switched to
+  plain text. A plain-text message is sent as text/plain only (marks such
+  as `**` or `- ` stay text, and a reply quotes with `> ` lines). A
+  formatted reply to or forward of an HTML message sends the original's
   HTML below your text, with its images (inline ones too), remote styles,
-  scripts and forms removed; a forward shows the original's From, Sent,
-  To and Subject above it. If you change the quoted text (or delete the
-  "On ... wrote:" line), the text is sent as you edited it instead.
-  A small toolbar above the body types the markers for you: Bold
-  (Ctrl+B) and Italic (Ctrl+I, written `_italic_`) wrap the selection
-  (whole words), or put an empty pair at the caret, and take the markers off again when
-  it is already wrapped; Bulleted list (Ctrl+Shift+8), Numbered list
-  (Ctrl+Shift+7) and Quote (Ctrl+Shift+Q) act on the lines the selection
-  touches, and off again when they all have it; Link (Ctrl+K) asks for an
-  address (`example.org` becomes `https://example.org`, `name@example.org`
-  a mailto link) and makes the selection `[label](address)`. Ctrl+Z right
-  after one of these undoes it. The first time a formatting button or key
-  is used, a one-line caption under the toolbar says what the marks do
-  (once). **Preview**, at the end of the toolbar, shows the message as the
-  recipient gets it (the HTML part, drawn by the reader's own renderer, in
-  the body's place until it is turned off). The plain-text part of a
-  formatted message has the marks taken out (`**bold**` reads `bold`), and
-  so do the previews in Drafts and the Outbox. There is no underline,
-  headings, fonts or colours. **High importance** and **Low importance**,
-  after Preview, send the message with `Importance: high` / `low` and
-  `X-Priority: 1` / `5` (one at most; neither for normal mail); the
-  choice is saved with the draft.
+  scripts and forms removed; a forward shows the original's From, Sent, To
+  and Subject above it. Nothing is ever loaded from the network. Web fonts,
+  a free colour picker, highlight, headings, images in the body and HTML
+  source editing do not exist (see the plan's non-goals). The body is
+  Komorebi's own painted page (the reader's text engine): it shows the
+  formatting as you type, with only the paragraph you change laid out
+  again, while a hidden text field underneath keeps the caret, the keyboard
+  layouts and IME, the clipboard's text and what screen readers read.
+  Pasted HTML (from a browser, Word or Outlook) keeps only what the
+  document can hold; Ctrl+Shift+V pastes plain text. The toolbar's font,
+  size, indent and alignment move into **More** below 1040 px (and Quote,
+  Clear formatting and the importance toggles when the composer is
+  narrower still), so it never clips. **More** also holds **Preview** (the
+  message as the recipient gets it) and **Switch to plain text** /
+  **Switch to formatted text**; switching to plain text asks first, and
+  Ctrl+Z (or switching back before typing) brings the formatting back.
+  Settings > General > Compose sets whether new messages start formatted
+  or as plain text, and their font, size and colour. **High importance**
+  and **Low importance**, after the Signature menu, send the message with
+  `Importance: high` / `low` and `X-Priority: 1` / `5` (one at most;
+  neither for normal mail); the choice is saved with the draft.
 - **Replies and forwards:** the quote is folded behind **Show quoted
   text** under the body (it is still saved and sent); the line above it
   ("On ..., ... wrote:", or a forward's heading and fields) is written in
@@ -369,9 +379,31 @@ getting in the way.
   Outbox survive a restart; a send cut off by closing the app is never
   resent automatically. Removing an account that still has drafts or
   Outbox messages asks first and says how many will be lost.
-- **One window:** starting Komorebi again brings the running window to
-  the front (one app per cache file; a throwaway `KOMOREBI_DB` runs
-  beside it).
+- **One app per cache:** starting Komorebi again brings the main window
+  to the front (one app per cache file; a throwaway `KOMOREBI_DB` runs
+  beside it). Pop-out message windows are secondary windows of that one
+  app: closing the main window closes them all and ends the app.
+- **Tabs and windows:** the folder pane folds to the rail at any width
+  (the pane toggle at its top, Ctrl+Shift+E, or Hide folders in its menu),
+  and stays as it was left. A double-click, Shift+Enter or "Open in new
+  tab" opens a message in its own tab at full width (a middle-click opens
+  it in the background, unread until it is shown); each draft beyond the
+  one in the reading pane gets a composer tab, and a draft with something
+  written moves to a tab of its own when another message is selected. The
+  tab strip under the title bar shows only while more than the fixed Mail
+  tab is open; tabs close (×, a middle-click, Ctrl+W), reorder (drag, or
+  Ctrl+Shift+PageUp/PageDown) and reopen (Ctrl+Shift+T, this session's last
+  ten), and a menu at the strip's end lists them all. Open tabs come back
+  at the next start, as message and draft ids only ("Reopen tabs at
+  start" in Settings › General). Ctrl+O or "Open in new window" shows a
+  message in a slim read-only window of its own (several can sit side by
+  side to compare); Reply, Reply all and Forward there open a composer tab
+  in the main window. Archiving, deleting or moving a message closes its
+  tab or window, and Undo brings a tab back at its place; a message removed
+  on the server stays readable, with a warning, until its tab is closed.
+  A message window has the reader's commands but not Show original, Save
+  as .eml, Copy message ID or the invitation card (open the message in the
+  main window for those); the composer has no window of its own yet.
 - **Organizing:** read/unread, important, archive, delete and move, all
   two-way with the server (important is the standard IMAP `\Flagged`
   flag, which other clients show as a flag or a star). Several messages can be selected at once:
@@ -505,30 +537,33 @@ for scope, non-goals and the performance budgets.
 
 ## Add an account
 
-The first start shows only the welcome: "Add account", and the links
-"Need help?" (this section), "Privacy" (PRIVACY.md) and "Settings" (the
-language and theme). The form asks, in this order:
+The first start shows only the welcome: "Add your email account", three
+lines on what Komorebi is, and the links "Need help?" (this section),
+"Privacy" (PRIVACY.md), a Language box (it switches at once) and Settings.
+Adding an account takes three short steps, with the steps remaining shown
+above them (Settings → Accounts → Add account opens the same steps):
 
-1. **Email** and **Password** (an app password if your provider uses
-   two-step sign-in). The password is saved in Windows Credential Manager,
-   never in Komorebi's files.
-2. **Provider**: Purelymail, Postale.io or Other server. An address at
-   purelymail.com or postale.io picks its provider by itself; for your own
-   domain, choose the provider that hosts it. Other server asks for the
-   servers: "Find settings" looks them up from your domain (only your
-   domain name is sent), or open "Server settings" to type them.
-3. **Your name** (optional): shown to the people you write to. Left empty,
-   mail goes out with your address only.
+1. **Your email.** Continue checks the address. For purelymail.com and
+   postale.io the settings are built in; for any other domain Komorebi
+   looks them up from your domain (DNS, then its autoconfig page; only the
+   domain name is sent, never the password), and only because you pressed
+   Continue. Offline, it goes straight to the server settings.
+2. **Sign in.** What was found shows above the Password box (an app
+   password if your provider uses two-step sign-in; it is saved in
+   Windows Credential Manager, never in Komorebi's files). If nothing was
+   found, pick Purelymail, Postale.io or Other server; "Change" opens the
+   server settings (hosts, ports, encryption, username). Sign in checks
+   each step (connecting securely, checking your password, getting ready
+   to send); Back or Esc stop a check that takes too long. A failure says
+   what went wrong in one sentence with the next step ("Set username",
+   "Review certificate", "Try again" or "Set up manually"); "Show details"
+   lists the seven steps and the server names.
+3. **Make it yours** (optional): your name as people see it, and a
+   signature, with a preview. Skip keeps them empty; both stay in Settings
+   → Accounts → your account.
 
-"Add account" (or "Test connection", which saves nothing) checks each step
-(find the server, connect, secure, sign in, folder list, sending server,
-sending sign-in). Cancel, Back or Esc stop a check that takes too long. If
-a step fails, the message says what to check and offers the next step: "Set
-username" when the password was rejected and your login isn't your
-address, "Review certificate" for a server with its own certificate. Once
-added, Komorebi opens the new Inbox; the newest mail arrives first, and the
-list shows the download until it ends. The signature and the Sent copy are
-in Settings → Accounts → Edit.
+"You're all set" then shows the first download (newest mail first) until
+you press "Open your inbox", which opens the new Inbox.
 
 ## Install
 
@@ -644,12 +679,20 @@ After `cargo build --release --locked`:
 | Ctrl+Shift+C / Ctrl+Shift+B | Show Cc and Bcc, and go to Cc / Bcc (in the composer) |
 | Ctrl+Shift+A | Attach files (in the composer) |
 | Ctrl+V | Attach the files copied in Explorer (in the composer; text pastes as usual) |
-| Ctrl+B / Ctrl+I | Bold / italic markers on the selection (in the message body) |
-| Ctrl+K | Link the selection to an address (in the message body; Enter inserts, Esc cancels) |
-| Ctrl+Shift+8 / Ctrl+Shift+7 | Bulleted / numbered list on the selected lines (in the message body; the key that types `8` / `7`) |
-| Ctrl+Shift+Q | Quote the selected lines (`> `; again takes it off; in the message body) |
 | Up / Down, Enter or Tab, Esc | Pick, take or close the recipient suggestions (while they show under an address field) |
-| Esc | Close the composer, saving the draft |
+| Ctrl+B / Ctrl+I / Ctrl+U | Bold / italic / underline (in a formatted message's body, where Ctrl+U does not mark as unread) |
+| Ctrl+Shift+X | Strikethrough (in a formatted message's body) |
+| Ctrl+K | Link the selection to an address, or insert one at the caret (in a formatted message's body; Enter inserts, Esc cancels) |
+| Ctrl+Shift+8 / Ctrl+Shift+7 | Bulleted / numbered list on the selected paragraphs (the key that types `8` / `7`); typing `- `, `* ` or `1. ` at a line start does the same |
+| Ctrl+Shift+Q | Quote the selected paragraphs (again takes it off) |
+| Ctrl+L / Ctrl+E / Ctrl+R / Ctrl+J | Align left / center / right / justify (in the body these come before Search and Reply) |
+| Ctrl+] / Ctrl+[ | One font size larger / smaller |
+| Ctrl+M / Ctrl+Shift+M | Increase / decrease the indent |
+| Tab / Shift+Tab (in a list or table) | A list item's level, or the next / previous table cell (Tab after the last cell leaves the table); elsewhere Tab moves the focus |
+| Ctrl+Space | Clear formatting |
+| Ctrl+Z / Ctrl+Y | Undo / redo text and formatting together (200 steps) |
+| Ctrl+Shift+V | Paste as plain text (in the body, where it does not move messages) |
+| Esc | Close the composer, saving the draft (in a composer tab, close the tab) |
 | Tab / Shift+Tab | Next / previous control; the folders, the list, the reader's toolbar and the composer's formatting buttons are one stop each (a row's quick actions, shown on hover and on the keyboard's row, are never Tab stops: the keys below do the same) |
 | F6 / Shift+F6 | Next / previous pane: the title bar's search, folders, message list, reader (toolbar, composer or the selection's buttons) |
 | Space or Enter | Press the focused button or toggle |
@@ -677,6 +720,16 @@ After `cargo build --release --locked`:
 | Shift+F10 or Menu | The row menu for what is selected, under the current row (a draft or Outbox row: Open, Discard) |
 | Ctrl+Z | Undo the last archive, delete, move, junk report or send (while the offer at the bottom of the list shows: at least 10 s, or until the next one; its time stops while the pointer is over it) |
 | F5 | Refresh (also retries a rejected sign-in) |
+| Ctrl+Shift+E | Show / hide the folders (the pane folds to the rail) |
+| Double-click, Shift+Enter | Open the message in a new tab (a tab it already has comes forward) |
+| Middle-click | On a message row, open it in a background tab; on a tab, close it |
+| Ctrl+O | Open the message in a new window (a tab moved this way closes) |
+| Ctrl+W or Ctrl+F4 | Close the tab (not the Mail tab); in a message window, close the window |
+| Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp | Next / previous tab |
+| Ctrl+1 to Ctrl+8, Ctrl+9 | Go to tab 1 to 8, the last tab |
+| Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Move the tab left / right (the Mail tab stays first) |
+| Ctrl+Shift+T | Reopen the last closed tab |
+| Esc (in a message window) | Close the window; in a message tab Esc never closes the tab |
 
 The keys that act on the selected message (reply, forward, read and
 unread, important, archive, Delete, Move, and the list keys above) work only
@@ -734,7 +787,7 @@ once at start; ISO 8601 when it can't be read.
 | `KOMOREBI_ANIMATE=0` | Act as if Windows' animation effects were off |
 | `KOMOREBI_SYSTEM_TITLEBAR=1` | Keep the Windows title bar (with the search strip under it), as on Windows 10 and under high contrast |
 | `KOMOREBI_TITLEBAR_BORDER=1` | Draw a 1 px line along the top of the app-drawn title bar, for a Windows that draws no top border over it |
-| `KOMOREBI_SNAPSHOT=file.bmp` | Render the window to a file and exit (always at the default place and size; the saved window place is ignored). Options: `KOMOREBI_SIZE=WxH`, `KOMOREBI_THEME=light` or `dark` (over the theme chosen in Settings), `KOMOREBI_SNAPSHOT_SELECT=n` (or `a-b`: open message a, then Shift+Down to b, showing the "N selected" panel), `KOMOREBI_SNAPSHOT_WALK=n` (then open the next n messages, 250 ms apart), `KOMOREBI_SNAPSHOT_SCROLL=px` (scroll the reader), `KOMOREBI_SNAPSHOT_ACTION=reply`, `compose`, `compose-invalid` (a new message with a wrong To address, then Send: the error under To, which has the focus; nothing is sent), `compose-no-to` (a new message with no recipient, then Send: "Add a recipient to send." under To), `compose-format` (a new message with formatting markers, and the link field open with an address typed), `compose-preview` (the same text with Preview on: the HTML part drawn in the body's place), `compose-hint` (the same text after Bold on its last word, offline only: the one-time caption about the marks, saved as seen in the throwaway cache), `drop-hover` and `drop-hover-compose` (a file dragged over the window with no composer or with one open: "Drop to attach to a new message" / "Drop to attach"), `draft-reply` (a reply to the selected message with a line typed, then Close: the reader's "You started a reply to this message." bar with Resume; offline only, as the draft is saved in the throwaway cache), `compose-suggest` (a new message with `al` typed into To: the recipient suggestions), `compose-attach` (a new message with three made-up attachments, the counter at 85%), `drafts` (the Drafts view), `discard` (the newest saved draft, or on a cache with none a made-up message typed into a new one, then the Discard prompt), `guard` (the newest saved draft, then Send: the send guards' bar), `menu:list`, `menu:pane` or `menu:rail` (print the entries of the list's "..." menu, of the folder pane's row menu on All inboxes, each account line and the first folder shown of each account, or of each rail tile's menu, with their enabled state, to stderr and exit; no native menu is opened, which in a snapshot run would wait for a click), `menu:row`, `menu:more` or `menu:move` (the same for the row menu on what is selected, the reader's More menu, each item with its accelerator text and check mark, or the Move list: recent folders first, then the tree by depth), `select-mode` ("Select messages" on: the rows' check boxes), `move` (the Move list on what is selected, its filter focused), `delete-confirm` (the Trash question on what is selected; nothing is deleted), `not-downloaded` (the open message as if not downloaded with its server out of reach, in memory only: after 2 s the sentence and Retry; the snapshot waits for them), `outbox` (the Outbox view with its newest message), `outbox:permanent` or `outbox:transient` (only with `KOMOREBI_OFFLINE=1`, on a throwaway cache, as it writes it: a made-up message whose send failed, with a 550 5.1.1 "user unknown" reply (Edit leads) or a 421 "try again later" (Retry leads), opened in the Outbox with its sentence, Details and first lines; nothing is sent), `pane` (the narrow window's folder pane, opened over the content: use a width below 1040), `settings`, `settings:general`, `settings:privacy`, `settings:about` (or `settings:accounts`: Settings on that section), `settings-edit` (Settings with the first account's edit form), `settings-edit-logins` (the same, with made-up IMAP and SMTP usernames), `settings-edit-folders` (the same, scrolled to its Folders: the roles Sent, Drafts, Trash, Archive and Junk, each header above its box), `menu:account` (prints the account page's "…" menu: Move up / Move down, with two accounts or more), `notice-why` (the sender notice's "Why?" dialog over the selected message), `remote-always-bar` (Always load from this sender on the selected HTML message, staying in the reader: the bar with Undo and Privacy settings), `cert-changed` (the first account's status line as when its saved certificate changed: the short sentence and Review certificate; made-up, nothing is sent), `cert-changed-settings` (the same, then Settings with that account's line), `settings-add` (Settings on the add-account form, as the welcome's Add account opens it: Email focused, no Provider chosen), `signin-wait` (the same while it signs in, Cancel enabled; nothing is sent, and the ring shows after a second, so add `KOMOREBI_SNAPSHOT_HOVER`, and "Still signing in…" after 3 s, so also `KOMOREBI_SNAPSHOT_WALK=4`), `account-find` (the add-account form on "Other server" after "Find settings" answered with made-up settings from a provider's autoconfig: the note and the filled fields; nothing is looked up or sent; `account-find-srv`, `account-find-none` and `account-find-foreign` show the DNS source, the empty answer and a server on another domain left out; `account-find-rest` the form before any lookup, with the hint), `account-test-failed` (the add-account form after "Test connection" failed at the IMAP sign-in of a made-up server: the sentence with the steps inside its bar, Set username and the Password box's error state, scrolled into view), `fresh-inbox` (only with `KOMOREBI_OFFLINE=1`, on a throwaway cache, as it writes it: a made-up account added to the cache as just added, its Inbox in its first download at 1,234 of 5,000, the list's progress and the status line without a close button; use an empty cache to see it alone), `account-cert-failed` (the first account's edit form after the secure connection failed on an untrusted certificate of a made-up server: the sentence and Review certificate), `account-cert-prompt` (the same with the Trust this certificate? prompt open: the whole SHA-256 fingerprint and the certificate's details; nothing is saved), `account-cert-again` (the prompt as when a forgotten certificate is reviewed again: the old fingerprint is shown too), `account-cert-pinned` (the edit form with a certificate saved for each server: the lines and Forget certificate), `remove-data` (Settings → Privacy with the Remove all data prompt; nothing is removed until it is confirmed), `plain` (plain-text view), `original` (Show original colours, in the dark theme), `source` (Show original on the selected message), `rsvp` (Accept on the selected invitation: the reply prompt; nothing is sent until it is confirmed), `select-all` (select and copy the page), `scroll-right` (scroll a page wider than the reader to its right edge), `archive` (archive what is selected: the Undo offer; the move is held, so the cache is not changed), `undo-send` (a reply to the selected message, sent: the undo-send offer; only with `KOMOREBI_OFFLINE=1`, as the reply stays queued in the cache and the next start sends it, so use a throwaway copy), `junk` (Report junk on what is selected: on the seeded cache, which has no Junk folder, the line saying so), `offline` (the first account's status line as when its server can't be reached, with Try now, and the caution badge on its pane row and rail tile), `offline-settings` (the same, then Settings with that account's line), `settings-download` (Settings with the first account's mail downloading, made-up numbers; its bar shows after a second, so add `KOMOREBI_SNAPSHOT_HOVER` to take the snapshot later), `unread` (the Unread filter), `read-all` (Mark all as read, then the Unread filter: its empty state; this changes the cache, so use a copy), `tips` (the teaching tips of this layout from the first one), `tips:folders`, `tips:search` or `tips:help` (the series at that tip, its place counted as in the series: `tips:search` is "1 of 2" at 1280 and "2 of 3" at 900; `tips:folders` at 1040 px or wider prints "tip not applicable at this width" to stderr and exits 0 without a snapshot; nothing is saved as seen), `whats-new` (the What's new bar, on a cache with an account and no or another `whats_new_version`; otherwise it says so on stderr) or `shortcuts` (the Keyboard shortcuts dialog). Snapshot runs never start the tips or the What's new bar by themselves. `KOMOREBI_SNAPSHOT_SEARCH=text` types `text` into the search box first (with `KOMOREBI_SNAPSHOT_ACTION=search-all`, in the "All folders" scope; `joao` on the seeded cache). `KOMOREBI_SNAPSHOT_ACTION=menu:scope` prints the search scope menu, `inactive` draws the window as inactive (the title bar dims). `KOMOREBI_SNAPSHOT_TITLEBAR=custom` or `system` picks the title bar (snapshots draw the app's own unless `KOMOREBI_THEME=contrast`); every snapshot prints the bar's drawn and pushed height and its passthrough rectangles to stderr (`[titlebar]`), and the layout in effect (`[layout] width=… mode=wide|compact|one-pane list=… reader=…`; `KOMOREBI_SIZE=560x700` shows one pane). `KOMOREBI_SNAPSHOT_FOCUS` then moves the keyboard focus with real key presses from the list: `toolbar` (Tab: the reader's first button; `toolbar:n` then Right n times), `nav` (Shift+F6 to the folders; `nav:n` then Down n times; `nav:n:keys` then presses `l` Left, `r` Right, `u` Up, `d` Down or `e` Enter for each letter), `list` (the list's current row), `tab:n` (n Tabs) or `press:keys` (the letters above plus `n` PageDown, `p` PageUp, `h` Home, `z` End, `f` F6 and `t` Tab, pressed where the focus already is, such as a dialog's or a Settings page's: `press:ttt` walks three Tab stops into Settings, which `tab:n` would leave; in one pane with a message open the list is hidden, so `toolbar` and `tab:n`, which start from it, show no focus: use `press:t` there, or `press:de` to open a row from the list). `KOMOREBI_SNAPSHOT_HOVER=x,y` then points at x,y (logical px) to show a hover, `x,y:press` also holding the left button down there and `x,y:click` clicking there (the snapshot is taken 700 ms later, so a tooltip shows); `caption-min`, `caption-max` or `caption-close` (`:press` held down) show a caption button's state. `KOMOREBI_SNAPSHOT_CHECK=1` then exits with code 1 (and says which on stderr) if the message list or the reader came out blank (less than 1% of their pixels unlike the background); CI uses it with `KOMOREBI_SNAPSHOT_SELECT=0` |
+| `KOMOREBI_SNAPSHOT=file.bmp` | Render the window to a file and exit (always at the default place and size; the saved window place is ignored). Options: `KOMOREBI_SIZE=WxH`, `KOMOREBI_THEME=light` or `dark` (over the theme chosen in Settings), `KOMOREBI_SNAPSHOT_SELECT=n` (or `a-b`: open message a, then Shift+Down to b, showing the "N selected" panel), `KOMOREBI_SNAPSHOT_WALK=n` (then open the next n messages, 250 ms apart), `KOMOREBI_SNAPSHOT_SCROLL=px` (scroll the reader), `KOMOREBI_SNAPSHOT_ACTION=reply`, `compose`, `compose-invalid` (a new message with a wrong To address, then Send: the error under To, which has the focus; nothing is sent), `compose-no-to` (a new message with no recipient, then Send: "Add a recipient to send." under To), `compose-rich` (a new formatted message: bold, italic, underline, a colour, a link, both lists and a quote; `compose-rich-compact` is the same, for a narrow `KOMOREBI_SIZE`), `compose-table` (the same with a 3 x 3 table), `compose-format` (the same, and the link field open with an address typed), `compose-preview` (the same with Preview on: the HTML part drawn in the body's place), `compose-plain` (the same switched to plain text) and `compose-plain-ask` (the question before that), `compose-signature`, `settings-signatures` and `signature-edit` (only with `KOMOREBI_OFFLINE=1` on a throwaway cache, as they write two made-up signatures to it, one with a logo and set as the first account's defaults: a formatted message with it, Settings > Signatures, and the first signature's page), `drop-hover` and `drop-hover-compose` (a file dragged over the window with no composer or with one open: "Drop to attach to a new message" / "Drop to attach"), `draft-reply` (a reply to the selected message with a line typed, then Close: the reader's "You started a reply to this message." bar with Resume; offline only, as the draft is saved in the throwaway cache), `compose-suggest` (a new message with `al` typed into To: the recipient suggestions), `compose-attach` (a new message with three made-up attachments, the counter at 85%), `drafts` (the Drafts view), `discard` (the newest saved draft, or on a cache with none a made-up message typed into a new one, then the Discard prompt), `guard` (the newest saved draft, then Send: the send guards' bar), `menu:list`, `menu:pane` or `menu:rail` (print the entries of the list's "..." menu, of the folder pane's row menu on All inboxes, each account line and the first folder shown of each account, or of each rail tile's menu, with their enabled state, to stderr and exit; no native menu is opened, which in a snapshot run would wait for a click), `menu:row`, `menu:more` or `menu:move` (the same for the row menu on what is selected, the reader's More menu, each item with its accelerator text and check mark, or the Move list: recent folders first, then the tree by depth), `select-mode` ("Select messages" on: the rows' check boxes), `move` (the Move list on what is selected, its filter focused), `delete-confirm` (the Trash question on what is selected; nothing is deleted), `not-downloaded` (the open message as if not downloaded with its server out of reach, in memory only: after 2 s the sentence and Retry; the snapshot waits for them), `outbox` (the Outbox view with its newest message), `outbox:permanent` or `outbox:transient` (only with `KOMOREBI_OFFLINE=1`, on a throwaway cache, as it writes it: a made-up message whose send failed, with a 550 5.1.1 "user unknown" reply (Edit leads) or a 421 "try again later" (Retry leads), opened in the Outbox with its sentence, Details and first lines; nothing is sent), `pane` (the narrow window's folder pane, opened over the content: use a width below 1040), `nav:collapsed` (the folder pane folded to the rail, as Ctrl+Shift+E does; at 1040 px or wider, and saved in the cache's settings, so use a throwaway copy), `tabs` or `tabs:n` (the list's first n messages, 3 by default, in tabs of their own, the first one shown: the tab strip and a message at full width), `windows:n` (the list's first n messages in message windows of their own; the snapshot is of the main window, for measuring memory with `examples/peak_memory`), `settings`, `settings:signatures`, `settings:general`, `settings:privacy`, `settings:about` (or `settings:accounts`: Settings on that section), `settings-edit` (Settings with the first account's edit form), `settings-edit-logins` (the same, with made-up IMAP and SMTP usernames), `settings-edit-folders` (the same, scrolled to its Folders: the roles Sent, Drafts, Trash, Archive and Junk, each header above its box), `menu:account` (prints the account page's "…" menu: Move up / Move down, with two accounts or more), `notice-why` (the sender notice's "Why?" dialog over the selected message), `remote-always-bar` (Always load from this sender on the selected HTML message, staying in the reader: the bar with Undo and Privacy settings), `cert-changed` (the first account's status line as when its saved certificate changed: the short sentence and Review certificate; made-up, nothing is sent), `cert-changed-settings` (the same, then Settings with that account's line), the onboarding flow (made up, nothing is looked up, checked or sent): `ob-email`, `ob-email-error` (a wrong address, its error under the field), `ob-finding` (Sign in while the lookup runs), `ob-found-preset` (a Purelymail address: settings built in), `ob-found` (a lookup's answer from a provider's autoconfig), `ob-notfound` (nothing found: the provider choice), `ob-password`, `ob-wait` and `ob-wait-slow` (the check's three stages, then the 10 s sentence), `ob-error-rejected`, `ob-error-unreachable`, `ob-error-cert` (one title, one sentence, one next step; "Show details" folded), `ob-manual` (the server settings), and, only with `KOMOREBI_OFFLINE=1` on a throwaway cache as they add a made-up account to it, `ob-personalise`, `ob-done` and `ob-done-progress` (Make it yours, the finish, and the finish at 1,234 of 5,000); `ob-embedded` opens the flow from Settings > Add account (a cache with an account). The rings show after a second, so add `KOMOREBI_SNAPSHOT_HOVER` to take the snapshot later. `settings-add`, `signin-wait`, `account-test-failed` and `account-find*` are kept as aliases of `ob-email`, `ob-wait`, `ob-error-rejected` and `ob-found` / `ob-notfound` / `ob-manual`, `fresh-inbox` (only with `KOMOREBI_OFFLINE=1`, on a throwaway cache, as it writes it: a made-up account added to the cache as just added, its Inbox in its first download at 1,234 of 5,000 and the list's progress; use an empty cache to see it alone), `account-cert-failed` (the first account's edit form after the secure connection failed on an untrusted certificate of a made-up server: the sentence and Review certificate), `account-cert-prompt` (the same with the Trust this certificate? prompt open: the whole SHA-256 fingerprint and the certificate's details; nothing is saved), `account-cert-again` (the prompt as when a forgotten certificate is reviewed again: the old fingerprint is shown too), `account-cert-pinned` (the edit form with a certificate saved for each server: the lines and Forget certificate), `remove-data` (Settings → Privacy with the Remove all data prompt; nothing is removed until it is confirmed), `plain` (plain-text view), `original` (Show original colours, in the dark theme), `source` (Show original on the selected message), `rsvp` (Accept on the selected invitation: the reply prompt; nothing is sent until it is confirmed), `select-all` (select and copy the page), `scroll-right` (scroll a page wider than the reader to its right edge), `archive` (archive what is selected: the Undo offer; the move is held, so the cache is not changed), `undo-send` (a reply to the selected message, sent: the undo-send offer; only with `KOMOREBI_OFFLINE=1`, as the reply stays queued in the cache and the next start sends it, so use a throwaway copy), `junk` (Report junk on what is selected: on the seeded cache, which has no Junk folder, the line saying so), `offline` (the first account's status line as when its server can't be reached, with Try now, and the caution badge on its pane row and rail tile), `offline-settings` (the same, then Settings with that account's line), `settings-download` (Settings with the first account's mail downloading, made-up numbers; its bar shows after a second, so add `KOMOREBI_SNAPSHOT_HOVER` to take the snapshot later), `unread` (the Unread filter), `read-all` (Mark all as read, then the Unread filter: its empty state; this changes the cache, so use a copy), `tips` (the teaching tips of this layout from the first one), `tips:folders`, `tips:search` or `tips:help` (the series at that tip, its place counted as in the series: `tips:search` is "1 of 2" at 1280 and "2 of 3" at 900; `tips:folders` at 1040 px or wider prints "tip not applicable at this width" to stderr and exits 0 without a snapshot; nothing is saved as seen), `whats-new` (the What's new bar, on a cache with an account and no or another `whats_new_version`; otherwise it says so on stderr) or `shortcuts` (the Keyboard shortcuts dialog). Snapshot runs never start the tips or the What's new bar by themselves. `KOMOREBI_SNAPSHOT_SEARCH=text` types `text` into the search box first (with `KOMOREBI_SNAPSHOT_ACTION=search-all`, in the "All folders" scope; `joao` on the seeded cache). `KOMOREBI_SNAPSHOT_ACTION=menu:scope` prints the search scope menu, `inactive` draws the window as inactive (the title bar dims). `KOMOREBI_SNAPSHOT_TITLEBAR=custom` or `system` picks the title bar (snapshots draw the app's own unless `KOMOREBI_THEME=contrast`); every snapshot prints the bar's drawn and pushed height and its passthrough rectangles to stderr (`[titlebar]`), and the layout in effect (`[layout] width=… mode=wide|compact|one-pane list=… reader=…`; `KOMOREBI_SIZE=560x700` shows one pane). `KOMOREBI_SNAPSHOT_FOCUS` then moves the keyboard focus with real key presses from the list: `toolbar` (Tab: the reader's first button; `toolbar:n` then Right n times), `nav` (Shift+F6 to the folders; `nav:n` then Down n times; `nav:n:keys` then presses `l` Left, `r` Right, `u` Up, `d` Down or `e` Enter for each letter), `list` (the list's current row), `tab:n` (n Tabs) or `press:keys` (the letters above plus `n` PageDown, `p` PageUp, `h` Home, `z` End, `f` F6 and `t` Tab, pressed where the focus already is, such as a dialog's or a Settings page's: `press:ttt` walks three Tab stops into Settings, which `tab:n` would leave; in one pane with a message open the list is hidden, so `toolbar` and `tab:n`, which start from it, show no focus: use `press:t` there, or `press:de` to open a row from the list). `KOMOREBI_SNAPSHOT_HOVER=x,y` then points at x,y (logical px) to show a hover, `x,y:press` also holding the left button down there and `x,y:click` clicking there (the snapshot is taken 700 ms later, so a tooltip shows); `caption-min`, `caption-max` or `caption-close` (`:press` held down) show a caption button's state. `KOMOREBI_SNAPSHOT_CHECK=1` then exits with code 1 (and says which on stderr) if the message list or the reader came out blank (less than 1% of their pixels unlike the background); CI uses it with `KOMOREBI_SNAPSHOT_SELECT=0` |
 
 Measurement tools against an account you authorize (credentials from an
 env file with `EMAIL` and `PASSWORD_EMAIL`; output is numbers only):
@@ -755,7 +808,7 @@ checking the reader; `tests/fixtures/notice` holds ten synthetic messages for
 the sender notice, encrypted mail and Unsubscribe, and `tests/fixtures/invite` eight meeting invitations, and `tests/fixtures/reader` an emoji message and three heavy ones (a long newsletter, a 120-message digest, a 1,200-row statement) for timing the reader (see their READMEs). Add `--drafts` for two saved drafts (a new message and
 a reply to the newest message), and `--outbox` for a message whose send failed
 (in the Outbox) plus a newer draft with no subject that mentions an
-attachment, and `--signature` for an account signature. With an eml-dir,
+attachment, and `--signature` for two named signatures set as the account's defaults. With an eml-dir,
 `--html-reply` adds, newest, a reply to the newest HTML message as Komorebi
 sends one (formatted text, signature and the sanitized HTML quote), as its
 sender would receive it (`KOMOREBI_SNAPSHOT_SELECT=0` opens it). For the folder

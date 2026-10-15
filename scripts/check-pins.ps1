@@ -42,9 +42,10 @@ foreach ($name in $pinned) {
 }
 
 Write-Output ''
-Write-Output 'Manual check on a Slint bump: ui/widgets.slint reads the TextInput properties'
-Write-Output 'anchor-position-byte-offset and cursor-position-byte-offset, which Slint marks'
-Write-Output 'internal and undocumented (the formatting toolbar needs the selection). Check'
-Write-Output 'that the new version still has them, and test Ctrl+B / Ctrl+I / Ctrl+K.'
+Write-Output 'Manual check on a Slint bump: ui/widgets.slint and ui/editor.slint read the'
+Write-Output 'TextInput properties anchor-position-byte-offset, cursor-position-byte-offset'
+Write-Output 'and preedit-text, which Slint marks internal and undocumented (the editor needs'
+Write-Output 'the selection and the IME''s composition). Check that the new version still has'
+Write-Output 'them, and test typing, Ctrl+B / Ctrl+K and an IME in a formatted message.'
 
 if ($failed) { exit 1 }

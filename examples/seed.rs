@@ -17,7 +17,8 @@
 //! saved drafts: a new message, and a reply to the newest message. `--outbox`
 //! adds a message whose send failed (in the Outbox) and, newest, a draft with
 //! no subject that mentions an attachment (for the send guards).
-//! `--signature` gives the account a two-line signature. `--html-reply`
+//! `--signature` adds two named signatures, the account's defaults (a
+//! two-line one for new mail, a short one for replies and forwards). `--html-reply`
 //! (with `eml-dir`) adds, newest, a reply to the newest HTML message as
 //! Komorebi sends it (Markdown-lite text, signature and the sanitized HTML
 //! quote, built by `compose_html` and `smtp::build_raw`), received from
@@ -126,9 +127,17 @@ fn main() -> Result<()> {
         smtp: server(465),
         save_sent: true,
     })?;
-    if signature && let Some(mut a) = db.accounts()?.pop() {
-        a.signature = "Seed Account\nKomorebi test data".into();
-        db.update_account(&a)?;
+    if signature {
+        // Two named signatures: one for new mail, a short one for replies
+        // and forwards.
+        use komorebi::mail::rich::Doc;
+        let long = db.add_signature(
+            "Seed",
+            &Doc::from_plain("Seed Account\nKomorebi test data"),
+            None,
+        )?;
+        let short = db.add_signature("Seed (short)", &Doc::from_plain("Seed"), None)?;
+        db.set_account_signatures(account, Some(long), Some(short))?;
     }
     let inbox = db.upsert_folder(account, "INBOX", "Inbox", 0, Role::Inbox)?;
     let sent = db.upsert_folder(account, "Sent", "Sent", 0, Role::Sent)?;

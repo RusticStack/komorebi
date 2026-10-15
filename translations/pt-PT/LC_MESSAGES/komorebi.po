@@ -29,9 +29,6 @@ msgstr "Contas"
 msgid "Settings"
 msgstr "Definições"
 
-msgid "Add an account"
-msgstr "Adicionar uma conta"
-
 msgid "Edit {0}"
 msgstr "Editar {0}"
 
@@ -706,12 +703,6 @@ msgstr "Selecionar tudo"
 msgid "[Message shortened for display]"
 msgstr "[Mensagem encurtada para apresentação]"
 
-msgid "Welcome to Komorebi"
-msgstr "Bem-vindo ao Komorebi"
-
-msgid "Add your Purelymail, Postale.io or other IMAP account. You need your email address and password; it takes about a minute."
-msgstr "Adicione a sua conta Purelymail, Postale.io ou outra conta IMAP. Precisa do seu endereço de e-mail e da palavra-passe; demora cerca de um minuto."
-
 msgid "New mail"
 msgstr "Novo correio"
 
@@ -1016,9 +1007,6 @@ msgstr "Introduza um nome de utilizador {0} válido."
 
 msgid "Every step passed. Nothing was saved; use Add account or Save to keep these settings."
 msgstr "Todos os passos foram bem-sucedidos. Nada foi guardado; utilize Adicionar conta ou Guardar para manter estas definições."
-
-msgid "Added {0}. Downloading mail …"
-msgstr "Conta {0} adicionada. A transferir correio …"
 
 msgid "Saved {0}."
 msgstr "Conta {0} guardada."
@@ -1662,12 +1650,6 @@ msgid_plural "Delete {n} messages from Junk?"
 msgstr[0] "Eliminar {n} mensagem do Lixo eletrónico?"
 msgstr[1] "Eliminar {n} mensagens do Lixo eletrónico?"
 
-msgid "Enter your email address."
-msgstr "Introduza o seu endereço de e-mail."
-
-msgid "Enter an email address like ana@example.com."
-msgstr "Introduza um endereço de e-mail como ana@exemplo.pt."
-
 msgid "Enter your password."
 msgstr "Introduza a sua palavra-passe."
 
@@ -1713,14 +1695,8 @@ msgstr "Definições do servidor"
 msgid "Incoming and sending servers, ports and security"
 msgstr "Servidores de receção e de envio, portas e segurança"
 
-msgid "Your name (optional)"
-msgstr "O seu nome (opcional)"
-
 msgid "e.g. Ana Silva"
 msgstr "p. ex., Ana Silva"
-
-msgid "Shown to the people you write to."
-msgstr "Mostrado às pessoas a quem escreve."
 
 msgid "Set username"
 msgstr "Definir nome de utilizador"
@@ -1733,9 +1709,6 @@ msgstr "Ainda a iniciar sessão … Pode cancelar e verificar o nome do servido
 
 msgid "Downloading your mail"
 msgstr "A transferir o seu correio"
-
-msgid "Your mail stays on this PC and on your server. No ads, no tracking."
-msgstr "O seu correio fica neste PC e no seu servidor. Sem anúncios, sem rastreio."
 
 msgid "Need help?"
 msgstr "Precisa de ajuda?"
@@ -2141,14 +2114,6 @@ msgid "Attach the files copied in File Explorer"
 msgstr "Anexar os ficheiros copiados no Explorador de Ficheiros"
 
 msgctxt "shortcut key"
-msgid "Ctrl+B / Ctrl+I"
-msgstr "Ctrl+B / Ctrl+I"
-
-msgctxt "shortcut"
-msgid "Bold / italic"
-msgstr "Negrito / itálico"
-
-msgctxt "shortcut key"
 msgid "Ctrl+K"
 msgstr "Ctrl+K"
 
@@ -2197,17 +2162,11 @@ msgstr "Citação (Ctrl+Shift+Q)"
 msgid "Preview"
 msgstr "Pré-visualizar"
 
-msgid "Preview the message as it is sent"
-msgstr "Pré-visualizar a mensagem tal como é enviada"
-
 msgid "High importance"
 msgstr "Importância alta"
 
 msgid "Low importance"
 msgstr "Importância baixa"
-
-msgid "Marks like **bold**, _italic_ and “- ” lists are sent as formatting. Preview shows how the message looks."
-msgstr "Marcas como **negrito**, _itálico_ e listas com “- ” são enviadas como formatação. Pré-visualizar mostra o aspeto da mensagem."
 
 msgid "Couldn't draw the preview. The message is sent as written."
 msgstr "Não foi possível mostrar a pré-visualização. A mensagem é enviada tal como foi escrita."
@@ -2322,7 +2281,6 @@ msgstr "Ctrl+Shift+Q"
 msgctxt "shortcut"
 msgid "Quote"
 msgstr "Citação"
-
 
 msgid "More options for this account"
 msgstr "Mais opções para esta conta"
@@ -2455,3 +2413,754 @@ msgstr "Peça a impressão digital a quem gere o servidor, ou execute openssl x5
 
 msgid "How do I check this?"
 msgstr "Como posso verificar isto?"
+
+msgid "Downloading your mail …"
+msgstr "A transferir o seu e-mail …"
+
+msgid "Your mail, calm and close at hand"
+msgstr "O seu e-mail, tranquilo e sempre à mão"
+
+msgid "A small, fast email app for Windows. Your messages stay on this PC and on your mail server."
+msgstr "Uma aplicação de e-mail pequena e rápida para o Windows. As suas mensagens ficam neste PC e no seu servidor de e-mail."
+
+msgid "Add your email account"
+msgstr "Adicionar a sua conta de e-mail"
+
+msgid "It takes about a minute."
+msgstr "Demora cerca de um minuto."
+
+msgid "Private by design"
+msgstr "Privado de raiz"
+
+msgid "No ads, no tracking, no AI reading your mail."
+msgstr "Sem anúncios, sem rastreio, sem IA a ler o seu e-mail."
+
+msgid "Fast from the start"
+msgstr "Rápido desde o início"
+
+msgid "Opens in a blink, works offline with what's downloaded."
+msgstr "Abre num instante e funciona sem ligação com o que já foi transferido."
+
+msgid "Works with your provider"
+msgstr "Funciona com o seu fornecedor"
+
+msgid "Purelymail, Postale.io or your own server."
+msgstr "Purelymail, Postale.io ou o seu próprio servidor."
+
+msgid "Your email"
+msgstr "O seu e-mail"
+
+msgid "Sign in"
+msgstr "Iniciar sessão"
+
+msgid "Make it yours"
+msgstr "Personalizar"
+
+msgid "What's your email address?"
+msgstr "Qual é o seu endereço de e-mail?"
+
+msgid "We'll look up the right settings for you."
+msgstr "Vamos procurar as definições certas por si."
+
+msgid "name@example.com"
+msgstr "nome@exemplo.pt"
+
+msgid "Email address"
+msgstr "Endereço de e-mail"
+
+msgid "Enter an email address like name@example.com."
+msgstr "Introduza um endereço de e-mail como nome@exemplo.pt."
+
+msgid "This account is already in Komorebi."
+msgstr "Esta conta já está no Komorebi."
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Sign in to {0}"
+msgstr "Iniciar sessão em {0}"
+
+msgid "Your provider's help pages list these. If you run your own server, use its IMAP and SMTP details."
+msgstr "Estas definições constam das páginas de ajuda do seu fornecedor. Se tiver o seu próprio servidor, use os dados IMAP e SMTP dele."
+
+msgid "You're offline, so we can't look up settings. Enter them below."
+msgstr "Está sem ligação, por isso não é possível procurar as definições. Introduza-as abaixo."
+
+msgid "Looking up settings for {0} …"
+msgstr "A procurar as definições de {0} …"
+
+msgid "Settings found"
+msgstr "Definições encontradas"
+
+msgid "We couldn't find settings for {0}"
+msgstr "Não encontrámos as definições de {0}"
+
+msgid "Settings ready"
+msgstr "Definições prontas"
+
+msgid "{0} · encrypted"
+msgstr "{0} · cifrado"
+
+msgid "Choose your provider or set it up yourself."
+msgstr "Escolha o seu fornecedor ou configure manualmente."
+
+msgid "Incoming (IMAP) server"
+msgstr "Servidor de receção (IMAP)"
+
+msgid "Encrypted (SSL/TLS)"
+msgstr "Cifrado (SSL/TLS)"
+
+msgid "Encrypted after connecting (STARTTLS)"
+msgstr "Cifrado após ligar (STARTTLS)"
+
+msgid "Outgoing (SMTP) server"
+msgstr "Servidor de envio (SMTP)"
+
+msgid "Connecting securely"
+msgstr "A ligar em segurança"
+
+msgid "Checking your password"
+msgstr "A verificar a palavra-passe"
+
+msgid "Getting ready to send"
+msgstr "A preparar o envio"
+
+msgid "Still working on it … This can take a moment on some servers."
+msgstr "Ainda a trabalhar … Em alguns servidores pode demorar um pouco."
+
+msgid "Taking longer than usual. You can go back and check the address."
+msgstr "Está a demorar mais do que o habitual. Pode voltar atrás e verificar o endereço."
+
+msgid "That password didn't work"
+msgstr "A palavra-passe não funcionou"
+
+msgid "Can't reach your mail server"
+msgstr "Não é possível contactar o servidor de e-mail"
+
+msgid "This server's certificate isn't trusted"
+msgstr "O certificado deste servidor não é fidedigno"
+
+msgid "Couldn't sign in"
+msgstr "Não foi possível iniciar sessão"
+
+msgid "Check it and try again. If your provider uses two-step sign-in, use an app password."
+msgstr "Verifique-a e tente novamente. Se o seu fornecedor usar a verificação em dois passos, use uma palavra-passe de aplicação."
+
+msgid "Check your internet connection, then try again."
+msgstr "Verifique a ligação à Internet e tente novamente."
+
+msgid "Review it before you continue."
+msgstr "Reveja-o antes de continuar."
+
+msgid "Try again"
+msgstr "Tentar novamente"
+
+msgid "Set up manually"
+msgstr "Configurar manualmente"
+
+msgid "Hide details"
+msgstr "Ocultar detalhes"
+
+msgid "Show details"
+msgstr "Mostrar detalhes"
+
+msgid "How should your name appear when you send mail? You can change this later in Settings."
+msgstr "Como quer que o seu nome apareça quando envia e-mail? Pode alterar isto mais tarde nas Definições."
+
+msgid "Your name"
+msgstr "O seu nome"
+
+msgid "Signature (optional)"
+msgstr "Assinatura (opcional)"
+
+msgid "Skip"
+msgstr "Ignorar"
+
+msgid "Done"
+msgstr "Concluir"
+
+msgid "You're all set"
+msgstr "Está tudo pronto"
+
+# {0} is a raw address: "A conta {0} está pronta" (conta is feminine).
+msgctxt "account"
+msgid "{0} is ready. Your mail keeps arriving in the background."
+msgstr "A conta {0} está pronta. O seu e-mail continua a chegar em segundo plano."
+
+msgid "Your newest mail is here."
+msgstr "O seu e-mail mais recente já chegou."
+
+msgid "Open your inbox"
+msgstr "Abrir a caixa de entrada"
+
+msgid "Step {0} of {1}"
+msgstr "Passo {0} de {1}"
+
+msgid "{0}, step {1} of {2}, completed"
+msgstr "{0}, passo {1} de {2}, concluído"
+
+msgid "{0}, step {1} of {2}, current"
+msgstr "{0}, passo {1} de {2}, atual"
+
+msgid "{0}, step {1} of {2}, not started"
+msgstr "{0}, passo {1} de {2}, não iniciado"
+
+msgctxt "change the servers"
+msgid "Change"
+msgstr "Alterar"
+
+msgid "Change the server settings"
+msgstr "Alterar as definições do servidor"
+
+
+msgid "Signatures"
+msgstr "Assinaturas"
+
+msgid "New messages"
+msgstr "Mensagens novas"
+
+msgid "Signature for new messages"
+msgstr "Assinatura das mensagens novas"
+
+msgid "Replies and forwards"
+msgstr "Respostas e reencaminhamentos"
+
+msgid "Signature for replies and forwards"
+msgstr "Assinatura das respostas e reencaminhamentos"
+
+msgid "Manage signatures"
+msgstr "Gerir assinaturas"
+
+msgid "No signatures yet. Add one to use it in new mail and replies."
+msgstr "Ainda não há assinaturas. Adicione uma para a usar em mensagens novas e respostas."
+
+msgid "Delete {0}"
+msgstr "Eliminar {0}"
+
+msgid "Add signature"
+msgstr "Adicionar assinatura"
+
+msgid "Your name, and what people should know about you"
+msgstr "O seu nome e o que as pessoas devem saber sobre si"
+
+msgid "Logo"
+msgstr "Logótipo"
+
+msgid "Add logo…"
+msgstr "Adicionar logótipo…"
+
+msgid "Remove logo"
+msgstr "Remover logótipo"
+
+msgid "The logo must be a PNG or JPEG file of 200 KB or less."
+msgstr "O logótipo tem de ser um ficheiro PNG ou JPEG com 200 KB ou menos."
+
+msgid "Compose"
+msgstr "Escrever"
+
+msgid "Message format"
+msgstr "Formato da mensagem"
+
+msgid "How new messages start. Any message can be switched in its More menu."
+msgstr "Como começam as mensagens novas. Qualquer mensagem pode ser mudada no respetivo menu Mais opções."
+
+msgid "Formatted (HTML)"
+msgstr "Formatado (HTML)"
+
+msgid "Plain text"
+msgstr "Texto simples"
+
+msgid "Default font"
+msgstr "Tipo de letra predefinido"
+
+msgid "Font"
+msgstr "Tipo de letra"
+
+msgid "Font size"
+msgstr "Tamanho do tipo de letra"
+
+msgid "Font colour"
+msgstr "Cor do tipo de letra"
+
+msgid "The quick brown fox jumps over the lazy dog."
+msgstr "A rápida raposa castanha salta sobre o cão preguiçoso."
+
+msgctxt "signature"
+msgid "None"
+msgstr "Nenhuma"
+
+msgid "Manage signatures…"
+msgstr "Gerir assinaturas…"
+
+msgid "Align"
+msgstr "Alinhar"
+
+msgid "Decrease indent"
+msgstr "Diminuir avanço"
+
+msgid "Increase indent"
+msgstr "Aumentar avanço"
+
+msgid "Quote"
+msgstr "Citação"
+
+msgid "Clear formatting"
+msgstr "Limpar formatação"
+
+msgid "Switch to plain text"
+msgstr "Mudar para texto simples"
+
+msgid "Switch to formatted text"
+msgstr "Mudar para texto formatado"
+
+msgid "More options"
+msgstr "Mais opções"
+
+msgid "Edit quoted text"
+msgstr "Editar texto citado"
+
+msgid "Switch to plain text?"
+msgstr "Mudar para texto simples?"
+
+msgid "Formatting, tables and the signature logo are removed. You can undo this."
+msgstr "A formatação, as tabelas e o logótipo da assinatura são removidos. Pode anular esta ação."
+
+msgid "Black"
+msgstr "Preto"
+
+msgid "Grey"
+msgstr "Cinzento"
+
+msgid "Dark red"
+msgstr "Vermelho-escuro"
+
+msgid "Red"
+msgstr "Vermelho"
+
+msgid "Orange"
+msgstr "Laranja"
+
+msgid "Gold"
+msgstr "Dourado"
+
+msgid "Green"
+msgstr "Verde"
+
+msgid "Teal"
+msgstr "Azul-petróleo"
+
+msgid "Blue"
+msgstr "Azul"
+
+msgid "Purple"
+msgstr "Roxo"
+
+msgctxt "colour"
+msgid "Automatic"
+msgstr "Automática"
+
+msgid "Center"
+msgstr "Centrar"
+
+msgid "Align right"
+msgstr "Alinhar à direita"
+
+msgid "Justify"
+msgstr "Justificar"
+
+msgid "Align left"
+msgstr "Alinhar à esquerda"
+
+msgid "Paste as plain text"
+msgstr "Colar como texto simples"
+
+msgid "{0} × {1} table"
+msgstr "Tabela de {0} × {1}"
+
+msgid "Rows"
+msgstr "Linhas"
+
+msgid "Columns"
+msgstr "Colunas"
+
+msgid "Insert row above"
+msgstr "Inserir linha acima"
+
+msgid "Insert row below"
+msgstr "Inserir linha abaixo"
+
+msgid "Insert column left"
+msgstr "Inserir coluna à esquerda"
+
+msgid "Insert column right"
+msgstr "Inserir coluna à direita"
+
+msgid "Delete row"
+msgstr "Eliminar linha"
+
+msgid "Delete column"
+msgstr "Eliminar coluna"
+
+msgid "Delete table"
+msgstr "Eliminar tabela"
+
+msgid "Underline (Ctrl+U)"
+msgstr "Sublinhado (Ctrl+U)"
+
+msgid "Strikethrough (Ctrl+Shift+X)"
+msgstr "Rasurado (Ctrl+Shift+X)"
+
+msgid "Font colour: {0}"
+msgstr "Cor do tipo de letra: {0}"
+
+msgid "More font colours"
+msgstr "Mais cores do tipo de letra"
+
+msgid "Decrease indent (Ctrl+Shift+M)"
+msgstr "Diminuir avanço (Ctrl+Shift+M)"
+
+msgid "Increase indent (Ctrl+M)"
+msgstr "Aumentar avanço (Ctrl+M)"
+
+msgid "Align: {0}"
+msgstr "Alinhamento: {0}"
+
+msgid "Table"
+msgstr "Tabela"
+
+msgid "Insert table"
+msgstr "Inserir tabela"
+
+msgid "Clear formatting (Ctrl+Space)"
+msgstr "Limpar formatação (Ctrl+Espaço)"
+
+msgctxt "shortcut group"
+msgid "Formatting (message body)"
+msgstr "Formatação (corpo da mensagem)"
+
+msgctxt "shortcut key"
+msgid "Ctrl+B / Ctrl+I / Ctrl+U"
+msgstr "Ctrl+B / Ctrl+I / Ctrl+U"
+
+msgctxt "shortcut"
+msgid "Bold / italic / underline"
+msgstr "Negrito / itálico / sublinhado"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+X"
+msgstr "Ctrl+Shift+X"
+
+msgctxt "shortcut"
+msgid "Strikethrough"
+msgstr "Rasurado"
+
+msgctxt "shortcut key"
+msgid "Ctrl+L / Ctrl+E / Ctrl+R / Ctrl+J"
+msgstr "Ctrl+L / Ctrl+E / Ctrl+R / Ctrl+J"
+
+msgctxt "shortcut"
+msgid "Align left / center / right / justify"
+msgstr "Alinhar à esquerda / ao centro / à direita / justificar"
+
+msgctxt "shortcut key"
+msgid "Ctrl+] / Ctrl+["
+msgstr "Ctrl+] / Ctrl+["
+
+msgctxt "shortcut"
+msgid "Larger / smaller text"
+msgstr "Texto maior / menor"
+
+msgctxt "shortcut key"
+msgid "Ctrl+M / Ctrl+Shift+M"
+msgstr "Ctrl+M / Ctrl+Shift+M"
+
+msgctxt "shortcut"
+msgid "Increase / decrease indent"
+msgstr "Aumentar / diminuir avanço"
+
+msgctxt "shortcut key"
+msgid "Tab / Shift+Tab (in a list or table)"
+msgstr "Tab / Shift+Tab (numa lista ou tabela)"
+
+msgctxt "shortcut"
+msgid "List level, or the next / previous cell"
+msgstr "Nível da lista, ou a célula seguinte / anterior"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Space"
+msgstr "Ctrl+Espaço"
+
+msgctxt "shortcut"
+msgid "Clear formatting"
+msgstr "Limpar formatação"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Z / Ctrl+Y"
+msgstr "Ctrl+Z / Ctrl+Y"
+
+msgctxt "shortcut"
+msgid "Undo / redo"
+msgstr "Anular / refazer"
+
+msgctxt "shortcut"
+msgid "Paste as plain text"
+msgstr "Colar como texto simples"
+
+msgid "Delete signature “{0}”?"
+msgstr "Eliminar a assinatura “{0}”?"
+
+msgid "Messages already written keep it."
+msgstr "As mensagens já escritas mantêm-na."
+
+msgid "It is the default for {n} account; that account gets no signature."
+msgid_plural "It is the default for {n} accounts; those accounts get no signature."
+msgstr[0] "É a predefinição de {n} conta; essa conta fica sem assinatura."
+msgstr[1] "É a predefinição de {n} contas; essas contas ficam sem assinatura."
+
+msgid "Give the signature a name."
+msgstr "Dê um nome à assinatura."
+
+msgid "A signature with this name already exists."
+msgstr "Já existe uma assinatura com este nome."
+
+msgid "Add a logo"
+msgstr "Adicionar um logótipo"
+
+msgid "Reopen tabs at start"
+msgstr "Reabrir os separadores ao iniciar"
+
+msgid "The message and draft tabs open when Komorebi closes come back the next time."
+msgstr "Os separadores de mensagens e rascunhos abertos quando o Komorebi fecha voltam a abrir da próxima vez."
+
+msgid "Close tab"
+msgstr "Fechar separador"
+
+msgid "Close other tabs"
+msgstr "Fechar os outros separadores"
+
+msgid "Close tabs to the right"
+msgstr "Fechar os separadores à direita"
+
+msgid "Open in new window"
+msgstr "Abrir numa nova janela"
+
+msgid "Reopen closed tab"
+msgstr "Reabrir o separador fechado"
+
+msgctxt "tab"
+msgid "Mail"
+msgstr "Correio"
+
+msgid "This message was moved or deleted on the server."
+msgstr "Esta mensagem foi movida ou eliminada no servidor."
+
+msgid "Hide folders (Ctrl+Shift+E)"
+msgstr "Ocultar pastas (Ctrl+Shift+E)"
+
+msgid "Show folders (Ctrl+Shift+E)"
+msgstr "Mostrar pastas (Ctrl+Shift+E)"
+
+msgctxt "shortcut group"
+msgid "Tabs and windows"
+msgstr "Separadores e janelas"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+E"
+msgstr "Ctrl+Shift+E"
+
+msgctxt "shortcut"
+msgid "Show / hide the folders"
+msgstr "Mostrar / ocultar as pastas"
+
+msgctxt "shortcut key"
+msgid "Double-click, Shift+Enter"
+msgstr "Duplo clique, Shift+Enter"
+
+msgctxt "shortcut"
+msgid "Open in new tab"
+msgstr "Abrir num novo separador"
+
+msgctxt "shortcut key"
+msgid "Middle-click"
+msgstr "Clique com o botão do meio"
+
+msgctxt "shortcut"
+msgid "Open in a background tab; on a tab, close it"
+msgstr "Abrir num separador em segundo plano; num separador, fechá-lo"
+
+msgctxt "shortcut key"
+msgid "Ctrl+O"
+msgstr "Ctrl+O"
+
+msgctxt "shortcut"
+msgid "Open in new window"
+msgstr "Abrir numa nova janela"
+
+msgctxt "shortcut key"
+msgid "Ctrl+W or Ctrl+F4"
+msgstr "Ctrl+W ou Ctrl+F4"
+
+msgctxt "shortcut"
+msgid "Close the tab or message window"
+msgstr "Fechar o separador ou a janela da mensagem"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp"
+msgstr "Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp"
+
+msgctxt "shortcut"
+msgid "Next / previous tab"
+msgstr "Separador seguinte / anterior"
+
+msgctxt "shortcut key"
+msgid "Ctrl+1 to Ctrl+8, Ctrl+9"
+msgstr "Ctrl+1 a Ctrl+8, Ctrl+9"
+
+msgctxt "shortcut"
+msgid "Go to tab 1-8 / last tab"
+msgstr "Ir para o separador 1-8 / último"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+PageUp / Ctrl+Shift+PageDown"
+msgstr "Ctrl+Shift+PageUp / Ctrl+Shift+PageDown"
+
+msgctxt "shortcut"
+msgid "Move tab left / right"
+msgstr "Mover o separador para a esquerda / direita"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+T"
+msgstr "Ctrl+Shift+T"
+
+msgctxt "shortcut"
+msgid "Reopen closed tab"
+msgstr "Reabrir o separador fechado"
+
+msgctxt "shortcut key"
+msgid "Esc (in a message window)"
+msgstr "Esc (numa janela de mensagem)"
+
+msgctxt "shortcut"
+msgid "Close the window"
+msgstr "Fechar a janela"
+
+msgid "Open in new tab"
+msgstr "Abrir num novo separador"
+
+msgid "Hide folders"
+msgstr "Ocultar pastas"
+
+msgid "Show folders"
+msgstr "Mostrar pastas"
+
+msgid "Draft kept in a tab"
+msgstr "Rascunho mantido num separador"
+
+msgctxt "window title"
+msgid "{0} - Komorebi"
+msgstr "{0} - Komorebi"
+
+msgctxt "tab title"
+msgid "New message"
+msgstr "Nova mensagem"
+
+msgid "Undo brought the message back; open it from the list."
+msgstr "A mensagem foi reposta; abra-a a partir da lista."
+
+msgid "{0}, draft, {1} of {2}"
+msgstr "{0}, rascunho, {1} de {2}"
+
+msgid "{0}, unread, {1} of {2}"
+msgstr "{0}, não lida, {1} de {2}"
+
+msgid "{0}, {1} of {2}"
+msgstr "{0}, {1} de {2}"
+
+msgid "Close tab (Ctrl+W)"
+msgstr "Fechar separador (Ctrl+W)"
+
+msgid "Tabs"
+msgstr "Separadores"
+
+msgid "All tabs"
+msgstr "Todos os separadores"
+
+msgid "Notifications for new mail"
+msgstr "Notificações de correio novo"
+
+msgid "Windows shows a notification when new mail arrives while Komorebi is in the background. They are made on this computer; nothing is sent anywhere."
+msgstr "O Windows mostra uma notificação quando chega correio novo com o Komorebi em segundo plano. São criadas neste computador; nada é enviado para lado nenhum."
+
+msgid "Show the sender and subject"
+msgstr "Mostrar o remetente e o assunto"
+
+msgid "Off: a notification only says New mail, which is safer on a shared screen or the lock screen."
+msgstr "Desativado: a notificação diz apenas Novo correio, o que é mais seguro num ecrã partilhado ou no ecrã de bloqueio."
+
+msgid "Show the sender and subject in notifications"
+msgstr "Mostrar o remetente e o assunto nas notificações"
+
+msgid "Keep running in the notification area"
+msgstr "Continuar na área de notificação"
+
+msgid "Closing the window keeps Komorebi in the notification area, so mail keeps arriving. Quit from its icon's menu."
+msgstr "Ao fechar a janela, o Komorebi continua na área de notificação e o correio continua a chegar. Para sair, use o menu do ícone."
+
+msgid "Keep running in the notification area when the window closes"
+msgstr "Continuar na área de notificação quando a janela fecha"
+
+msgid "Start with Windows"
+msgstr "Iniciar com o Windows"
+
+msgid "Komorebi starts in the notification area when you sign in to Windows."
+msgstr "O Komorebi inicia na área de notificação quando entra no Windows."
+
+msgid "Start Komorebi with Windows"
+msgstr "Iniciar o Komorebi com o Windows"
+
+msgid "Refresh (F5). {0}"
+msgstr "Atualizar (F5). {0}"
+
+msgid "Updated {0}"
+msgstr "Atualizado às {0}"
+
+msgctxt "tray menu"
+msgid "Open Komorebi"
+msgstr "Abrir o Komorebi"
+
+msgctxt "tray menu"
+msgid "Check mail"
+msgstr "Verificar correio"
+
+msgctxt "tray menu"
+msgid "Pause notifications"
+msgstr "Pausar notificações"
+
+msgctxt "tray menu"
+msgid "Quit"
+msgstr "Sair"
+
+msgid "Komorebi: {n} unread message"
+msgid_plural "Komorebi: {n} unread messages"
+msgstr[0] "Komorebi: {n} mensagem por ler"
+msgstr[1] "Komorebi: {n} mensagens por ler"
+
+msgid "Open Komorebi to read it."
+msgstr "Abra o Komorebi para a ler."
+
+msgid "{n} new message"
+msgid_plural "{n} new messages"
+msgstr[0] "{n} mensagem nova"
+msgstr[1] "{n} mensagens novas"
+
+msgid "Open Komorebi to read them."
+msgstr "Abra o Komorebi para as ler."
+
+msgid "Notifications for this account"
+msgstr "Notificações desta conta"
+
+msgid "New mail in this account can show a Windows notification. Notifications for new mail in Settings > General applies to every account."
+msgstr "O correio novo nesta conta pode mostrar uma notificação do Windows. Notificações de correio novo, em Definições > Geral, aplica-se a todas as contas."
+
+msgid "Notifications for {0}"
+msgstr "Notificações de {0}"

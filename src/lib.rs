@@ -10,6 +10,7 @@ pub mod fetch;
 pub mod fold;
 pub mod i18n;
 pub mod mail;
+pub mod notify;
 pub mod onboard;
 pub mod providers;
 pub mod role;
@@ -17,6 +18,8 @@ pub mod secrets;
 pub mod theme;
 pub mod tree;
 pub mod trust;
+#[cfg(windows)]
+pub mod win_shell;
 
 /// A development switch from the environment (`KOMOREBI_*`). Set but empty
 /// counts as unset: some shells leave `VAR=` behind instead of removing it.

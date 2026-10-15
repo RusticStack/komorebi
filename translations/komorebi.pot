@@ -45,98 +45,6 @@ msgctxt "suggestion"
 msgid "{0}, {1}"
 msgstr ""
 
-#: ui/app.slint
-msgid "Find the incoming server"
-msgstr ""
-
-#: ui/app.slint
-msgid "Connect to the incoming server"
-msgstr ""
-
-#: ui/app.slint
-msgid "Secure the connection"
-msgstr ""
-
-#: ui/app.slint
-msgid "Sign in to incoming mail"
-msgstr ""
-
-#: ui/app.slint
-msgid "Read the folder list"
-msgstr ""
-
-#: ui/app.slint
-msgid "Connect to the sending server"
-msgstr ""
-
-#: ui/app.slint
-msgid "Sign in to sending mail"
-msgstr ""
-
-#: ui/app.slint
-msgid "{0}, waiting"
-msgstr ""
-
-#: ui/app.slint
-msgid "{0}, in progress"
-msgstr ""
-
-#: ui/app.slint
-msgid "{0}, passed"
-msgstr ""
-
-#: ui/app.slint
-msgid "{0}, failed"
-msgstr ""
-
-#: ui/app.slint
-msgid "{0}, skipped"
-msgstr ""
-
-#: ui/app.slint
-msgid "Forget certificate"
-msgstr ""
-
-#: ui/app.slint
-msgid "Find settings"
-msgstr ""
-
-#: ui/app.slint
-msgid "Looking up settings"
-msgstr ""
-
-#: ui/app.slint
-msgid "Looking up settings …"
-msgstr ""
-
-#: ui/app.slint
-msgid "Fills in the servers for your address. Only your domain name is looked up, and nothing is saved."
-msgstr ""
-
-#: ui/app.slint
-msgid "Enter your email address."
-msgstr ""
-
-#: ui/app.slint
-msgid "Enter an email address like ana@example.com."
-msgstr ""
-
-#: ui/app.slint
-msgid "Enter your password."
-msgstr ""
-
-#: ui/app.slint ui/tr.slint
-msgid "Choose your provider."
-msgstr ""
-
-#: ui/app.slint
-msgid "Enter the incoming (IMAP) server."
-msgstr ""
-
-#: ui/app.slint
-msgid "Enter the sending (SMTP) server."
-msgstr ""
-
 #: ui/app.slint ui/tr.slint
 msgid "Move up"
 msgstr ""
@@ -145,7 +53,7 @@ msgstr ""
 msgid "Move down"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Back"
 msgstr ""
 
@@ -162,14 +70,10 @@ msgid "Accounts"
 msgstr ""
 
 #: ui/app.slint
-msgid "Add an account"
-msgstr ""
-
-#: ui/app.slint
 msgid "Edit {0}"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/onboarding.slint ui/tr.slint
 msgid "Settings"
 msgstr ""
 
@@ -178,10 +82,14 @@ msgid "More options for this account"
 msgstr ""
 
 #: ui/app.slint
-msgid "General"
+msgid "Signatures"
 msgstr ""
 
 #: ui/app.slint
+msgid "General"
+msgstr ""
+
+#: ui/app.slint ui/onboarding.slint
 msgid "Privacy"
 msgstr ""
 
@@ -193,7 +101,7 @@ msgstr ""
 msgid "Downloading the mail of {0}"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/onboarding.slint ui/tr.slint
 msgid "Review certificate"
 msgstr ""
 
@@ -218,7 +126,7 @@ msgstr ""
 msgid "No accounts yet"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Add another account"
 msgstr ""
 
@@ -248,6 +156,18 @@ msgid "Sync {0}"
 msgstr ""
 
 #: ui/app.slint
+msgid "Notifications for this account"
+msgstr ""
+
+#: ui/app.slint
+msgid "New mail in this account can show a Windows notification. Notifications for new mail in Settings > General applies to every account."
+msgstr ""
+
+#: ui/app.slint
+msgid "Notifications for {0}"
+msgstr ""
+
+#: ui/app.slint
 msgid "Name"
 msgstr ""
 
@@ -267,12 +187,8 @@ msgstr ""
 msgid "The address can't be changed. To use another one, add another account."
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Password"
-msgstr ""
-
-#: ui/app.slint
-msgid "Password or app password"
 msgstr ""
 
 #: ui/app.slint
@@ -280,47 +196,27 @@ msgid "Leave empty to keep the current one"
 msgstr ""
 
 #: ui/app.slint
-msgid "Saved in Windows Credential Manager, never in Komorebi's files."
-msgstr ""
-
-#: ui/app.slint
-msgid "Username"
-msgstr ""
-
-#: ui/app.slint
-msgid "Same as email address"
-msgstr ""
-
-#: ui/app.slint
-msgid "The name you sign in with, if it isn't your email address."
-msgstr ""
-
-#: ui/app.slint
-msgid "Provider"
-msgstr ""
-
-#: ui/app.slint
-msgid "Any domain hosted at Purelymail"
-msgstr ""
-
-#: ui/app.slint
-msgid "Any domain hosted at Postale"
-msgstr ""
-
-#: ui/app.slint
-msgid "Other server"
-msgstr ""
-
-#: ui/app.slint
-msgid "Any other IMAP and SMTP server"
-msgstr ""
-
-#: ui/app.slint
 msgid "Signature"
 msgstr ""
 
 #: ui/app.slint
-msgid "Added below new mail, replies and forwards"
+msgid "New messages"
+msgstr ""
+
+#: ui/app.slint
+msgid "Signature for new messages"
+msgstr ""
+
+#: ui/app.slint
+msgid "Replies and forwards"
+msgstr ""
+
+#: ui/app.slint
+msgid "Signature for replies and forwards"
+msgstr ""
+
+#: ui/app.slint
+msgid "Manage signatures"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint
@@ -356,11 +252,7 @@ msgstr ""
 msgid "Junk"
 msgstr ""
 
-#: ui/app.slint
-msgid "Not filled in: the form changed while Komorebi looked."
-msgstr ""
-
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Server settings"
 msgstr ""
 
@@ -368,19 +260,23 @@ msgstr ""
 msgid "Incoming and sending servers, ports and security"
 msgstr ""
 
+#: ui/app.slint ui/onboarding.slint
+msgid "Not filled in: the form changed while Komorebi looked."
+msgstr ""
+
 #: ui/app.slint
 msgid "IMAP server"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Port"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "IMAP port"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "IMAP security"
 msgstr ""
 
@@ -396,15 +292,19 @@ msgstr ""
 msgid "IMAP username"
 msgstr ""
 
+#: ui/app.slint ui/onboarding.slint
+msgid "Same as email address"
+msgstr ""
+
 #: ui/app.slint
 msgid "SMTP server"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "SMTP port"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "SMTP security"
 msgstr ""
 
@@ -416,11 +316,11 @@ msgstr ""
 msgid "STARTTLS (port 587)"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Same sign-in as incoming"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "SMTP username"
 msgstr ""
 
@@ -428,19 +328,7 @@ msgstr ""
 msgid "Komorebi always signs in to the sending server."
 msgstr ""
 
-#: ui/app.slint
-msgid "Your name (optional)"
-msgstr ""
-
-#: ui/app.slint
-msgid "e.g. Ana Silva"
-msgstr ""
-
-#: ui/app.slint
-msgid "Shown to the people you write to."
-msgstr ""
-
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Set username"
 msgstr ""
 
@@ -474,6 +362,70 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Remove {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "No signatures yet. Add one to use it in new mail and replies."
+msgstr ""
+
+#: ui/app.slint
+msgid "Edit"
+msgstr ""
+
+#: ui/app.slint
+msgid "Delete {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add signature"
+msgstr ""
+
+#: ui/app.slint
+msgid "https://example.com or name@example.com"
+msgstr ""
+
+#: ui/app.slint
+msgid "Link address"
+msgstr ""
+
+#: ui/app.slint ui/editor.slint
+msgid "Insert"
+msgstr ""
+
+#: ui/app.slint
+msgid "Cancel (Esc)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Not a web or e-mail address"
+msgstr ""
+
+#: ui/app.slint
+msgid "Your name, and what people should know about you"
+msgstr ""
+
+#: ui/app.slint
+msgid "Logo"
+msgstr ""
+
+#: ui/app.slint
+msgid "Add logo…"
+msgstr ""
+
+#: ui/app.slint
+msgid "Remove logo"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "The logo must be a PNG or JPEG file of 200 KB or less."
+msgstr ""
+
+#: ui/app.slint
+msgid "Save"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Cancel"
 msgstr ""
 
 #: ui/app.slint
@@ -586,6 +538,58 @@ msgid "Flash the taskbar button when new mail arrives"
 msgstr ""
 
 #: ui/app.slint
+msgid "Notifications for new mail"
+msgstr ""
+
+#: ui/app.slint
+msgid "Windows shows a notification when new mail arrives while Komorebi is in the background. They are made on this computer; nothing is sent anywhere."
+msgstr ""
+
+#: ui/app.slint
+msgid "Show the sender and subject"
+msgstr ""
+
+#: ui/app.slint
+msgid "Off: a notification only says New mail, which is safer on a shared screen or the lock screen."
+msgstr ""
+
+#: ui/app.slint
+msgid "Show the sender and subject in notifications"
+msgstr ""
+
+#: ui/app.slint
+msgid "Keep running in the notification area"
+msgstr ""
+
+#: ui/app.slint
+msgid "Closing the window keeps Komorebi in the notification area, so mail keeps arriving. Quit from its icon's menu."
+msgstr ""
+
+#: ui/app.slint
+msgid "Keep running in the notification area when the window closes"
+msgstr ""
+
+#: ui/app.slint
+msgid "Start with Windows"
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi starts in the notification area when you sign in to Windows."
+msgstr ""
+
+#: ui/app.slint
+msgid "Start Komorebi with Windows"
+msgstr ""
+
+#: ui/app.slint
+msgid "Reopen tabs at start"
+msgstr ""
+
+#: ui/app.slint
+msgid "The message and draft tabs open when Komorebi closes come back the next time."
+msgstr ""
+
+#: ui/app.slint ui/onboarding.slint
 msgctxt "settings language"
 msgid "Language"
 msgstr ""
@@ -595,13 +599,53 @@ msgctxt "settings language"
 msgid "The language of menus and messages. System follows your Windows display language."
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgctxt "settings language"
 msgid "System"
 msgstr ""
 
 #: ui/app.slint
 msgid "Some text changes after Komorebi restarts."
+msgstr ""
+
+#: ui/app.slint
+msgid "Compose"
+msgstr ""
+
+#: ui/app.slint
+msgid "Message format"
+msgstr ""
+
+#: ui/app.slint
+msgid "How new messages start. Any message can be switched in its More menu."
+msgstr ""
+
+#: ui/app.slint
+msgid "Formatted (HTML)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Plain text"
+msgstr ""
+
+#: ui/app.slint
+msgid "Default font"
+msgstr ""
+
+#: ui/app.slint ui/editor.slint
+msgid "Font"
+msgstr ""
+
+#: ui/app.slint ui/editor.slint
+msgid "Font size"
+msgstr ""
+
+#: ui/app.slint ui/editor.slint
+msgid "Font colour"
+msgstr ""
+
+#: ui/app.slint
+msgid "The quick brown fox jumps over the lazy dog."
 msgstr ""
 
 #: ui/app.slint
@@ -757,7 +801,7 @@ msgctxt "about group"
 msgid "About"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Privacy statement"
 msgstr ""
 
@@ -773,7 +817,7 @@ msgstr ""
 msgid "Data folder"
 msgstr ""
 
-#: ui/app.slint ui/widgets.slint
+#: ui/app.slint ui/editor.slint ui/widgets.slint
 msgid "Copy"
 msgstr ""
 
@@ -806,19 +850,11 @@ msgid "The toolkit Komorebi's window is built with."
 msgstr ""
 
 #: ui/app.slint
-msgid "Save"
-msgstr ""
-
-#: ui/app.slint
 msgid "Test connection"
 msgstr ""
 
 #: ui/app.slint
 msgid "Checks the servers and the sign-in without saving anything"
-msgstr ""
-
-#: ui/app.slint ui/widgets.slint
-msgid "Cancel"
 msgstr ""
 
 #: ui/app.slint
@@ -861,6 +897,31 @@ msgstr ""
 msgid "Move to"
 msgstr ""
 
+#: ui/app.slint ui/widgets.slint
+msgid "Close tab"
+msgstr ""
+
+#: ui/app.slint
+msgid "Close other tabs"
+msgstr ""
+
+#: ui/app.slint
+msgid "Close tabs to the right"
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgid "Open in new window"
+msgstr ""
+
+#: ui/app.slint
+msgid "Reopen closed tab"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgctxt "tab"
+msgid "Mail"
+msgstr ""
+
 #: ui/app.slint
 msgid "Open"
 msgstr ""
@@ -895,6 +956,10 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Refresh (F5)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Refresh (F5). {0}"
 msgstr ""
 
 #: ui/app.slint ui/widgets.slint
@@ -934,12 +999,61 @@ msgstr ""
 msgid "Show all"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "Downloading your mail"
 msgstr ""
 
 #: ui/app.slint
 msgid "Searches subject, people and preview of downloaded mail."
+msgstr ""
+
+#: ui/app.slint ui/tr.slint
+msgctxt "signature"
+msgid "None"
+msgstr ""
+
+#: ui/app.slint
+msgid "Manage signatures…"
+msgstr ""
+
+#: ui/app.slint
+msgid "Align"
+msgstr ""
+
+#: ui/app.slint
+msgid "Decrease indent"
+msgstr ""
+
+#: ui/app.slint
+msgid "Increase indent"
+msgstr ""
+
+#: ui/app.slint
+msgid "Quote"
+msgstr ""
+
+#: ui/app.slint
+msgid "Clear formatting"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "High importance"
+msgstr ""
+
+#: ui/app.slint ui/widgets.slint
+msgid "Low importance"
+msgstr ""
+
+#: ui/app.slint
+msgid "Preview"
+msgstr ""
+
+#: ui/app.slint
+msgid "Switch to plain text"
+msgstr ""
+
+#: ui/app.slint
+msgid "Switch to formatted text"
 msgstr ""
 
 #: ui/app.slint
@@ -1007,71 +1121,11 @@ msgid "Add Bcc (Ctrl+Shift+B)"
 msgstr ""
 
 #: ui/app.slint
-msgid "Bold (Ctrl+B)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Italic (Ctrl+I)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Link (Ctrl+K)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Bulleted list (Ctrl+Shift+8)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Numbered list (Ctrl+Shift+7)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Quote (Ctrl+Shift+Q)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Preview"
-msgstr ""
-
-#: ui/app.slint
-msgid "Preview the message as it is sent"
-msgstr ""
-
-#: ui/app.slint ui/widgets.slint
-msgid "High importance"
-msgstr ""
-
-#: ui/app.slint ui/widgets.slint
-msgid "Low importance"
-msgstr ""
-
-#: ui/app.slint
-msgid "Marks like **bold**, _italic_ and “- ” lists are sent as formatting. Preview shows how the message looks."
-msgstr ""
-
-#: ui/app.slint
-msgid "https://example.com or name@example.com"
-msgstr ""
-
-#: ui/app.slint
-msgid "Link address"
-msgstr ""
-
-#: ui/app.slint
-msgid "Not a web or e-mail address"
-msgstr ""
-
-#: ui/app.slint
-msgid "Insert"
+msgid "More options"
 msgstr ""
 
 #: ui/app.slint
 msgid "Insert link (Enter)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Cancel (Esc)"
 msgstr ""
 
 #: ui/app.slint
@@ -1092,6 +1146,10 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Show quoted text"
+msgstr ""
+
+#: ui/app.slint
+msgid "Edit quoted text"
 msgstr ""
 
 #: ui/app.slint
@@ -1160,7 +1218,7 @@ msgstr ""
 msgid "Remove importance"
 msgstr ""
 
-#: ui/app.slint ui/widgets.slint
+#: ui/app.slint ui/editor.slint ui/widgets.slint
 msgid "Select all"
 msgstr ""
 
@@ -1170,10 +1228,6 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Back to list (Esc)"
-msgstr ""
-
-#: ui/app.slint
-msgid "Edit"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint
@@ -1248,7 +1302,7 @@ msgstr ""
 msgid "Unsubscribe"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/onboarding.slint
 msgid "From: {0}"
 msgstr ""
 
@@ -1270,6 +1324,10 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Sent with low importance"
+msgstr ""
+
+#: ui/app.slint
+msgid "This message was moved or deleted on the server."
 msgstr ""
 
 #: ui/app.slint
@@ -1388,23 +1446,7 @@ msgid "View as plain text"
 msgstr ""
 
 #: ui/app.slint
-msgid "Welcome to Komorebi"
-msgstr ""
-
-#: ui/app.slint
-msgid "Add your Purelymail, Postale.io or other IMAP account. You need your email address and password; it takes about a minute."
-msgstr ""
-
-#: ui/app.slint
-msgid "Your mail stays on this PC and on your server. No ads, no tracking."
-msgstr ""
-
-#: ui/app.slint
-msgid "Need help?"
-msgstr ""
-
-#: ui/app.slint
-msgid "Need help? How to add an account"
+msgid "Hide folders (Ctrl+Shift+E)"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint
@@ -1421,6 +1463,10 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Folders (Close navigation)"
+msgstr ""
+
+#: ui/app.slint
+msgid "Show folders (Ctrl+Shift+E)"
 msgstr ""
 
 #: ui/app.slint
@@ -1465,6 +1511,14 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Open this link in your browser?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Switch to plain text?"
+msgstr ""
+
+#: ui/app.slint
+msgid "Formatting, tables and the signature logo are removed. You can undo this."
 msgstr ""
 
 #: ui/app.slint
@@ -1513,6 +1567,556 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Don't open its links or attachments, reply, or enter a password unless you're sure. If you know the sender, check with them another way. Report junk moves it to your Junk folder."
+msgstr ""
+
+#: ui/editor.slint
+msgid "Black"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Grey"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Dark red"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Red"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Orange"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Gold"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Green"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Teal"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Blue"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Purple"
+msgstr ""
+
+#: ui/editor.slint
+msgctxt "colour"
+msgid "Automatic"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Center"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Align right"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Justify"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Align left"
+msgstr ""
+
+#: ui/editor.slint ui/widgets.slint
+msgid "Cut"
+msgstr ""
+
+#: ui/editor.slint ui/widgets.slint
+msgid "Paste"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Paste as plain text"
+msgstr ""
+
+#: ui/editor.slint
+msgid "{0} × {1} table"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Rows"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Columns"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Insert row above"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Insert row below"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Insert column left"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Insert column right"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Delete row"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Delete column"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Delete table"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Bold (Ctrl+B)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Italic (Ctrl+I)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Underline (Ctrl+U)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Strikethrough (Ctrl+Shift+X)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Font colour: {0}"
+msgstr ""
+
+#: ui/editor.slint
+msgid "More font colours"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Bulleted list (Ctrl+Shift+8)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Numbered list (Ctrl+Shift+7)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Decrease indent (Ctrl+Shift+M)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Increase indent (Ctrl+M)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Align: {0}"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Link (Ctrl+K)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Quote (Ctrl+Shift+Q)"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Table"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Insert table"
+msgstr ""
+
+#: ui/editor.slint
+msgid "Clear formatting (Ctrl+Space)"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Find the incoming server"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Connect to the incoming server"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Secure the connection"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Sign in to incoming mail"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Read the folder list"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Connect to the sending server"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Sign in to sending mail"
+msgstr ""
+
+#: ui/forms.slint ui/onboarding.slint
+msgid "{0}, waiting"
+msgstr ""
+
+#: ui/forms.slint ui/onboarding.slint
+msgid "{0}, in progress"
+msgstr ""
+
+#: ui/forms.slint ui/onboarding.slint
+msgid "{0}, passed"
+msgstr ""
+
+#: ui/forms.slint ui/onboarding.slint
+msgid "{0}, failed"
+msgstr ""
+
+#: ui/forms.slint ui/onboarding.slint
+msgid "{0}, skipped"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Forget certificate"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Find settings"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Looking up settings"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Looking up settings …"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Fills in the servers for your address. Only your domain name is looked up, and nothing is saved."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Downloading your mail …"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Enter your password."
+msgstr ""
+
+#: ui/onboarding.slint ui/tr.slint
+msgid "Choose your provider."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Enter the incoming (IMAP) server."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Enter the sending (SMTP) server."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Your mail, calm and close at hand"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "A small, fast email app for Windows. Your messages stay on this PC and on your mail server."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Add your email account"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "It takes about a minute."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Private by design"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "No ads, no tracking, no AI reading your mail."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Fast from the start"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Opens in a blink, works offline with what's downloaded."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Works with your provider"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Purelymail, Postale.io or your own server."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Need help?"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Need help? How to add an account"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Your email"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Sign in"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Make it yours"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "What's your email address?"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "We'll look up the right settings for you."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "name@example.com"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Email address"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Enter an email address like name@example.com."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "This account is already in Komorebi."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Continue"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Sign in to {0}"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Your provider's help pages list these. If you run your own server, use its IMAP and SMTP details."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "You're offline, so we can't look up settings. Enter them below."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Looking up settings for {0} …"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Settings found"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "We couldn't find settings for {0}"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Settings ready"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "{0} · encrypted"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Choose your provider or set it up yourself."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Provider"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Any domain hosted at Purelymail"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Any domain hosted at Postale"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Other server"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Any other IMAP and SMTP server"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Incoming (IMAP) server"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Encrypted (SSL/TLS)"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Encrypted after connecting (STARTTLS)"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Outgoing (SMTP) server"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Username"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Password or app password"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Saved in Windows Credential Manager, never in Komorebi's files."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "The name you sign in with, if it isn't your email address."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Connecting securely"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Checking your password"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Getting ready to send"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Still working on it … This can take a moment on some servers."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Taking longer than usual. You can go back and check the address."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "That password didn't work"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Can't reach your mail server"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "This server's certificate isn't trusted"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Couldn't sign in"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Check it and try again. If your provider uses two-step sign-in, use an app password."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Check your internet connection, then try again."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Review it before you continue."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Try again"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Set up manually"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Hide details"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Show details"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "How should your name appear when you send mail? You can change this later in Settings."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Your name"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "e.g. Ana Silva"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Signature (optional)"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Added below new mail, replies and forwards"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Skip"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Done"
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "You're all set"
+msgstr ""
+
+#: ui/onboarding.slint
+msgctxt "account"
+msgid "{0} is ready. Your mail keeps arriving in the background."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Your newest mail is here."
+msgstr ""
+
+#: ui/onboarding.slint
+msgid "Open your inbox"
 msgstr ""
 
 #: ui/shortcuts.slint
@@ -1628,6 +2232,111 @@ msgstr ""
 #: ui/shortcuts.slint
 msgctxt "shortcut"
 msgid "Close the folder pane, clear the search or the selection"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut group"
+msgid "Tabs and windows"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+E"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Show / hide the folders"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Double-click, Shift+Enter"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Open in new tab"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Middle-click"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Open in a background tab; on a tab, close it"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+O"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Open in new window"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+W or Ctrl+F4"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Close the tab or message window"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Next / previous tab"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+1 to Ctrl+8, Ctrl+9"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Go to tab 1-8 / last tab"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+PageUp / Ctrl+Shift+PageDown"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Move tab left / right"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+T"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Reopen closed tab"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Esc (in a message window)"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Close the window"
 msgstr ""
 
 #: ui/shortcuts.slint
@@ -1877,12 +2586,37 @@ msgstr ""
 
 #: ui/shortcuts.slint
 msgctxt "shortcut key"
-msgid "Ctrl+B / Ctrl+I"
+msgid "Up / Down, Enter or Tab, Esc"
 msgstr ""
 
 #: ui/shortcuts.slint
 msgctxt "shortcut"
-msgid "Bold / italic"
+msgid "Pick, take or close a suggested address"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut group"
+msgid "Formatting (message body)"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+B / Ctrl+I / Ctrl+U"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Bold / italic / underline"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+X"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Strikethrough"
 msgstr ""
 
 #: ui/shortcuts.slint
@@ -1917,12 +2651,67 @@ msgstr ""
 
 #: ui/shortcuts.slint
 msgctxt "shortcut key"
-msgid "Up / Down, Enter or Tab, Esc"
+msgid "Ctrl+L / Ctrl+E / Ctrl+R / Ctrl+J"
 msgstr ""
 
 #: ui/shortcuts.slint
 msgctxt "shortcut"
-msgid "Pick, take or close a suggested address"
+msgid "Align left / center / right / justify"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+] / Ctrl+["
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Larger / smaller text"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+M / Ctrl+Shift+M"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Increase / decrease indent"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Tab / Shift+Tab (in a list or table)"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "List level, or the next / previous cell"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Space"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Clear formatting"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Ctrl+Z / Ctrl+Y"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Undo / redo"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Paste as plain text"
 msgstr ""
 
 #: ui/tr.slint
@@ -1932,6 +2721,50 @@ msgstr ""
 
 #: ui/tr.slint
 msgid "Komorebi couldn't start.\n\n{0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Updated {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "tray menu"
+msgid "Open Komorebi"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "tray menu"
+msgid "Check mail"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "tray menu"
+msgid "Pause notifications"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "tray menu"
+msgid "Quit"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Komorebi: {n} unread message"
+msgid_plural "Komorebi: {n} unread messages"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Open Komorebi to read it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{n} new message"
+msgid_plural "{n} new messages"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Open Komorebi to read them."
 msgstr ""
 
 #: ui/tr.slint
@@ -2372,10 +3205,6 @@ msgid "Every step passed. Nothing was saved; use Add account or Save to keep the
 msgstr ""
 
 #: ui/tr.slint
-msgid "Added {0}. Downloading mail …"
-msgstr ""
-
-#: ui/tr.slint
 msgid "Saved {0}."
 msgstr ""
 
@@ -2474,6 +3303,18 @@ msgstr ""
 
 #: ui/tr.slint
 msgid "Collapse all folders"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Open in new tab"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Hide folders"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Show folders"
 msgstr ""
 
 #: ui/tr.slint
@@ -2775,6 +3616,24 @@ msgid "Earlier draft saved in Drafts."
 msgstr ""
 
 #: ui/tr.slint
+msgid "Draft kept in a tab"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "window title"
+msgid "{0} - Komorebi"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "tab title"
+msgid "New message"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Undo brought the message back; open it from the list."
+msgstr ""
+
+#: ui/tr.slint
 msgid "Add an account to write messages."
 msgstr ""
 
@@ -3051,6 +3910,32 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: ui/tr.slint
+msgid "Delete signature “{0}”?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Messages already written keep it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "It is the default for {n} account; that account gets no signature."
+msgid_plural "It is the default for {n} accounts; those accounts get no signature."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Give the signature a name."
+msgstr ""
+
+#: ui/tr.slint
+msgid "A signature with this name already exists."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Add a logo"
+msgstr ""
+
+#: ui/tr.slint
 msgid "Trust this certificate?"
 msgstr ""
 
@@ -3154,14 +4039,6 @@ msgid "Clear"
 msgstr ""
 
 #: ui/widgets.slint
-msgid "Cut"
-msgstr ""
-
-#: ui/widgets.slint
-msgid "Paste"
-msgstr ""
-
-#: ui/widgets.slint
 msgid "Hide password"
 msgstr ""
 
@@ -3216,4 +4093,53 @@ msgstr ""
 #: ui/widgets.slint
 msgctxt "percent"
 msgid "{0}%"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Step {0} of {1}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0}, step {1} of {2}, completed"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0}, step {1} of {2}, current"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0}, step {1} of {2}, not started"
+msgstr ""
+
+#: ui/widgets.slint
+msgctxt "change the servers"
+msgid "Change"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Change the server settings"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0}, draft, {1} of {2}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0}, unread, {1} of {2}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "{0}, {1} of {2}"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Close tab (Ctrl+W)"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "Tabs"
+msgstr ""
+
+#: ui/widgets.slint
+msgid "All tabs"
 msgstr ""

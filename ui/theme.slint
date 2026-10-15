@@ -34,6 +34,13 @@ export global Theme {
     in property <bool> animate: true;
     out property <duration> fast: animate ? 167ms : 0ms;
     out property <duration> faster: animate ? 83ms : 0ms;
+    // The onboarding flow (docs/WINUI3.md "Onboarding"): a step's
+    // cross-fade, the welcome's entrance, the finish mark, and the delay
+    // between the items of a staggered list.
+    out property <duration> normal: animate ? 200ms : 0ms;
+    out property <duration> gentle: animate ? 250ms : 0ms;
+    out property <duration> slow: animate ? 300ms : 0ms;
+    out property <duration> stagger: animate ? 50ms : 0ms;
 
     // WinUI 3 theme resources (docs/WINUI3.md "Mapping to Komorebi"), as
     // `contrast ? high contrast : dark ? dark : light`. Translucent ones
@@ -151,6 +158,19 @@ export global Theme {
     // Selected text: AccentFillColorSelectedTextBackground (the accent).
     out property <color> selection-bg: contrast ? hc-highlight : ramp[3];
     out property <color> selection-text: contrast ? hc-highlight-text : #ffffff;
+    // TabView (docs/WINUI3.md "TabView"): a tab under the pointer
+    // (LayerOnMicaBaseAltFillColorSecondary) and pressed (Default); the
+    // selected one joins the card it heads; the strip is ButtonFace under a
+    // contrast theme.
+    out property <color> tab-hover: contrast ? hc-highlight : dark ? #ffffff0f : #0000000a;
+    out property <color> tab-pressed: contrast ? hc-highlight : dark ? #3a3a3a73 : #ffffffb3;
+    out property <color> tab-selected: contrast ? hc-window : card;
+    out property <color> tab-strip: contrast ? hc-button : transparent;
+    // Text on a tab: TextSecondary at rest, TextPrimary selected; under a
+    // contrast theme WindowText at rest, Highlight selected, HighlightText
+    // on the pointer-over fill.
+    out property <color> tab-text: contrast ? hc-text : text-2;
+    out property <color> tab-text-selected: contrast ? hc-highlight : text;
     // The keyboard focus ring: FocusStrokeColorOuter (2 px) and Inner (1 px).
     out property <color> focus: contrast ? hc-text : dark ? #ffffff : #000000e4;
     out property <color> focus-inner: contrast ? hc-window : dark ? #000000b3 : #ffffffb3;
@@ -174,6 +194,15 @@ export global Theme {
     // of a draft or a failed send. 6.1:1 on the light card (5.6:1 under a
     // hovered or selected row), 6.6:1 on the dark card (5.4:1 hovered).
     out property <color> important: contrast ? hc-text : dark ? #eaa300 : #835b00;
+    // The brand mark's two tones (docs/WINUI3.md "Onboarding"), from the
+    // accent ramp; outlines in WindowText under a contrast theme.
+    out property <color> mark-a: contrast ? hc-text : dark ? ramp[4] : ramp[2];
+    out property <color> mark-b: contrast ? hc-text : dark ? ramp[5] : ramp[4];
+    // Its light (the sun and the lit leaf): white on the light theme, the
+    // lightest accent step on the dark one, where on-accent is black.
+    out property <color> mark-c: contrast ? hc-text : dark ? ramp[6] : #ffffff;
+    // The "found" chip's glyph.
+    out property <color> ok-glyph: success;
 
     // Type ramp (Fluent 2), scaled by the Rust side for the Windows text
     // size (docs/WINUI3.md "Text size").
@@ -182,6 +211,8 @@ export global Theme {
     in property <length> subtitle: 16px;
     in property <length> title: 20px;
     in property <length> title-large: 28px;
+    // Display: the welcome's headline only (Segoe UI Variable Display, 600).
+    in property <length> display: 40px;
     // One message row (the list scrolls and pages by it): 76 px, taller by
     // the line heights (4/3 of the size) its two body lines and one caption
     // line gain at larger text sizes.
@@ -209,6 +240,14 @@ export global Theme {
     // An account's initial tile (the folder pane's account line).
     out property <length> tile: 20px;
 
+    // A tab (TabViewItemMinHeight 32, taller with the text size; its
+    // Caption title and 3 px paddings), 100 to 240 px wide; the strip adds
+    // 8 px above (TabViewHeaderPadding). The Mail tab is its icon only.
+    out property <length> tab-height: max(32px, caption-line + 16px);
+    out property <length> tab-min: 100px;
+    out property <length> tab-max: 240px;
+    out property <length> tab-icon-only: 40px;
+
     // An attachment chip: 40 px, taller by what a larger text size adds
     // to its name (Body) and size (Caption) lines.
     out property <length> chip-height: max(40px, round((body + caption) * 4 / 3 / 1px) * 1px + 4px);
@@ -218,9 +257,24 @@ export global Theme {
     out property <length> s2: 8px;
     out property <length> s3: 12px;
     out property <length> s4: 16px;
+    out property <length> s5: 20px;
     out property <length> s6: 24px;
+    out property <length> s8: 32px;
+    out property <length> s10: 40px;
+    out property <length> s12: 48px;
     out property <length> radius: 4px;
     out property <length> radius-lg: 8px;
+    // The onboarding card only.
+    out property <length> radius-xl: 12px;
+}
+
+// The onboarding flow's easing curves, beside Theme's durations (a global
+// of their own: Slint can't hand an easing to the Rust side, and Theme is
+// exported to it): Fluent 2 decelerateMax (entering) and accelerateMax
+// (leaving).
+export global Motion {
+    out property <easing> ease-out: cubic-bezier(0.1, 0.9, 0.2, 1);
+    out property <easing> ease-in: cubic-bezier(0.9, 0.1, 1, 0.2);
 }
 
 // The one tooltip (docs/WINUI3.md "ToolTip"): the control under the pointer
@@ -288,6 +342,18 @@ export global Icons {
     out property <string> link: "\u{E71B}";
     out property <string> bullets: "\u{E8FD}";
     out property <string> quote: "\u{E9B2}";
+    // The composer's formatting toolbar (docs/WINUI3.md "Composer toolbar").
+    out property <string> underline: "\u{E8DC}";
+    out property <string> strikethrough: "\u{EDE0}";
+    out property <string> font-color: "\u{E8D3}";
+    out property <string> outdent: "\u{E290}";
+    out property <string> indent: "\u{E291}";
+    out property <string> align-left: "\u{E8E4}";
+    out property <string> align-center: "\u{E8E3}";
+    out property <string> align-right: "\u{E8E2}";
+    out property <string> table: "\u{E80A}";
+    out property <string> clear-format: "\u{E75C}";
+    out property <string> signature: "\u{EE56}";
     out property <string> accept: "\u{E8FB}";
     out property <string> tentative: "\u{E9CE}";
     out property <string> check-mark: "\u{E73E}";
@@ -311,6 +377,11 @@ export global Icons {
     out property <string> help: "\u{E897}";
     out property <string> feedback: "\u{ED15}";
     out property <string> shield: "\u{EA18}";
+    // Onboarding: the welcome's values (Shield above, LightningBolt, Globe)
+    // and the Password box's Lock.
+    out property <string> lightning: "\u{E945}";
+    out property <string> globe: "\u{E774}";
+    out property <string> lock: "\u{E72E}";
     // InfoBar: a filled circle, and the glyphs drawn over it.
     out property <string> status-circle: "\u{F136}";
     out property <string> status-info: "\u{F13F}";

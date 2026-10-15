@@ -113,7 +113,17 @@ fn main() -> anyhow::Result<()> {
         snapshot_and_quit(&ui, path.into());
     }
 
-    ui.run()?;
+    // Started by Windows at sign-in (`--minimized`, "Start with Windows"):
+    // the window stays hidden and the tray icon is the way in (it shows if
+    // the tray can't be made). The loop runs until Quit or a real close,
+    // so a window hidden to the tray keeps the app alive.
+    if !komorebi::notify::launched_minimized(std::env::args().skip(1))
+        || komorebi::dev_var("KOMOREBI_SNAPSHOT").is_some()
+    {
+        ui.show()?;
+    }
+    slint::run_event_loop_until_quit()?;
+    ui.hide().ok();
     if !app::remove_data_if_asked(ui) {
         app::finish_actions();
     }
@@ -701,6 +711,64 @@ unsafe extern "system" fn appearance_proc(
     result
 }
 
+/// A message window's frame (docs/WINUI3.md "Secondary windows"): the
+/// system caption, dark or light and in the accent caption colour as the
+/// main window's bar is asked to be (now, or once the window exists).
+pub fn dress_popout(ui: &AppWindow) {
+    #[cfg(windows)]
+    if let (Some(hwnd), Some(bar)) = (hwnd(ui), TITLE_BAR.get()) {
+        set_title_bar(hwnd, bar);
+    }
+    #[cfg(not(windows))]
+    let _ = ui;
+}
+
+/// A message window's window events: on the first one its icons, frame
+/// colours and the appearance listener (the main window's subclass, which
+/// also sets its caption again when Windows resets it); `placed` hears its
+/// size in logical px whenever it is resized. It is never marked as the
+/// app's window (a second start finds the main one) and never gets the
+/// app-drawn bar.
+pub fn watch_popout(ui: &AppWindow, placed: impl Fn(u32, u32) + 'static) {
+    use slint::ComponentHandle;
+    use slint::winit_030::winit::event::WindowEvent;
+    use slint::winit_030::{EventResult, WinitWindowAccessor};
+    let mut dressed = false;
+    let weak = ui.as_weak();
+    ui.window().on_winit_window_event(move |window, event| {
+        if !std::mem::replace(&mut dressed, true) {
+            window.with_winit_window(set_icons);
+            window.with_winit_window(watch_appearance);
+        }
+        if let WindowEvent::Resized(_) = event
+            && let Some(ui) = weak.upgrade()
+        {
+            let w = ui.window();
+            let maximized = window
+                .with_winit_window(|x| x.is_maximized() || x.is_minimized() == Some(true))
+                .unwrap_or(false);
+            if !maximized {
+                let size = w.size().to_logical(w.scale_factor());
+                placed(size.width.round() as u32, size.height.round() as u32);
+            }
+        }
+        EventResult::Propagate
+    });
+}
+
+/// Bring `ui` to the front (a reply from a message window opens in the
+/// main one), restoring it if it was minimized.
+pub fn bring_to_front(ui: &AppWindow) {
+    use slint::ComponentHandle;
+    ui.window().set_minimized(false);
+    #[cfg(windows)]
+    if let Some(hwnd) = hwnd(ui) {
+        // SAFETY: this process's live window; Windows may decline (then
+        // the taskbar button flashes instead).
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd) };
+    }
+}
+
 /// Flash the taskbar button until the window comes to the front.
 #[cfg(windows)]
 pub fn flash_taskbar(ui: &AppWindow) {
@@ -788,6 +856,8 @@ fn single_instance(db_path: &Path) -> bool {
     }
     // SAFETY: a valid handle from CreateMutexW.
     unsafe { CloseHandle(handle) };
+    // A window hidden to the tray is shown by the running copy itself.
+    komorebi::win_shell::signal_existing_instance();
     if let Some(hwnd) = app_window(window_mark(db_path)) {
         // SAFETY: a window handle just found; a stale one fails harmlessly.
         unsafe {
@@ -914,28 +984,44 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 ui.invoke_compose();
                 ui.invoke_send();
             }
-            // A new message with formatting markers in the body, which has
-            // the focus; Ctrl+K and an address follow below.
-            "compose-format" | "compose-preview" | "compose-hint" => {
+            // A formatted message (the painted editor) with bold, italic,
+            // underline, a colour, a link, both lists and a quote, the
+            // focus in its body; `compose-table` adds a 3 x 3 table,
+            // `compose-preview` turns Preview on.
+            "compose-format"
+            | "compose-rich"
+            | "compose-rich-compact"
+            | "compose-preview"
+            | "compose-table" => {
                 ui.invoke_compose();
-                let body = "Hi Ana,\n\nThe **report** is _ready_. Notes:\n\n- totals checked\n\
-                    - [the sheet](https://example.org/sheet)\n\n> Can you send it today?\n\nThanks";
-                ui.set_c_body(body.into());
-                ui.invoke_c_edited(ComposeField::Body, body.into());
-                ui.set_c_focus(ComposeField::Body);
-                ui.set_c_focus_seq(ui.get_c_focus_seq().wrapping_add(1));
-                // Preview on: the HTML part rendered in the body's place.
+                app::sample_rich(action == "compose-table");
                 if action == "compose-preview" {
                     ui.set_c_preview(true);
                 }
-                // The first formatting edit ever: Bold on the word
-                // "Thanks" shows the one-time caption (offline, as it is
-                // saved as seen in the throwaway cache).
-                if action == "compose-hint" && komorebi::dev_var("KOMOREBI_OFFLINE").is_some() {
-                    let at = body.rfind("Thanks").unwrap_or(0) as i32;
-                    ui.invoke_c_format(FormatAction::Bold, at, at + 6);
+            }
+            // The same message switched to plain text (`compose-plain`), or
+            // the question before it (`compose-plain-ask`).
+            "compose-plain" | "compose-plain-ask" => {
+                ui.invoke_compose();
+                app::sample_rich(false);
+                if action == "compose-plain" {
+                    ui.global::<Rich>().invoke_set_rich(false);
+                } else {
+                    ui.global::<Rich>().set_plain_ask(true);
                 }
             }
+            // Settings > Signatures with two made-up signatures (written to
+            // the throwaway cache, offline only), and the first one's page.
+            "settings-signatures" => app::sample_signatures(false),
+            // A formatted message from an account whose default signature
+            // has a logo (made up, offline only).
+            "compose-signature" => {
+                app::sample_signatures(false);
+                ui.set_show_settings(false);
+                ui.invoke_compose();
+                app::sample_rich(false);
+            }
+            "signature-edit" => app::sample_signatures(true),
             // A file dragged over the window, with a composer open
             // (`drop-hover-compose`) or not: the drop overlay.
             "drop-hover" => app::sample_file_hover(),
@@ -991,6 +1077,34 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
             }
             // The narrow window's folder pane, opened over the content.
             "pane" => ui.set_pane_open(true),
+            // The folder pane folded to the rail at any width (Ctrl+Shift+E).
+            "nav:collapsed" => ui.invoke_toggle_pane(),
+            // The list's first n messages in windows of their own (the
+            // snapshot is of the main window; for measuring memory).
+            a if a.starts_with("windows:") => {
+                let n = a["windows:".len()..].parse::<usize>().unwrap_or(1);
+                app::open_windows(n);
+            }
+            // Tabs: the newest messages in tabs of their own (up to N), the
+            // first one shown; the strip over the content.
+            a if a.starts_with("tabs") => {
+                use slint::Model;
+                let n = a
+                    .strip_prefix("tabs:")
+                    .and_then(|n| n.parse::<usize>().ok())
+                    .unwrap_or(3);
+                let rows = ui.get_rows();
+                let ids: Vec<i32> = (0..rows.row_count().min(n))
+                    .filter_map(|i| rows.row_data(i))
+                    .map(|r| r.id)
+                    .collect();
+                for id in ids.iter().rev() {
+                    ui.invoke_open_tab(*id, true);
+                }
+                if !ids.is_empty() {
+                    ui.invoke_tab_activate(1);
+                }
+            }
             // The last folder opened first, then the pane: it opens
             // scrolled to that folder.
             "pane-last" => {
@@ -1009,7 +1123,7 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
             // Settings on one section: `settings:general`, `:privacy`,
             // `:about` (or `:accounts`).
             s if s.starts_with("settings:") => {
-                let section = ["accounts", "general", "privacy", "about"]
+                let section = ["accounts", "signatures", "general", "privacy", "about"]
                     .iter()
                     .position(|n| s.ends_with(n))
                     .unwrap_or(0);
@@ -1019,31 +1133,38 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
             // Settings > Privacy with the Remove all data prompt (nothing
             // is removed until it is confirmed).
             "remove-data" => {
-                ui.set_settings_section(2);
+                ui.set_settings_section(3);
                 ui.set_show_settings(true);
                 ui.invoke_remove_all_data();
             }
-            // Settings on the add-account form, as the welcome's Add
-            // account opens it; `signin-wait` also as while it signs in
-            // (nothing is sent; the ring shows after a second, so add a
-            // `KOMOREBI_SNAPSHOT_HOVER` to take the snapshot later).
-            "settings-add" | "signin-wait" => {
+            // The onboarding flow (made up and offline; nothing is looked up,
+            // checked or sent): `ob-email`, `ob-email-error`, `ob-finding`,
+            // `ob-found-preset`, `ob-found`, `ob-notfound`, `ob-password`,
+            // `ob-wait`, `ob-wait-slow`, `ob-error-rejected`,
+            // `ob-error-unreachable`, `ob-error-cert`, `ob-manual`, and
+            // (offline only, as they add a made-up account to the throwaway
+            // cache) `ob-personalise`, `ob-done`, `ob-done-progress`.
+            // `ob-embedded` opens it from Settings > Add account (a cache with
+            // an account). The old add-form actions are aliases.
+            "ob-embedded" => {
                 ui.set_settings_section(0);
-                ui.set_settings_add(true);
                 ui.set_show_settings(true);
-                ui.set_a_busy(action == "signin-wait");
+                ui.invoke_open_onboarding();
             }
-            // The add-account form after "Test connection" failed at the
-            // IMAP sign-in (made-up server; nothing is sent), as the steps
-            // list and the sentence show it.
-            "account-test-failed" => {
-                ui.set_settings_section(0);
-                ui.set_settings_add(true);
-                ui.set_show_settings(true);
-                // After the page has built itself (which clears the form).
-                slint::Timer::single_shot(std::time::Duration::from_millis(50), || {
-                    app::sample_check_failed()
-                });
+            s if s.starts_with("ob-")
+                || matches!(s, "settings-add" | "signin-wait" | "account-test-failed")
+                || s.starts_with("account-find") =>
+            {
+                let state = match s {
+                    "settings-add" => "email",
+                    "signin-wait" => "wait",
+                    "account-test-failed" => "error-rejected",
+                    "account-find" | "account-find-srv" => "found",
+                    "account-find-none" | "account-find-foreign" => "notfound",
+                    "account-find-rest" => "manual",
+                    s => s.trim_start_matches("ob-"),
+                };
+                app::sample_onboard(state);
             }
             // A reply to the selected message, sent: the Undo offer (the
             // send waits out its undo window, so nothing goes out). The
@@ -1080,29 +1201,6 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
                     app::sample_cert(action.trim_start_matches("account-cert-"))
                 });
-            }
-            // The add-account form on "Other server" with a made-up address
-            // after "Find settings" answered with made-up settings (nothing
-            // is looked up or sent): `account-find` (the provider's
-            // autoconfig), `account-find-srv`, `account-find-none`,
-            // `account-find-foreign` (a server on another domain, not taken), `account-find-rest` (before any lookup: the hint).
-            s if s.starts_with("account-find") => {
-                ui.set_a_add_start(AccountForm {
-                    provider: 2,
-                    email: "alice@example.com".into(),
-                    ..Default::default()
-                });
-                ui.set_settings_section(0);
-                ui.set_settings_add(true);
-                ui.set_show_settings(true);
-                let state = s.trim_start_matches("account-find").trim_start_matches('-');
-                let state = if state.is_empty() { "ok" } else { state }.to_string();
-                // After the page has built itself (which clears the form).
-                if state != "rest" {
-                    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-                        app::sample_find(&state)
-                    });
-                }
             }
             // The first account's page scrolled to its Folders (the roles
             // Sent, Drafts, Trash, Archive and Junk, each header above its

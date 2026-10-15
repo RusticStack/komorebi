@@ -252,10 +252,119 @@ pub(super) fn clipboard_files() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// The fragment of a CF_HTML ("HTML Format") clipboard block: the UTF-8
+/// bytes between its `StartFragment` and `EndFragment` offsets (the
+/// header's), else between the `<!--StartFragment-->` comments. `None` if
+/// the header is malformed.
+pub(super) fn cf_html_fragment(block: &[u8]) -> Option<String> {
+    let block = block.split(|b| *b == 0).next().unwrap_or(block);
+    let head = String::from_utf8_lossy(block.get(..block.len().min(1024))?);
+    let field = |name: &str| -> Option<usize> {
+        let at = head.find(name)? + name.len();
+        let digits: String = head
+            .get(at..)?
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        digits.parse().ok()
+    };
+    let html = match (field("StartFragment:"), field("EndFragment:")) {
+        (Some(a), Some(b)) if a <= b && b <= block.len() => block.get(a..b)?,
+        _ => {
+            let text = block;
+            let find = |pat: &[u8]| text.windows(pat.len()).position(|w| w == pat);
+            let a = find(b"<!--StartFragment-->")? + "<!--StartFragment-->".len();
+            let b = find(b"<!--EndFragment-->")?;
+            text.get(a..b.max(a))?
+        }
+    };
+    Some(String::from_utf8_lossy(html).into_owned())
+}
+
+/// The HTML fragment on the clipboard (copied from a browser, Word or
+/// Outlook), if any; at most 2 MB.
+#[cfg(windows)]
+pub(super) fn clipboard_html() -> Option<String> {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+        RegisterClipboardFormatW,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    struct Close;
+    impl Drop for Close {
+        fn drop(&mut self) {
+            // SAFETY: only made after OpenClipboard succeeded.
+            unsafe { CloseClipboard() };
+        }
+    }
+    let name: Vec<u16> = "HTML Format\0".encode_utf16().collect();
+    // SAFETY: `name` is NUL-terminated; the clipboard is opened and closed
+    // (by `Close`) on this thread; the handle stays valid while it is open,
+    // and the block is copied out between GlobalLock and GlobalUnlock,
+    // within GlobalSize.
+    unsafe {
+        let format = RegisterClipboardFormatW(name.as_ptr());
+        if format == 0
+            || IsClipboardFormatAvailable(format) == 0
+            || OpenClipboard(std::ptr::null_mut()) == 0
+        {
+            return None;
+        }
+        let _close = Close;
+        let handle = GetClipboardData(format);
+        if handle.is_null() {
+            return None;
+        }
+        let size = GlobalSize(handle);
+        if size > 2 * 1024 * 1024 {
+            return None;
+        }
+        let ptr = GlobalLock(handle) as *const u8;
+        if ptr.is_null() {
+            return None;
+        }
+        let block = std::slice::from_raw_parts(ptr, size).to_vec();
+        GlobalUnlock(handle);
+        cf_html_fragment(&block)
+    }
+}
+
+#[cfg(not(windows))]
+pub(super) fn clipboard_html() -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cf_html_gives_its_fragment() {
+        let html = "<html><body><!--StartFragment--><b>Hi</b> ação<!--EndFragment--></body></html>";
+        let head = |a: usize, b: usize| {
+            format!(
+                "Version:0.9\r\nStartHTML:0000000105\r\nEndHTML:{:010}\r\nStartFragment:{a:010}\r\nEndFragment:{b:010}\r\n",
+                105 + html.len()
+            )
+        };
+        let probe = head(0, 0);
+        let start = probe.len() + html.find("<b>").unwrap();
+        let end = probe.len() + html.find("<!--End").unwrap();
+        let block = format!("{}{html}\0", head(start, end));
+        assert_eq!(
+            cf_html_fragment(block.as_bytes()).as_deref(),
+            Some("<b>Hi</b> ação")
+        );
+        // Offsets out of range: the fragment comments.
+        let block = format!("{}{html}", head(9999, 99999));
+        assert_eq!(
+            cf_html_fragment(block.as_bytes()).as_deref(),
+            Some("<b>Hi</b> ação")
+        );
+        // Neither: nothing.
+        assert_eq!(cf_html_fragment(b"Version:0.9\r\n<b>x</b>"), None);
+    }
 
     fn dropfiles(wide: bool, list: &[u8]) -> Vec<u8> {
         let mut b = Vec::new();

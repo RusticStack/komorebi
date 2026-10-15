@@ -48,6 +48,7 @@ pub mod pin;
 #[cfg(test)]
 mod profiles;
 pub mod render;
+pub mod rich;
 pub mod smtp;
 pub mod source;
 #[cfg(test)]
@@ -1287,8 +1288,19 @@ impl Worker {
                 data,
             });
         }
-        let (body, body_html) =
-            compose_html::alternative(&draft.body, draft.quoted_html.as_deref());
+        // A formatted draft is saved as it is stored (tagged, so it reads
+        // back exactly), with its signature logo as the related part.
+        let (body, body_html, inline) = match draft.body_rich.as_deref() {
+            Some(stored) => {
+                let inline = match rich::import::strict(stored) {
+                    Some(doc) => db.inline_images(&doc)?,
+                    None => Vec::new(),
+                };
+                (draft.body.clone(), Some(stored.to_string()), inline)
+            }
+            // A plain-text draft is plain text only, as it is sent.
+            None => (draft.body.clone(), None, Vec::new()),
+        };
         let out = smtp::Outgoing {
             from_name: self.account.name.clone(),
             from_email: self.account.email.clone(),
@@ -1298,6 +1310,7 @@ impl Worker {
             subject: draft.subject,
             body,
             body_html,
+            inline,
             attachments,
             in_reply_to: draft.in_reply_to,
             references: draft.refs,

@@ -60,16 +60,22 @@ mod find;
 #[cfg(debug_assertions)]
 mod flow;
 mod invite;
+mod notifications;
+mod onboarding;
+pub use onboarding::sample_onboard;
 mod original;
 mod outbox;
 mod reader;
 mod roles;
 mod settings;
+mod signatures;
+mod tabs;
 mod text;
 #[cfg(test)]
 mod text_calls;
 mod tips;
 mod triage;
+mod windows;
 mod wipe;
 
 thread_local! {
@@ -154,6 +160,9 @@ const NAV_COLLAPSE: i32 = 3;
 const NAV_SETTINGS: i32 = 4;
 /// Go to the folder in the entry's `id` (a rail tile's Inbox, Sent, Archive).
 const NAV_OPEN: i32 = 6;
+/// Hide folders / Show folders: fold the full pane to the rail (from
+/// 1040 px; the window runs it, `toggle-pane`).
+const NAV_FOLD: i32 = 7;
 /// The list's "..." menu: Mark all as read.
 const LIST_MARK_READ: i32 = 1;
 const LIST_SELECT: i32 = 2;
@@ -218,6 +227,8 @@ enum Question {
     DeleteFrom {
         trash: bool,
     },
+    /// Delete a signature (Settings > Signatures).
+    DeleteSignature(i64),
 }
 
 impl Question {
@@ -232,6 +243,7 @@ impl Question {
                 | Question::RemoveAllData
                 | Question::TrustCert
                 | Question::DeleteFrom { .. }
+                | Question::DeleteSignature(_)
         )
     }
 }
@@ -321,6 +333,13 @@ struct Held {
     total: HashMap<i64, i64>,
     /// The message that was open, reopened by Undo.
     open: Option<i64>,
+    /// The message tabs that closed with it (their places), reopened by
+    /// Undo; and the tab it was done from, shown again.
+    tabs: Vec<(usize, i64)>,
+    from_tab: Option<i64>,
+    /// Message windows closed with it (Undo does not open them again, and
+    /// says so).
+    windows: bool,
 }
 
 struct App {
@@ -377,10 +396,12 @@ struct App {
     /// replaces it; it never replaces another status).
     progress_shown: Cell<bool>,
     /// Accounts in their first download (just added): the empty list shows
-    /// its progress, and the status line's "Added …" stays until it ends.
+    /// its progress.
     first_sync: HashSet<i64>,
-    /// The status line says "Added …" (it goes when that download ends).
-    added_shown: Cell<bool>,
+    /// The account the onboarding flow added, while the flow shows its
+    /// first download, and the last progress seen (folder, done).
+    ob_account: Option<i64>,
+    ob_progress: Option<(i64, usize)>,
     /// A just-added account and the view at that moment: its Inbox opens
     /// as soon as its folders arrive, unless the view changed meanwhile.
     land_on: Option<(i64, View)>,
@@ -410,6 +431,24 @@ struct App {
     preview_timer: Timer,
     /// The one-time caption about the formatting marks was shown.
     format_hint_seen: bool,
+    /// The formatted editors' pictures (`composer::rich`).
+    ed: composer::rich::EdUi,
+    /// New messages start formatted, in this font, size and colour
+    /// (settings `compose_*`).
+    compose_rich: bool,
+    compose_defaults: (
+        komorebi::mail::rich::FontId,
+        komorebi::mail::rich::SizePt,
+        Option<komorebi::mail::rich::ColorId>,
+    ),
+    /// The signatures, by name (Settings > Signatures, the composer's
+    /// Signature menu and the account page's boxes).
+    sig_list: Vec<db::SignatureInfo>,
+    /// The signature open in Settings (`None`: a new one), its logo, and
+    /// whether it changed since it opened.
+    sig_open: Option<i64>,
+    sig_logo: Option<komorebi::mail::rich::Logo>,
+    sig_dirty: bool,
     /// How long Send waits so it can be undone (setting `undo_send_secs`;
     /// 0 sends at once).
     undo_delay: Duration,
@@ -493,6 +532,10 @@ struct App {
     /// Flash the taskbar button on new mail in the background (setting
     /// `flash_taskbar`).
     flash: bool,
+    /// New-mail notifications, the tray icon and background mode.
+    notes: notifications::Notes,
+    /// When the last sync pass ended (unix seconds), for "Updated 14:05".
+    last_updated: Option<i64>,
     /// The language choice in Settings (setting `language`) and the
     /// language it gives on this computer.
     language: komorebi::i18n::LangSetting,
@@ -516,6 +559,16 @@ struct App {
     /// whose actions ask for them, nor in tests).
     tips_auto: bool,
     tip_timer: Timer,
+    /// The main window's tabs (`tabs.rs`) and the timer that saves them.
+    tabs: tabs::Tabs,
+    tabs_timer: Timer,
+    /// Open the saved tabs again at start (setting `reopen_tabs`).
+    reopen_tabs: bool,
+    /// The read-only message windows (`windows.rs`).
+    popouts: windows::PopOuts,
+    /// A draft started now opens in a tab of its own whatever shows (a
+    /// reply from a message window).
+    draft_tab: bool,
 }
 
 /// Set up the controller on `ui` over the cache at `db_path`. Returns where
@@ -648,7 +701,8 @@ pub fn install_with(
         progress: HashMap::new(),
         progress_shown: Cell::new(false),
         first_sync: HashSet::new(),
-        added_shown: Cell::new(false),
+        ob_account: None,
+        ob_progress: None,
         land_on: None,
         check_form: (None, String::new()),
         last_tick: SystemTime::now(),
@@ -664,6 +718,17 @@ pub fn install_with(
         preview_want: (0.0, false),
         preview_timer: Timer::default(),
         format_hint_seen: settings.format_hint_seen,
+        ed: composer::rich::EdUi::default(),
+        compose_rich: settings.compose_rich,
+        compose_defaults: (
+            settings.compose_font,
+            settings.compose_size,
+            settings.compose_color,
+        ),
+        sig_list: Vec::new(),
+        sig_open: None,
+        sig_logo: None,
+        sig_dirty: false,
         undo_delay: Duration::from_secs(settings.undo_send_secs),
         builder: Rc::new(composer::spawn_build),
         // KOMOREBI_OFFLINE never touches the credential store.
@@ -707,6 +772,8 @@ pub fn install_with(
         check_interval: Duration::from_secs(settings.check_interval_secs),
         last_full_sync: None,
         flash: settings.flash_taskbar,
+        notes: notifications::Notes::from_settings(&settings),
+        last_updated: None,
         language,
         lang,
         focused: true,
@@ -720,6 +787,11 @@ pub fn install_with(
         tips_armed: false,
         tips_auto: komorebi::dev_var("KOMOREBI_SNAPSHOT").is_none(),
         tip_timer: Timer::default(),
+        tabs: tabs::Tabs::default(),
+        tabs_timer: Timer::default(),
+        reopen_tabs: settings.reopen_tabs,
+        popouts: windows::PopOuts::new(settings.popout_size),
+        draft_tab: false,
     };
     // The view the window last showed (a folder still there), else the
     // Inbox; with the drafts and outbox counted, so the pane is whole in
@@ -733,7 +805,10 @@ pub fn install_with(
         app.outbox_count,
     );
     ui.set_selected_folder(app.view.code());
+    ui.set_nav_collapsed(settings.nav_collapsed);
     app.load_accounts()?;
+    // The welcome's Language box shows the choice before Settings opens.
+    ui.set_g_language(app.language.index());
     app.onboarding = tips::onboarding(&settings, !app.accounts.is_empty());
     // KOMOREBI_OFFLINE keeps the app off the network and away from the
     // credential store (demos, timing runs).
@@ -752,6 +827,7 @@ pub fn install_with(
     );
     mark("model ready");
     wire(ui);
+    app.show_compose_defaults();
     APP.with(|cell| *cell.borrow_mut() = Some(app));
     if let Some(aside) = damaged {
         let name = aside.file_name().unwrap_or_default().to_string_lossy();
@@ -770,6 +846,21 @@ pub fn install_with(
     });
     Timer::single_shot(START_SYNC_AFTER, || {
         with_app(|a| a.count_drafts_and_outbox());
+    });
+    // The tabs of the last session, after the first frame: only the
+    // setting was read before it (titles in one query now).
+    let saved_tabs = if settings.reopen_tabs {
+        settings.tabs.clone()
+    } else {
+        String::new()
+    };
+    if !saved_tabs.is_empty() {
+        Timer::single_shot(START_SYNC_AFTER, move || {
+            with_app(|a| a.restore_tabs(&saved_tabs));
+        });
+    }
+    Timer::single_shot(START_SYNC_AFTER, || {
+        with_app(|a| a.start_notifications());
     });
     Timer::single_shot(WARM_RENDER_AFTER, move || {
         with_app(|a| a.reader.warm());
@@ -907,6 +998,17 @@ pub fn sample_tips(tip: Option<&str>) -> bool {
 /// this cache is due one (an account, and another version saved or none).
 pub fn sample_whats_new() -> bool {
     with_app(|a| a.show_whats_new_if_due()).unwrap_or(false)
+}
+
+/// Snapshots (`KOMOREBI_SNAPSHOT_ACTION=windows:n`): the list's first `n`
+/// messages in message windows of their own (for measuring their memory).
+pub fn open_windows(n: usize) {
+    with_app(|a| {
+        let ids: Vec<i64> = (0..n).filter_map(|i| a.rows.id_at(i)).collect();
+        for id in ids {
+            a.open_window(id);
+        }
+    });
 }
 
 /// Snapshot QA: made-up attachments in the composer showing.
@@ -1198,6 +1300,19 @@ pub fn sample_attachments() {
     with_app(|a| a.sample_attachments());
 }
 
+/// A formatted message for the snapshots (made up; nothing is sent): a
+/// greeting, bold, italic, underlined and coloured words, a link, both
+/// lists and a quote; with `table`, a 3 x 3 table too.
+pub fn sample_rich(table: bool) {
+    with_app(|a| a.sample_rich(table));
+}
+
+/// Settings > Signatures with two made-up signatures (written to the
+/// throwaway cache, offline only); `edit`: the first one's page.
+pub fn sample_signatures(edit: bool) {
+    with_app(|a| a.sample_signatures(edit));
+}
+
 /// A file is dragged over the window (or the drag left it): the composer
 /// shows where it goes.
 pub fn file_hover(on: bool) {
@@ -1278,31 +1393,6 @@ pub fn sample_cert_changed() {
     });
 }
 
-/// Snapshot QA: the account form's steps as when "Test connection" failed
-/// at the IMAP sign-in of a made-up server (a rejected password: the steps
-/// in the bar, Set username, the Password box's error state).
-pub fn sample_check_failed() {
-    use mail::errors::{Class, Step, describe};
-    with_app(|a| {
-        a.check_form = (None, "alice@example.com".into());
-        a.check_seq += 1;
-        let seq = a.check_seq;
-        let say = describe(
-            Step::ImapSignIn,
-            Class::Auth,
-            "imap.example.com",
-            993,
-            "alice",
-        );
-        let failure = CheckFailure {
-            step: Some(Step::ImapSignIn.index()),
-            text: CheckText::Say(say),
-            review: None,
-        };
-        a.finish_check(seq, Err(failure), None);
-    });
-}
-
 /// Snapshot QA: a made-up account (ana@example.com, with an empty Inbox)
 /// added to the throwaway cache as if just added, its first download at
 /// 1,234 of 5,000. Nothing connects (snapshots run offline).
@@ -1334,11 +1424,6 @@ pub fn sample_fresh_inbox() {
         a.syncing.insert(id);
         a.land_on = Some((id, a.view));
         a.land();
-        let line = t!(invoke_account_added, new.email.as_str().into());
-        a.set_status(&line, false);
-        a.status_timer.stop();
-        a.added_shown.set(true);
-        a.ui().set_status_closable(false);
         let folder = a
             .folders
             .iter()
@@ -1350,61 +1435,6 @@ pub fn sample_fresh_inbox() {
             done: 1234,
             total: 5000,
         });
-    });
-}
-
-/// Snapshot QA: the add-account form (manual, made-up address) after "Find
-/// settings" answered with made-up settings; nothing is looked up or sent.
-/// `ok` (found by autoconfig), `srv`, `none`, or `foreign` (the incoming
-/// server is on another domain).
-pub fn sample_find(state: &str) {
-    use mail::discover::{Discovered, Found, Outcome, Source};
-    let found = |host: &str, port: u16, security, user: Option<&str>| Found {
-        server: Server {
-            host: host.into(),
-            port,
-            security,
-        },
-        user: user.map(String::from),
-    };
-    let imap = found("imap.example.com", 993, Security::Tls, Some("alice"));
-    let smtp = found("smtp.example.com", 587, Security::StartTls, None);
-    let out = match state {
-        "none" => Outcome::default(),
-        "srv" => Outcome {
-            found: Discovered {
-                imap: Some(found("imap.example.com", 993, Security::Tls, None)),
-                smtp: Some(found("smtp.example.com", 465, Security::Tls, None)),
-            },
-            sources: vec![Source::Srv],
-            refused: Vec::new(),
-        },
-        "foreign" => Outcome {
-            found: Discovered {
-                imap: None,
-                smtp: Some(smtp),
-            },
-            sources: vec![Source::Autoconfig],
-            refused: vec!["mail.hosting-provider.net".into()],
-        },
-        _ => Outcome {
-            found: Discovered {
-                imap: Some(imap),
-                smtp: Some(smtp),
-            },
-            sources: vec![Source::Autoconfig],
-            refused: Vec::new(),
-        },
-    };
-    with_app(|a| {
-        a.find_seq += 1;
-        let seq = a.find_seq;
-        let from = find::Fields {
-            imap_port: "993".into(),
-            smtp_port: "465".into(),
-            ..Default::default()
-        };
-        a.finish_find(seq, "alice@example.com".into(), from, out);
     });
 }
 
@@ -1751,6 +1781,9 @@ fn wire(ui: &AppWindow) {
     ui.on_cancel_check(|| {
         with_app(|a| a.cancel_check());
     });
+    onboarding::wire(ui);
+    composer::rich::wire(ui);
+    signatures::wire(ui);
     ui.on_welcome_link(|which| {
         with_app(|a| a.welcome_link(which));
     });
@@ -1807,6 +1840,9 @@ fn wire(ui: &AppWindow) {
     ui.on_account_enabled(|id, on| {
         with_app(|a| a.set_account_enabled(id as i64, on));
     });
+    ui.on_account_notify(|id, on| {
+        with_app(|a| a.set_account_notify(id as i64, on));
+    });
     ui.on_move_account(|id, up| {
         with_app(|a| a.move_account(id as i64, up));
     });
@@ -1852,6 +1888,15 @@ fn wire(ui: &AppWindow) {
     });
     ui.on_tip_skip(|| {
         with_app(|a| a.tip_skip());
+    });
+    ui.on_nav_collapse_changed(|collapsed| {
+        with_app(|a| {
+            if let Err(e) =
+                a.db.set_setting("nav_collapsed", if collapsed { "1" } else { "0" })
+            {
+                a.set_status(&text::detail(&e), true);
+            }
+        });
     });
     ui.on_layout_changed(|compact| {
         with_app(|a| a.layout_changed(compact));
@@ -1908,19 +1953,60 @@ fn wire(ui: &AppWindow) {
             }
         });
     });
-    // Drafts are saved and held moves sent before the window goes, and
-    // where the window is, for the next start.
+    ui.on_tab_activate(|i| {
+        with_app(|a| a.activate_tab(i.max(0) as usize));
+    });
+    ui.on_tab_close(|i| {
+        with_app(|a| a.close_tab(i.max(0) as usize));
+    });
+    ui.on_tab_move(|from, to| {
+        with_app(|a| a.move_tab(from.max(0) as usize, to.max(0) as usize));
+    });
+    ui.on_tab_command(|i, command| {
+        with_app(|a| a.tab_command(i.max(0) as usize, command));
+    });
+    ui.on_tab_key(|key| {
+        with_app(|a| a.tab_key(key));
+    });
+    ui.on_open_tab(|id, background| {
+        with_app(|a| a.open_in_tab(i64::from(id), background));
+    });
+    ui.on_open_current_tab(|| {
+        with_app(|a| a.open_current_in_tab());
+    });
+    ui.on_open_window(|| {
+        with_app(|a| a.open_current_window());
+    });
+    // The message windows close first (none outlives this one); drafts
+    // are saved and held moves sent before the window goes, and where the
+    // window is and its tabs, for the next start.
+    // With "Keep running in the notification area" on (and the tray icon
+    // up), the window only hides; otherwise the app quits.
     ui.window().on_close_requested(|| {
-        with_app(|a| {
-            a.flush_held();
-            a.save_all_drafts();
-            a.save_geometry();
-        });
+        let to_tray = with_app(|a| {
+            a.before_close();
+            a.notes.close_to_tray && a.notes.has_tray() && !a.notes.quitting
+        })
+        .unwrap_or(false);
+        if !to_tray {
+            slint::quit_event_loop().ok();
+        }
         slint::CloseRequestResponse::HideWindow
     });
 }
 
 impl App {
+    /// What closing the window saves: drafts, held moves, where the window
+    /// is and its tabs; the message windows close.
+    fn before_close(&mut self) {
+        self.close_all_popouts();
+        self.flush_held();
+        self.save_all_drafts();
+        self.save_geometry();
+        self.save_tabs();
+        self.save_popout_size();
+    }
+
     fn ui(&self) -> AppWindow {
         self.ui.upgrade().expect("window alive")
     }
@@ -1990,6 +2076,7 @@ impl App {
                     caution: a.enabled && matches!(state, Some(AccountState::Unreachable)),
                     name: a.name.trim().into(),
                     enabled: a.enabled,
+                    notify: !self.notes.off.contains(&a.id),
                     dot: settings::account_color(i),
                     first: i == 0,
                     last: i == last,
@@ -2122,6 +2209,7 @@ impl App {
 
     fn add_account(&mut self, form: AccountForm) {
         let ui = self.ui();
+        ui.set_a_error_kind(onboarding::kind::OTHER);
         let email = form.email.trim().to_string();
         let password = form.password.to_string();
         self.check_form = (form_preset(&form), email.clone());
@@ -2202,6 +2290,7 @@ impl App {
         self.check_seq += 1;
         let seq = self.check_seq;
         let verify = self.verifier;
+        ui.set_a_error_kind(onboarding::kind::OTHER);
         ui.set_a_busy(true);
         ui.set_a_reading(false);
         ui.set_a_rejected(false);
@@ -2287,6 +2376,7 @@ impl App {
                     None => ui.set_a_test(ModelRc::default()),
                 }
                 let rejected = matches!(text, CheckText::Say(mail::Say::Rejected { .. }));
+                ui.set_a_error_kind(onboarding::error_kind(&text, review.is_some()));
                 ui.set_a_error(
                     match text {
                         CheckText::Say(mail::Say::Rejected { host, login }) => {
@@ -2432,22 +2522,13 @@ impl App {
                     self.spawn_workers(account);
                     self.workers[&id].send(Job::SyncAll { full: true });
                 }
-                // Settings close on the mail: the new account's Inbox once
-                // its folders arrive (the list then shows the download).
-                ui.set_a_busy(false);
-                ui.set_a_test(ModelRc::default());
-                ui.set_a_rejected(false);
-                ui.set_show_settings(false);
+                // The mail behind the flow moves to the new account's Inbox
+                // once its folders arrive (the list then shows the
+                // download); the flow goes on to Make it yours.
                 self.land_on = Some((id, self.view));
                 self.land();
-                // Said until the first download ends (no close button).
-                let line = t!(invoke_account_added, new.email.as_str().into());
-                self.set_status(&line, false);
-                self.status_timer.stop();
-                self.added_shown.set(true);
-                ui.set_status_closable(false);
                 self.show_empty();
-                ui.invoke_focus_list();
+                self.onboard_added(id, &new.email);
             }
             Err(e) => ui.set_a_error(t!(invoke_not_saved, format!("{e:#}").into()).into()),
         }
@@ -2501,6 +2582,7 @@ impl App {
             smtp_own_login: a.smtp_user != a.imap_user,
         });
         ui.set_a_edit_id(id as i32);
+        self.show_account_signatures(id);
         ui.set_a_edit_index(
             self.accounts
                 .iter()
@@ -2685,6 +2767,7 @@ impl App {
         if self.drafts.drop_account(id) && self.ui().get_composing() {
             self.ui().set_composing(false);
         }
+        self.prune_draft_tabs();
         self.pending_sends.retain(|_, p| p.account != id);
         self.refresh_draft_count();
         self.outbox_changed();
@@ -2698,6 +2781,7 @@ impl App {
         }
         self.load_accounts().ok();
         self.reload_rows();
+        self.refresh_message_tabs();
         self.ui().set_syncing(!self.syncing.is_empty());
     }
 
@@ -2726,6 +2810,7 @@ impl App {
         }
         komorebi::diag::set(None);
         self.remove_data = true;
+        self.close_all_popouts();
         slint::quit_event_loop().ok();
     }
 
@@ -3213,7 +3298,7 @@ impl App {
                 }
             };
             let main = vec![go(Role::Inbox), go(Role::Sent), go(Role::Archive)];
-            return Some((main, Vec::new()));
+            return Some((main, self.fold_entry().into_iter().collect()));
         }
         if !matches!(item.kind, 0..=2) || (item.kind == 2 && item.id <= 0) {
             return None;
@@ -3258,7 +3343,29 @@ impl App {
         } else {
             Vec::new()
         };
+        let mut extra = extra;
+        extra.extend(self.fold_entry());
         Some((main, extra))
+    }
+
+    /// The pane menu's Hide folders / Show folders, from 1040 px (below it
+    /// the pane is always the rail, opened over the content by its toggle).
+    fn fold_entry(&self) -> Option<MenuCommand> {
+        let ui = self.ui.upgrade()?;
+        if ui.get_compact() {
+            return None;
+        }
+        let title = if ui.get_nav_collapsed() {
+            t!(invoke_menu_show_folders)
+        } else {
+            t!(invoke_menu_hide_folders)
+        };
+        Some(MenuCommand {
+            title: title.into(),
+            enabled: true,
+            command: NAV_FOLD,
+            ..Default::default()
+        })
     }
 
     /// Right-click, "..." or the Menu key on a folder pane row: puts its
@@ -3342,6 +3449,8 @@ impl App {
     }
 
     fn set_view(&mut self, view: View) {
+        // The folders belong to the Mail tab.
+        self.go_to_mail_tab();
         if self.view == view {
             return;
         }
@@ -3692,7 +3801,8 @@ impl App {
     /// Esc in the list: clears the search, else the selection and the
     /// message open, else the status line.
     fn escape(&mut self) {
-        if !self.reading() {
+        // A message tab never closes on Esc (it would be lost by accident).
+        if !self.reading() || !self.in_mail_tab() {
             return;
         }
         if !self.search.is_empty() || !self.ui().get_search_text().is_empty() {
@@ -3719,6 +3829,10 @@ impl App {
     /// step: the open Outbox entry or message closes and the list takes
     /// the focus. Nothing on the server changes.
     fn back_to_list(&mut self) {
+        // From a message tab (one pane): back to the Mail tab.
+        if !self.in_mail_tab() {
+            return self.go_to_mail_tab();
+        }
         if !self.reading() {
             return;
         }
@@ -3818,6 +3932,8 @@ impl App {
                     with_app(|a| {
                         a.rebuild_nav();
                         a.reload_rows();
+                        a.refresh_message_tabs();
+                        a.refresh_popouts();
                     });
                 });
         }
@@ -3900,7 +4016,9 @@ impl App {
         }
         if matches!(flag, Flag::Seen) {
             self.rebuild_nav();
+            self.refresh_message_tabs();
         }
+        self.popouts_flags_changed(&ids);
     }
 
     /// What an action applies to: the open message, or with none open the
@@ -4067,15 +4185,42 @@ impl App {
     fn select_message(&mut self, id: i64) {
         let ui = self.ui();
         if ui.get_composing() {
-            // Parked as Esc and Close park it: saved here and on the
-            // server; Drafts brings it back.
-            self.park_composer();
+            if self.in_mail_tab() {
+                // A draft with something written moves to a tab of its
+                // own (saved here and on the server); an empty one goes.
+                if self.pane_draft_aside() {
+                    self.set_status(&t!(invoke_draft_kept_in_tab), false);
+                }
+            } else {
+                // Parked as Esc and Close park it: saved here and on the
+                // server; Drafts brings it back.
+                self.park_composer();
+            }
             ui.set_composing(false);
         }
+        if !self.load_message(id) {
+            return;
+        }
+        if self.filter == Filter::Unread && self.lists_messages() {
+            self.kept_unread.insert(id);
+        }
+        self.rows.select(|s, _| s.single(id));
+        self.show_open();
+        self.sync_selection_index();
+    }
+
+    /// Make message `id` the open one: the reader shows it (its body, or a
+    /// download of it), and its read delay starts. The list's selection is
+    /// left alone (a tab shows it). False when it is not cached.
+    fn load_message(&mut self, id: i64) -> bool {
+        let ui = self.ui();
         let mut msg = match self.db.message(id) {
             Ok(Some(m)) => m,
-            Ok(None) => return,
-            Err(e) => return self.set_status(&text::detail(&e), true),
+            Ok(None) => return false,
+            Err(e) => {
+                self.set_status(&text::detail(&e), true);
+                return false;
+            }
         };
         // The "will always load" bar belongs to the message it was
         // pressed on (also when the next one isn't downloaded yet).
@@ -4111,14 +4256,9 @@ impl App {
         } else {
             self.load_open_body();
         }
-        if self.filter == Filter::Unread && self.lists_messages() {
-            self.kept_unread.insert(id);
-        }
         self.move_filter.clear();
         self.show_move_targets();
-        self.rows.select(|s, _| s.single(id));
-        self.show_open();
-        self.sync_selection_index();
+        true
     }
 
     /// Show the open message's body: text at once, or HTML through the
@@ -4230,6 +4370,14 @@ impl App {
             ui.set_has_message(false);
             return;
         };
+        self.fill_reader(&ui, open);
+        self.show_draft_reply();
+        self.show_invite();
+    }
+
+    /// The reader's header, notices and text for `open`, in `ui` (the
+    /// main window or a message window).
+    fn fill_reader(&self, ui: &AppWindow, open: &Open) {
         let m = &open.msg;
         ui.set_has_message(true);
         ui.set_r_subject(m.subject.as_str().into());
@@ -4245,7 +4393,6 @@ impl App {
         ui.set_r_importance(m.importance.code() as i32);
         ui.set_r_server_draft(self.folder_role(m.folder_id) == Role::Drafts);
         ui.set_r_in_junk(self.folder_role(m.folder_id) == Role::Junk);
-        self.show_draft_reply();
         ui.set_loading(m.raw.is_none());
         ui.set_r_unreachable(m.raw.is_none() && self.unreachable(m.account_id));
         match &open.body {
@@ -4289,7 +4436,6 @@ impl App {
                 ui.set_r_unsubscribe(false);
             }
         }
-        self.show_invite();
     }
 
     /// Unsubscribe from the open message's list: a `mailto:` address opens
@@ -4370,10 +4516,11 @@ impl App {
     }
 
     fn delete(&mut self) {
-        if let Some(row) = self
-            .current_row()
-            .filter(|&id| !self.lists_messages() && self.rows.index_of(id).is_some())
-        {
+        // A draft or Outbox row of the list (never from a message tab,
+        // whose message is no row of the Mail tab's Drafts or Outbox).
+        if let Some(row) = self.current_row().filter(|&id| {
+            self.in_mail_tab() && !self.lists_messages() && self.rows.index_of(id).is_some()
+        }) {
             return self.discard_row(row);
         }
         let targets = self.targets();
@@ -4402,6 +4549,12 @@ impl App {
         if !self.reading() {
             return;
         }
+        self.move_out(dest, targets);
+    }
+
+    /// [`App::remove_targets`] whatever the main window shows (a message
+    /// window's own message).
+    fn move_out(&mut self, dest: Dest, targets: Vec<db::Brief>) {
         let mut jobs = Vec::new();
         let mut removed = HashSet::new();
         let mut read_first = Vec::new();
@@ -4506,6 +4659,14 @@ impl App {
                 *unread.entry(m.folder_id).or_default() += 1;
             }
         }
+        // Done from a message tab: that tab closes (the one to its left
+        // shows), as do the other tabs of these messages.
+        let from_tab = match self.tabs.active_kind() {
+            tabs::TabKind::Message(id) if ids.contains(&id) => Some(id),
+            _ => None,
+        };
+        let closed_tabs = self.close_message_tabs(&ids);
+        let closed_windows = self.close_popouts_of(&ids);
         let open = self
             .open
             .as_ref()
@@ -4514,7 +4675,7 @@ impl App {
         // What was open, or the whole selection, went (not a quick action
         // on another row): the next row opens in its place. Otherwise the
         // open message and what is left of the selection stay.
-        let hit = open.is_some() || {
+        let hit = self.in_mail_tab() && from_tab.is_none() && open.is_some() || {
             let selected = self.rows.selection().ids();
             self.open.is_none()
                 && !selected.is_empty()
@@ -4533,9 +4694,12 @@ impl App {
             unread,
             total,
             open,
+            tabs: closed_tabs,
+            from_tab,
+            windows: closed_windows,
         });
         self.rebuild_nav();
-        if hit {
+        if hit && self.in_mail_tab() {
             match index.and_then(|i| self.rows.neighbour(i)) {
                 Some(id) => self.select_message(id),
                 None => self.close_reader(),
@@ -4597,7 +4761,13 @@ impl App {
         self.clear_undo(UndoOffer::Move(seq));
         self.reload_rows();
         self.rebuild_nav();
-        if !self.reading() {
+        if !held.tabs.is_empty() {
+            self.reopen_message_tabs(&held.tabs, held.from_tab);
+        }
+        if held.windows {
+            self.set_status(&t!(invoke_undo_window), false);
+        }
+        if !self.reading() || held.from_tab.is_some() {
             return;
         }
         let listed: Vec<i64> = held
@@ -4707,6 +4877,7 @@ impl App {
     // ------------------------------------------------------------ events
 
     fn on_event(&mut self, event: Event) {
+        self.onboard_event(&event);
         match event {
             Event::Syncing {
                 account_id,
@@ -4718,9 +4889,9 @@ impl App {
                 } else {
                     self.syncing.remove(&account_id);
                     self.end_progress(account_id);
-                    // The first download is over: "Added …" goes.
-                    if self.first_sync.remove(&account_id) && self.added_shown.get() {
-                        self.set_status("", false);
+                    self.first_sync.remove(&account_id);
+                    if self.syncing.is_empty() && error.is_none() {
+                        self.mark_updated();
                     }
                 }
                 self.ui().set_syncing(!self.syncing.is_empty());
@@ -4799,11 +4970,16 @@ impl App {
                     self.load_open_body();
                     self.show_open();
                 }
+                self.popouts_body_ready(message_id);
                 self.raw_arrived(message_id);
                 self.schedule_reload();
             }
             Event::BodyFailed { message_id, error } => {
                 self.raw_failed(message_id, &error);
+                self.popouts_body_failed(
+                    message_id,
+                    &t!(invoke_could_not_download_body, text::problem(&error).into()),
+                );
                 if self.open.as_ref().is_some_and(|o| o.msg.id == message_id) {
                     self.reader.close();
                     let ui = self.ui();
@@ -5044,6 +5220,7 @@ impl App {
                     )
                 }
             }
+            Question::DeleteSignature(id) => self.signature_question(id),
             Question::TrustCert => match self.trust_prompt() {
                 Some(p) => {
                     let said = (p.title.clone(), p.text.clone(), p.ok.clone());
@@ -5099,6 +5276,7 @@ impl App {
             Question::RemoveAllData => self.remove_all_data_now(),
             Question::TrustCert => self.trust_certificate(),
             Question::DeleteFrom { .. } => self.delete_confirmed(),
+            Question::DeleteSignature(id) => self.delete_signature_now(id),
         }
     }
 
@@ -5132,7 +5310,6 @@ impl App {
             None => (text, Severity::Info, Some(5)),
         };
         self.progress_shown.set(false);
-        self.added_shown.set(false);
         let ui = self.ui();
         ui.set_status_closable(true);
         ui.set_status(text.into());
@@ -5178,6 +5355,11 @@ impl App {
             .and_then(|o| o.msg.raw.as_deref())
             .zip(usize::try_from(index).ok())
             .and_then(|(raw, i)| mime::attachment(raw, i));
+        self.open_attachment_file(found);
+    }
+
+    /// Open an attachment (its name and bytes) in the app for its type.
+    fn open_attachment_file(&mut self, found: Option<(String, Vec<u8>)>) {
         let Some((name, data)) = found else { return };
         if files::risky(&name) {
             return self.set_status(&t!(invoke_file_can_run, name.as_str().into()), true);
@@ -5844,13 +6026,19 @@ mod tests {
     /// (the Windows 10 icon font; Windows 11's Segoe Fluent Icons, used
     /// when present, has them all too). None needed a substitute. A new
     /// icon is added here only once it is checked in that font.
-    const MDL2_GLYPHS: [u32; 66] = [
+    const MDL2_GLYPHS: [u32; 80] = [
         0xE700, 0xE70B, 0xE70D, 0xE70E, 0xE70F, 0xE710, 0xE711, 0xE712, 0xE713, 0xE715, 0xE71B,
         0xE721, 0xE723, 0xE724, 0xE72A, 0xE72B, 0xE72C, 0xE73E, 0xE74D, 0xE74E, 0xE762, 0xE76C,
         0xE77B, 0xE783, 0xE787, 0xE7B3, 0xE7B8, 0xE7BA, 0xE7C1, 0xE7C3, 0xE894, 0xE898, 0xE8A5,
         0xE8B7, 0xE8B9, 0xE8BB, 0xE8C2, 0xE8C3, 0xE8C8, 0xE8C9, 0xE8DB, 0xE8DD, 0xE8DE, 0xE8FB,
         0xE8FD, 0xE921, 0xE922, 0xE923, 0xE943, 0xE946, 0xE97A, 0xE9B2, 0xE9CE, 0xEB4B, 0xEC59,
         0xF136, 0xF13C, 0xF13D, 0xF13E, 0xF13F, 0xE765, 0xE897, 0xEA18, 0xEA80, 0xED15, 0xE74B,
+        // Onboarding: LightningBolt, Globe, Lock.
+        0xE945, 0xE774, 0xE72E,
+        // The composer's toolbar: Underline, Strikethrough, FontColor,
+        // DecreaseIndent, IncreaseIndent, AlignLeft, AlignCenter,
+        // AlignRight, Table, Erase (clear formatting), Signature.
+        0xE8DC, 0xEDE0, 0xE8D3, 0xE290, 0xE291, 0xE8E4, 0xE8E3, 0xE8E2, 0xE80A, 0xE75C, 0xEE56,
     ];
 
     #[test]
@@ -5859,6 +6047,8 @@ mod tests {
             include_str!("../ui/theme.slint"),
             include_str!("../ui/widgets.slint"),
             include_str!("../ui/app.slint"),
+            include_str!("../ui/onboarding.slint"),
+            include_str!("../ui/editor.slint"),
             include_str!("role.rs"),
             include_str!("app.rs"),
         ];

@@ -1,0 +1,1364 @@
+// The first run and Settings > Accounts > Add account (docs/WINUI3.md
+// "Onboarding", docs/FLUENT2.md "Onboarding"): the welcome, then three
+// steps (Your email, Sign in, Make it yours) and the finish, on the layer.
+// The Rust side (src/app/onboarding.rs) decides how the servers are found,
+// runs the check and saves the account; the page holds the form as typed,
+// so a typed password is gone as soon as the page closes.
+import { ComboBox, ScrollView } from "std-widgets.slint";
+import { Theme, Icons, Motion } from "theme.slint";
+import { Focus, Icon, Button, IconButton, HyperlinkButton, TextField, ComposeBody, CheckBox, InfoBar, Severity, ProgressRing, ProgressBar, RadioButtons, ComboEdge, BrandMark, StepIndicator, OnboardCard, ProviderChip, TipTimer } from "widgets.slint";
+import { ServerPorts, Discovery, ServerFields, AccountForm, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow } from "forms.slint";
+
+// Rules that live in Rust, where they are tested.
+export global Onboard {
+    // The state of stage `group` (0 Connecting securely, 1 Checking your
+    // password, 2 Getting ready to send) from the check's seven step
+    // states (0 waiting, 1 running, 2 passed, 3 failed, 4 skipped).
+    pure callback stage(/* states */ [int], /* group */ int) -> int;
+    // The first line of a signature (the From preview).
+    pure callback first-line(string) -> string;
+}
+
+// The step's buttons: Back (or a subtle Skip) at the start and the primary
+// at the end; one under the other, the primary first, when they don't fit.
+component StepButtons inherits Rectangle {
+    in property <string> back-text: @tr("Back");
+    in property <bool> has-back: true;
+    in property <bool> back-subtle;
+    in property <string> primary-text;
+    in property <bool> primary-enabled: true;
+    in property <int> primary-focus;
+    callback back();
+    callback primary();
+    property <length> back-w: !root.has-back ? 0 : root.back-subtle ? skip.preferred-width : back.natural-width;
+    property <length> primary-w: max(96px, primary.natural-width);
+    property <bool> stacked: root.has-back && root.back-w + Theme.s2 + root.primary-w > root.width;
+    height: root.stacked ? 2 * 32px + Theme.s2 : 32px;
+    primary := Button {
+        x: root.stacked ? 0 : root.width - self.width;
+        y: 0;
+        width: root.stacked ? root.width : root.primary-w;
+        accent: true;
+        label: root.primary-text;
+        enabled: root.primary-enabled;
+        focus-seq: root.primary-focus;
+        clicked => { root.primary(); }
+    }
+    back := Button {
+        visible: root.has-back && !root.back-subtle;
+        enabled: self.visible;
+        x: 0;
+        y: root.stacked ? 32px + Theme.s2 : 0;
+        width: root.stacked ? root.width : self.natural-width;
+        label: root.back-text;
+        clicked => { root.back(); }
+    }
+    skip := IconButton {
+        visible: root.has-back && root.back-subtle;
+        enabled: self.visible;
+        x: 0;
+        y: root.stacked ? 32px + Theme.s2 : 0;
+        width: root.stacked ? root.width : self.preferred-width;
+        label: root.back-text;
+        clicked => { root.back(); }
+    }
+}
+
+// One of the welcome's three values: a 20 px glyph in a 36 px accent-tinted
+// square, the title in Body Strong and a Caption line.
+component ValueRow inherits HorizontalLayout {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> line;
+    spacing: Theme.s3;
+    VerticalLayout {
+        alignment: start;
+        Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: Theme.radius-lg;
+            background: Theme.contrast ? Theme.hc-window : Theme.accent.with-alpha(0.12);
+            border-width: Theme.contrast ? 1px : 0;
+            border-color: Theme.hc-text;
+            Icon {
+                text: root.icon;
+                font-size: 20px;
+                color: Theme.accent-text;
+            }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        Text {
+            text: root.title;
+            font-size: Theme.body;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.line;
+            font-size: Theme.caption;
+            color: Theme.text-2;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// The first download, under the personalise card and on the finish: an
+// indeterminate bar until a folder reports numbers, then "{0} of {1}"
+// (never an overall percentage).
+component SyncLine inherits VerticalLayout {
+    // 0 none, 1 indeterminate, 2 determinate, 3 the first pass ended.
+    in property <int> state;
+    in property <float> value;
+    in property <string> text;
+    spacing: Theme.s2;
+    if root.state == 1 || root.state == 2: Text {
+        text: root.state == 2 ? root.text : @tr("Downloading your mail\u{a0}…");
+        font-size: Theme.caption;
+        color: Theme.text-2;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        accessible-live-region: polite;
+    }
+    if root.state == 1 || root.state == 2: ProgressBar {
+        delay: 0ms;
+        indeterminate: root.state == 1;
+        value: root.value;
+        accessible-label: @tr("Downloading your mail");
+    }
+}
+
+export component OnboardingPage inherits Rectangle {
+    // In Settings' content area (Add account): no welcome; Back from the
+    // email step closes the flow.
+    in property <bool> embedded;
+    // The window is at least 1040 px wide (two-column welcome).
+    in property <bool> window-wide;
+    // 0 welcome, 1 Your email, 2 Sign in, 3 Make it yours, 4 finish.
+    in-out property <int> step;
+    // The account check (as Settings' account page has it).
+    in property <bool> busy;
+    // The long sentence of a failure, with the host names ("Show
+    // details"), and its kind: 0 other, 1 rejected password, 2 server out
+    // of reach, 3 untrusted certificate.
+    in property <string> error;
+    in property <int> error-kind;
+    in property <[int]> test-steps;
+    in-out property <bool> rejected;
+    in property <int> review;
+    in property <string> cert-imap;
+    in property <string> cert-smtp;
+    in property <bool> pinned-imap;
+    in property <bool> pinned-smtp;
+    // "Find settings" (see SettingsPage).
+    in property <bool> finding;
+    in property <string> find-note;
+    in property <ServerFields> found-from;
+    in property <string> found-email;
+    in property <ServerFields> found-to;
+    in property <int> found-seq;
+    // The chip: 0 hidden, 1 looking, 2 a preset's, 3 found by the lookup,
+    // 4 not found; the incoming server found and the address's domain.
+    in property <int> chip;
+    in property <string> chip-host;
+    in property <string> domain;
+    // The preset chosen (0 Purelymail, 1 Postale.io), 2 Other server, -1
+    // none yet; manual setup shows; the offline note.
+    in-out property <int> provider: -1;
+    in-out property <bool> manual;
+    in property <bool> offline-note;
+    // The address's problem after Continue: 0 none, 1 not an address, 2
+    // already in Komorebi.
+    in-out property <int> email-problem;
+    // Make it yours: the name (prefilled from the address) and the
+    // account's address.
+    in-out property <string> name;
+    in property <string> address;
+    // The first download (SyncLine) and whether the Inbox has a message.
+    in property <int> sync;
+    in property <float> sync-value;
+    in property <string> sync-text;
+    in property <bool> newest;
+    // The wait's reassurance: 1 after 3 s, 2 after 10 s.
+    in-out property <int> slow;
+    // The display language (0 System, 1 English, 2 Português (Portugal)).
+    in property <int> language;
+    // Each change focuses the welcome's button (Settings closed over it).
+    in property <int> refocus;
+    callback continue-email(string, ServerFields);
+    callback sign-in(AccountForm);
+    callback cancel-check();
+    callback find-settings(string, ServerFields);
+    callback review-certificate(AccountForm, int);
+    callback forget-certificate(int);
+    callback form-changed(AccountForm);
+    // Back to the email step: a lookup or check still running answers
+    // into nothing.
+    callback reset();
+    callback personalise(/* save */ bool, /* name */ string, /* signature */ string);
+    callback open-inbox();
+    // Back or Esc from the email step: the welcome, or (embedded) out.
+    callback close();
+    callback link(int);
+    callback language-changed(int);
+    callback open-settings();
+
+    background: Theme.layer;
+
+    // ---- the form as typed (the address also for the snapshots)
+    in-out property <string> email;
+    property <string> password;
+    property <string> signature;
+    property <string> imap-host;
+    property <string> imap-port: "993";
+    property <int> imap-security: 0;
+    property <string> imap-user;
+    property <string> smtp-host;
+    property <string> smtp-port: "465";
+    property <int> smtp-security: 0;
+    property <string> smtp-user;
+    property <bool> same-login: true;
+    property <string> password-err;
+    property <string> provider-err;
+    property <string> imap-err;
+    property <string> smtp-err;
+    // "Set username" opened the sign-in name under the password.
+    property <bool> user-open;
+    // Sign in was pressed while the lookup ran: it signs in once it answers.
+    property <bool> pending;
+    // "Show details" of a failure.
+    property <bool> details;
+    property <bool> find-stale;
+    // Each change focuses the error bar's first button.
+    property <int> err-focus;
+
+    changed password => {
+        root.rejected = false;
+        root.password-err = "";
+    }
+    changed imap-host => { root.imap-err = ""; }
+    changed smtp-host => { root.smtp-err = ""; }
+    changed error => { root.details = false; }
+    changed busy => { if !root.busy { root.slow = 0; } }
+    // The servers as typed, one value for all six fields.
+    property <string> servers: root.imap-host + "|" + root.imap-port + "|" + root.imap-security + "|" + root.smtp-host + "|" + root.smtp-port + "|" + root.smtp-security;
+    changed servers => { root.form-changed(root.form()); }
+
+    function servers-now() -> ServerFields {
+        return {
+            imap-host: root.imap-host,
+            imap-port: root.imap-port,
+            imap-starttls: root.imap-security == 1,
+            imap-user: root.imap-user,
+            smtp-host: root.smtp-host,
+            smtp-port: root.smtp-port,
+            smtp-starttls: root.smtp-security == 1,
+            smtp-user: root.smtp-user,
+            smtp-own-login: !root.same-login,
+        };
+    }
+    // The provider the form signs in with: manual setup and a lookup's
+    // answer are Other server (2).
+    property <int> form-provider: root.manual || (root.chip == 3 && root.provider < 0) ? 2 : root.provider;
+    function form() -> AccountForm {
+        return {
+            id: 0,
+            provider: root.form-provider,
+            name: "",
+            email: root.email,
+            password: root.password,
+            imap-host: root.imap-host,
+            imap-port: root.imap-port,
+            imap-starttls: root.imap-security == 1,
+            smtp-host: root.smtp-host,
+            smtp-port: root.smtp-port,
+            smtp-starttls: root.smtp-security == 1,
+            save-sent: true,
+            signature: "",
+            imap-user: root.imap-user,
+            smtp-user: root.smtp-user,
+            smtp-own-login: !root.same-login,
+        };
+    }
+    // A lookup answered: fill the fields it found, unless they or the
+    // address were edited meanwhile; then a Sign in that waited for it.
+    changed found-seq => {
+        if root.servers-now() == root.found-from && root.email == root.found-email {
+            root.find-stale = false;
+            root.imap-host = root.found-to.imap-host;
+            root.imap-port = root.found-to.imap-port;
+            root.imap-security = root.found-to.imap-starttls ? 1 : 0;
+            root.imap-user = root.found-to.imap-user;
+            root.smtp-host = root.found-to.smtp-host;
+            root.smtp-port = root.found-to.smtp-port;
+            root.smtp-security = root.found-to.smtp-starttls ? 1 : 0;
+            root.smtp-user = root.found-to.smtp-user;
+            root.same-login = !root.found-to.smtp-own-login;
+        } else {
+            root.find-stale = true;
+        }
+        if root.pending {
+            root.pending = false;
+            if root.chip == 3 {
+                root.submit();
+            }
+        }
+    }
+    // Sign in: an inline error under each field missing, else the check.
+    function submit() {
+        if root.busy {
+            return;
+        }
+        root.password-err = root.password == "" ? @tr("Enter your password.") : "";
+        root.provider-err = !root.manual && root.chip == 4 && root.provider < 0 ? @tr("Choose your provider.") : "";
+        root.imap-err = root.manual && root.imap-host == "" ? @tr("Enter the incoming (IMAP) server.") : "";
+        root.smtp-err = root.manual && root.smtp-host == "" ? @tr("Enter the sending (SMTP) server.") : "";
+        if root.password-err != "" || root.provider-err != "" || root.imap-err != "" || root.smtp-err != "" {
+            return;
+        }
+        // Still looking: sign in once the lookup answers.
+        if !root.manual && root.chip == 1 {
+            root.pending = true;
+            return;
+        }
+        root.sign-in(root.form());
+    }
+    function go-manual() {
+        root.manual = true;
+        root.provider = 2;
+        root.provider-err = "";
+    }
+    // Back: from manual setup to the chip, from Sign in to the email, from
+    // the email out; a running check or a waiting Sign in is dropped.
+    function back() {
+        if root.busy {
+            root.cancel-check();
+            return;
+        }
+        root.pending = false;
+        if root.step == 2 && root.manual && root.chip != 0 {
+            root.manual = false;
+            if root.provider == 2 {
+                root.provider = -1;
+            }
+            return;
+        }
+        if root.step == 2 {
+            root.reset();
+            root.manual = false;
+            root.provider = -1;
+            root.user-open = false;
+            root.step = 1;
+            return;
+        }
+        if root.step == 1 {
+            root.close();
+        }
+    }
+    function primary() {
+        if root.view == 1 {
+            // A new address starts from empty servers: what a lookup for an
+            // earlier one filled is never signed in with.
+            root.clear-servers();
+            root.continue-email(root.email, root.servers-now());
+        } else if root.view == 2 {
+            root.submit();
+        } else if root.view == 3 {
+            root.personalise(true, root.name, root.signature);
+        } else if root.view == 4 {
+            root.open-inbox();
+        }
+    }
+    function clear-servers() {
+        root.imap-host = "";
+        root.imap-port = "993";
+        root.imap-security = 0;
+        root.imap-user = "";
+        root.smtp-host = "";
+        root.smtp-port = "465";
+        root.smtp-security = 0;
+        root.smtp-user = "";
+        root.same-login = true;
+        root.find-stale = false;
+    }
+    // "Add another account": the email step, empty.
+    function again() {
+        root.email = "";
+        root.password = "";
+        root.signature = "";
+        root.imap-host = "";
+        root.imap-port = "993";
+        root.imap-security = 0;
+        root.imap-user = "";
+        root.smtp-host = "";
+        root.smtp-port = "465";
+        root.smtp-security = 0;
+        root.smtp-user = "";
+        root.same-login = true;
+        root.user-open = false;
+        root.manual = false;
+        root.provider = -1;
+        root.reset();
+        root.step = 1;
+    }
+
+    // ---- step transitions (docs/WINUI3.md "Onboarding"): the content
+    // fades out over `faster`, then the next one fades in over `normal`
+    // from 12 px below (above when going back). The card frame stays.
+    property <int> view: root.step;
+    property <int> phase;
+    property <int> dir: 1;
+    init => { root.view = root.step; }
+    changed step => {
+        if root.step != root.view {
+            root.dir = root.step > root.view ? 1 : -1;
+            root.phase = 1;
+        }
+    }
+    Timer {
+        interval: max(1ms, Theme.faster);
+        running: root.phase == 1;
+        triggered => {
+            root.view = root.step;
+            root.phase = 2;
+        }
+    }
+    Timer {
+        interval: 1ms;
+        running: root.phase == 2;
+        triggered => { root.phase = 0; }
+    }
+    property <float> fade: root.phase == 0 ? 1 : 0;
+    animate fade {
+        duration: root.phase == 1 ? Theme.faster : Theme.normal;
+        easing: root.phase == 1 ? Motion.ease-in : Motion.ease-out;
+    }
+    property <length> rise: root.phase == 2 ? root.dir * 12px : 0;
+    animate rise {
+        duration: root.phase == 2 ? 0ms : Theme.normal;
+        easing: Motion.ease-out;
+    }
+    // The wait's reassurance, after 3 s and after 10 s.
+    Timer {
+        interval: 3s;
+        running: root.busy && root.slow == 0;
+        triggered => { root.slow = 1; }
+    }
+    Timer {
+        interval: 7s;
+        running: root.busy && root.slow == 1;
+        triggered => { root.slow = 2; }
+    }
+
+    // The welcome's entrance: after the first frame, which is drawn still.
+    // Drawn at once while animations are off.
+    property <bool> entered: !Theme.animate;
+    Timer {
+        interval: 1ms;
+        running: !root.entered;
+        triggered => { root.entered = true; }
+    }
+
+    // Esc goes back (on Make it yours it skips), Alt+Left is Back.
+    FocusScope {
+        focus-on-tab-navigation: false;
+        capture-key-pressed(e) => {
+            if e.modifiers.alt && e.text == Key.LeftArrow && (root.view == 1 || root.view == 2) {
+                root.back();
+                return accept;
+            }
+            reject
+        }
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                if root.view == 3 {
+                    root.personalise(false, "", "");
+                } else if root.view == 1 || root.view == 2 {
+                    root.back();
+                }
+                return accept;
+            }
+            reject
+        }
+
+        // ---- the welcome (first run only)
+        if root.view == 0: welcome := ScrollView {
+            property <length> foot-h: foot.preferred-height + 2 * Theme.s6;
+            property <length> hero-h: root.window-wide ? wide-hero.preferred-height : narrow-hero.preferred-height;
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, self.hero-h + Theme.s10 + self.foot-h);
+            property <length> top: max(Theme.s10, (self.visible-height - self.foot-h - self.hero-h) * 0.4);
+            // Wide: the mark and the copy, the values beside them.
+            wide-hero := HorizontalLayout {
+                visible: root.window-wide;
+                x: (welcome.visible-width - self.width) / 2;
+                y: welcome.top;
+                width: min(welcome.visible-width - 2 * Theme.s6, 440px + Theme.s12 + 360px);
+                height: self.preferred-height;
+                spacing: Theme.s12;
+                VerticalLayout {
+                    max-width: 440px;
+                    horizontal-stretch: 1;
+                    alignment: start;
+                    HorizontalLayout {
+                        alignment: start;
+                        BrandMark {
+                            size: 96px;
+                            opacity: root.entered ? 1 : 0;
+                            animate opacity { duration: Theme.gentle; easing: Motion.ease-out; }
+                        }
+                    }
+                    Rectangle { height: Theme.s6; }
+                    Text {
+                        text: @tr("Your mail, calm and close at hand");
+                        font-family: Theme.display-font;
+                        font-size: Theme.display;
+                        font-weight: 600;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                        opacity: root.entered ? 1 : 0;
+                        animate opacity { delay: Theme.stagger; duration: Theme.gentle; easing: Motion.ease-out; }
+                    }
+                    Rectangle { height: Theme.s3; }
+                    Text {
+                        text: @tr("A small, fast email app for Windows. Your messages stay on this PC and on your mail server.");
+                        font-size: Theme.subtitle;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                        opacity: root.entered ? 1 : 0;
+                        animate opacity { delay: Theme.stagger; duration: Theme.gentle; easing: Motion.ease-out; }
+                    }
+                    Rectangle { height: Theme.s8; }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            min-width: 200px;
+                            height: 40px;
+                            accent: true;
+                            label: @tr("Add your email account");
+                            focus-seq: root.refocus;
+                            init => { self.focus(); }
+                            clicked => { root.step = 1; }
+                        }
+                    }
+                    Rectangle { height: Theme.s3; }
+                    Text {
+                        text: @tr("It takes about a minute.");
+                        font-size: Theme.caption;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                    }
+                }
+                VerticalLayout {
+                    max-width: 360px;
+                    horizontal-stretch: 1;
+                    alignment: start;
+                    padding-top: Theme.s6;
+                    spacing: Theme.s4;
+                    for v[i] in [
+                        { icon: Icons.shield, title: @tr("Private by design"), line: @tr("No ads, no tracking, no AI reading your mail.") },
+                        { icon: Icons.lightning, title: @tr("Fast from the start"), line: @tr("Opens in a blink, works offline with what's downloaded.") },
+                        { icon: Icons.globe, title: @tr("Works with your provider"), line: @tr("Purelymail, Postale.io or your own server.") },
+                    ]: Rectangle {
+                        height: value.preferred-height;
+                        opacity: root.entered ? 1 : 0;
+                        animate opacity { delay: (i + 2) * Theme.stagger; duration: Theme.gentle; easing: Motion.ease-out; }
+                        value := ValueRow {
+                            icon: v.icon;
+                            title: v.title;
+                            line: v.line;
+                        }
+                    }
+                }
+            }
+            // Narrow: one centred column.
+            narrow-hero := VerticalLayout {
+                visible: !root.window-wide;
+                x: (welcome.visible-width - self.width) / 2;
+                y: welcome.top;
+                width: min(welcome.visible-width - 2 * Theme.s4, 480px);
+                height: self.preferred-height;
+                alignment: start;
+                HorizontalLayout {
+                    alignment: center;
+                    BrandMark {
+                        size: 96px;
+                        opacity: root.entered ? 1 : 0;
+                        animate opacity { duration: Theme.gentle; easing: Motion.ease-out; }
+                    }
+                }
+                Rectangle { height: Theme.s6; }
+                Text {
+                    text: @tr("Your mail, calm and close at hand");
+                    font-family: Theme.display-font;
+                    font-size: Theme.display;
+                    font-weight: 600;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    opacity: root.entered ? 1 : 0;
+                    animate opacity { delay: Theme.stagger; duration: Theme.gentle; easing: Motion.ease-out; }
+                }
+                Rectangle { height: Theme.s3; }
+                Text {
+                    text: @tr("A small, fast email app for Windows. Your messages stay on this PC and on your mail server.");
+                    font-size: Theme.subtitle;
+                    color: Theme.text-2;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    opacity: root.entered ? 1 : 0;
+                    animate opacity { delay: Theme.stagger; duration: Theme.gentle; easing: Motion.ease-out; }
+                }
+                Rectangle { height: Theme.s6; }
+                HorizontalLayout {
+                    alignment: center;
+                    Button {
+                        min-width: 200px;
+                        height: 40px;
+                        accent: true;
+                        label: @tr("Add your email account");
+                            focus-seq: root.refocus;
+                        init => { self.focus(); }
+                        clicked => { root.step = 1; }
+                    }
+                }
+                Rectangle { height: Theme.s2; }
+                Text {
+                    text: @tr("It takes about a minute.");
+                    font-size: Theme.caption;
+                    color: Theme.text-2;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: Theme.s6; }
+                VerticalLayout {
+                    spacing: Theme.s3;
+                    for v[i] in [
+                        { icon: Icons.shield, title: @tr("Private by design"), line: @tr("No ads, no tracking, no AI reading your mail.") },
+                        { icon: Icons.lightning, title: @tr("Fast from the start"), line: @tr("Opens in a blink, works offline with what's downloaded.") },
+                        { icon: Icons.globe, title: @tr("Works with your provider"), line: @tr("Purelymail, Postale.io or your own server.") },
+                    ]: Rectangle {
+                        height: nvalue.preferred-height;
+                        opacity: root.entered ? 1 : 0;
+                        animate opacity { delay: (i + 2) * Theme.stagger; duration: Theme.gentle; easing: Motion.ease-out; }
+                        nvalue := ValueRow {
+                            icon: v.icon;
+                            title: v.title;
+                            line: v.line;
+                        }
+                    }
+                }
+            }
+            // Help, the privacy statement, the language and Settings,
+            // pinned 24 px from the bottom.
+            foot := HorizontalLayout {
+                x: (welcome.visible-width - self.width) / 2;
+                y: welcome.content-height - self.height - Theme.s6;
+                width: min(self.preferred-width, welcome.visible-width - 2 * Theme.s4);
+                height: self.preferred-height;
+                alignment: center;
+                spacing: Theme.s1;
+                HyperlinkButton {
+                    text: @tr("Need help?");
+                    label: @tr("Need help? How to add an account");
+                    clicked => { root.link(0); }
+                }
+                HyperlinkButton {
+                    text: @tr("Privacy");
+                    label: @tr("Privacy statement");
+                    clicked => { root.link(1); }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    // 160 px (compact), wider for a language's own name.
+                    Rectangle {
+                        width: max(160px, lang-box.preferred-width);
+                        height: lang-box.min-height;
+                        lang-box := ComboBox {
+                            width: 100%;
+                            height: 100%;
+                            // Each language is named in its own language.
+                            model: [@tr("settings language" => "System"), "English", "Português (Portugal)"];
+                            current-index: root.language;
+                            accessible-label: @tr("settings language" => "Language");
+                            selected(v) => { root.language-changed(self.current-index); }
+                        }
+                        ComboEdge { }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        width: 40px;
+                        icon: Icons.settings;
+                        tooltip: @tr("Settings");
+                        clicked => { root.open-settings(); }
+                    }
+                }
+            }
+        }
+
+        // ---- the steps and the finish
+        if root.view >= 1: steps := ScrollView {
+            // The column: 480 px (560 for manual setup), the finish 440.
+            property <length> col-max: root.view == 4 ? 440px : root.view == 2 && root.manual ? 560px : 480px;
+            property <length> col-w: min(self.col-max, self.visible-width - 2 * Theme.s4);
+            property <bool> narrow-card: !root.window-wide || self.col-w < 440px;
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, col.preferred-height + 2 * Theme.s6);
+            col := VerticalLayout {
+                x: (steps.visible-width - self.width) / 2;
+                y: root.view == 4 ? max(Theme.s10, (steps.visible-height - self.preferred-height) * 0.4) : Theme.s6;
+                width: steps.col-w;
+                height: self.preferred-height;
+                spacing: Theme.s6;
+                if root.view <= 3: StepIndicator {
+                    labels: [@tr("Your email"), @tr("Sign in"), @tr("Make it yours")];
+                    current: root.view;
+                    narrow: steps.col-w < 440px || Theme.body > 19px;
+                }
+                // ---- 1 Your email
+                if root.view == 1: OnboardCard {
+                    narrow: steps.narrow-card;
+                    Rectangle {
+                        opacity: root.fade;
+                        height: email-col.preferred-height;
+                        Rectangle {
+                            email-col := VerticalLayout {
+                                y: root.rise;
+                                height: parent.height;
+                                Text {
+                                    text: @tr("What's your email address?");
+                                    font-family: Theme.display-font;
+                                    font-size: Theme.title;
+                                    font-weight: 600;
+                                    color: Theme.text;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { height: Theme.s2; }
+                                Text {
+                                    text: @tr("We'll look up the right settings for you.");
+                                    font-size: Theme.body;
+                                    color: Theme.text-2;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { height: Theme.s6; }
+                                TextField {
+                                    text <=> root.email;
+                                    input-type: InputType.text;
+                                    placeholder-text: @tr("name@example.com");
+                                    accessible-label: @tr("Email address");
+                                    error: root.email-problem != 0;
+                                    description: root.email-problem == 1 ? @tr("Enter an email address like name@example.com.") : root.email-problem == 2 ? @tr("This account is already in Komorebi.") : "";
+                                    init => {
+                                        Focus.keyboard = true;
+                                        self.focus();
+                                    }
+                                    accepted => { root.primary(); }
+                                    edited => { root.email-problem = 0; }
+                                }
+                                if root.email-problem != 0: VerticalLayout {
+                                    padding-top: Theme.s1;
+                                    FieldNote {
+                                        error: true;
+                                        text: root.email-problem == 1 ? @tr("Enter an email address like name@example.com.") : @tr("This account is already in Komorebi.");
+                                        accessible-role: none;
+                                    }
+                                }
+                                Rectangle { height: Theme.s6; }
+                                StepButtons {
+                                    primary-text: @tr("Continue");
+                                    back => { root.back(); }
+                                    primary => { root.primary(); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // ---- 2 Sign in (the chip and the password), or manual setup
+                if root.view == 2: OnboardCard {
+                    narrow: steps.narrow-card;
+                    Rectangle {
+                        opacity: root.fade;
+                        height: sign-col.preferred-height;
+                        Rectangle {
+                            sign-col := VerticalLayout {
+                                y: root.rise;
+                                height: parent.height;
+                                // The title: the address elided, whole in the tooltip.
+                                if !root.manual: Rectangle {
+                                    height: title-text.preferred-height;
+                                    title-text := Text {
+                                        width: 100%;
+                                        text: @tr("Sign in to {0}", root.email);
+                                        font-family: Theme.display-font;
+                                        font-size: Theme.title;
+                                        font-weight: 600;
+                                        color: Theme.text;
+                                        overflow: elide;
+                                    }
+                                    title-ta := TouchArea { }
+                                    TipTimer {
+                                        text: root.email;
+                                        hover: title-ta.has-hover;
+                                        pressed: title-ta.pressed;
+                                    }
+                                }
+                                if root.manual: VerticalLayout {
+                                    Text {
+                                        text: @tr("Server settings");
+                                        font-family: Theme.display-font;
+                                        font-size: Theme.title;
+                                        font-weight: 600;
+                                        color: Theme.text;
+                                        wrap: word-wrap;
+                                    }
+                                    Rectangle { height: Theme.s2; }
+                                    Text {
+                                        text: @tr("Your provider's help pages list these. If you run your own server, use its IMAP and SMTP details.");
+                                        font-size: Theme.body;
+                                        color: Theme.text-2;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                if root.manual && root.offline-note: VerticalLayout {
+                                    padding-top: Theme.s4;
+                                    InfoBar {
+                                        severity: Severity.info;
+                                        message: @tr("You're offline, so we can't look up settings. Enter them below.");
+                                        closable: false;
+                                    }
+                                }
+                                // ---- the chip, and the providers when nothing was found
+                                if !root.manual && root.chip != 0: VerticalLayout {
+                                    padding-top: Theme.s4;
+                                    spacing: Theme.s3;
+                                    ProviderChip {
+                                        state: root.chip == 1 ? 1 : root.chip == 4 ? 3 : 2;
+                                        title: root.chip == 1 ? @tr("Looking up settings for {0}\u{a0}…", root.domain)
+                                            : root.chip == 2 ? (root.provider == 1 ? "Postale.io" : "Purelymail")
+                                            : root.chip == 3 ? @tr("Settings found")
+                                            : @tr("We couldn't find settings for {0}", root.domain);
+                                        detail: root.chip == 2 ? @tr("Settings ready")
+                                            : root.chip == 3 ? @tr("{0} · encrypted", root.chip-host)
+                                            : root.chip == 4 ? @tr("Choose your provider or set it up yourself.") : "";
+                                        can-change: root.chip != 1 && !root.busy;
+                                        change => { root.go-manual(); }
+                                    }
+                                    if root.chip == 4: VerticalLayout {
+                                        spacing: Theme.s2;
+                                        RadioButtons {
+                                            label: @tr("Provider");
+                                            enabled: !root.busy;
+                                            items: [
+                                                { label: "Purelymail", description: @tr("Any domain hosted at Purelymail") },
+                                                { label: "Postale.io", description: @tr("Any domain hosted at Postale") },
+                                                { label: @tr("Other server"), description: @tr("Any other IMAP and SMTP server") },
+                                            ];
+                                            selected: root.provider;
+                                            picked(i) => {
+                                                root.provider-err = "";
+                                                if i == 2 {
+                                                    root.go-manual();
+                                                } else {
+                                                    root.provider = i;
+                                                }
+                                            }
+                                        }
+                                        if root.provider-err != "": FieldNote { error: true; text: root.provider-err; }
+                                    }
+                                }
+                                // ---- manual setup's servers
+                                if root.manual: VerticalLayout {
+                                    padding-top: Theme.s6;
+                                    spacing: Theme.s3;
+                                    HorizontalLayout {
+                                        spacing: Theme.s2;
+                                        VerticalLayout {
+                                            spacing: Theme.s2;
+                                            FieldHeader { text: @tr("Incoming (IMAP) server"); }
+                                            TextField {
+                                                text <=> root.imap-host;
+                                                placeholder-text: "imap.example.com";
+                                                accessible-label: @tr("Incoming (IMAP) server");
+                                                error: root.imap-err != "";
+                                                description: root.imap-err;
+                                                enabled: !root.busy;
+                                                init => {
+                                                    if !root.offline-note || root.imap-host == "" {
+                                                        self.focus();
+                                                    }
+                                                }
+                                                accepted => { root.submit(); }
+                                            }
+                                            if root.imap-err != "": FieldNote { error: true; text: root.imap-err; }
+                                        }
+                                        VerticalLayout {
+                                            width: 96px;
+                                            spacing: Theme.s2;
+                                            alignment: start;
+                                            FieldHeader { text: @tr("Port"); }
+                                            TextField { text <=> root.imap-port; input-type: InputType.number; enabled: !root.busy; accessible-label: @tr("IMAP port"); }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: Theme.s2;
+                                        FieldHeader { text: @tr("IMAP security"); }
+                                        Rectangle {
+                                            height: imap-box.min-height;
+                                            imap-box := ComboBox {
+                                                width: 100%;
+                                                height: 100%;
+                                                enabled: !root.busy;
+                                                model: [@tr("Encrypted (SSL/TLS)"), @tr("Encrypted after connecting (STARTTLS)")];
+                                                current-index <=> root.imap-security;
+                                                accessible-label: @tr("IMAP security");
+                                                selected(v) => { root.imap-port = ServerPorts.port-for-security(true, 1 - root.imap-security, root.imap-security, root.imap-port); }
+                                            }
+                                            ComboEdge { }
+                                        }
+                                    }
+                                    if root.cert-imap != "": CertLine {
+                                        text: root.cert-imap;
+                                        pinned: root.pinned-imap;
+                                        forget => { root.forget-certificate(1); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: Theme.s2;
+                                        VerticalLayout {
+                                            spacing: Theme.s2;
+                                            FieldHeader { text: @tr("Outgoing (SMTP) server"); }
+                                            TextField {
+                                                text <=> root.smtp-host;
+                                                placeholder-text: "smtp.example.com";
+                                                accessible-label: @tr("Outgoing (SMTP) server");
+                                                error: root.smtp-err != "";
+                                                description: root.smtp-err;
+                                                enabled: !root.busy;
+                                                accepted => { root.submit(); }
+                                            }
+                                            if root.smtp-err != "": FieldNote { error: true; text: root.smtp-err; }
+                                        }
+                                        VerticalLayout {
+                                            width: 96px;
+                                            spacing: Theme.s2;
+                                            alignment: start;
+                                            FieldHeader { text: @tr("Port"); }
+                                            TextField { text <=> root.smtp-port; input-type: InputType.number; enabled: !root.busy; accessible-label: @tr("SMTP port"); }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: Theme.s2;
+                                        FieldHeader { text: @tr("SMTP security"); }
+                                        Rectangle {
+                                            height: smtp-box.min-height;
+                                            smtp-box := ComboBox {
+                                                width: 100%;
+                                                height: 100%;
+                                                enabled: !root.busy;
+                                                model: [@tr("Encrypted (SSL/TLS)"), @tr("Encrypted after connecting (STARTTLS)")];
+                                                current-index <=> root.smtp-security;
+                                                accessible-label: @tr("SMTP security");
+                                                selected(v) => { root.smtp-port = ServerPorts.port-for-security(false, 1 - root.smtp-security, root.smtp-security, root.smtp-port); }
+                                            }
+                                            ComboEdge { }
+                                        }
+                                    }
+                                    if root.cert-smtp != "": CertLine {
+                                        text: root.cert-smtp;
+                                        pinned: root.pinned-smtp;
+                                        forget => { root.forget-certificate(2); }
+                                    }
+                                    CheckBox {
+                                        text: @tr("Same sign-in as incoming");
+                                        checked <=> root.same-login;
+                                    }
+                                    VerticalLayout {
+                                        spacing: Theme.s2;
+                                        FieldHeader { text: @tr("Username"); }
+                                        TextField {
+                                            text <=> root.imap-user;
+                                            placeholder-text: @tr("Same as email address");
+                                            accessible-label: @tr("Username");
+                                            enabled: !root.busy;
+                                        }
+                                    }
+                                    if !root.same-login: VerticalLayout {
+                                        spacing: Theme.s2;
+                                        FieldHeader { text: @tr("SMTP username"); }
+                                        TextField {
+                                            text <=> root.smtp-user;
+                                            placeholder-text: @tr("Same as email address");
+                                            accessible-label: @tr("SMTP username");
+                                            enabled: !root.busy;
+                                        }
+                                    }
+                                    FindSettingsRow {
+                                        finding: root.finding;
+                                        can-find: !root.finding && !root.busy && Discovery.email-ok(root.email);
+                                        note: root.find-stale ? @tr("Not filled in: the form changed while Komorebi looked.") : root.find-note;
+                                        find => {
+                                            root.find-stale = false;
+                                            root.find-settings(root.email, root.servers-now());
+                                        }
+                                    }
+                                }
+                                // ---- the password
+                                Rectangle { height: Theme.s6; }
+                                VerticalLayout {
+                                    spacing: Theme.s2;
+                                    FieldHeader { text: @tr("Password"); }
+                                    pw-field := TextField {
+                                        text <=> root.password;
+                                        input-type: InputType.password;
+                                        leading-icon: Icons.lock;
+                                        enabled: !root.busy;
+                                        placeholder-text: @tr("Password or app password");
+                                        accessible-label: @tr("Password");
+                                        error: root.password-err != "" || root.rejected;
+                                        description: root.password-err != "" ? root.password-err : @tr("Saved in Windows Credential Manager, never in Komorebi's files.");
+                                        init => {
+                                            if !root.manual {
+                                                Focus.keyboard = true;
+                                                self.focus();
+                                            }
+                                        }
+                                        accepted => { root.submit(); }
+                                    }
+                                    if root.password-err != "": FieldNote { error: true; text: root.password-err; }
+                                    if root.password-err == "": FieldNote {
+                                        text: @tr("Saved in Windows Credential Manager, never in Komorebi's files.");
+                                        accessible-role: none;
+                                    }
+                                }
+                                // The sign-in name, after "Set username".
+                                if root.user-open && !root.manual: VerticalLayout {
+                                    padding-top: Theme.s3;
+                                    spacing: Theme.s2;
+                                    FieldHeader { text: @tr("Username"); }
+                                    TextField {
+                                        text <=> root.imap-user;
+                                        placeholder-text: @tr("Same as email address");
+                                        accessible-label: @tr("Username");
+                                        description: @tr("The name you sign in with, if it isn't your email address.");
+                                        enabled: !root.busy;
+                                        init => {
+                                            Focus.keyboard = true;
+                                            self.focus();
+                                        }
+                                        accepted => { root.submit(); }
+                                    }
+                                    FieldNote {
+                                        text: @tr("The name you sign in with, if it isn't your email address.");
+                                        accessible-role: none;
+                                    }
+                                }
+                                // ---- the wait: three stages, shown at once
+                                if root.busy: VerticalLayout {
+                                    padding-top: Theme.s6;
+                                    spacing: Theme.s2;
+                                    accessible-role: list;
+                                    for name[i] in [@tr("Connecting securely"), @tr("Checking your password"), @tr("Getting ready to send")]: stage := Rectangle {
+                                        property <int> state: Onboard.stage(root.test-steps, i);
+                                        property <float> shown: 0;
+                                        init => { self.shown = 1; }
+                                        opacity: self.shown;
+                                        animate opacity { delay: i * Theme.stagger; duration: Theme.normal; easing: Motion.ease-out; }
+                                        height: max(20px, stage-text.preferred-height);
+                                        accessible-role: list-item;
+                                        accessible-label: [@tr("{0}, waiting", name), @tr("{0}, in progress", name), @tr("{0}, passed", name), @tr("{0}, failed", name), @tr("{0}, skipped", name)][self.state];
+                                        accessible-live-region: polite;
+                                        HorizontalLayout {
+                                            spacing: Theme.s2;
+                                            Rectangle {
+                                                width: 16px;
+                                                if stage.state == 1: ProgressRing { active: true; }
+                                                if stage.state == 2: Icon {
+                                                    text: Icons.check-mark;
+                                                    font-size: 12px;
+                                                    color: Theme.success;
+                                                }
+                                                if stage.state == 0: Rectangle {
+                                                    width: 6px;
+                                                    height: 6px;
+                                                    border-radius: 3px;
+                                                    background: Theme.text-3;
+                                                }
+                                            }
+                                            stage-text := Text {
+                                                text: name;
+                                                font-size: Theme.body;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                wrap: word-wrap;
+                                                color: stage.state == 0 ? Theme.text-2 : Theme.text;
+                                                accessible-role: none;
+                                            }
+                                        }
+                                    }
+                                    if root.slow > 0: Text {
+                                        text: root.slow == 1 ? @tr("Still working on it\u{a0}… This can take a moment on some servers.") : @tr("Taking longer than usual. You can go back and check the address.");
+                                        font-size: Theme.caption;
+                                        color: Theme.text-2;
+                                        wrap: word-wrap;
+                                        accessible-live-region: polite;
+                                    }
+                                }
+                                // ---- a failure: one title, one sentence, one next step
+                                if root.error != "" && !root.busy: err-box := VerticalLayout {
+                                    padding-top: Theme.s4;
+                                    // 1 Set username, 2 Review certificate, 3 Try again,
+                                    // 4 Set up manually.
+                                    property <int> act: root.error-kind == 1 ? (root.user-open ? 0 : 1)
+                                        : root.error-kind == 2 ? 3
+                                        : root.error-kind == 3 ? (root.review != 0 ? 2 : root.manual ? 0 : 4)
+                                        : root.manual ? 3 : 4;
+                                    property <int> passes: 2;
+                                    Timer {
+                                        interval: 60ms;
+                                        running: err-box.passes > 0;
+                                        triggered => {
+                                            err-box.passes -= 1;
+                                            if err-box.passes == 0 {
+                                                if root.rejected {
+                                                    Focus.keyboard = true;
+                                                    pw-field.focus();
+                                                    pw-field.select-all();
+                                                } else if err-box.act != 0 {
+                                                    root.err-focus += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    InfoBar {
+                                        severity: Severity.critical;
+                                        closable: false;
+                                        title: root.error-kind == 1 ? @tr("That password didn't work")
+                                            : root.error-kind == 2 ? @tr("Can't reach your mail server")
+                                            : root.error-kind == 3 ? @tr("This server's certificate isn't trusted")
+                                            : @tr("Couldn't sign in");
+                                        message: root.error-kind == 1 ? @tr("Check it and try again. If your provider uses two-step sign-in, use an app password.")
+                                            : root.error-kind == 2 ? @tr("Check your internet connection, then try again.")
+                                            : root.error-kind == 3 ? @tr("Review it before you continue.")
+                                            : root.error;
+                                        button1: err-box.act == 1 ? @tr("Set username") : err-box.act == 2 ? @tr("Review certificate") : err-box.act == 3 ? @tr("Try again") : err-box.act == 4 ? @tr("Set up manually") : "";
+                                        button-focus: root.err-focus;
+                                        button-clicked(i) => {
+                                            if err-box.act == 1 {
+                                                root.user-open = true;
+                                            } else if err-box.act == 2 {
+                                                root.review-certificate(root.form(), root.review);
+                                            } else if err-box.act == 3 {
+                                                root.submit();
+                                            } else if err-box.act == 4 {
+                                                root.go-manual();
+                                            }
+                                        }
+                                        accessible-live-region: assertive;
+                                        if root.error-kind != 0 || root.test-steps.length > 0: VerticalLayout {
+                                            padding-top: 0;
+                                            spacing: Theme.s2;
+                                            HorizontalLayout {
+                                                alignment: start;
+                                                padding-left: -11px;
+                                                HyperlinkButton {
+                                                    text: root.details ? @tr("Hide details") : @tr("Show details");
+                                                    clicked => { root.details = !root.details; }
+                                                }
+                                            }
+                                            if root.details && root.error-kind != 0: Text {
+                                                text: root.error;
+                                                font-size: Theme.caption;
+                                                color: Theme.text;
+                                                wrap: word-wrap;
+                                            }
+                                            if root.details && root.test-steps.length > 0: StepList { states: root.test-steps; }
+                                        }
+                                    }
+                                }
+                                Rectangle { height: Theme.s6; }
+                                StepButtons {
+                                    primary-text: @tr("Sign in");
+                                    primary-enabled: !root.busy && !root.pending;
+                                    back => { root.back(); }
+                                    primary => { root.submit(); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // ---- 3 Make it yours
+                if root.view == 3: OnboardCard {
+                    narrow: steps.narrow-card;
+                    Rectangle {
+                        opacity: root.fade;
+                        height: yours-col.preferred-height;
+                        Rectangle {
+                            yours-col := VerticalLayout {
+                                y: root.rise;
+                                height: parent.height;
+                                Text {
+                                    text: @tr("Make it yours");
+                                    font-family: Theme.display-font;
+                                    font-size: Theme.title;
+                                    font-weight: 600;
+                                    color: Theme.text;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { height: Theme.s2; }
+                                Text {
+                                    text: @tr("How should your name appear when you send mail? You can change this later in Settings.");
+                                    font-size: Theme.body;
+                                    color: Theme.text-2;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { height: Theme.s6; }
+                                VerticalLayout {
+                                    spacing: Theme.s2;
+                                    FieldHeader { text: @tr("Your name"); }
+                                    TextField {
+                                        text <=> root.name;
+                                        placeholder-text: @tr("e.g. Ana Silva");
+                                        accessible-label: @tr("Your name");
+                                        init => {
+                                            Focus.keyboard = true;
+                                            self.focus();
+                                        }
+                                        accepted => { root.primary(); }
+                                    }
+                                }
+                                Rectangle { height: Theme.s4; }
+                                VerticalLayout {
+                                    spacing: Theme.s2;
+                                    FieldHeader { text: @tr("Signature (optional)"); }
+                                    ComposeBody {
+                                        text <=> root.signature;
+                                        font-size: Theme.body;
+                                        height: max(76px, 4 * Theme.body + 24px);
+                                        placeholder-text: @tr("Added below new mail, replies and forwards");
+                                        accessible-label: @tr("Signature (optional)");
+                                    }
+                                }
+                                Rectangle { height: Theme.s4; }
+                                // How the mail will look to the people it goes to.
+                                Rectangle {
+                                    height: preview.preferred-height;
+                                    border-radius: Theme.radius;
+                                    background: Theme.card-fill-2;
+                                    border-width: 1px;
+                                    border-color: Theme.card-stroke;
+                                    preview := VerticalLayout {
+                                        padding: Theme.s3;
+                                        spacing: Theme.s1;
+                                        Text {
+                                            text: @tr("From: {0}", root.name != "" ? root.name + " <" + root.address + ">" : root.address);
+                                            font-size: Theme.caption;
+                                            color: Theme.text-2;
+                                            wrap: word-wrap;
+                                        }
+                                        if root.signature != "": Text {
+                                            text: "-- " + Onboard.first-line(root.signature);
+                                            font-size: Theme.caption;
+                                            color: Theme.text-2;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                                Rectangle { height: Theme.s6; }
+                                StepButtons {
+                                    back-text: @tr("Skip");
+                                    back-subtle: true;
+                                    primary-text: @tr("Done");
+                                    back => { root.personalise(false, "", ""); }
+                                    primary => { root.primary(); }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.view == 3 && root.sync != 0: SyncLine {
+                    state: root.sync;
+                    value: root.sync-value;
+                    text: root.sync-text;
+                }
+                // ---- 4 You're all set
+                if root.view == 4: Rectangle {
+                    opacity: root.fade;
+                    height: done-col.preferred-height;
+                    done-col := VerticalLayout {
+                    alignment: start;
+                    HorizontalLayout {
+                        alignment: center;
+                        BrandMark {
+                            size: 64px;
+                            property <bool> go;
+                            init => { self.go = true; }
+                            celebrate: self.go;
+                        }
+                    }
+                    Rectangle { height: Theme.s6; }
+                    Text {
+                        text: @tr("You're all set");
+                        font-family: Theme.display-font;
+                        font-size: Theme.title-large;
+                        font-weight: 600;
+                        color: Theme.text;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                        accessible-live-region: polite;
+                    }
+                    Rectangle { height: Theme.s2; }
+                    Text {
+                        text: @tr("account" => "{0} is ready. Your mail keeps arriving in the background.", root.address);
+                        font-size: Theme.body;
+                        color: Theme.text-2;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    if root.sync != 0 || root.newest: Rectangle { height: Theme.s6; }
+                    if root.newest: Text {
+                        text: @tr("Your newest mail is here.");
+                        font-size: Theme.body;
+                        font-weight: 600;
+                        color: Theme.text;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                        accessible-live-region: polite;
+                    }
+                    if root.sync != 0 && !root.newest: SyncLine {
+                        state: root.sync;
+                        value: root.sync-value;
+                        text: root.sync-text;
+                    }
+                    Rectangle { height: Theme.s8; }
+                    HorizontalLayout {
+                        alignment: center;
+                        Button {
+                            min-width: 200px;
+                            height: 40px;
+                            accent: true;
+                            label: @tr("Open your inbox");
+                            init => {
+                                Focus.keyboard = true;
+                                self.focus();
+                            }
+                            clicked => { root.open-inbox(); }
+                        }
+                    }
+                    Rectangle { height: Theme.s3; }
+                    HorizontalLayout {
+                        alignment: center;
+                        IconButton {
+                            label: @tr("Add another account");
+                            clicked => { root.again(); }
+                        }
+                    }
+                }
+                }
+            }
+        }
+    }
+}

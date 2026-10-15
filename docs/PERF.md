@@ -43,6 +43,7 @@ Source: Rust Performance Book "Heap Allocations", "Iterators", "Bounds Checks"; 
 Source: Cargo book "Profiles"; rustc codegen options; Perf Book "Build Configuration", "Inlining"; cargo-bloat.
 
 1. Current profile: `opt-level = "s"`, fat LTO, `codegen-units = 1`, `strip`. Never `"z"` (disables loop vectorization). Per-package `opt-level = 3` goes only on crates whose loops are the product promise (Slint core and renderer, tiny-skia, SQLite C code); every other crate stays `s`.
+   Development uses the unoptimized `dev` profile only (dependencies optimized once and cached); `release` is built once at the end of a task for the size ceiling and for any timing or memory number, which `dev` cannot give.
 2. A per-package override changes that crate's codegen before LTO; generic code is instantiated in the caller and follows the caller's level. Verify every override with a build and a timing, not by reasoning. `libsqlite3-sys` takes its C flags from the package's `OPT_LEVEL` through the `cc` crate.
 3. Raising the whole `komorebi` package to 3 overshoots the budget (measured 20.4 MB). Hot render code at 3 needs a separate workspace crate; do that only if a 9-run app measurement beats the spread.
 4. Do not add `#[inline(never)]`/`#[inline(always)]` speculatively; measure with cargo-bloat first. Forced Slint features (SVG, 3.8 MB of ICU dictionaries for complex scripts) cannot be dropped from our Cargo.toml; removing them changes behaviour or needs a vendored patch: out of scope.

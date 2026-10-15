@@ -109,6 +109,24 @@ pub(super) fn apply_system_theme(
     shown: Option<&SystemTheme>,
     theme: ThemeChoice,
 ) {
+    set_tokens(ui, system, shown);
+    apply_theme(ui, system, theme);
+}
+
+/// [`apply_system_theme`] for a message window: the same tokens and
+/// light or dark, and its system caption dressed as the main window's
+/// (it has no title bar of its own to switch).
+pub(super) fn apply_popout_theme(ui: &AppWindow, system: &SystemTheme, theme: ThemeChoice) {
+    set_tokens(ui, system, None);
+    ui.global::<crate::Palette>()
+        .set_color_scheme(color_scheme(system, theme));
+    ui.set_custom_title_bar(false);
+    crate::dress_popout(ui);
+}
+
+/// The Theme global's Windows inputs: the accent ramp, high contrast, the
+/// animation switch and the text size.
+fn set_tokens(ui: &AppWindow, system: &SystemTheme, shown: Option<&SystemTheme>) {
     let t = ui.global::<Theme>();
     let color = |c: theme::Rgb| Color::from_rgb_u8(c[0], c[1], c[2]);
     if shown.is_none_or(|s| s.ramp != system.ramp) {
@@ -138,15 +156,12 @@ pub(super) fn apply_system_theme(
     t.set_subtitle(size(16.0));
     t.set_title(size(20.0));
     t.set_title_large(size(28.0));
-    apply_theme(ui, system, theme);
+    t.set_display(size(theme::DISPLAY));
 }
 
-/// Show light or dark: under a contrast theme as its window colour is
-/// (Slint's std widgets have no contrast colours, so they stay readable);
-/// else as `theme` chooses, System following Windows. The title bar
-/// follows (docs/WINUI3.md "Title bar and frame"): app-drawn on Windows 11,
-/// the system caption under high contrast (switched live) or on Windows 10.
-fn apply_theme(ui: &AppWindow, system: &SystemTheme, theme: ThemeChoice) {
+/// Light or dark: under a contrast theme as its window colour is; else as
+/// `theme` chooses, System following Windows.
+fn color_scheme(system: &SystemTheme, theme: ThemeChoice) -> slint::language::ColorScheme {
     use slint::language::ColorScheme;
     let dark = match system.contrast {
         Some(hc) => theme::luminance(hc[0]) < 0.5,
@@ -156,11 +171,21 @@ fn apply_theme(ui: &AppWindow, system: &SystemTheme, theme: ThemeChoice) {
             ThemeChoice::System => system.dark,
         },
     };
-    let scheme = if dark {
+    if dark {
         ColorScheme::Dark
     } else {
         ColorScheme::Light
-    };
+    }
+}
+
+/// Show light or dark: under a contrast theme as its window colour is
+/// (Slint's std widgets have no contrast colours, so they stay readable);
+/// else as `theme` chooses, System following Windows. The title bar
+/// follows (docs/WINUI3.md "Title bar and frame"): app-drawn on Windows 11,
+/// the system caption under high contrast (switched live) or on Windows 10.
+fn apply_theme(ui: &AppWindow, system: &SystemTheme, theme: ThemeChoice) {
+    let scheme = color_scheme(system, theme);
+    let dark = scheme == slint::language::ColorScheme::Dark;
     ui.global::<crate::Palette>().set_color_scheme(scheme);
     let layer = ui.global::<Theme>().get_layer();
     let caption = theme::caption_color(system, [layer.red(), layer.green(), layer.blue()]);
@@ -274,6 +299,7 @@ impl App {
             self.set_status(&text::detail(&e), true);
         }
         self.reload_rows();
+        self.refresh_message_tabs();
         if had_workers {
             self.respawn_workers(id);
             self.set_status(&t!(invoke_redownloading, email.as_str().into()), false);
@@ -296,14 +322,16 @@ impl App {
         ];
         ui.set_g_choices(ModelRc::new(VecModel::from(choices.to_vec())));
         ui.set_g_flash(self.flash);
+        ui.set_g_reopen_tabs(self.reopen_tabs);
         ui.set_g_language(self.language.index());
         ui.set_g_diag(komorebi::diag::enabled());
+        self.show_notification_settings();
     }
 
     /// General choice `which` (0 theme, 1 check interval, 2 undo send,
     /// 3 mark as read, 4 taskbar flash, 5 the diagnostics log under
     /// Privacy, 6 the language: 0 System, 1 English, 2 Português
-    /// (Portugal)) changed to `value` (an index into its choices; for the
+    /// (Portugal), 7 reopen tabs at start) changed to `value` (an index into its choices; for the
     /// switches 1 or 0): apply it and save it.
     pub(super) fn general_changed(&mut self, which: i32, value: i32) {
         let pick = |n: usize| (value.max(0) as usize).min(n - 1);
@@ -311,6 +339,7 @@ impl App {
             0 => {
                 self.theme = [ThemeChoice::System, ThemeChoice::Light, ThemeChoice::Dark][pick(3)];
                 apply_theme(&self.ui(), &self.system, self.theme);
+                self.theme_popouts();
                 ("theme", self.theme.key().to_string())
             }
             1 => {
@@ -349,6 +378,16 @@ impl App {
                 komorebi::diag::set(on.then(|| komorebi::diag::log_path(&self.db_path)));
                 ("diagnostics_log", u8::from(on).to_string())
             }
+            // Off: the saved tabs go at once (ids only, but not kept).
+            7 => {
+                self.reopen_tabs = value != 0;
+                self.save_tabs();
+                ("reopen_tabs", u8::from(self.reopen_tabs).to_string())
+            }
+            8..=11 => {
+                self.notification_changed(which, value != 0);
+                return;
+            }
             _ => return,
         };
         if let Err(e) = self.db.set_setting(key, &saved) {
@@ -380,6 +419,8 @@ impl App {
     /// account form's one-off answers (`a_error`, `a_ok`, the lookup note).
     fn repush_text(&mut self) {
         self.push_window_title();
+        self.repush_tray(self.inbox_unread.unwrap_or(0));
+        self.show_last_updated();
         self.rebuild_nav();
         self.show_list_title();
         self.show_empty();
@@ -393,6 +434,10 @@ impl App {
         self.show_account_rows();
         self.show_open();
         self.reader.language_changed();
+        // Tab titles made by Rust ("New message", "(no subject)"), and
+        // the message windows' Rust-set text.
+        self.retitle_tabs();
+        self.repush_popouts();
         self.show_outbox_entry();
         self.show_move_targets();
         self.repush_composer();
@@ -414,6 +459,8 @@ impl App {
     pub(super) fn system_changed(&mut self, system: SystemTheme) {
         apply_system_theme(&self.ui(), &system, Some(&self.system), self.theme);
         self.system = system;
+        // Every message window follows.
+        self.theme_popouts();
     }
 
     // ----------------------------------------------- title and window
@@ -423,6 +470,11 @@ impl App {
     /// the taskbar button if the user asked for that.
     pub(super) fn show_unread(&mut self, unread: i32) {
         let before = self.inbox_unread.replace(unread);
+        // New mail is found by message id, not by the unread total: a
+        // message read in the same refresh must not hide a new one.
+        if before.is_some() {
+            self.notify_new_mail();
+        }
         if before == Some(unread) {
             return;
         }
@@ -431,6 +483,7 @@ impl App {
         if self.flash && !self.focused && before.is_some_and(|b| unread > b) {
             crate::flash_taskbar(&ui);
         }
+        self.repush_tray(unread);
     }
 
     /// Put the title in the window: the inboxes' unread count, if any, in

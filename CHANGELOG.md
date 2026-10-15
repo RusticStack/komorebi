@@ -9,6 +9,67 @@ changes in the local data (the cache, its folders and Credential Manager).
 
 ### Added
 
+- Tabs and windows: the folder pane folds to the rail at any width (its
+  toggle, Ctrl+Shift+E or Hide folders; remembered). Messages open in tabs
+  of their own at full width (double-click, Shift+Enter, a middle-click in
+  the background, "Open in new tab"), and each draft beyond the one in the
+  reading pane gets a composer tab; a draft with something written moves
+  to a tab when another message is selected. Tabs close (Ctrl+W, a
+  middle-click), reorder, reopen (Ctrl+Shift+T) and come back at the next
+  start ("Reopen tabs at start" in Settings > General). Ctrl+O or "Open in
+  new window" shows a message in a read-only window of its own; replies
+  from it open as composer tabs in the main window. Closing the main
+  window closes every window. Local data: settings `nav_collapsed`,
+  `tabs` (message and draft ids only), `reopen_tabs` and `popout_size`; no
+  schema change.
+- Formatted mail: the composer's body is Komorebi's own painted page (the
+  reader's text engine over a hidden text field that keeps the caret, IME,
+  the clipboard's text and screen readers), with a toolbar for ten
+  email-safe fonts, twelve sizes, bold, italic, underline, strikethrough,
+  ten named colours or Automatic, bulleted and numbered lists, indent,
+  alignment, links, quotes, simple tables (up to 10 x 10, Tab between
+  cells) and Clear formatting; one undo stack for text and formatting;
+  pasted HTML keeps what the document can hold (Ctrl+Shift+V pastes plain
+  text). A message with no formatting is still sent as plain text only;
+  any message can be switched to plain text (asked first, Ctrl+Z undoes
+  it), and a plain-text message is sent as text/plain only (the composer's
+  old `**bold**` and `- ` marks are no longer turned into HTML). Settings > General > Compose picks how new messages start and their
+  font. A key in a 2,000-line message with 20 tables is drawn in about
+  11 ms (TODO.md has the numbers).
+- Named signatures (Settings > Signatures): formatted, with at most one
+  PNG or JPEG logo of 200 KB sent as an embedded `cid:` part; each account
+  picks one for new messages and one for replies and forwards (or None);
+  the composer's Signature menu swaps it.
+- Local data: **schema v14** adds the `signatures` table,
+  `accounts.sig_new` / `sig_reply`, `drafts.body_rich` and
+  `drafts.signature_id`, and `draft_attachments.cid`. Each non-empty
+  account signature becomes a named signature (named after the account's
+  address) once, and both defaults; `accounts.signature` stays in the
+  table but is no longer read (the onboarding flow's signature is saved
+  as a named signature). A formatted draft keeps its plain text in
+  `drafts.body` beside the document; a draft saved as plain text (every
+  draft from before) opens as plain text. All of it is plaintext in the
+  cache.
+
+- A new first run and Add account flow (`ui/onboarding.slint`,
+  docs/WINUI3.md "Onboarding"): a welcome with Komorebi's vector mark, what
+  it is in one sentence and three short values, "Add your email account",
+  and Need help?, Privacy, a Language box that switches at once and
+  Settings; then three steps with the steps remaining shown above them:
+  **Your email** (Continue checks the address and refuses one already
+  added; a Purelymail or Postale.io address has its settings built in;
+  any other domain is looked up only because Continue was pressed;
+  offline goes straight to the server settings), **Sign in** (what was
+  found, or the provider choice, or manual setup with "Encrypted
+  (SSL/TLS)" and "Encrypted after connecting (STARTTLS)"; the check shows
+  three stages and reassures after 3 and 10 seconds; a failure is one
+  title, one sentence and one next step, with the seven steps under "Show
+  details"), and **Make it yours** (the name from the address and an
+  optional signature with a From preview, after the account is saved).
+  "You're all set" shows the first download until "Open your inbox".
+  Settings > Accounts > Add account opens the same steps in the content
+  area. Text, colours, motion (off with Windows animation effects), high
+  contrast and text size follow Windows; English and pt-PT.
 - Sender-set importance: the `Importance`, `X-Priority` and
   `X-MSMail-Priority` headers are read in the same header FETCH as the
   rest of a list row (no extra round trip). A high-importance message
@@ -23,17 +84,25 @@ changes in the local data (the cache, its folders and Credential Manager).
   and its server copy. Changing it, or the From account, on an empty new
   message keeps nothing (Esc still drops it silently).
 - Local data: the cache moves to schema v13, adding `messages.priority`
-  and `drafts.importance` (both default to normal). Headers already
-  cached are not fetched again and the upgrade does not scan the cache
-  (so the first start stays fast). Instead a message cached before v13
-  gets its importance from its body: when the body is downloaded (the
-  background prefetch or opening it), or, if it was already downloaded,
-  when it is opened (the reader reads it from the cached copy and the row
-  keeps it). Until then its row shows none. No extra round trip. The step
-  is one way: 0.3.0 leaves a v13 cache as it is and does not open it.
+  and `drafts.importance` (both default to normal). Cached mail is cleared
+  and refetched on first start after upgrading (a clean slate, so every
+  message has its importance, flags and body from the server): messages,
+  bodies and the address index are emptied and each folder's sync
+  fingerprint reset, so the next sync is a full first one (inboxes do not
+  notify for it). Accounts, folders and their settings, drafts, the outbox,
+  signatures, settings, remote-image senders and invitation answers are
+  kept. Nothing on the server changes. The step is one way: 0.3.0 leaves a
+  v13 cache as it is and does not open it.
 
 ### Changed
 
+- Settings no longer has its own "Add an account" form (the account page,
+  Edit, is unchanged), and adding an account no longer leaves an "Added …
+  Downloading mail…" line on the status line: the flow's finish shows the
+  download. Local data: none changed (no schema change; Make it yours
+  writes the account's existing name and signature once, the signature
+  also as a named signature set as both its defaults; Skip writes
+  nothing).
 - Read and unread rows look more different: an unread row has its
   sender, subject and date semibold in the text colour and an 8 px accent
   dot before the sender; a read row is regular in the secondary text

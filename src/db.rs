@@ -7,6 +7,7 @@
 //! Passwords are never stored here (see `secrets`).
 
 use crate::fold::{fold as search_fold, fold_into, needs_fold};
+use crate::mail::rich;
 use crate::mail::smtp;
 use crate::providers::{Security, Server};
 use crate::role::Role;
@@ -21,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 /// How long a sync worker waits for another connection's write lock.
 const WORKER_BUSY: Duration = Duration::from_secs(10);
@@ -60,7 +61,26 @@ CREATE TABLE accounts (
     smtp_user TEXT NOT NULL DEFAULT '',
     -- DER of the pinned server certificates (public data); NULL: none.
     imap_pin BLOB,
-    smtp_pin BLOB
+    smtp_pin BLOB,
+    -- The signature that starts new mail, and the one that starts replies and
+    -- forwards (`signatures.id`; NULL: none). Cleared by `delete_signature`.
+    -- `signature` above is the plain text of before v14 and is no longer read.
+    sig_new INTEGER,
+    sig_reply INTEGER
+);
+
+-- Named signatures: formatted (the tagged HTML of `rich::html`, read back by
+-- `rich::import::strict`) with their plain text, and at most one small
+-- logo (a PNG or JPEG as picked, 200 KB at most). Plaintext, like the rest.
+CREATE TABLE signatures (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    body_html TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    logo BLOB,
+    logo_mime TEXT,
+    created INTEGER NOT NULL,
+    updated INTEGER NOT NULL
 );
 
 -- App settings by key; a missing key takes its default (`Settings`).
@@ -164,7 +184,11 @@ CREATE TABLE drafts (
     server_uidvalidity INTEGER,
     server_uid INTEGER,
     -- The importance it is sent with (`Importance`).
-    importance INTEGER NOT NULL DEFAULT 0
+    importance INTEGER NOT NULL DEFAULT 0,
+    -- The formatted draft (tagged `rich::html`); NULL: a plain draft.
+    body_rich TEXT,
+    -- The signature last put in (informational).
+    signature_id INTEGER
 );
 CREATE INDEX drafts_state ON drafts(state, updated DESC, id DESC);
 CREATE INDEX drafts_reply ON drafts(reply_to_msg);
@@ -176,7 +200,9 @@ CREATE TABLE draft_attachments (
     name TEXT NOT NULL,
     mime TEXT NOT NULL DEFAULT '',
     size INTEGER NOT NULL,
-    file TEXT NOT NULL
+    file TEXT NOT NULL,
+    -- Non-NULL: an inline part (a signature's logo), by Content-ID.
+    cid TEXT
 );
 CREATE INDEX draft_attachments_draft ON draft_attachments(draft_id);
 "#;
@@ -339,14 +365,52 @@ ALTER TABLE folders ADD COLUMN role_override TEXT NOT NULL DEFAULT '';
 "#;
 
 /// v13 keeps the importance a message's sender set and the one a draft
-/// is sent with (`Importance`). Messages cached before start normal: their
-/// headers aren't fetched again, and the cached bodies aren't scanned here
-/// (first launch after the upgrade stays fast). A body stored from now on
-/// fills it in (`set_body`, `set_bodies`), and the reader reads it from
-/// an already cached body when the message opens.
+/// is sent with (`Importance`). Mail cached before cannot be given its
+/// importance (headers aren't fetched again), so the server-derived cache is
+/// cleared and the next sync downloads it all again ("clean slate"). The
+/// decision per table:
+/// - `messages`, `bodies` (cascade): server copies, cleared.
+/// - `addresses`: rebuilt from the headers, cleared; `accounts.addr_backfill`
+///   reset (NULL: nothing to take in; new mail is indexed as it arrives).
+/// - `rsvp`: the user's own answers to invitations, kept.
+/// - `folders`: rows kept (names, `role_override` and the UIDVALIDITY stay,
+///   so a draft's copy in the server's Drafts folder still matches and is
+///   not uploaded twice); only the sync fingerprint is cleared, which makes
+///   the next sync a full first one without a UIDVALIDITY reset.
+/// - `drafts` (and the outbox), `draft_attachments`, `signatures`,
+///   `settings`, `accounts`, `remote_allow`: local only, kept. A draft's
+///   `reply_to_msg` becomes NULL (its foreign key), its headers stay.
 const MIGRATE_V12_TO_V13: &str = r#"
+DELETE FROM messages;
+DELETE FROM addresses;
+UPDATE accounts SET addr_backfill = NULL;
+UPDATE folders SET sync_uidnext = NULL, sync_messages = NULL, sync_hms = NULL;
 ALTER TABLE messages ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE drafts ADD COLUMN importance INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// v14 adds named signatures, the account's two defaults, and a draft's
+/// formatted form. `import_signatures` turns each non-empty
+/// `accounts.signature` into a signature once. The column stays: until the
+/// Signatures page ships (TODO.md, composer upgrade Phase 3) the app still
+/// reads and writes it, so edits made meanwhile have to be carried over
+/// when the readers switch. `drafts.body` stays the plain text.
+const MIGRATE_V13_TO_V14: &str = r#"
+CREATE TABLE signatures (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    body_html TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    logo BLOB,
+    logo_mime TEXT,
+    created INTEGER NOT NULL,
+    updated INTEGER NOT NULL
+);
+ALTER TABLE accounts ADD COLUMN sig_new INTEGER;
+ALTER TABLE accounts ADD COLUMN sig_reply INTEGER;
+ALTER TABLE drafts ADD COLUMN body_rich TEXT;
+ALTER TABLE drafts ADD COLUMN signature_id INTEGER;
+ALTER TABLE draft_attachments ADD COLUMN cid TEXT;
 "#;
 
 /// A stored body's row: preview, attachment, `has_body`, and the sender's
@@ -704,6 +768,38 @@ pub struct Settings {
     /// The composer's one-time caption about the formatting marks was
     /// shown (key `format_hint_seen`).
     pub format_hint_seen: bool,
+    /// New messages start formatted (key `compose_format`: `rich` or
+    /// `plain`). Formatted by default.
+    pub compose_rich: bool,
+    /// The default font of formatted messages (key `compose_font`: a
+    /// [`rich::FontId`] label, `compose_size`: points, `compose_color`: a
+    /// named colour's `#rrggbb`, or `auto`).
+    pub compose_font: rich::FontId,
+    pub compose_size: rich::SizePt,
+    pub compose_color: Option<rich::ColorId>,
+    /// The folder pane is folded to the rail at every width (key
+    /// `nav_collapsed`: `1` or `0`).
+    pub nav_collapsed: bool,
+    /// The tabs open when the window last closed (key `tabs`: message and
+    /// draft ids and the active tab, never text; see `app::tabs`).
+    pub tabs: String,
+    /// Open the saved tabs again at start (key `reopen_tabs`: `1` or `0`).
+    /// On by default.
+    pub reopen_tabs: bool,
+    /// New-mail notifications (key `notify`: `1` or `0`). On by default.
+    pub notify: bool,
+    /// Notifications show the sender and subject (key `notify_detail`);
+    /// off, they only say "New mail". On by default.
+    pub notify_detail: bool,
+    /// Notifications paused from the tray menu (key `notify_paused`).
+    pub notify_paused: bool,
+    /// Accounts that never notify (key `notify_off`: account ids, spaces).
+    pub notify_off: Vec<i64>,
+    /// Closing the window keeps the app in the tray (key `close_to_tray`).
+    pub close_to_tray: bool,
+    /// The last message window's size in logical px (key `popout_size`:
+    /// `w h`).
+    pub popout_size: Option<(u32, u32)>,
 }
 
 /// The new-mail check intervals Settings offers, in seconds.
@@ -794,6 +890,19 @@ impl Default for Settings {
             tips_seen: String::new(),
             whats_new_version: None,
             format_hint_seen: false,
+            compose_rich: true,
+            compose_font: rich::FontId::default(),
+            compose_size: rich::SizePt::DEFAULT,
+            compose_color: None,
+            nav_collapsed: false,
+            tabs: String::new(),
+            reopen_tabs: true,
+            notify: true,
+            notify_detail: true,
+            notify_paused: false,
+            notify_off: Vec::new(),
+            close_to_tray: false,
+            popout_size: None,
         }
     }
 }
@@ -855,6 +964,55 @@ impl Settings {
             "tips_seen" => self.tips_seen = value.to_string(),
             "whats_new_version" => self.whats_new_version = Some(value.trim().to_string()),
             "format_hint_seen" => self.format_hint_seen = value == "1",
+            "compose_format" => match value.trim() {
+                "rich" => self.compose_rich = true,
+                "plain" => self.compose_rich = false,
+                _ => {}
+            },
+            "compose_font" => {
+                if let Some(f) = rich::FontId::ALL.iter().find(|f| f.label() == value.trim()) {
+                    self.compose_font = *f;
+                }
+            }
+            "compose_size" => {
+                if let Some(s) = value.trim().parse::<u8>().ok().and_then(rich::SizePt::new) {
+                    self.compose_size = s;
+                }
+            }
+            "nav_collapsed" => self.nav_collapsed = value.trim() == "1",
+            "tabs" => self.tabs = value.trim().to_string(),
+            "reopen_tabs" => match value.trim() {
+                "1" => self.reopen_tabs = true,
+                "0" => self.reopen_tabs = false,
+                _ => {}
+            },
+            "notify" => self.notify = value.trim() != "0",
+            "notify_detail" => self.notify_detail = value.trim() != "0",
+            "notify_paused" => self.notify_paused = value.trim() == "1",
+            "notify_off" => {
+                self.notify_off = value
+                    .split_whitespace()
+                    .filter_map(|n| n.parse().ok())
+                    .collect();
+            }
+            "close_to_tray" => self.close_to_tray = value.trim() == "1",
+            "popout_size" => {
+                let mut it = value.split_whitespace().map(|n| n.parse::<u32>().ok());
+                if let (Some(Some(w)), Some(Some(h)), None) = (it.next(), it.next(), it.next())
+                    && (200..=10_000).contains(&w)
+                    && (200..=10_000).contains(&h)
+                {
+                    self.popout_size = Some((w, h));
+                }
+            }
+            "compose_color" => match value.trim() {
+                "auto" => self.compose_color = None,
+                hex => {
+                    if let Some(c) = rich::ColorId::from_hex(hex) {
+                        self.compose_color = Some(c);
+                    }
+                }
+            },
             _ => {}
         }
     }
@@ -898,6 +1056,10 @@ pub struct DraftRow {
     pub updated: i64,
     /// The importance it is sent with.
     pub importance: Importance,
+    /// The formatted draft (`rich::html` in `Mode::Draft`); `None`: plain.
+    pub body_rich: Option<String>,
+    /// The signature last put in (informational).
+    pub signature_id: Option<i64>,
 }
 
 /// A draft's copy in the server's Drafts folder of account `account_id`.
@@ -1022,7 +1184,7 @@ pub struct OutboxEntry {
     pub body: String,
 }
 
-const DRAFT_COLUMNS: &str = "id, account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,     cc_addrs, bcc_addrs, subject, body, message_id, updated, quoted_html, importance";
+const DRAFT_COLUMNS: &str = "id, account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,     cc_addrs, bcc_addrs, subject, body, message_id, updated, quoted_html, importance, body_rich, signature_id";
 
 impl DraftRow {
     fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Self> {
@@ -1042,8 +1204,171 @@ impl DraftRow {
             updated: r.get(12)?,
             quoted_html: r.get(13)?,
             importance: Importance::from_code(r.get(14)?),
+            body_rich: r.get(15)?,
+            signature_id: r.get(16)?,
         })
     }
+}
+
+/// A stored signature (`signatures` row).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    pub id: i64,
+    pub name: String,
+    /// Tagged `rich::html` of the signature's blocks.
+    pub body_html: String,
+    /// The plain text, generated from the blocks (no `-- ` line).
+    pub body_text: String,
+    pub logo: Option<Vec<u8>>,
+    pub logo_mime: Option<String>,
+    pub created: i64,
+    pub updated: i64,
+}
+
+impl Signature {
+    /// The signature's content; empty if the stored HTML is unreadable.
+    pub fn doc(&self) -> rich::Doc {
+        rich::from_stored(&self.body_html).unwrap_or_default()
+    }
+
+    pub fn logo(&self) -> Option<rich::Logo> {
+        self.logo
+            .as_deref()
+            .and_then(|b| rich::Logo::from_bytes(b).ok())
+    }
+
+    /// The block a message holds when this signature is put in: marked
+    /// untouched, `None` if the signature has no text and no logo.
+    pub fn block(&self) -> Option<rich::SignatureBlock> {
+        let blocks = self.doc().blocks;
+        let logo = self.logo().map(|l| l.reference());
+        let empty = blocks
+            .iter()
+            .all(|b| matches!(b, rich::Block::Para(p) if p.is_empty()));
+        (!(empty && logo.is_none())).then(|| rich::SignatureBlock::new(blocks, logo, Some(self.id)))
+    }
+}
+
+/// A signature in a list: no logo bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureInfo {
+    pub id: i64,
+    pub name: String,
+    /// The first line of its text, for the list.
+    pub first_line: String,
+    pub has_logo: bool,
+}
+
+/// Why a signature was not saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureError {
+    EmptyName,
+    /// Another signature has this name (names ignore case).
+    NameTaken,
+    NotFound,
+}
+
+impl std::fmt::Display for SignatureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(match self {
+            SignatureError::EmptyName => "a signature needs a name",
+            SignatureError::NameTaken => "a signature with this name already exists",
+            SignatureError::NotFound => "no such signature",
+        })
+    }
+}
+
+impl std::error::Error for SignatureError {}
+
+/// The longest signature name kept, in characters.
+pub const MAX_SIGNATURE_NAME: usize = 100;
+
+/// Whether `drafts.kind` is a reply, reply all or forward (which take the
+/// account's "replies and forwards" signature).
+pub fn is_reply_kind(kind: i64) -> bool {
+    matches!(kind, 1..=3)
+}
+
+/// Turn each account's old plain-text signature into a signature named
+/// after the account's address, set as both its defaults. Never fails the
+/// upgrade: an account whose signature cannot be converted keeps none.
+fn import_signatures(conn: &Connection) {
+    let rows: Vec<(i64, String, String)> = conn
+        .prepare(
+            "SELECT id, email, signature FROM accounts WHERE signature != '' ORDER BY position, id",
+        )
+        .and_then(|mut st| {
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<_>>()
+        })
+        .unwrap_or_default();
+    for (account, email, text) in rows {
+        text_signature(conn, account, &email, &text);
+    }
+}
+
+/// Save typed text (an old plain signature, or the one the onboarding flow
+/// asks for) as a signature named after `email`, and make it both of the
+/// account's defaults. `None` (nothing changed) for blank text or when no
+/// name is free.
+fn text_signature(conn: &Connection, account: i64, email: &str, text: &str) -> Option<i64> {
+    let text = text.trim_end().to_string();
+    if text.trim().is_empty() {
+        return None;
+    }
+    // Markers become formatting once; plain text keeps every line.
+    let doc = if crate::mail::compose_html::has_formatting(&text) {
+        rich::import::lossy(&crate::mail::compose_html::to_html(&text))
+    } else {
+        None
+    }
+    .unwrap_or_else(|| rich::Doc::from_plain(&text));
+    let (html, plain) = signature_forms(&doc);
+    let now = chrono::Utc::now().timestamp();
+    // Names ignore case, and two addresses may differ only in case.
+    let names = [
+        email.to_string(),
+        format!("{email} ({account})"),
+        format!("{email} ({account}, {now})"),
+    ];
+    let done = names.iter().any(|name| {
+        conn.execute(
+            "INSERT INTO signatures (name, body_html, body_text, created, updated)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![name, html, plain, now],
+        )
+        .is_ok()
+    });
+    if !done {
+        return None;
+    }
+    let id = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE accounts SET sig_new = ?2, sig_reply = ?2 WHERE id = ?1",
+        params![account, id],
+    )
+    .ok()?;
+    Some(id)
+}
+
+/// The stored HTML and the plain text of a signature's document: only
+/// paragraphs and tables are kept.
+fn signature_forms(doc: &rich::Doc) -> (String, String) {
+    let blocks: Vec<rich::Block> = doc
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, rich::Block::Para(_) | rich::Block::Table(_)))
+        .cloned()
+        .collect();
+    let doc = rich::Doc {
+        blocks,
+        ..doc.clone()
+    }
+    .normalized();
+    (
+        rich::html(&doc, rich::Mode::Draft),
+        rich::emit::signature_text(&doc.blocks),
+    )
 }
 
 pub struct Db {
@@ -1150,6 +1475,7 @@ impl Db {
             (10, MIGRATE_V10_TO_V11),
             (11, MIGRATE_V11_TO_V12),
             (12, MIGRATE_V12_TO_V13),
+            (13, MIGRATE_V13_TO_V14),
         ] {
             if version != from {
                 continue;
@@ -1159,7 +1485,11 @@ impl Db {
             // Another process may have migrated while we waited for the lock.
             if user_version(&conn)? == from {
                 let to = from + 1;
-                conn.execute_batch(&format!("{step} PRAGMA user_version = {to}; COMMIT;"))
+                conn.execute_batch(step).context("upgrading cache schema")?;
+                if from == 13 {
+                    import_signatures(&conn);
+                }
+                conn.execute_batch(&format!("PRAGMA user_version = {to}; COMMIT;"))
                     .context("upgrading cache schema")?;
             } else {
                 conn.execute_batch("COMMIT;")?;
@@ -1374,6 +1704,61 @@ impl Db {
             s.apply(&key, &value);
         }
         Ok(s)
+    }
+
+    /// True while an enabled account's inbox has not completed a sync (after
+    /// a clean-slate upgrade the first sync refetches everything; that mail
+    /// must not notify).
+    pub fn inbox_awaits_first_sync(&self) -> Result<bool> {
+        Ok(self.conn.query_row(
+            &format!(
+                "SELECT EXISTS (SELECT 1 FROM folders f JOIN accounts a ON a.id = f.account_id
+                 WHERE a.enabled = 1 AND f.sync_uidnext IS NULL AND ({ROLE_SQL}) = 'inbox')"
+            ),
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// The highest message id in the cache (0 when empty): new-mail
+    /// notifications only consider messages stored after it.
+    pub fn max_message_id(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COALESCE(MAX(id), 0) FROM messages", [], |r| {
+                r.get(0)
+            })?)
+    }
+
+    /// Unread inbox messages stored after message `after` (oldest first, at
+    /// most `limit`): account id, message id, sender, subject. For the
+    /// new-mail notification only; nothing of it is kept.
+    pub fn new_unread_inbox(
+        &self,
+        after: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, i64, String, String)>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT m.account_id, m.id, m.from_name, m.from_addr, m.subject
+             FROM messages m JOIN folders f ON f.id = m.folder_id
+             WHERE m.id > ?1 AND m.seen = 0 AND (SELECT {ROLE_SQL} FROM folders WHERE id = f.id) = 'inbox'
+             ORDER BY m.id LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(params![after, limit as i64], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (a, id, name, addr, subject) = row?;
+            out.push((a, id, if name.is_empty() { addr } else { name }, subject));
+        }
+        Ok(out)
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
@@ -2123,6 +2508,25 @@ impl Db {
         Ok(out)
     }
 
+    /// The subject and read state of these messages (tab titles), in one
+    /// query; ids no longer cached are left out.
+    pub fn subjects(&self, ids: &[i64]) -> Result<Vec<(i64, String, bool)>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(500) {
+            let marks = vec!["?"; chunk.len()].join(",");
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT id, subject, seen FROM messages WHERE id IN ({marks})"
+            ))?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
     /// [`Db::set_seen`] for many messages, in one transaction.
     pub fn set_seen_many(&self, ids: &[i64], seen: bool) -> Result<()> {
         self.each(ids, "UPDATE messages SET seen = ?2 WHERE id = ?1", seen)
@@ -2182,6 +2586,268 @@ impl Db {
         Ok(())
     }
 
+    // ---- signatures ----------------------------------------------------
+
+    /// All signatures by name, without their logos.
+    pub fn signatures(&self) -> Result<Vec<SignatureInfo>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, name, body_text, logo IS NOT NULL FROM signatures
+             ORDER BY name COLLATE NOCASE, id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let text: String = r.get(2)?;
+            Ok(SignatureInfo {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                first_line: text
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or("")
+                    .to_string(),
+                has_logo: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn signature(&self, id: i64) -> Result<Option<Signature>> {
+        Ok(self
+            .conn
+            .prepare_cached(
+                "SELECT id, name, body_html, body_text, logo, logo_mime, created, updated
+                 FROM signatures WHERE id = ?1",
+            )?
+            .query_row([id], |r| {
+                Ok(Signature {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    body_html: r.get(2)?,
+                    body_text: r.get(3)?,
+                    logo: r.get(4)?,
+                    logo_mime: r.get(5)?,
+                    created: r.get(6)?,
+                    updated: r.get(7)?,
+                })
+            })
+            .optional()?)
+    }
+
+    /// Save a new signature: `doc`'s paragraphs and tables, and at most one
+    /// logo. Fails with a [`SignatureError`] for an empty or taken name.
+    pub fn add_signature(
+        &self,
+        name: &str,
+        doc: &rich::Doc,
+        logo: Option<&rich::Logo>,
+    ) -> Result<i64> {
+        let name = signature_name(name)?;
+        let (html, text) = signature_forms(doc);
+        let now = chrono::Utc::now().timestamp();
+        self.conn
+            .execute(
+                "INSERT INTO signatures (name, body_html, body_text, logo, logo_mime, created, updated)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                params![
+                    name,
+                    html,
+                    text,
+                    logo.map(|l| l.bytes.as_slice()),
+                    logo.map(|l| l.mime),
+                    now
+                ],
+            )
+            .map_err(signature_write_error)?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Replace a signature's name, content and logo (`None` removes it).
+    pub fn update_signature(
+        &self,
+        id: i64,
+        name: &str,
+        doc: &rich::Doc,
+        logo: Option<&rich::Logo>,
+    ) -> Result<()> {
+        let name = signature_name(name)?;
+        let (html, text) = signature_forms(doc);
+        let n = self
+            .conn
+            .execute(
+                "UPDATE signatures SET name = ?2, body_html = ?3, body_text = ?4, logo = ?5,
+                    logo_mime = ?6, updated = ?7 WHERE id = ?1",
+                params![
+                    id,
+                    name,
+                    html,
+                    text,
+                    logo.map(|l| l.bytes.as_slice()),
+                    logo.map(|l| l.mime),
+                    chrono::Utc::now().timestamp()
+                ],
+            )
+            .map_err(signature_write_error)?;
+        if n == 0 {
+            return Err(SignatureError::NotFound.into());
+        }
+        Ok(())
+    }
+
+    /// Ids of the accounts that use signature `id` as a default.
+    pub fn signature_users(&self, id: i64) -> Result<Vec<i64>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id FROM accounts WHERE sig_new = ?1 OR sig_reply = ?1 ORDER BY position, id",
+        )?;
+        Ok(stmt
+            .query_map([id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Delete a signature; the accounts that had it as a default get none.
+    /// Returns those accounts.
+    pub fn delete_signature(&self, id: i64) -> Result<Vec<i64>> {
+        let tx = self.write()?;
+        let users: Vec<i64> = {
+            let mut stmt = tx.prepare_cached(
+                "SELECT id FROM accounts WHERE sig_new = ?1 OR sig_reply = ?1 ORDER BY position, id",
+            )?;
+            stmt.query_map([id], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        tx.execute(
+            "UPDATE accounts SET sig_new = NULL WHERE sig_new = ?1",
+            [id],
+        )?;
+        tx.execute(
+            "UPDATE accounts SET sig_reply = NULL WHERE sig_reply = ?1",
+            [id],
+        )?;
+        tx.execute(
+            "UPDATE drafts SET signature_id = NULL WHERE signature_id = ?1",
+            [id],
+        )?;
+        let n = tx.execute("DELETE FROM signatures WHERE id = ?1", [id])?;
+        if n == 0 {
+            return Err(SignatureError::NotFound.into());
+        }
+        tx.commit()?;
+        Ok(users)
+    }
+
+    /// An account's default signatures: for new messages, and for replies
+    /// and forwards.
+    pub fn account_signatures(&self, account_id: i64) -> Result<(Option<i64>, Option<i64>)> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT sig_new, sig_reply FROM accounts WHERE id = ?1")?
+            .query_row([account_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?
+            .unwrap_or((None, None)))
+    }
+
+    /// Set an account's two defaults (`None`: no signature). A signature
+    /// that does not exist is an error and nothing changes.
+    pub fn set_account_signatures(
+        &self,
+        account_id: i64,
+        new: Option<i64>,
+        reply: Option<i64>,
+    ) -> Result<()> {
+        let tx = self.write()?;
+        for id in [new, reply].into_iter().flatten() {
+            let found: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM signatures WHERE id = ?1)",
+                [id],
+                |r| r.get(0),
+            )?;
+            if !found {
+                return Err(SignatureError::NotFound.into());
+            }
+        }
+        tx.execute(
+            "UPDATE accounts SET sig_new = ?2, sig_reply = ?3 WHERE id = ?1",
+            params![account_id, new, reply],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The signature an account puts in a new message (`reply` false) or in
+    /// a reply or forward (`reply` true); `None` if it has none.
+    pub fn default_signature(&self, account_id: i64, reply: bool) -> Result<Option<Signature>> {
+        let (new, re) = self.account_signatures(account_id)?;
+        match if reply { re } else { new } {
+            Some(id) => self.signature(id),
+            None => Ok(None),
+        }
+    }
+
+    /// The pictures the signatures in `doc` show by `cid:`, read from the
+    /// stored signatures; one whose bytes no longer match the document's
+    /// mark (the signature's logo changed since) is left out.
+    pub fn inline_images(&self, doc: &rich::Doc) -> Result<Vec<smtp::InlineImage>> {
+        let mut out: Vec<smtp::InlineImage> = Vec::new();
+        for b in &doc.blocks {
+            let rich::Block::Signature(s) = b else {
+                continue;
+            };
+            let (Some(logo), Some(id)) = (s.logo, s.source) else {
+                continue;
+            };
+            let cid = logo.cid();
+            if out.iter().any(|i| i.cid == cid) {
+                continue;
+            }
+            if let Some(sig) = self.signature(id)?
+                && let (Some(data), Some(mime)) = (sig.logo, sig.logo_mime)
+                && rich::fnv(&data) == logo.hash
+            {
+                out.push(smtp::InlineImage { cid, mime, data });
+            }
+        }
+        Ok(out)
+    }
+
+    /// What `doc` sends: the text/plain body, the text/html alternative when
+    /// the document needs one, and the logo images it shows. A logo whose
+    /// picture cannot be found is left out of the HTML rather than shown
+    /// broken.
+    pub fn send_parts(
+        &self,
+        doc: &rich::Doc,
+    ) -> Result<(String, Option<String>, Vec<smtp::InlineImage>)> {
+        let inline = self.inline_images(doc)?;
+        let mut doc = doc.clone();
+        for b in &mut doc.blocks {
+            if let rich::Block::Signature(s) = b
+                && let Some(l) = s.logo
+                && !inline.iter().any(|i| i.cid == l.cid())
+            {
+                s.logo = None;
+            }
+        }
+        let (plain, html) = rich::parts(&doc);
+        let inline = if html.is_some() { inline } else { Vec::new() };
+        Ok((plain, html, inline))
+    }
+
+    /// Typed signature text (the onboarding flow's Signature box) as a new
+    /// signature named after the account's address, made both of its
+    /// defaults. `None` for blank text.
+    pub fn adopt_signature_text(&self, account_id: i64, text: &str) -> Result<Option<i64>> {
+        let email: String = self.conn.query_row(
+            "SELECT email FROM accounts WHERE id = ?1",
+            [account_id],
+            |r| r.get(0),
+        )?;
+        Ok(text_signature(&self.conn, account_id, &email, text))
+    }
+
+    /// [`Db::default_signature`] for a draft of `drafts.kind` `kind`.
+    pub fn signature_for_kind(&self, account_id: i64, kind: i64) -> Result<Option<Signature>> {
+        self.default_signature(account_id, is_reply_kind(kind))
+    }
+
     // ---- drafts --------------------------------------------------------
 
     /// Save a new draft and return its id. A folder left over from an
@@ -2190,8 +2856,8 @@ impl Db {
         self.conn.execute(
             "INSERT INTO drafts (account_id, kind, reply_to_msg, in_reply_to, refs, to_addrs,
                 cc_addrs, bcc_addrs, subject, body, message_id, created, updated, quoted_html,
-                importance)
-             VALUES (?1, ?2, (SELECT id FROM messages WHERE id = ?3), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14)",
+                importance, body_rich, signature_id)
+             VALUES (?1, ?2, (SELECT id FROM messages WHERE id = ?3), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16)",
             params![
                 d.account_id,
                 d.kind,
@@ -2207,6 +2873,8 @@ impl Db {
                 chrono::Utc::now().timestamp(),
                 d.quoted_html,
                 d.importance.code(),
+                d.body_rich,
+                d.signature_id,
             ],
         )?;
         let id = self.conn.last_insert_rowid();
@@ -2225,7 +2893,8 @@ impl Db {
                     reply_to_msg = (SELECT id FROM messages WHERE id = ?4),
                     in_reply_to = ?5, refs = ?6, to_addrs = ?7, cc_addrs = ?8, bcc_addrs = ?9,
                     subject = ?10, body = ?11, message_id = ?12, updated = ?13,
-                    quoted_html = ?14, importance = ?15, rev = rev + 1
+                    quoted_html = ?14, importance = ?15, body_rich = ?16, signature_id = ?17,
+                    rev = rev + 1
                  WHERE id = ?1 AND state = 0",
             )?
             .execute(params![
@@ -2244,6 +2913,8 @@ impl Db {
                 chrono::Utc::now().timestamp(),
                 d.quoted_html,
                 d.importance.code(),
+                d.body_rich,
+                d.signature_id,
             ])?;
         Ok(changed > 0)
     }
@@ -2952,6 +3623,26 @@ fn folded_contains(hay: &[u8], needle: &str, buf: &mut String) -> bool {
     }
 }
 
+/// A signature name as kept: trimmed and cut to the limit.
+fn signature_name(name: &str) -> std::result::Result<String, SignatureError> {
+    let name: String = name.trim().chars().take(MAX_SIGNATURE_NAME).collect();
+    if name.is_empty() {
+        Err(SignatureError::EmptyName)
+    } else {
+        Ok(name)
+    }
+}
+
+fn signature_write_error(e: rusqlite::Error) -> anyhow::Error {
+    use rusqlite::ffi::ErrorCode;
+    match &e {
+        rusqlite::Error::SqliteFailure(f, _) if f.code == ErrorCode::ConstraintViolation => {
+            SignatureError::NameTaken.into()
+        }
+        _ => e.into(),
+    }
+}
+
 fn user_version(conn: &Connection) -> Result<i64> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
@@ -3230,6 +3921,61 @@ mod tests {
             date,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn new_unread_inbox_is_a_high_water_mark_over_unread_inbox_mail() {
+        let mut db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let inbox = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        let sent = db
+            .upsert_folder(acc, "Sent", "Sent", 0, Role::Sent)
+            .unwrap();
+        assert_eq!(db.max_message_id().unwrap(), 0);
+        db.insert_headers(acc, inbox, &[header(1, 10, "old")])
+            .unwrap();
+        let mark = db.max_message_id().unwrap();
+        assert!(mark > 0);
+        assert!(db.new_unread_inbox(mark, 10).unwrap().is_empty());
+        // New unread inbox mail and an outgoing copy.
+        db.insert_headers(acc, inbox, &[header(2, 20, "one"), header(3, 30, "two")])
+            .unwrap();
+        db.insert_headers(acc, sent, &[header(1, 40, "mine")])
+            .unwrap();
+        let found = db.new_unread_inbox(mark, 10).unwrap();
+        let subjects: Vec<&str> = found.iter().map(|f| f.3.as_str()).collect();
+        assert_eq!(subjects, ["one", "two"]);
+        assert_eq!(found[0].0, acc);
+        assert_eq!(found[0].2, "Jane");
+        // The limit applies, oldest first.
+        assert_eq!(db.new_unread_inbox(mark, 1).unwrap().len(), 1);
+        // Already-read mail never counts.
+        db.set_seen(found[1].1, true).unwrap();
+        assert_eq!(db.new_unread_inbox(mark, 10).unwrap().len(), 1);
+        assert!(db.max_message_id().unwrap() > found[1].1);
+    }
+
+    #[test]
+    fn new_mail_is_found_although_the_unread_total_did_not_rise() {
+        let mut db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let inbox = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        db.insert_headers(acc, inbox, &[header(1, 10, "old")])
+            .unwrap();
+        let mark = db.max_message_id().unwrap();
+        let old = db.message_ids(&[inbox], "").unwrap()[0];
+        // One message is read and another arrives in the same refresh:
+        // the unread total is unchanged, the new message is still found.
+        db.set_seen(old, true).unwrap();
+        db.insert_headers(acc, inbox, &[header(2, 20, "fresh")])
+            .unwrap();
+        let found = db.new_unread_inbox(mark, 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].3, "fresh");
     }
 
     #[test]
@@ -3690,7 +4436,12 @@ mod tests {
     const DROP_V7: &str = "ALTER TABLE accounts DROP COLUMN signature; DROP TABLE settings;";
     /// Undo v8 (after v9).
     const DROP_V8: &str = "DROP TABLE addresses; ALTER TABLE accounts DROP COLUMN addr_backfill;";
-    /// Undo v13 (run first: it is the newest).
+    /// Undo v14 (run first: it is the newest).
+    const DROP_V14: &str = "ALTER TABLE accounts DROP COLUMN sig_new;
+        ALTER TABLE accounts DROP COLUMN sig_reply; DROP TABLE signatures;
+        ALTER TABLE drafts DROP COLUMN body_rich; ALTER TABLE drafts DROP COLUMN signature_id;
+        ALTER TABLE draft_attachments DROP COLUMN cid;";
+    /// Undo v13 (after v14).
     const DROP_V13: &str = "ALTER TABLE messages DROP COLUMN priority;
         ALTER TABLE drafts DROP COLUMN importance;";
     /// Undo v12 (after v13).
@@ -3709,7 +4460,7 @@ mod tests {
     /// Turn a current database back into v2 (no fingerprint columns).
     fn downgrade_to_v2(conn: &Connection) {
         conn.execute_batch(&format!(
-            "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
+            "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
              ALTER TABLE folders DROP COLUMN sync_uidnext;
              ALTER TABLE folders DROP COLUMN sync_messages;
              ALTER TABLE folders DROP COLUMN sync_hms;
@@ -3823,7 +4574,7 @@ mod tests {
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
             ))
             .unwrap();
 
@@ -3832,10 +4583,8 @@ mod tests {
         assert!(db.remote_allow_list().unwrap().is_empty());
         db.allow_remote("news@shop.example").unwrap();
         assert!(db.remote_allowed("news@shop.example").unwrap());
-        assert_eq!(
-            db.message(id).unwrap().unwrap().raw.as_deref(),
-            Some(&b"raw"[..])
-        );
+        // The mail cached before v13 is cleared (refetched by the next sync).
+        assert!(db.message(id).unwrap().is_none());
     }
 
     #[test]
@@ -3912,10 +4661,8 @@ mod tests {
             .unwrap();
         assert_eq!(nulls, 1);
         assert_eq!(db.folder(f).unwrap().unwrap().uidvalidity, 7);
-        assert_eq!(
-            db.message(id).unwrap().unwrap().raw.as_deref(),
-            Some(&b"raw"[..])
-        );
+        // The mail cached before v13 is cleared (refetched by the next sync).
+        assert!(db.message(id).unwrap().is_none());
     }
 
     #[test]
@@ -4051,7 +4798,9 @@ mod tests {
     fn a_v11_cache_migrates_to_the_new_shape() {
         let old = Db::in_memory().unwrap();
         old.conn
-            .execute_batch(&format!("{DROP_V13} {DROP_V12} PRAGMA user_version = 11;"))
+            .execute_batch(&format!(
+                "{DROP_V14} {DROP_V13} {DROP_V12} PRAGMA user_version = 11;"
+            ))
             .unwrap();
         let migrated = Db::init(old.conn).unwrap();
         let new = Db::in_memory().unwrap();
@@ -4107,14 +4856,9 @@ mod tests {
         assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(db.folder(1).unwrap().unwrap().uidvalidity, 7);
         assert_eq!(db.fingerprint(1).unwrap(), None);
-        assert_eq!(
-            db.message(1).unwrap().unwrap().raw.as_deref(),
-            Some(&b"hi"[..])
-        );
-        assert!(db.message(2).unwrap().unwrap().raw.is_none());
-        assert_eq!(db.missing_bodies(1, 10, 1_000_000).unwrap(), [(2, 11, 0)]);
-        // Deleting a message also deletes its body.
-        db.delete_message(1).unwrap();
+        // Cached mail is cleared (clean slate), bodies with it.
+        assert!(db.message(1).unwrap().is_none());
+        assert!(db.message(2).unwrap().is_none());
         let bodies: i64 = db
             .conn
             .query_row("SELECT COUNT(*) FROM bodies", [], |r| r.get(0))
@@ -4193,13 +4937,16 @@ mod tests {
         db.allow_remote("news@shop.example").unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
             ))
             .unwrap();
 
-        let db = Db::init(db.conn).unwrap();
+        let mut db = Db::init(db.conn).unwrap();
         assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(db.count_drafts().unwrap(), 0);
+        assert!(db.header(id).unwrap().is_none());
+        db.insert_headers(acc, f, &[header(1, 1, "a")]).unwrap();
+        let id = db.message_ids(&[f], "").unwrap()[0];
         assert!(!db.header(id).unwrap().unwrap().has_draft);
         db.insert_draft(&DraftRow {
             reply_to_msg: Some(id),
@@ -4208,10 +4955,6 @@ mod tests {
         .unwrap();
         assert!(db.header(id).unwrap().unwrap().has_draft);
         assert!(db.remote_allowed("news@shop.example").unwrap());
-        assert_eq!(
-            db.message(id).unwrap().unwrap().raw.as_deref(),
-            Some(&b"raw"[..])
-        );
     }
 
     #[test]
@@ -4412,7 +5155,7 @@ mod tests {
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
                  ALTER TABLE drafts DROP COLUMN next_try; ALTER TABLE drafts DROP COLUMN last_error;
                  PRAGMA user_version = 5;"
             ))
@@ -4439,7 +5182,7 @@ mod tests {
         let acc = account(&db);
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
             ))
             .unwrap();
 
@@ -4754,7 +5497,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
             ))
             .unwrap();
 
@@ -4784,7 +5527,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
             ))
             .unwrap();
 
@@ -4803,7 +5546,7 @@ example.com"
         db.set_setting("undo_send_secs", "10").unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} PRAGMA user_version = 10;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} PRAGMA user_version = 10;"
             ))
             .unwrap();
 
@@ -4822,7 +5565,9 @@ example.com"
         let db = Db::in_memory().unwrap();
         let acc = account(&db);
         db.conn
-            .execute_batch(&format!("{DROP_V13} {DROP_V12} PRAGMA user_version = 11;"))
+            .execute_batch(&format!(
+                "{DROP_V14} {DROP_V13} {DROP_V12} PRAGMA user_version = 11;"
+            ))
             .unwrap();
 
         let db = Db::init(db.conn).unwrap();
@@ -4856,6 +5601,386 @@ example.com"
         assert_eq!(db.accounts().unwrap().len(), 1);
     }
 
+    fn account_named(db: &Db, email: &str) -> i64 {
+        db.add_account(&NewAccount {
+            email: email.into(),
+            name: String::new(),
+            imap: Server {
+                host: "imap.example.com".into(),
+                port: 993,
+                security: Security::Tls,
+            },
+            smtp: Server {
+                host: "smtp.example.com".into(),
+                port: 587,
+                security: Security::StartTls,
+            },
+            save_sent: true,
+            imap_user: String::new(),
+            smtp_user: String::new(),
+        })
+        .unwrap()
+    }
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut v = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        v.extend(w.to_be_bytes());
+        v.extend(h.to_be_bytes());
+        v.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        v
+    }
+
+    fn text_doc(text: &str) -> rich::Doc {
+        rich::Doc::from_plain(text)
+    }
+
+    #[test]
+    fn migrates_v13_to_v14_signatures() {
+        let db = Db::in_memory().unwrap();
+        let none = account_named(&db, "none@example.com");
+        let lines = account_named(&db, "lines@example.com");
+        let marked = account_named(&db, "marked@example.com");
+        let blank = account_named(&db, "blank@example.com");
+        let upper = account_named(&db, "Lines@Example.com");
+        db.conn
+            .execute_batch(&format!(
+                "{DROP_V14}
+                 UPDATE accounts SET signature = 'Ana' || char(10) || char(10) || 'Ana Ltd' WHERE id = {lines};
+                 UPDATE accounts SET signature = '**Ana**' || char(10) || '- one' || char(10) || '[site](https://example.org)' WHERE id = {marked};
+                 UPDATE accounts SET signature = '  ' || char(10) WHERE id = {blank};
+                 UPDATE accounts SET signature = 'Other Ana' WHERE id = {upper};
+                 INSERT INTO drafts (id, account_id, message_id, body, created, updated)
+                     VALUES (1, {lines}, '<d@x>', 'draft body', 1, 1);
+                 PRAGMA user_version = 13;"
+            ))
+            .unwrap();
+
+        let db = Db::init(db.conn).unwrap();
+        assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
+        let list = db.signatures().unwrap();
+        let names: Vec<_> = list.iter().map(|s| s.name.as_str()).collect();
+        // "Lines@Example.com" differs from "lines@example.com" only in case:
+        // it still gets its signature, under a name that is not taken.
+        assert_eq!(
+            names,
+            [
+                "lines@example.com",
+                format!("Lines@Example.com ({upper})").as_str(),
+                "marked@example.com"
+            ]
+        );
+        let (n, _) = db.account_signatures(upper).unwrap();
+        assert_eq!(
+            db.signature(n.unwrap()).unwrap().unwrap().body_text,
+            "Other Ana"
+        );
+
+        // An empty (or blank) signature gets none.
+        assert_eq!(db.account_signatures(none).unwrap(), (None, None));
+        assert_eq!(db.account_signatures(blank).unwrap(), (None, None));
+
+        // Plain text keeps every line, blank ones included.
+        let (n, r) = db.account_signatures(lines).unwrap();
+        assert!(n.is_some() && n == r);
+        let sig = db.signature(n.unwrap()).unwrap().unwrap();
+        assert_eq!(sig.body_text, "Ana\n\nAna Ltd");
+        assert_eq!(rich::plain(&sig.doc()), "Ana\n\nAna Ltd");
+        assert!(sig.logo.is_none());
+
+        // Markers became formatting once.
+        let (n, _) = db.account_signatures(marked).unwrap();
+        let sig = db.signature(n.unwrap()).unwrap().unwrap();
+        assert_eq!(sig.body_text, "Ana\n- one\nsite (https://example.org/)");
+        let doc = sig.doc();
+        assert!(rich::needs_html(&doc));
+        let Some(rich::Block::Para(p)) = doc.blocks.first() else {
+            panic!("{doc:?}")
+        };
+        assert!(p.runs.iter().any(|r| r.text == "Ana" && r.style.b));
+        assert!(sig.body_html.contains("<!--komorebi:rich 1-->"));
+        // The old column stays, unread; drafts are untouched.
+        let old: String = db
+            .conn
+            .query_row(
+                "SELECT signature FROM accounts WHERE id = ?1",
+                [lines],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old, "Ana\n\nAna Ltd");
+        let d = db.draft(1).unwrap().unwrap();
+        assert_eq!(
+            (d.body.as_str(), d.body_rich, d.signature_id),
+            ("draft body", None, None)
+        );
+    }
+
+    #[test]
+    fn migrating_with_no_signatures_adds_nothing() {
+        let db = Db::in_memory().unwrap();
+        account(&db);
+        db.conn
+            .execute_batch(&format!("{DROP_V14} PRAGMA user_version = 13;"))
+            .unwrap();
+        let db = Db::init(db.conn).unwrap();
+        assert!(db.signatures().unwrap().is_empty());
+    }
+
+    #[test]
+    fn signatures_are_named_unique_and_editable() {
+        let db = Db::in_memory().unwrap();
+        let formal = db
+            .add_signature("  Formal ", &text_doc("Ana\nAna Ltd"), None)
+            .unwrap();
+        db.add_signature("Short", &text_doc("A."), None).unwrap();
+        let err = |r: Result<i64>| r.unwrap_err().downcast::<SignatureError>().unwrap();
+        assert_eq!(
+            err(db.add_signature("formal", &text_doc("x"), None)),
+            SignatureError::NameTaken
+        );
+        assert_eq!(
+            err(db.add_signature("  ", &text_doc("x"), None)),
+            SignatureError::EmptyName
+        );
+        let list = db.signatures().unwrap();
+        assert_eq!(
+            list.iter()
+                .map(|s| (s.name.as_str(), s.first_line.as_str(), s.has_logo))
+                .collect::<Vec<_>>(),
+            [("Formal", "Ana", false), ("Short", "A.", false)]
+        );
+
+        // Edit: rename, new text, add then remove a logo.
+        let logo = rich::Logo::from_bytes(&png(80, 30)).unwrap();
+        db.update_signature(formal, "Formal 2", &text_doc("Ana\nBoard"), Some(&logo))
+            .unwrap();
+        let sig = db.signature(formal).unwrap().unwrap();
+        assert_eq!(
+            (sig.name.as_str(), sig.body_text.as_str()),
+            ("Formal 2", "Ana\nBoard")
+        );
+        assert_eq!(sig.logo.as_deref(), Some(&logo.bytes[..]));
+        assert_eq!(sig.logo_mime.as_deref(), Some("image/png"));
+        assert_eq!(sig.logo().unwrap().reference(), logo.reference());
+        // Renaming to its own name (other case) is fine; to another's is not.
+        db.update_signature(formal, "FORMAL 2", &text_doc("Ana\nBoard"), Some(&logo))
+            .unwrap();
+        assert_eq!(
+            db.update_signature(formal, "short", &text_doc("x"), None)
+                .unwrap_err()
+                .downcast::<SignatureError>()
+                .unwrap(),
+            SignatureError::NameTaken
+        );
+        assert_eq!(
+            db.update_signature(999, "n", &text_doc("x"), None)
+                .unwrap_err()
+                .downcast::<SignatureError>()
+                .unwrap(),
+            SignatureError::NotFound
+        );
+        db.update_signature(formal, "FORMAL 2", &text_doc("Ana"), None)
+            .unwrap();
+        assert!(db.signature(formal).unwrap().unwrap().logo.is_none());
+        // Only paragraphs and tables are kept in a signature.
+        let mut doc = text_doc("kept");
+        doc.blocks.push(rich::Block::Quote(
+            rich::QuoteBlock::new("<p>q</p>", false).unwrap(),
+        ));
+        db.update_signature(formal, "FORMAL 2", &doc, None).unwrap();
+        assert_eq!(db.signature(formal).unwrap().unwrap().body_text, "kept");
+        // Long names are cut.
+        let long = db
+            .add_signature(&"n".repeat(500), &text_doc("x"), None)
+            .unwrap();
+        assert_eq!(
+            db.signature(long).unwrap().unwrap().name.chars().count(),
+            MAX_SIGNATURE_NAME
+        );
+    }
+
+    #[test]
+    fn account_defaults_differ_for_new_mail_and_replies() {
+        let db = Db::in_memory().unwrap();
+        let a = account_named(&db, "a@example.com");
+        let b = account_named(&db, "b@example.com");
+        let fresh = db
+            .add_signature("Fresh", &text_doc("New mail"), None)
+            .unwrap();
+        let reply = db
+            .add_signature("Reply", &text_doc("Re: mail"), None)
+            .unwrap();
+        // New accounts have none.
+        assert_eq!(db.account_signatures(a).unwrap(), (None, None));
+        assert!(db.default_signature(a, false).unwrap().is_none());
+
+        db.set_account_signatures(a, Some(fresh), Some(reply))
+            .unwrap();
+        db.set_account_signatures(b, None, Some(fresh)).unwrap();
+        let text = |s: Option<Signature>| s.map(|s| s.body_text);
+        assert_eq!(
+            text(db.default_signature(a, false).unwrap()).as_deref(),
+            Some("New mail")
+        );
+        assert_eq!(
+            text(db.default_signature(a, true).unwrap()).as_deref(),
+            Some("Re: mail")
+        );
+        // Kinds: 0 new; 1 reply, 2 reply all, 3 forward.
+        for (kind, want) in [
+            (0, "New mail"),
+            (1, "Re: mail"),
+            (2, "Re: mail"),
+            (3, "Re: mail"),
+        ] {
+            assert_eq!(
+                text(db.signature_for_kind(a, kind).unwrap()).as_deref(),
+                Some(want),
+                "{kind}"
+            );
+        }
+        // None inserts nothing.
+        assert!(db.signature_for_kind(b, 0).unwrap().is_none());
+        assert_eq!(
+            text(db.signature_for_kind(b, 3).unwrap()).as_deref(),
+            Some("New mail")
+        );
+        // An unknown signature is refused and nothing changes.
+        let e = db.set_account_signatures(a, Some(999), None).unwrap_err();
+        assert_eq!(
+            e.downcast::<SignatureError>().unwrap(),
+            SignatureError::NotFound
+        );
+        assert_eq!(
+            db.account_signatures(a).unwrap(),
+            (Some(fresh), Some(reply))
+        );
+
+        assert_eq!(db.signature_users(fresh).unwrap(), [a, b]);
+        // Deleting clears the defaults that pointed at it, and only those.
+        assert_eq!(db.delete_signature(fresh).unwrap(), [a, b]);
+        assert_eq!(db.account_signatures(a).unwrap(), (None, Some(reply)));
+        assert_eq!(db.account_signatures(b).unwrap(), (None, None));
+        assert!(db.signature(fresh).unwrap().is_none());
+        assert_eq!(
+            db.delete_signature(fresh)
+                .unwrap_err()
+                .downcast::<SignatureError>()
+                .unwrap(),
+            SignatureError::NotFound
+        );
+        // Removing the account leaves the signatures.
+        db.remove_account(a).unwrap();
+        assert_eq!(db.signatures().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_signature_block_knows_its_source_and_logo() {
+        let db = Db::in_memory().unwrap();
+        let logo = rich::Logo::from_bytes(&png(500, 100)).unwrap();
+        assert_eq!((logo.width, logo.height), (400, 80));
+        let id = db
+            .add_signature("S", &text_doc("Ana"), Some(&logo))
+            .unwrap();
+        let block = db.signature(id).unwrap().unwrap().block().unwrap();
+        assert_eq!(block.source, Some(id));
+        assert!(block.is_untouched());
+        assert_eq!(block.logo, Some(logo.reference()));
+        // An empty signature without a logo puts nothing in.
+        let empty = db.add_signature("E", &text_doc(""), None).unwrap();
+        assert!(db.signature(empty).unwrap().unwrap().block().is_none());
+        // A logo alone is still a signature.
+        let only = db.add_signature("L", &text_doc(""), Some(&logo)).unwrap();
+        assert!(db.signature(only).unwrap().unwrap().block().is_some());
+    }
+
+    #[test]
+    fn a_logo_message_is_sent_with_its_picture() {
+        let db = Db::in_memory().unwrap();
+        let logo = rich::Logo::from_bytes(&png(120, 40)).unwrap();
+        let id = db
+            .add_signature("S", &text_doc("Ana"), Some(&logo))
+            .unwrap();
+        let block = db.signature(id).unwrap().unwrap().block().unwrap();
+        let mut doc = text_doc("Hello");
+        doc.blocks.push(rich::Block::Signature(block));
+
+        let (plain, html, inline) = db.send_parts(&doc).unwrap();
+        assert_eq!(plain, "Hello\n\n-- \nAna");
+        let html = html.unwrap();
+        assert_eq!(inline.len(), 1);
+        assert_eq!(inline[0].mime, "image/png");
+        assert_eq!(inline[0].data, logo.bytes);
+        assert!(html.contains(&format!("cid:{}", inline[0].cid)));
+        assert!(!html.contains("data-") && !html.contains("<!--"));
+
+        // The MIME tree carries it as a related part.
+        let raw = smtp::build_raw(smtp::Outgoing {
+            from_email: "me@example.com".into(),
+            to: "you@example.com".into(),
+            body: plain,
+            body_html: Some(html),
+            inline,
+            ..Default::default()
+        })
+        .unwrap();
+        let text = String::from_utf8(raw).unwrap();
+        assert!(text.contains("multipart/related") && text.contains("Content-ID: <sig-"));
+
+        // The logo was replaced since: the mark no longer matches, so the
+        // picture is dropped instead of being shown broken.
+        let other = rich::Logo::from_bytes(&png(10, 10)).unwrap();
+        db.update_signature(id, "S", &text_doc("Ana"), Some(&other))
+            .unwrap();
+        let (_, html, inline) = db.send_parts(&doc).unwrap();
+        assert!(inline.is_empty());
+        assert!(html.is_none_or(|h| !h.contains("<img")));
+        // A message with no formatting sends no HTML and no picture.
+        let (plain, html, inline) = db.send_parts(&text_doc("plain")).unwrap();
+        assert_eq!((plain.as_str(), html, inline.len()), ("plain", None, 0));
+    }
+
+    #[test]
+    fn a_formatted_draft_keeps_its_stored_form() {
+        let db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let doc = rich::Doc {
+            blocks: vec![rich::Block::Para(rich::Para {
+                runs: vec![rich::Run::styled(
+                    "Hi",
+                    rich::Style {
+                        b: true,
+                        ..Default::default()
+                    },
+                )],
+                ..Default::default()
+            })],
+            ..Default::default()
+        }
+        .normalized();
+        let stored = rich::html(&doc, rich::Mode::Draft);
+        let mut row = DraftRow {
+            account_id: acc,
+            message_id: "<d@x>".into(),
+            body: rich::plain(&doc),
+            body_rich: Some(stored.clone()),
+            signature_id: Some(3),
+            ..Default::default()
+        };
+        row.id = db.insert_draft(&row).unwrap();
+        let back = db.draft(row.id).unwrap().unwrap();
+        assert_eq!(back.body_rich.as_deref(), Some(stored.as_str()));
+        assert_eq!((back.body.as_str(), back.signature_id), ("Hi", Some(3)));
+        assert_eq!(rich::import::strict(&stored).unwrap(), doc);
+        // Saving as plain text clears it; the list and search see the text.
+        row.body_rich = None;
+        row.signature_id = None;
+        assert!(db.update_draft(&row).unwrap());
+        let back = db.draft(row.id).unwrap().unwrap();
+        assert_eq!((back.body_rich, back.signature_id), (None, None));
+        assert_eq!(db.draft_ids("hi").unwrap(), [row.id]);
+    }
+
     #[test]
     fn migrates_v12_to_v13() {
         let db = Db::in_memory().unwrap();
@@ -4865,7 +5990,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13}
+                "{DROP_V14} {DROP_V13}
                  INSERT INTO messages (id, account_id, folder_id, uid, subject)
                      VALUES (1, {acc}, {f}, 10, 'Old');
                  INSERT INTO drafts (id, account_id, message_id, created, updated)
@@ -4875,14 +6000,9 @@ example.com"
             .unwrap();
 
         let mut db = Db::init(db.conn).unwrap();
-        assert_eq!(user_version(&db.conn).unwrap(), 13);
-        assert_eq!(SCHEMA_VERSION, 13);
-        // Rows cached before read as normal.
-        let h = db.header(1).unwrap().unwrap();
-        assert_eq!(
-            (h.subject.as_str(), h.importance),
-            ("Old", Importance::Normal)
-        );
+        assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
+        // Mail cached before is cleared (refetched by the next sync).
+        assert!(db.header(1).unwrap().is_none());
         assert_eq!(db.draft(1).unwrap().unwrap().importance, Importance::Normal);
         // New rows keep theirs.
         db.insert_headers(
@@ -4906,16 +6026,86 @@ example.com"
         assert_eq!(db.draft(1).unwrap().unwrap().importance, Importance::Low);
         // An unknown code reads as normal.
         db.conn
-            .execute("UPDATE messages SET priority = 7 WHERE id = 1", [])
+            .execute("UPDATE messages SET priority = 7 WHERE id = ?1", [id])
             .unwrap();
         assert_eq!(
-            db.header(1).unwrap().unwrap().importance,
+            db.header(id).unwrap().unwrap().importance,
             Importance::Normal
         );
         assert_eq!(
             db.message(id).unwrap().unwrap().importance,
-            Importance::High
+            Importance::Normal
         );
+    }
+
+    /// Upgrading from before v13 clears what the server can give again and
+    /// keeps everything that exists only here.
+    #[test]
+    fn clean_slate_upgrade_clears_server_data_and_keeps_local_data() {
+        let db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let f = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        db.conn
+            .execute_batch(&format!(
+                "{DROP_V14} {DROP_V13}
+                 INSERT INTO messages (id, account_id, folder_id, uid, subject, has_body)
+                     VALUES (1, {acc}, {f}, 10, 'Old', 1);
+                 INSERT INTO bodies (message_id, raw) VALUES (1, x'41');
+                 INSERT INTO addresses (account_id, addr) VALUES ({acc}, 'a@x');
+                 UPDATE accounts SET addr_backfill = 1;
+                 UPDATE folders SET uidvalidity = 7, role_override = 'inbox',
+                     sync_uidnext = 11, sync_messages = 1, sync_hms = 5;
+                 INSERT INTO drafts (id, account_id, message_id, created, updated, subject, reply_to_msg)
+                     VALUES (1, {acc}, '<d@x>', 1, 1, 'Draft', 1);
+                 INSERT INTO drafts (id, account_id, message_id, created, updated, state, raw)
+                     VALUES (2, {acc}, '<o@x>', 1, 1, 1, x'42');
+                 INSERT INTO draft_attachments (draft_id, name, size, file)
+                     VALUES (1, 'a.txt', 1, '1');
+                 INSERT INTO settings (key, value) VALUES ('theme', 'dark');
+                 INSERT INTO remote_allow (address, created) VALUES ('s@x', 1);
+                 INSERT INTO rsvp (account_id, uid, partstat) VALUES ({acc}, 'u', 1);
+                 PRAGMA user_version = 12;"
+            ))
+            .unwrap();
+
+        let db = Db::init(db.conn).unwrap();
+        assert_eq!(user_version(&db.conn).unwrap(), SCHEMA_VERSION);
+        let count = |sql: &str| -> i64 { db.conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        // Server-derived: gone.
+        assert_eq!(count("SELECT COUNT(*) FROM messages"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM bodies"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM addresses"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM accounts WHERE addr_backfill IS NOT NULL"),
+            0
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM folders WHERE sync_uidnext IS NOT NULL OR sync_hms IS NOT NULL OR sync_messages IS NOT NULL"
+            ),
+            0
+        );
+        // The next sync is a first one: no UIDVALIDITY reset, no notifications.
+        assert!(!db.set_uidvalidity(f, 7).unwrap());
+        assert!(db.inbox_awaits_first_sync().unwrap());
+        // Local-only: kept.
+        assert_eq!(count("SELECT COUNT(*) FROM accounts"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM folders"), 1);
+        assert_eq!(db.folders().unwrap()[0].name, "INBOX");
+        let d = db.draft(1).unwrap().unwrap();
+        assert_eq!(d.subject, "Draft");
+        assert_eq!(d.reply_to_msg, None);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM drafts WHERE state = 1 AND raw IS NOT NULL"),
+            1
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM draft_attachments"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM settings"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM remote_allow"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM rsvp"), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM signatures"), 0);
     }
 
     /// Mail cached before v13 learns its importance from a body stored
@@ -5251,7 +6441,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
+                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
             ))
             .unwrap();
 
@@ -5264,10 +6454,8 @@ example.com"
         db.insert_headers(acc, inbox, &[later]).unwrap();
         assert_eq!(suggested(&db, acc, "bob"), ["bob@example.com"]);
         while db.backfill_addresses(acc, BACKFILL_CHUNK).unwrap() {}
-        assert_eq!(
-            indexed(&db, "jane@example.com"),
-            Some(("Jane".into(), 2, 200))
-        );
+        // The mail cached before is cleared (clean slate), so is its index.
+        assert_eq!(indexed(&db, "jane@example.com"), None);
         assert_eq!(indexed(&db, "bob@example.com").unwrap().1, 1);
         // Removing the account removes its index.
         db.remove_account(acc).unwrap();

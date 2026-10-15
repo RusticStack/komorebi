@@ -179,16 +179,29 @@ fn rrect(r: Rect, rad: f32) -> Option<Path> {
 /// Paint the document band starting at device row `y_px` into `pm`, at
 /// `scale` device pixels per CSS px.
 pub fn render(doc: &Doc, pm: &mut Pixmap, y_px: f32, scale: f32, cache: &mut GlyphCache) {
-    cache.trim();
-    cache.clock = cache.clock.wrapping_add(1);
-    let (vw, vh) = (pm.width() as f32, pm.height() as f32);
     pm.fill(tiny_skia::Color::from_rgba8(
         doc.bg[0], doc.bg[1], doc.bg[2], 255,
     ));
+    render_at(doc, pm, 0.0, 0.0, y_px, scale, cache);
+}
+
+/// Paint `doc`'s items placed at (`dx`, `dy`) CSS px, over what `pm`
+/// holds (no canvas fill), in the band starting at device row `y_px`.
+pub fn render_at(
+    doc: &Doc,
+    pm: &mut Pixmap,
+    dx: f32,
+    dy: f32,
+    y_px: f32,
+    scale: f32,
+    cache: &mut GlyphCache,
+) {
+    begin(cache);
+    let (vw, vh) = (pm.width() as f32, pm.height() as f32);
     // Device rectangle of a CSS rectangle.
     let dev = |r: &Rect| Rect {
-        x: r.x * scale,
-        y: r.y * scale - y_px,
+        x: (r.x + dx) * scale,
+        y: (r.y + dy) * scale - y_px,
         w: r.w * scale,
         h: r.h * scale,
     };
@@ -300,7 +313,7 @@ pub fn render(doc: &Doc, pm: &mut Pixmap, y_px: f32, scale: f32, cache: &mut Gly
                 let Some(l) = doc.layouts.get(*layout) else {
                     continue;
                 };
-                let (ox, oy) = (x * scale, y * scale - y_px);
+                let (ox, oy) = ((x + dx) * scale, (y + dy) * scale - y_px);
                 if oy > vh || oy + l.height() * scale < 0.0 || ox > vw {
                     continue;
                 }
@@ -308,6 +321,79 @@ pub fn render(doc: &Doc, pm: &mut Pixmap, y_px: f32, scale: f32, cache: &mut Gly
             }
         }
     }
+}
+
+/// Start a paint: trim the glyph cache and advance its clock.
+pub(super) fn begin(cache: &mut GlyphCache) {
+    cache.trim();
+    cache.clock = cache.clock.wrapping_add(1);
+}
+
+pub(super) fn fill(pm: &mut Pixmap, d: Rect, color: [u8; 4], radius: f32) {
+    let (vw, vh) = (pm.width() as f32, pm.height() as f32);
+    if color[3] == 0 || d.y > vh || d.y + d.h < 0.0 {
+        return;
+    }
+    if radius > 0.5 {
+        if let Some(p) = rrect(d, radius) {
+            pm.fill_path(
+                &p,
+                &paint_of(color),
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+        }
+    } else if let Some(rc) = clip_rect(d, vw, vh) {
+        let mut p = paint_of(color);
+        p.anti_alias = false;
+        pm.fill_rect(rc, &p, Transform::identity(), None);
+    }
+}
+
+pub(super) fn image(pm: &mut Pixmap, src: &Pixmap, d: Rect) {
+    let (iw, ih) = (src.width() as f32, src.height() as f32);
+    if d.w < 0.5 || d.h < 0.5 || iw < 1.0 || ih < 1.0 {
+        return;
+    }
+    let (sx, sy) = (d.w / iw, d.h / ih);
+    if (sx - 1.0).abs() < 0.01 && (sy - 1.0).abs() < 0.01 {
+        blit_image(pm, src, d.x.round() as i32, d.y.round() as i32, d);
+        return;
+    }
+    let (vw, vh) = (pm.width() as f32, pm.height() as f32);
+    let t = Transform::from_row(sx, 0.0, 0.0, sy, d.x, d.y);
+    let shader = Pattern::new(
+        src.as_ref(),
+        SpreadMode::Pad,
+        FilterQuality::Bilinear,
+        1.0,
+        t,
+    );
+    let paint = Paint {
+        shader,
+        anti_alias: true,
+        ..Default::default()
+    };
+    if let Some(rc) = clip_rect(d, vw, vh) {
+        pm.fill_rect(rc, &paint, Transform::identity(), None);
+    }
+}
+
+/// Draw a laid-out text at device offset (`ox`, `oy`).
+pub(super) fn text(
+    l: &parley::Layout<Brush>,
+    pm: &mut Pixmap,
+    ox: f32,
+    oy: f32,
+    scale: f32,
+    cache: &mut GlyphCache,
+) {
+    let vh = pm.height() as f32;
+    if oy > vh || oy + l.height() * scale < 0.0 {
+        return;
+    }
+    draw_text(l, pm, ox, oy, f32::INFINITY, scale, cache);
 }
 
 fn clip_rect(d: Rect, vw: f32, vh: f32) -> Option<tiny_skia::Rect> {

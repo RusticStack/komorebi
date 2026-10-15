@@ -190,8 +190,9 @@ pub(super) fn note(out: &discover::Outcome, kept: bool) -> String {
 
 impl App {
     /// "Find settings": look the email domain up (DNS, then the provider's
-    /// autoconfig over HTTPS) on a short-lived thread. Only a click starts
-    /// it; offline it refuses.
+    /// autoconfig over HTTPS) on a short-lived thread. Only a press starts
+    /// it (Find settings, or Continue on the onboarding email step for a
+    /// domain that is not a preset's); offline it refuses.
     pub(super) fn find_settings(&mut self, email: String, fields: ServerFields) {
         let ui = self.ui();
         if komorebi::dev_var("KOMOREBI_OFFLINE").is_some() {
@@ -237,6 +238,9 @@ impl App {
         if merged.to != from {
             self.found_last = Some(merged.to.clone());
         }
+        // The onboarding chip first: a Sign in waiting for this answer
+        // reads it when `found-seq` changes.
+        self.onboard_found(&out);
         ui.set_a_found_from((&from).into());
         ui.set_a_found_email(email.as_str().into());
         ui.set_a_found_to((&merged.to).into());

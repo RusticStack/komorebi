@@ -24,6 +24,17 @@ pub struct OutAttachment {
     pub data: Vec<u8>,
 }
 
+/// An image the HTML part shows by `cid:` (a signature's logo), sent in a
+/// `multipart/related` with the HTML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineImage {
+    /// The Content-ID, without angle brackets or `cid:`.
+    pub cid: String,
+    /// `image/png` or `image/jpeg`.
+    pub mime: String,
+    pub data: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Outgoing {
     pub from_name: String,
@@ -36,6 +47,8 @@ pub struct Outgoing {
     /// The text/html alternative of `body` (`compose_html::alternative`).
     /// `None`: the message is plain text only.
     pub body_html: Option<String>,
+    /// Images `body_html` shows by `cid:`; ignored without `body_html`.
+    pub inline: Vec<InlineImage>,
     pub attachments: Vec<OutAttachment>,
     /// Message-ID being replied to, without angle brackets.
     pub in_reply_to: String,
@@ -224,13 +237,23 @@ fn build_with(out: Outgoing, addrs: Addresses, builder: MessageBuilder) -> Resul
                 ),
             )
         }
-        (None, Some(html)) => Readable::Alternative(
-            MultiPart::alternative().singlepart(text).singlepart(
-                SinglePart::builder()
-                    .header(ContentType::TEXT_HTML)
-                    .body(html),
-            ),
-        ),
+        (None, Some(html)) => {
+            let html = SinglePart::builder()
+                .header(ContentType::TEXT_HTML)
+                .body(html);
+            if out.inline.is_empty() {
+                Readable::Alternative(MultiPart::alternative().singlepart(text).singlepart(html))
+            } else {
+                // text/plain, then multipart/related (the HTML and its images).
+                let mut related = MultiPart::related().singlepart(html);
+                for img in out.inline {
+                    let ct = ContentType::parse(&img.mime)?;
+                    related =
+                        related.singlepart(Attachment::new_inline(img.cid).body(img.data, ct));
+                }
+                Readable::Alternative(MultiPart::alternative().singlepart(text).multipart(related))
+            }
+        }
         (None, None) => Readable::Text(text),
     };
     let msg = if out.attachments.is_empty() {
@@ -998,6 +1021,7 @@ mod tests {
             subject: "Re: Plans".into(),
             body: "Line 1\nLine 2".into(),
             body_html: None,
+            inline: vec![],
             attachments: vec![],
             in_reply_to: "abc@example.com".into(),
             references: "<abc@example.com>".into(),
@@ -1418,6 +1442,112 @@ mod tests {
         for b in boundaries {
             assert!(text.contains(&format!("\r\n--{b}--")), "{b}");
         }
+    }
+
+    fn logo_png() -> InlineImage {
+        InlineImage {
+            cid: "sig-0123456789abcdef@komorebi".into(),
+            mime: "image/png".into(),
+            data: b"\x89PNG\r\n\x1a\nlogo".to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_logo_travels_as_a_related_part_of_the_html() {
+        let utf8 = || Some("utf-8".to_string());
+        let t = |s: &str| s.to_string();
+        let build = |attachment: bool| {
+            let mut o = sample();
+            o.body = "Hi\n\n-- \nAna".into();
+            o.body_html = Some(
+                "<div>Hi</div><div class=\"sig\"><img src=\"cid:sig-0123456789abcdef@komorebi\"></div>"
+                    .into(),
+            );
+            o.inline = vec![logo_png()];
+            if attachment {
+                o.attachments = vec![OutAttachment {
+                    filename: "notes.txt".into(),
+                    data: b"notes".to_vec(),
+                }];
+            }
+            build_raw(o).unwrap()
+        };
+        let alt = build(false);
+        assert_eq!(
+            structure(&alt),
+            [
+                (t("multipart/alternative"), None),
+                (t("text/plain"), utf8()),
+                (t("multipart/related"), None),
+                (t("text/html"), utf8()),
+                (t("image/png"), None),
+            ]
+        );
+        let mixed = build(true);
+        assert_eq!(
+            structure(&mixed),
+            [
+                (t("multipart/mixed"), None),
+                (t("multipart/alternative"), None),
+                (t("text/plain"), utf8()),
+                (t("multipart/related"), None),
+                (t("text/html"), utf8()),
+                (t("image/png"), None),
+                (t("text/plain"), None),
+            ]
+        );
+        let text = String::from_utf8(alt.clone()).unwrap();
+        assert!(
+            text.contains("Content-ID: <sig-0123456789abcdef@komorebi>"),
+            "{text}"
+        );
+        assert!(text.contains("Content-Disposition: inline"), "{text}");
+        let msg = mail_parser::MessageParser::default()
+            .parse(&alt[..])
+            .unwrap();
+        assert_eq!(msg.body_text(0).unwrap(), "Hi\r\n\r\n-- \r\nAna");
+        assert!(
+            msg.body_html(0)
+                .unwrap()
+                .contains("cid:sig-0123456789abcdef@komorebi")
+        );
+        // The picture is not listed as an attachment of its own.
+        use mail_parser::MimeHeaders;
+        let image = msg
+            .parts
+            .iter()
+            .find(|p| p.content_type().is_some_and(|c| c.ctype() == "image"))
+            .unwrap();
+        assert_eq!(image.contents(), &logo_png().data[..]);
+        // Without HTML the images are ignored: plain text only.
+        let mut o = sample();
+        o.inline = vec![logo_png()];
+        assert_eq!(
+            structure(&build_raw(o).unwrap()),
+            [(t("text/plain"), utf8())]
+        );
+    }
+
+    #[test]
+    fn a_rich_message_without_formatting_is_built_exactly_as_typed() {
+        let without_date = |raw: Vec<u8>| -> String {
+            String::from_utf8(raw)
+                .unwrap()
+                .split("\r\n")
+                .filter(|l| !l.starts_with("Date: "))
+                .collect::<Vec<_>>()
+                .join("\r\n")
+        };
+        let mut o = sample();
+        o.message_id = "<fixed@example.com>".into();
+        o.body = "Hi Ana,\n\n5 * 3 and snake_case, see https://example.com.\n\n-- \nMe".into();
+        let before = build_raw(o.clone()).unwrap();
+        let doc = crate::mail::rich::Doc::from_plain(&o.body);
+        let (body, html) = crate::mail::rich::parts(&doc);
+        assert_eq!(html, None);
+        assert_eq!(body, o.body);
+        let after = build_raw(Outgoing { body, ..o }).unwrap();
+        assert_eq!(without_date(after), without_date(before));
     }
 
     #[test]

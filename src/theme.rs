@@ -105,6 +105,10 @@ pub fn to_colorref(c: Rgb) -> u32 {
     u32::from(c[0]) | u32::from(c[1]) << 8 | u32::from(c[2]) << 16
 }
 
+/// The Fluent 2 type ramp's Display size (the onboarding welcome's
+/// headline), in px at 100 % text size; scaled as the rest of the ramp.
+pub const DISPLAY: f32 = 40.0;
+
 /// A font size scaled for the text size `factor` (1.0 to 2.25), as WinUI's
 /// `TextFormatting::GetScaledFontSize` does: small text grows the most.
 pub fn scaled(size: f32, factor: f32) -> f32 {
@@ -397,6 +401,7 @@ mod tests {
             (16.0, 29.1),
             (20.0, 32.3),
             (28.0, 39.2),
+            (DISPLAY, 49.97),
         ] {
             let got = scaled(size, 2.25);
             assert!((got - want).abs() < 0.05, "{size}: {got}");

@@ -189,7 +189,6 @@ pub(super) const CALLS: &[(&str, Call)] = &[
     ("err-port", |t| t.invoke_err_port("t0".into())),
     ("err-username", |t| t.invoke_err_username("t0".into())),
     ("check-passed", |t| t.invoke_check_passed()),
-    ("account-added", |t| t.invoke_account_added("t0".into())),
     ("account-saved", |t| t.invoke_account_saved("t0".into())),
     ("account-off", |t| t.invoke_account_off()),
     ("account-downloading", |t| {
@@ -262,6 +261,10 @@ pub(super) const CALLS: &[(&str, Call)] = &[
     ("key-backspace", |t| t.invoke_key_backspace()),
     ("move-recent", |t| t.invoke_move_recent()),
     ("menu-collapse-all", |t| t.invoke_menu_collapse_all()),
+    ("menu-open-tab", |t| t.invoke_menu_open_tab()),
+    ("menu-open-window", |t| t.invoke_menu_open_window()),
+    ("menu-hide-folders", |t| t.invoke_menu_hide_folders()),
+    ("menu-show-folders", |t| t.invoke_menu_show_folders()),
     ("menu-collapse-all-folders", |t| {
         t.invoke_menu_collapse_all_folders()
     }),
@@ -373,6 +376,10 @@ pub(super) const CALLS: &[(&str, Call)] = &[
     ("guard-no-attachment", |t| t.invoke_guard_no_attachment()),
     ("address-invalid", |t| t.invoke_address_invalid("t0".into())),
     ("earlier-draft-saved", |t| t.invoke_earlier_draft_saved()),
+    ("draft-kept-in-tab", |t| t.invoke_draft_kept_in_tab()),
+    ("tab-new-message", |t| t.invoke_tab_new_message()),
+    ("popout-title", |t| t.invoke_popout_title("t0".into())),
+    ("undo-window", |t| t.invoke_undo_window()),
     ("add-account-write", |t| t.invoke_add_account_write()),
     ("add-account-send", |t| t.invoke_add_account_send()),
     ("still-downloading", |t| t.invoke_still_downloading()),
@@ -463,6 +470,16 @@ pub(super) const CALLS: &[(&str, Call)] = &[
     ("q-wipe-text", |t| t.invoke_q_wipe_text()),
     ("q-wipe-unsent", |t| t.invoke_q_wipe_unsent(3)),
     ("q-wipe-ok", |t| t.invoke_q_wipe_ok()),
+    ("q-sig-delete-title", |t| {
+        t.invoke_q_sig_delete_title("t0".into())
+    }),
+    ("q-sig-delete-text", |t| t.invoke_q_sig_delete_text()),
+    ("q-sig-delete-users", |t| t.invoke_q_sig_delete_users(3)),
+    ("sig-name-empty", |t| t.invoke_sig_name_empty()),
+    ("sig-name-taken", |t| t.invoke_sig_name_taken()),
+    ("sig-logo-refused", |t| t.invoke_sig_logo_refused()),
+    ("sig-none", |t| t.invoke_sig_none()),
+    ("dlg-pick-logo", |t| t.invoke_dlg_pick_logo()),
     ("q-trust-title", |t| t.invoke_q_trust_title()),
     ("q-trust-text", |t| {
         t.invoke_q_trust_text("t0".into(), "t1".into())
@@ -473,4 +490,14 @@ pub(super) const CALLS: &[(&str, Call)] = &[
     ("dlg-save-invitation", |t| t.invoke_dlg_save_invitation()),
     ("dlg-save-message", |t| t.invoke_dlg_save_message()),
     ("dlg-attach-files", |t| t.invoke_dlg_attach_files()),
+    ("updated-at", |t| t.invoke_updated_at("t0".into())),
+    ("tray-open", |t| t.invoke_tray_open()),
+    ("tray-check", |t| t.invoke_tray_check()),
+    ("tray-pause", |t| t.invoke_tray_pause()),
+    ("tray-quit", |t| t.invoke_tray_quit()),
+    ("tray-tooltip", |t| t.invoke_tray_tooltip(3)),
+    ("toast-new-mail", |t| t.invoke_toast_new_mail()),
+    ("toast-new-mail-body", |t| t.invoke_toast_new_mail_body()),
+    ("toast-burst", |t| t.invoke_toast_burst(3)),
+    ("toast-burst-body", |t| t.invoke_toast_burst_body()),
 ];

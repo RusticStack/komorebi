@@ -25,6 +25,18 @@ export global Shortcuts {
         { keys: @tr("shortcut key" => "Left / Right"), action: @tr("shortcut" => "Move along a toolbar") },
         { keys: @tr("shortcut key" => "Esc"), action: @tr("shortcut" => "Close the folder pane, clear the search or the selection") },
 
+        { heading: true, action: @tr("shortcut group" => "Tabs and windows") },
+        { keys: @tr("shortcut key" => "Ctrl+Shift+E"), action: @tr("shortcut" => "Show / hide the folders") },
+        { keys: @tr("shortcut key" => "Double-click, Shift+Enter"), action: @tr("shortcut" => "Open in new tab") },
+        { keys: @tr("shortcut key" => "Middle-click"), action: @tr("shortcut" => "Open in a background tab; on a tab, close it") },
+        { keys: @tr("shortcut key" => "Ctrl+O"), action: @tr("shortcut" => "Open in new window") },
+        { keys: @tr("shortcut key" => "Ctrl+W or Ctrl+F4"), action: @tr("shortcut" => "Close the tab or message window") },
+        { keys: @tr("shortcut key" => "Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp"), action: @tr("shortcut" => "Next / previous tab") },
+        { keys: @tr("shortcut key" => "Ctrl+1 to Ctrl+8, Ctrl+9"), action: @tr("shortcut" => "Go to tab 1-8 / last tab") },
+        { keys: @tr("shortcut key" => "Ctrl+Shift+PageUp / Ctrl+Shift+PageDown"), action: @tr("shortcut" => "Move tab left / right") },
+        { keys: @tr("shortcut key" => "Ctrl+Shift+T"), action: @tr("shortcut" => "Reopen closed tab") },
+        { keys: @tr("shortcut key" => "Esc (in a message window)"), action: @tr("shortcut" => "Close the window") },
+
         { heading: true, action: @tr("shortcut group" => "Folders") },
         { keys: @tr("shortcut key" => "Up / Down, Home / End, Enter or Space"), action: @tr("shortcut" => "Move through the folders and open one") },
         { keys: @tr("shortcut key" => "Shift+F10 or Menu"), action: @tr("shortcut" => "Folder menu") },
@@ -54,10 +66,22 @@ export global Shortcuts {
         { keys: @tr("shortcut key" => "Ctrl+Shift+C / Ctrl+Shift+B"), action: @tr("shortcut" => "Show Cc / Bcc") },
         { keys: @tr("shortcut key" => "Ctrl+Shift+A"), action: @tr("shortcut" => "Attach files") },
         { keys: @tr("shortcut key" => "Ctrl+V"), action: @tr("shortcut" => "Attach the files copied in File Explorer") },
-        { keys: @tr("shortcut key" => "Ctrl+B / Ctrl+I"), action: @tr("shortcut" => "Bold / italic") },
+        { keys: @tr("shortcut key" => "Up / Down, Enter or Tab, Esc"), action: @tr("shortcut" => "Pick, take or close a suggested address") },
+
+        // In a formatted message's body these come before the keys above
+        // (Ctrl+U, Ctrl+E, Ctrl+R and Ctrl+Shift+V act on the text there).
+        { heading: true, action: @tr("shortcut group" => "Formatting (message body)") },
+        { keys: @tr("shortcut key" => "Ctrl+B / Ctrl+I / Ctrl+U"), action: @tr("shortcut" => "Bold / italic / underline") },
+        { keys: @tr("shortcut key" => "Ctrl+Shift+X"), action: @tr("shortcut" => "Strikethrough") },
         { keys: @tr("shortcut key" => "Ctrl+K"), action: @tr("shortcut" => "Link to an address") },
         { keys: @tr("shortcut key" => "Ctrl+Shift+8 / Ctrl+Shift+7"), action: @tr("shortcut" => "Bulleted / numbered list") },
         { keys: @tr("shortcut key" => "Ctrl+Shift+Q"), action: @tr("shortcut" => "Quote") },
-        { keys: @tr("shortcut key" => "Up / Down, Enter or Tab, Esc"), action: @tr("shortcut" => "Pick, take or close a suggested address") },
+        { keys: @tr("shortcut key" => "Ctrl+L / Ctrl+E / Ctrl+R / Ctrl+J"), action: @tr("shortcut" => "Align left / center / right / justify") },
+        { keys: @tr("shortcut key" => "Ctrl+] / Ctrl+["), action: @tr("shortcut" => "Larger / smaller text") },
+        { keys: @tr("shortcut key" => "Ctrl+M / Ctrl+Shift+M"), action: @tr("shortcut" => "Increase / decrease indent") },
+        { keys: @tr("shortcut key" => "Tab / Shift+Tab (in a list or table)"), action: @tr("shortcut" => "List level, or the next / previous cell") },
+        { keys: @tr("shortcut key" => "Ctrl+Space"), action: @tr("shortcut" => "Clear formatting") },
+        { keys: @tr("shortcut key" => "Ctrl+Z / Ctrl+Y"), action: @tr("shortcut" => "Undo / redo") },
+        { keys: @tr("shortcut key" => "Ctrl+Shift+V"), action: @tr("shortcut" => "Paste as plain text") },
     ];
 }

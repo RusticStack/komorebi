@@ -77,13 +77,21 @@ or remove the `account:<n>:password.komorebi` entries there by hand.
 The cache lives at `%LOCALAPPDATA%\komorebi\cache.sqlite3` and holds:
 
 - Account settings: email address, display name, IMAP/SMTP host, port and
-  security mode, the "save sent mail" choice, and the account's signature.
+  security mode, the "save sent mail" choice, and the account's two signature choices
+  (which named signature starts new mail, and which starts replies and
+  forwards). The named signatures themselves (text, formatting and an
+  optional small logo image) are stored in the cache too, and so is the
+  formatted form of each draft (`drafts.body_rich`). All of it is plaintext.
 - App settings, as named values: the theme, the display language (System,
   English or Portuguese; Windows' display language is only read, never
   stored or sent), the check interval, the
   undo-send and mark-as-read delays, the taskbar flash choice, where
   the window was when it last closed (position and size on screen), the
-  folder pane's folded lines, the view last open, the last folders
+  folder pane's folded lines and whether it is folded to the rail, the
+  view last open, the tabs open when the app last closed (message and
+  draft ids and which tab was active: never a subject, an address or any
+  text; cleared when "Reopen tabs at start" is off), the size of the last
+  message window, the last folders
   Move went to (folder ids), which teaching tips were seen, and the
   version the What's new bar last told about. Each
   account also records whether it is switched on and its place in the
@@ -233,9 +241,11 @@ Komorebi connects only to the servers you configure:
   replaces, and the copy of a draft you send or discard, is removed.
   While the app runs, one read-only IMAP connection waits on the inbox
   (IDLE) so new mail shows up without waiting for the next sync.
-- "Find settings" in the manual account form, only when you press it (or
-  when you press Add account or Test connection with Other server chosen
-  and no server typed; never while you type): your
+- Looking up your server settings, only when you press Continue on the
+  "Your email" step of adding an account (and only for a domain Komorebi
+  has no built-in settings for), or "Find settings" in manual setup or on
+  an account's page; never while you type or when a field loses focus,
+  and never under `KOMOREBI_OFFLINE`: your
   email domain (the part after the @, never the address or the password) goes
   to your system's DNS resolver as SRV queries (`_imaps._tcp`,
   `_submissions._tcp`, and their STARTTLS forms), in the clear unless your
@@ -328,6 +338,25 @@ as opening it does. Forward as attachment attaches the original whole,
 with all its header fields (its recipients and the servers it passed
 through, for example), to a new draft; nothing is sent until you press
 Send.
+
+## Notifications, tray and starting with Windows
+
+New-mail notifications are local. They are shown by Windows from the
+tray icon when the IMAP sync or IDLE connection you already have sees new
+mail; there is no push service, no cloud relay and no extra connection,
+and nothing about them is logged or sent anywhere. In Settings you choose,
+per account, whether it notifies, and whether a notification shows the
+sender and subject or only "New mail"; Windows keeps its own notification
+history and shows it on the lock screen according to your Windows
+settings, so pick "Only New mail" if that matters to you. Notifications
+can be muted from the tray menu. Komorebi remembers, in memory only, which
+messages it already notified about.
+
+Closing to the tray and starting with Windows are off by default. Turning
+"Start with Windows" on writes one value, `Komorebi`, under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (the path of the
+program and `--minimized`); turning it off removes it. Nothing else is
+written to the registry.
 
 ## Not collected
 

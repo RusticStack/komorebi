@@ -1,4 +1,4 @@
-import { Theme, Icons, Tip } from "theme.slint";
+import { Theme, Icons, Tip, Motion } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 
 // Where the keyboard focus came from last: the list and the folders show
@@ -148,6 +148,7 @@ export struct AccountRow {
     caution: bool,    // its server can't be reached (until a sync goes through)
     name: string,     // its display name (empty: none)
     enabled: bool,    // switched on (off: no connections, shown greyed)
+    notify: bool,     // new mail in it can notify (setting `notify_off`)
     dot: color,       // its colour (All inboxes rows, navigation)
     first: bool,      // first and last in the account order
     last: bool,
@@ -1010,6 +1011,10 @@ export component MailItem inherits Rectangle {
     callback quick(int);
     // Its check box: add it to the selection or take it out.
     callback check();
+    // A double-click (open it in a tab) and a middle-click (in a tab in
+    // the background).
+    callback double-clicked();
+    callback middle-clicked();
 
     accessible-role: list-item;
     accessible-label: (mail.unread ? @tr("Unread") + ", " : "") + (mail.draft ? @tr("Draft") + ", " : "") + mail.sender + ", " + mail.subject + ", " + mail.date + (mail.tag != "" ? ", " + mail.tag : "")
@@ -1044,9 +1049,16 @@ export component MailItem inherits Rectangle {
                 if e.button == PointerEventButton.right {
                     root.context(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                 }
+            } else if e.kind == PointerEventKind.up && e.button == PointerEventButton.middle {
+                root.middle-clicked();
             }
         }
         clicked => { root.clicked(self.ctrl, self.shift); }
+        double-clicked => {
+            if !self.ctrl && !self.shift {
+                root.double-clicked();
+            }
+        }
 
         // The backplate: selected and hovered is the pressed fill, selected
         // and pressed the hovered one, as in WinUI.
@@ -1400,7 +1412,7 @@ export component FieldLabel inherits Text {
 // The frame of a text field (docs/WINUI3.md "TextBox"): ControlFill
 // colours, 1 px ControlStroke sides and a 1 px strong bottom edge that
 // turns into a 2 px accent one while focused (TextControlElevationBorder).
-component InputFrame inherits Rectangle {
+export component InputFrame inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> focused;
     in property <bool> hover;
@@ -1466,6 +1478,9 @@ export component TextField inherits InputFrame {
     in property <bool> read-only <=> input.read-only;
     // Room kept at the end for a button over the field (SearchBox).
     in property <length> end-room;
+    // A decorative glyph before the text (the onboarding Password box's
+    // lock, E72E), in TextTertiary.
+    in property <string> leading-icon;
     // The clear button shows whenever there is text, focused or not
     // (SearchBox), with this name.
     in property <bool> clear-always;
@@ -1480,6 +1495,9 @@ export component TextField inherits InputFrame {
 
     public function set-selection-offsets(anchor: int, cursor: int) {
         input.set-selection-offsets(anchor, cursor);
+    }
+    public function select-all() {
+        input.select-all();
     }
 
     // The password shows while its reveal button is on, until the focus
@@ -1538,9 +1556,15 @@ export component TextField inherits InputFrame {
                     activated => { input.select-all(); }
                 }
             }
-            Rectangle {
+            if root.leading-icon != "": Icon {
                 x: 10px;
-                width: root.width - 16px - (root.button ? 32px : 0px) - root.end-room;
+                width: 16px;
+                text: root.leading-icon;
+                color: root.enabled ? Theme.text-3 : Theme.text-disabled;
+            }
+            Rectangle {
+                x: root.leading-icon != "" ? 34px : 10px;
+                width: root.width - self.x - 6px - (root.button ? 32px : 0px) - root.end-room;
                 clip: true;
                 if root.text == "": Text {
                     x: 0;
@@ -3039,5 +3063,618 @@ export component ComposeBody inherits InputFrame {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------- onboarding
+// (docs/WINUI3.md "Onboarding")
+
+// One leaf of the brand mark: a lens from `sx,sy` (its stem) to its tip,
+// `len` long and `wide` across, pointing at `dir` and turned by `turn`
+// about its stem, in the mark's 96-unit view box.
+component Leaf inherits Path {
+    in property <float> sx;
+    in property <float> sy;
+    in property <float> len;
+    in property <float> wide;
+    in property <angle> dir;
+    in property <angle> turn;
+    property <angle> a: root.dir + root.turn;
+    property <float> tx: root.sx + root.len * cos(root.a);
+    property <float> ty: root.sy + root.len * sin(root.a);
+    property <float> mx: root.sx + root.len / 2 * cos(root.a);
+    property <float> my: root.sy + root.len / 2 * sin(root.a);
+    property <float> nx: -sin(root.a) * root.wide;
+    property <float> ny: cos(root.a) * root.wide;
+    viewbox-width: 96;
+    viewbox-height: 96;
+    MoveTo { x: root.sx; y: root.sy; }
+    QuadraticTo { control-x: root.mx + root.nx; control-y: root.my + root.ny; x: root.tx; y: root.ty; }
+    QuadraticTo { control-x: root.mx - root.nx; control-y: root.my - root.ny; x: root.sx; y: root.sy; }
+    Close { }
+}
+
+// Komorebi's mark, "sunlight through leaves": a circle in `mark-a`, a sun
+// with four rays and three leaves in `mark-b` and `mark-c`, all vector
+// (no image is decoded). `celebrate` sways the leaves 6 degrees each way
+// and grows the circle from 0.92 once, over `slow`; still while
+// animations are off. Under a contrast theme: 2 px WindowText outlines on
+// the window colour.
+export component BrandMark inherits Rectangle {
+    in property <length> size: 96px;
+    in property <bool> celebrate;
+    property <float> t: root.celebrate ? 1 : 0;
+    animate t { duration: Theme.slow; easing: Motion.ease-out; }
+    property <angle> sway: sin(root.t * 360deg) * 6deg;
+    property <float> grow: root.celebrate ? 0.92 + 0.08 * root.t : 1;
+    property <brush> leaf-a: Theme.contrast ? transparent : Theme.mark-b;
+    property <brush> leaf-b: Theme.contrast ? transparent : Theme.mark-c.with-alpha(0.85);
+    property <brush> line: Theme.contrast ? Theme.hc-text : transparent;
+    property <length> line-width: Theme.contrast ? 2px : 0;
+    width: root.size;
+    height: root.size;
+    accessible-role: image;
+    accessible-label: "Komorebi";
+    Rectangle {
+        width: root.size * root.grow;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: Theme.contrast ? Theme.hc-window : Theme.mark-a;
+        border-width: Theme.contrast ? 2px : 0;
+        border-color: Theme.hc-text;
+        clip: true;
+        // The sun, upper right, with four short rays.
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 96;
+            viewbox-height: 96;
+            stroke: Theme.contrast ? Theme.hc-text : Theme.mark-c.with-alpha(0.85);
+            stroke-width: root.size / 96 * 3;
+            commands: "M 64 18 L 64 12 M 76 30 L 82 30 M 72.5 21.5 L 76.7 17.3 M 55.5 21.5 L 51.3 17.3";
+        }
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 96;
+            viewbox-height: 96;
+            fill: Theme.contrast ? transparent : Theme.mark-c.with-alpha(0.85);
+            stroke: root.line;
+            stroke-width: root.line-width;
+            commands: "M 56 30 A 8 8 0 1 1 72 30 A 8 8 0 1 1 56 30 Z";
+        }
+        Leaf {
+            width: 100%;
+            height: 100%;
+            sx: 14;
+            sy: 50;
+            len: 40;
+            wide: 11;
+            dir: -18deg;
+            turn: root.sway;
+            fill: root.leaf-a;
+            stroke: root.line;
+            stroke-width: root.line-width;
+        }
+        Leaf {
+            width: 100%;
+            height: 100%;
+            sx: 20;
+            sy: 70;
+            len: 44;
+            wide: 12;
+            dir: -8deg;
+            turn: -root.sway;
+            fill: root.leaf-b;
+            stroke: root.line;
+            stroke-width: root.line-width;
+        }
+        Leaf {
+            width: 100%;
+            height: 100%;
+            sx: 40;
+            sy: 86;
+            len: 38;
+            wide: 10;
+            dir: -26deg;
+            turn: root.sway;
+            fill: root.leaf-a;
+            stroke: root.line;
+            stroke-width: root.line-width;
+        }
+    }
+}
+
+// The steps remaining (Fluent 2 "Take action"): three 24 px circles joined
+// by 1 px lines, each with its label under it; done steps filled with a
+// check, the current one ringed with a dot. `narrow` (a column under
+// 440 px, or a large text size) shows "Step {0} of {1}" instead.
+export component StepIndicator inherits Rectangle {
+    in property <[string]> labels;
+    // 1-based; past the count: all done.
+    in property <int> current: 1;
+    in property <bool> narrow;
+    property <int> count: root.labels.length;
+    accessible-role: list;
+    height: root.narrow ? short.preferred-height : 24px + Theme.s1 + 2 * Theme.caption-line;
+    short := Text {
+        visible: root.narrow;
+        width: 100%;
+        text: @tr("Step {0} of {1}", min(root.current, root.count), root.count);
+        font-size: Theme.caption;
+        color: Theme.text-2;
+        horizontal-alignment: center;
+        accessible-live-region: polite;
+    }
+    // The lines first, under the circles.
+    for i in (root.narrow ? 0 : max(0, root.count - 1)): Rectangle {
+        x: root.width * (2 * i + 1) / (2 * root.count) + 12px + Theme.s1;
+        y: 12px;
+        width: root.width / root.count - 24px - 2 * Theme.s1;
+        height: 1px;
+        background: i + 1 < root.current ? Theme.accent : Theme.stroke-strong;
+    }
+    for label[i] in root.labels: Rectangle {
+        visible: !root.narrow;
+        property <bool> done: i + 1 < root.current;
+        property <bool> now: i + 1 == root.current;
+        x: root.width * i / root.count;
+        y: 0;
+        width: root.width / root.count;
+        height: root.height;
+        accessible-role: list-item;
+        accessible-label: self.done ? @tr("{0}, step {1} of {2}, completed", label, i + 1, root.count)
+            : self.now ? @tr("{0}, step {1} of {2}, current", label, i + 1, root.count)
+            : @tr("{0}, step {1} of {2}, not started", label, i + 1, root.count);
+        accessible-live-region: self.now ? AccessibleLiveness.polite : AccessibleLiveness.off;
+        Rectangle {
+            x: (parent.width - 24px) / 2;
+            y: 0;
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            background: parent.done ? Theme.accent : transparent;
+            border-width: parent.now ? 2px : parent.done ? 0 : 1px;
+            border-color: parent.now ? Theme.accent : Theme.stroke-strong;
+            animate background { duration: Theme.fast; }
+            if parent.done: Icon {
+                text: Icons.check-mark;
+                font-size: 12px;
+                color: Theme.on-accent;
+            }
+            if parent.now: Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.accent;
+            }
+        }
+        Text {
+            x: Theme.s1;
+            y: 24px + Theme.s1;
+            width: parent.width - Theme.s2;
+            text: label;
+            font-size: Theme.caption;
+            font-weight: parent.now ? 600 : 400;
+            color: parent.done || parent.now ? Theme.text : Theme.text-3;
+            horizontal-alignment: center;
+            vertical-alignment: top;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+    }
+}
+
+// The onboarding column's card: `card` fill, a 1 px card stroke (2 px
+// under a contrast theme), radius 12, padding 32 (24 when `narrow`).
+export component OnboardCard inherits Rectangle {
+    in property <bool> narrow;
+    background: Theme.card;
+    border-width: Theme.contrast ? 2px : 1px;
+    border-color: Theme.card-stroke;
+    border-radius: Theme.radius-xl;
+    VerticalLayout {
+        padding: root.narrow ? Theme.s6 : Theme.s8;
+        @children
+    }
+}
+
+// What the Sign in step knows of the servers (`state`: 0 hidden, 1
+// looking (the ring after a second), 2 found, 3 not found, on a Caution
+// fill), the title in Body Strong, the detail in Caption, and "Change"
+// (manual setup) at its end.
+export component ProviderChip inherits Rectangle {
+    in property <int> state;
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> can-change: true;
+    callback change;
+    visible: root.state != 0;
+    height: root.state == 0 ? 0 : max(48px, chip-row.preferred-height);
+    border-radius: Theme.radius;
+    background: root.state == 3 ? Theme.caution-bg : Theme.card-fill-2;
+    border-width: Theme.contrast ? 2px : 1px;
+    border-color: Theme.card-stroke;
+    accessible-role: groupbox;
+    accessible-label: root.detail != "" ? @tr("{0}. {1}", root.title, root.detail) : root.title;
+    accessible-live-region: polite;
+    chip-row := HorizontalLayout {
+        padding-left: Theme.s3;
+        padding-right: Theme.s1;
+        padding-top: Theme.s2;
+        padding-bottom: Theme.s2;
+        spacing: Theme.s3;
+        VerticalLayout {
+            alignment: center;
+            width: 16px;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                if root.state == 1: ProgressRing { active: true; }
+                if root.state == 2: Icon { text: Icons.status-circle; color: Theme.contrast ? Theme.hc-highlight : Theme.ok-glyph; }
+                if root.state == 2: Icon { text: Icons.status-success; color: Theme.contrast ? Theme.hc-highlight-text : Theme.text-inverse; }
+                if root.state == 3: Icon { text: Icons.status-circle; color: Theme.contrast ? Theme.hc-highlight : Theme.warning; }
+                if root.state == 3: Icon { text: Icons.status-warning; color: Theme.contrast ? Theme.hc-highlight-text : Theme.text-inverse; }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.title;
+                font-size: Theme.body;
+                font-weight: root.state == 1 ? 400 : 600;
+                color: Theme.text;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                font-size: Theme.caption;
+                color: Theme.text-2;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+        }
+        if root.can-change: VerticalLayout {
+            alignment: center;
+            HyperlinkButton {
+                text: @tr("change the servers" => "Change");
+                label: @tr("Change the server settings");
+                clicked => { root.change(); }
+            }
+        }
+    }
+}
+
+// One tab of the main window's strip (`TabStrip`): its kind (0 the Mail
+// tab, 1 a message, 2 a draft), title, and states.
+export struct TabItem {
+    title: string,
+    kind: int,
+    unread: bool,
+    gone: bool,
+}
+
+// A tab header (docs/WINUI3.md "TabView"): icon, title elided, and the
+// close button on the selected tab and under the pointer. The Mail tab is
+// its icon only and has no close button.
+component TabHeader inherits Rectangle {
+    in property <TabItem> tab;
+    in property <bool> selected;
+    in property <int> index;
+    in property <int> count;
+    in property <bool> ring;
+    // The tab beside the selected one or the pointer hides its separator.
+    in property <bool> separator: true;
+    callback activate;
+    callback close;
+    callback menu(length, length);
+    callback drag(length);
+    callback dropped(length);
+    out property <bool> hover: ta.has-hover || close-ta.has-hover;
+    property <bool> mail: root.tab.kind == 0;
+    property <bool> lit: !root.selected && (ta.pressed || root.hover);
+    property <bool> closable: !root.mail && (root.selected || root.hover);
+    // A press and how far it moved: a drag past 4 px moves the tab.
+    property <length> press-x;
+    property <bool> dragging;
+    property <color> fg: root.selected ? Theme.tab-text-selected
+        : Theme.contrast && root.lit ? Theme.hc-highlight-text
+        : ta.pressed ? Theme.text-3 : Theme.tab-text;
+
+    accessible-role: AccessibleRole.tab;
+    accessible-label: root.mail ? @tr("tab" => "Mail")
+        : root.tab.kind == 2 ? @tr("{0}, draft, {1} of {2}", root.tab.title, root.index + 1, root.count)
+        : root.tab.unread ? @tr("{0}, unread, {1} of {2}", root.tab.title, root.index + 1, root.count)
+        : @tr("{0}, {1} of {2}", root.tab.title, root.index + 1, root.count);
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-item-index: root.index;
+    accessible-item-count: root.count;
+    accessible-action-default => { root.activate(); }
+
+    // The separator at its end (DividerStroke, 8 px from top and bottom).
+    Rectangle {
+        x: parent.width - 1px;
+        y: Theme.s2;
+        width: 1px;
+        height: parent.height - 2 * Theme.s2;
+        background: root.separator && !root.selected && !root.hover ? Theme.stroke : transparent;
+    }
+    // The selected tab joins the card under it: the card's edge on three
+    // sides, its fill over the card's top edge.
+    if root.selected: Rectangle {
+        y: 0;
+        height: parent.height + 1px;
+        border-top-left-radius: Theme.radius-lg;
+        border-top-right-radius: Theme.radius-lg;
+        background: Theme.contrast ? Theme.hc-highlight : Theme.card-stroke;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: parent.height - 1px;
+            border-top-left-radius: Theme.radius-lg - 1px;
+            border-top-right-radius: Theme.radius-lg - 1px;
+            background: Theme.tab-selected;
+        }
+    }
+    if !root.selected: Rectangle {
+        y: 2px;
+        width: parent.width - 2px;
+        x: 1px;
+        height: parent.height - 4px;
+        border-radius: Theme.radius;
+        background: ta.pressed ? Theme.tab-pressed : root.hover ? Theme.tab-hover : Theme.contrast ? Theme.hc-button : transparent;
+    }
+    ta := TouchArea {
+        mouse-cursor: default;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                Focus.keyboard = false;
+                if e.button == PointerEventButton.left {
+                    root.press-x = self.mouse-x;
+                    root.dragging = false;
+                } else if e.button == PointerEventButton.right {
+                    root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            } else if e.kind == PointerEventKind.up {
+                if e.button == PointerEventButton.middle && !root.mail {
+                    root.close();
+                } else if e.button == PointerEventButton.left && root.dragging {
+                    root.dragging = false;
+                    root.dropped(self.mouse-x - root.press-x);
+                }
+            }
+        }
+        moved => {
+            if self.pressed && !root.mail && (root.dragging || abs(self.mouse-x - root.press-x) > 4px) {
+                root.dragging = true;
+                root.drag(self.mouse-x - root.press-x);
+            }
+        }
+        clicked => {
+            if !root.dragging {
+                root.activate();
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: root.mail ? 0 : root.selected ? 9px : Theme.s2;
+        padding-right: root.mail ? 0 : root.selected ? 5px : Theme.s1;
+        padding-top: 3px;
+        padding-bottom: root.selected ? 4px : 3px;
+        alignment: root.mail ? center : stretch;
+        Icon {
+            width: 16px;
+            text: root.tab.kind == 2 ? Icons.compose : root.tab.gone ? Icons.warning : Icons.mail;
+            color: root.fg;
+        }
+        if !root.mail: Rectangle { width: 10px; }
+        if !root.mail: Text {
+            horizontal-stretch: 1;
+            text: root.tab.title;
+            font-size: Theme.caption;
+            font-weight: root.tab.unread ? 600 : 400;
+            color: root.fg;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+        Rectangle {
+            visible: !root.mail;
+            width: root.mail ? 0 : 32px + Theme.s1;
+            Rectangle {
+                x: Theme.s1;
+                y: (parent.height - 24px) / 2;
+                width: 32px;
+                height: 24px;
+                visible: root.closable;
+                border-radius: Theme.radius;
+                background: close-ta.pressed ? Theme.pressed : close-ta.has-hover ? Theme.hover : transparent;
+                border-width: Theme.contrast && (root.selected || close-ta.has-hover) ? 1px : 0;
+                border-color: Theme.hc-button-text;
+                accessible-role: button;
+                accessible-label: @tr("Close tab");
+                accessible-action-default => { root.close(); }
+                close-ta := TouchArea {
+                    clicked => { root.close(); }
+                }
+                // Not scaled with the text size (IsTextScaleFactorEnabled off).
+                Icon {
+                    text: Icons.dismiss;
+                    font-size: 12px;
+                    color: Theme.contrast ? (root.selected ? Theme.hc-highlight : close-ta.has-hover ? Theme.hc-highlight-text : Theme.hc-button-text)
+                        : close-ta.pressed ? Theme.text-2 : Theme.text;
+                }
+                TipTimer {
+                    text: @tr("Close tab (Ctrl+W)");
+                    hover: close-ta.has-hover;
+                    pressed: close-ta.pressed;
+                }
+            }
+        }
+    }
+    TipTimer {
+        text: root.mail ? @tr("tab" => "Mail") : root.tab.title;
+        hover: ta.has-hover;
+        pressed: ta.pressed;
+    }
+    FocusRing {
+        shown: root.ring;
+        inset: 1px;
+        radius: Theme.radius-lg;
+    }
+}
+
+// The main window's tab strip (docs/WINUI3.md "TabView"): the Mail tab
+// first (pinned, icon only), then message and draft tabs from 100 to
+// 240 px, shrinking to 100 px and then scrolling, and the "All tabs" menu
+// at its end. One Tab stop: Left / Right, Home / End move between tabs.
+// Below 720 px (`narrow`) only the Mail tab, the active one and the menu
+// show.
+export component TabStrip inherits FocusScope {
+    in property <[TabItem]> tabs;
+    in property <int> active;
+    in property <bool> narrow;
+    callback activate(int);
+    callback close(int);
+    callback moved(/* from */ int, /* to */ int);
+    callback menu(int, length, length);
+    callback all-tabs(length, length);
+    out property <length> strip-height: Theme.tab-height + Theme.s2;
+
+    height: self.strip-height;
+    focus-on-click: false;
+    accessible-role: tab-list;
+    accessible-label: @tr("Tabs");
+    accessible-delegate-focus: root.active;
+    property <length> menu-w: 40px;
+    property <length> mail-w: Theme.tab-icon-only;
+    property <int> others: max(1, root.tabs.length - 1);
+    property <length> room: max(0px, root.width - root.mail-w - root.menu-w - Theme.s1);
+    property <length> tab-w: root.narrow ? clamp(root.room, Theme.tab-min, Theme.tab-max)
+        : clamp(root.room / root.others, Theme.tab-min, Theme.tab-max);
+    // Where tab `i` sits in the strip (below 720 px: the active one after
+    // the Mail tab).
+    pure function place(i: int) -> length {
+        i == 0 ? 0 : root.narrow ? root.mail-w : root.mail-w + (i - 1) * root.tab-w
+    }
+    property <length> content-w: root.narrow ? root.mail-w + root.tab-w : root.mail-w + (root.tabs.length - 1) * root.tab-w;
+    // A tab being dragged, and how far.
+    property <int> drag-index: -1;
+    property <length> drag-dx;
+    function pick(i: int) {
+        let n = clamp(i, 0, root.tabs.length - 1);
+        if n != root.active {
+            root.activate(n);
+        }
+    }
+    // The active tab in view.
+    function reveal() {
+        let x = root.place(root.active);
+        let w = root.active == 0 ? root.mail-w : root.tab-w;
+        if x + flick.content-x < 0 {
+            flick.content-x = -x;
+        } else if x + w + flick.content-x > flick.width {
+            flick.content-x = flick.width - x - w;
+        }
+    }
+    changed active => { root.reveal(); }
+    changed tab-w => { root.reveal(); }
+    focus-gained(reason) => {
+        if reason == FocusReason.tab-navigation {
+            Focus.keyboard = true;
+        }
+    }
+    key-pressed(e) => {
+        if (e.text == Key.F10 && e.modifiers.shift && !e.modifiers.control && !e.modifiers.alt) || (e.text == Key.Menu && !e.modifiers.shift) {
+            root.menu(root.active, root.absolute-position.x + root.place(root.active) + flick.content-x + Theme.s4, root.absolute-position.y + root.height);
+            return accept;
+        }
+        if e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
+            return reject;
+        }
+        if e.text == Key.LeftArrow {
+            root.pick(root.active - 1);
+        } else if e.text == Key.RightArrow {
+            root.pick(root.active + 1);
+        } else if e.text == Key.Home {
+            root.pick(0);
+        } else if e.text == Key.End {
+            root.pick(root.tabs.length - 1);
+        } else if e.text == Key.Return || e.text == " " {
+            // The active tab is already shown.
+        } else {
+            return reject;
+        }
+        accept
+    }
+    Rectangle {
+        background: Theme.tab-strip;
+    }
+    // Scrolled tabs: the wheel moves them sideways.
+    TouchArea {
+        x: flick.x;
+        y: flick.y;
+        width: flick.width;
+        height: flick.height;
+        scroll-event(e) => {
+            let d = e.delta-y != 0 ? e.delta-y : e.delta-x;
+            flick.content-x = clamp(flick.content-x + d, min(0px, flick.width - root.content-w), 0px);
+            accept
+        }
+    }
+    flick := Flickable {
+        x: 0;
+        y: Theme.s2;
+        width: root.width - root.menu-w;
+        height: Theme.tab-height + 1px;
+        content-width: max(self.width, root.content-w);
+        content-height: self.height;
+        interactive: false;
+        for tab[i] in root.tabs: TabHeader {
+            visible: !root.narrow || i == 0 || i == root.active;
+            x: root.place(i) + (i == root.drag-index ? root.drag-dx : 0);
+            z: i == root.drag-index ? 2 : i == root.active ? 1 : 0;
+            y: 0;
+            width: i == 0 ? root.mail-w : root.tab-w;
+            height: Theme.tab-height;
+            tab: tab;
+            index: i;
+            count: root.tabs.length;
+            selected: i == root.active;
+            ring: root.has-focus && i == root.active;
+            separator: i + 1 != root.active && i + 1 < root.tabs.length;
+            activate => { root.pick(i); }
+            close => { root.close(i); }
+            menu(x, y) => { root.menu(i, x, y); }
+            drag(dx) => {
+                root.drag-index = i;
+                root.drag-dx = dx;
+            }
+            dropped(dx) => {
+                root.drag-index = -1;
+                root.drag-dx = 0;
+                if !root.narrow {
+                    let to = clamp(round((root.place(i) + dx - root.mail-w) / root.tab-w) + 1, 1, root.tabs.length - 1);
+                    if to != i {
+                        root.moved(i, to);
+                    }
+                }
+            }
+        }
+    }
+    IconButton {
+        x: root.width - root.menu-w + Theme.s1;
+        y: Theme.s2 + (Theme.tab-height - 24px) / 2;
+        width: 32px;
+        height: 24px;
+        icon: Icons.chevron-down;
+        icon-size: 12px;
+        tooltip: @tr("All tabs");
+        tab-stop: false;
+        clicked => { root.all-tabs(self.absolute-position.x, self.absolute-position.y + self.height + Theme.s1); }
     }
 }

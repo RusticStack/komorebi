@@ -336,7 +336,7 @@ Learned on Postale's Dovecot, and handled:
       5.7 ms).
 - [x] Product round, Stage 7 (2026-10-08): HTML alternative and HTML
       quoted replies (`src/mail/compose_html.rs`, panic-free lints like
-      the renderer). The composer stays plain text; Markdown-lite markers
+      the renderer). The composer was plain text then (superseded by the composer upgrade stages at the end); Markdown-lite markers
       (`**bold**`, `*italic*`/`_italic_` at word boundaries, `- ` and `1. `
       lists with one nesting level (numbered ones start at 1), `> ` quotes,
       `[label](url)` and bare http(s) links; only http, https and mailto
@@ -1949,8 +1949,9 @@ Independent re-run of the gates on the finished tree, same machine:
       temporary local build (no real account; nothing kept).
 - [ ] Check by hand once: mouse-wheel scrolling of the pane with 300 more
       folders (no stutter expected: plain rows, `set_vec` on fold).
-- Deferred: a resizable pane splitter, a wide-pane hide toggle, pinned
-  favourites, hiding All inboxes with one account.
+- Deferred: a resizable pane splitter, pinned favourites, hiding All
+  inboxes with one account. (The wide-pane hide toggle is done: "Tabs and
+  windows", P1.)
 
 ## Folder pane, Stage 3: row actions, scrolling cues, rail and overlay (2026-10-12)
 
@@ -2881,8 +2882,9 @@ Independent re-run of the gates on the finished tree, same machine:
   Purelymail account; live checks of server draft copies, Review
   certificate and real failed sends need the user's authorization per
   account; the local cache is plaintext; no code signing (the installer
-  exists); editing server-only drafts (C8) is deferred; no toasts or tray
-  (non-goal); a cold-start measurement on a clean machine and the
+  exists); editing server-only drafts (C8) is deferred; native toasts and
+  the tray are in progress (see "Notifications, tray and background
+  mode"); a cold-start measurement on a clean machine and the
   static-CRT release smoke test are still open (see "Next").
 
 ## Release readiness (UX), final audit (2026-10-13)
@@ -3010,17 +3012,14 @@ was attributed. Cold-disk first boot was not measured.
 - [x] Composer: High / Low importance toggles at the end of the
       formatting bar; sent as `Importance` + `X-Priority`, saved with the
       draft and its Drafts-folder copy.
-- [x] Messages cached before v13: the importance rides the body
-      fetches that already happen (`Body::importance` from the same
-      parse; `set_body` / `set_bodies` fill `priority` only where it is
-      0), and an already cached body fills it as the message opens
-      (`backfill_importance`, one row UPDATE). No migration scan (first
-      start after the upgrade stays fast), no new round trip.
-- [ ] Still normal until then: a pre-v13 message whose body was never
-      downloaded (over the prefetch size, or outside its window), or
-      cached but never opened. A header-only FETCH of the importance
-      fields for cached UIDs would cover them; not done, to keep the
-      sync's round trips as they are.
+- [x] Messages cached before v13: the v12 to v13 migration clears the
+      server-derived cache (messages, bodies, address index, folder sync
+      fingerprints) so the next sync refetches it with importance. Local
+      data: cached mail is cleared and refetched on first start after
+      upgrading. Local-only tables are kept (see `MIGRATE_V12_TO_V13`);
+      notifications wait for each inbox's first sync
+      (`Db::inbox_awaits_first_sync`). The body back-fill
+      (`backfill_importance`) is now only a safety net.
 - [x] Reader: "Sent with high importance" after the list's bold "!"
       (hidden from screen readers), or "Sent with low importance", as a
       Caption TextSecondary line under the To line.
@@ -3034,6 +3033,47 @@ was attributed. Cold-disk first boot was not measured.
 - [x] Composer: High / Low importance (or another From account) on a
       blank message (`Draft::is_empty`) does not mark it touched, so Esc
       drops it and nothing reaches Drafts; a reply keeps the choice.
+
+## Onboarding redesign (2026-10-14)
+
+- [x] Docs first: FLUENT2 "Onboarding" allows the short stepped flow
+      (Your email, Sign in, Make it yours) and the press-only lookup on
+      Continue; WINUI3 "Onboarding" has the metrics; AGENTS.md, the plan,
+      README, PRIVACY.md and CHANGELOG say the same.
+- [x] Tokens (`normal`, `gentle`, `slow`, `stagger`, the `Motion` easings,
+      `s5`-`s12`, `display` with its text-size test, `radius-xl`,
+      `mark-a`/`mark-b`/`mark-c`, `ok-glyph`) and the widgets `BrandMark`,
+      `StepIndicator`, `OnboardCard`, `ProviderChip`, the TextBox
+      `leading-icon`.
+- [x] `ui/onboarding.slint` and `src/app/onboarding.rs`: welcome, the
+      three steps, manual setup, finish; Settings > Add account opens the
+      same flow in the content area; the Settings add form and the "Added
+      …" status line are gone. Stage grouping, chip from the lookup, name
+      from the address, error kinds, Skip writes nothing and no lookup for
+      a preset are tested.
+- [x] Snapshots `ob-*` (README), checked at 900x700 and 1280x800 in en and
+      pt-PT, light, dark and high contrast for the welcome and key steps,
+      and at 150 % text (the steps scroll).
+- [x] Measure the welcome (PERF.md, release, offline, interleaved A/B):
+      empty cache, first frame median 44.9 → 48.1 ms (min 34.6 → 38.7,
+      15 runs; an earlier, noisier set 69.5 → 73.3); seeded 2,000-message
+      cache 39.1 → 41.1 ms (min 36.0 → 35.9, 9 runs; the page is not built
+      once an account exists). Both deltas are inside the run-to-run
+      spread and far under 200 ms. Not like for like on the empty cache:
+      the new first frame draws the welcome's text still transparent (its
+      entrance follows), the old one drew it whole. Exe 17,154,048 → 17,996,288 bytes
+      (+0.8 MB of generated UI code, under the 20.0 MB cap). The vector
+      mark stays (no SVG measured).
+- [ ] The welcome's entrance is opacity only (the spec's 8 px rise needs
+      the hero's rows wrapped as the card content is).
+- [ ] The card's height does not animate between steps (only its content
+      fades and rises); the address in "Sign in to {0}" elides at its end
+      (Slint has no middle elision; the tooltip has it whole).
+- [ ] The flow is checked offline only (snapshots and the fakes): not yet
+      against real Purelymail / Postale.io lookups or a self-hosted
+      server's autoconfig.
+- [ ] `ob-finding` and `ob-wait` snapshots are taken before the rings'
+      1 s delay; add `KOMOREBI_SNAPSHOT_HOVER` to see them.
 
 ## Next
 
@@ -3226,3 +3266,268 @@ was attributed. Cold-disk first boot was not measured.
       default "save a copy to Sent" off for that preset. Postale.io does not
       (measured: 4 test sends and 1 APPEND left exactly 1 new Sent copy), so
       its preset keeps "save a copy" on.
+
+## Composer upgrade: rich formatting, tables and signatures
+
+Spec: the composer upgrade spec (plan Goals item 6 and the amended
+non-goal). No new crates; own model, no web engine.
+
+- [x] Phase 0: plan, README, PRIVACY, AGENTS, TODO, CHANGELOG, WINUI3 and
+      FLUENT2 wording amended (user-approved).
+- [x] Phase 1 core (`src/mail/rich/`): document model, HTML and plain
+      generation, strict and lossy import, schema v14 (signatures table,
+      `drafts.body_rich`), signature storage and per-account defaults,
+      related MIME for a signature logo. Round-trip and hostile-input tests.
+- [x] Phase 1 wiring: `Draft.rich` in `src/app/composer.rs`: saved as
+      `drafts.body` (plain text) plus `drafts.body_rich` (tagged HTML) and
+      read back strictly; `outgoing` goes through `Db::send_parts` (logo as
+      a related `cid:` part). Deviation: a draft saved without
+      `body_rich` (every draft from before, and plain-text drafts now)
+      opens as plain text, markers and all, instead of being converted:
+      nothing is lost and a plain draft stays plain. Deviation: a
+      plain-text message (from Settings or the switch) is sent as
+      text/plain only, with no marker conversion and no HTML quote (the
+      spec kept today's HTML quote for plain replies; "Plain text" and the
+      switch's "formatting is removed" promise win, and no release had
+      the marker composer). Reading a foreign
+      server Drafts copy back into the composer is still not supported
+      (README).
+- [x] Phase 2 + 5 together (the user chose the painted editor and no
+      visible-TextInput fallback): `RichBody` and `RichToolbar` in
+      `ui/editor.slint`, the controller in `src/app/composer/rich.rs`. The
+      page is `rich::view` (per-block layout and pieces); the hidden
+      TextInput proxy is clipped to 1 px under the painted caret; Up/Down,
+      Page, Home/End, clicks and drags come from the layout; one undo stack
+      (Ctrl+Z / Ctrl+Y); CF_HTML paste through `sanitize` and lossy import
+      (Ctrl+Shift+V plain); autoformat of `- `, `* `, `1. ` (its own undo
+      step); compact toolbar levels into More; Preview kept under More.
+      Gates:
+  - [x] keystroke to drawn frame, measured on the real window (headless
+        software renderer, release, `typing_latency_on_a_long_message`):
+        see "Measured" below.
+  - [ ] IME: the candidate window's place (the proxy's caret is held under
+        the painted one) and the preedit chip (`preedit-text`) are built
+        but not checked with the Japanese IME, pt-PT dead keys or Win+. on
+        a real window. Check by hand.
+  - [ ] Narrator: the proxy is the accessible text field ("Message body");
+        not checked with Narrator. Check by hand.
+  - [x] launch and size: see "Measured" below.
+- [x] Phase 3: Settings > Signatures (list, edit page with the reduced
+      toolbar, logo up to 200 KB, Delete asks naming the accounts),
+      account page boxes (new messages; replies and forwards), composer
+      Signature menu, From swap while untouched. The app no longer reads
+      `accounts.signature` (plain-text messages take the default's text);
+      the onboarding step saves its signature as a named one. There was
+      nothing to carry over: v14 is unreleased, so the import runs once on
+      the latest text.
+- [x] Phase 4: tables (grid flyout, Rows / Columns boxes, row and column
+      commands, Tab between cells, edits across a cell edge refused).
+- [x] Measured (release, 2026-10-14, on a machine kept busy by other
+      builds, 80-100 % CPU; the app at high priority; median and min of
+      7 runs; no clean baseline, so no change can be claimed):
+  - Typing, key to drawn frame on the real window (headless software
+    renderer, full 1280x800 redraw), 2,000 lines with 20 tables, caret in
+    the middle: median 10.9 ms (min 10.2), p95 11.6 ms (min 10.7) over
+    three sets of 7 x 100 keys; the key's handling 6.4 ms, the frame
+    4.4 ms. The engine alone (`examples/compose_bench.rs`): p95 0.49 ms in
+    a paragraph, 1.06 ms in a cell. Before the proxy window (the whole
+    137 KB projection in the TextInput) the key's handling was 34 ms: the
+    TextInput lays out all its text on every key, hence `WINDOW` (16 KB).
+  - Launch on a seeded 2,000-message copy (`KOMOREBI_TIMING`): first frame
+    median 164.1 ms (min 160.9), cache loaded median 86.9 ms (min 83.1),
+    within the 200 ms and 600 ms budgets; re-measure on a quiet machine.
+  - Release exe 18,949,632 bytes (CI ceiling 20,000,000); the Phase 1
+    tree was 18,070,016.
+- [ ] Not done: copying formatted text out (Ctrl+C copies the plain text);
+      a caret blink; arrow keys inside the colour flyout (Tab reaches the
+      swatches); the logo in the editor checked at 125-175 %; Narrator
+      reads only the proxy's part of a message over 16 KB.
+- [ ] Separate fix: the plan's lines 34-35 (command palette, rules and i18n
+      now exist) are stale.
+
+## Tabs and windows
+
+Spec: the tabs and windows design (collapsible folder pane, message and
+composer tabs, session restore, read-only message windows). The user
+approved the plan, README, PRIVACY, AGENTS, WINUI3 and FLUENT2 changes.
+
+- [x] P0: docs and checks. The plan, README, PRIVACY, AGENTS and
+      `docs/WINUI3.md` ("TabView", "Secondary windows") are amended; the
+      TabView values were read from `TabView_themeresources.xaml` and
+      `TabView.xaml` at the pinned microsoft-ui-xaml commit `4f685bc`. Where
+      they differ from the spec, the source wins: the header text is 12 px
+      (Caption, not Body), and in high contrast the selected tab is Window
+      with Highlight text (Highlight / HighlightText is the pointer-over
+      state).
+  - Spike, globals per window: passed by reading the generated code
+    (`i-slint-compiler` 1.18.1 `generator/rust.rs`): every root component
+    instance makes its own `SharedGlobals`, and `slint::Global` is
+    implemented for every exported component. So a `ReaderView` global
+    shared by two window components would work, and each window also has
+    its own `Theme`, `Tr`, `Palette`, `Focus`, `Tip` and `Rich`, which
+    must be pushed into every new window.
+  - Spike, Ctrl+Tab: passed by reading `i-slint-core` 1.18.1
+    `window.rs` (`process_key_input`): Tab moves the focus only when no
+    handler took the key and no Ctrl, Alt or Meta is held, so Ctrl+Tab
+    reaches the app's `capture-key-pressed`, which takes it before any
+    field. A headless test dispatches it.
+  - Choice for P5: the fallback, a second `AppWindow` in a detail-only
+    mode, not the `ReaderView` extraction. The global would move 77 reader
+    properties (190 references in `ui/app.slint`) and about 170 Rust
+    setter sites; the fallback reuses `Reader::new` unchanged and costs
+    some properties per window (measured below).
+
+- [x] P1: collapsible folder pane. `nav-collapsed` in `ui/app.slint`
+      (`folded = compact || nav-collapsed`), the toggle (E700) before New
+      mail in the full pane and at the top of the rail at every width,
+      Ctrl+Shift+E, Hide folders / Show folders in the pane's row menu
+      (from 1040 px), setting `nav_collapsed` read before the first frame.
+      The Folders tip follows the rail (`folded`). Only a press of the
+      toggle animates (Theme.fast, ease-out, 0 ms with animation effects
+      off): the start, a resize across 1040 px and a tab switch never do
+      (an animated start re-laid out the reader for 167 ms). Test
+      `nav_toggle_persists_and_shows_rail_when_wide`; snapshot action
+      `nav:collapsed`.
+  - [ ] Frame time of the width animation with the software renderer
+        not measured (hand check on a release build at 1280 x 800; if the
+        median is above 16 ms, animate a clip instead).
+- [x] P2: tab strip and message tabs (`src/app/tabs.rs`, `TabStrip` in
+      `ui/widgets.slint`). One reader for every tab: a switch keeps the
+      leaving tab's scroll, plain-text view and original colours and shows
+      the entering one's (`load_message` split out of `select_message`, so
+      the list's selection is left alone). Double-click, Shift+Enter, the
+      row menu's Open in new tab, middle-click (background, unread until
+      shown), Ctrl+W / Ctrl+F4, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageUp /
+      PageDown, Ctrl+1..9, Ctrl+Shift+PageUp / PageDown, Ctrl+Shift+T (ten
+      per session), drag to reorder (4 px), the tab menu (Close, Close
+      others, Close to the right, Open in new window, Reopen) and the All
+      tabs menu. Archive, delete, move or junk closes the message's tabs
+      (Undo puts them back at their places, `Held.tabs`); a message gone
+      from the cache after a sync marks its tab (InfoBar, actions off,
+      `refresh_message_tabs`). Esc never closes a message tab; the one-pane
+      back arrow goes to the Mail tab. F6: search, strip, folders, list,
+      reader. Narrow (below 720 px): the Mail tab, the active one and the
+      menu. Deviation: in a message tab the folders and the list are
+      hidden (`visible`), not unbuilt (`if`), as root functions name them.
+      Tests in `src/app/composer/tests/tabs_tests.rs` (opening, background,
+      view flags, keys from a text field, close / reopen / move, archive
+      and Undo, server removal, restore) and `tabs::tests`.
+- [x] P3: composer tabs. `Drafts` keeps tabbed drafts (`tabbed`, `add`,
+      `show`, `hide`): an empty draft in a tab is never dropped by another
+      taking the composer. A draft with something written moves to a
+      background tab when another message is selected ("Draft kept in a
+      tab"; an empty one goes, as before); New mail, Reply and Forward
+      from a message or draft tab open a composer tab to the right; Esc,
+      Ctrl+W or × closes a composer tab saving the draft (empty: dropped);
+      Send and Discard close it; Undo send opens the draft in a new tab; a
+      tab switch saves the leaving draft at once; the tab's title follows
+      the subject. Deviation: the body's cursor comes back for formatted
+      drafts (the editor keeps it); a plain-text body reopens at its start.
+      `a_second_compose_keeps_the_first_and_switching_round_trips` became
+      `a_second_compose_opens_a_tab_and_switching_round_trips`; three
+      older tests now expect "Draft kept in a tab" and the pane menu's
+      Hide folders.
+- [x] P4: restore. Setting `tabs` (`m<id>`, `d<draft row>`, `;a=<n>`; ids
+      only, at most 20), written a second after a change and at close;
+      read with the other settings, restored 250 ms after start (titles
+      in one query, `Db::subjects`; bodies as a tab is shown; draft rows
+      load when their tab first shows). Settings > General > Reopen tabs
+      at start (on; off clears the setting).
+- [x] P5: message windows (`src/app/windows.rs`, the detail-only
+      `AppWindow`). Each has its own reader and render worker (8 MB of
+      tiles, one page; the thread ends when its channel closes), its own
+      Theme / Palette pushed when it opens and on every theme, appearance
+      and language change, the system caption dressed like the main bar
+      (`dress_popout`, the appearance subclass on its HWND), never marked
+      as the app's window. Ctrl+O, Open in new window (row menu, More, tab
+      menu); a window cascades 32 px from the main one at the last size
+      (`popout_size`, default 900 x 760). Reply, Reply all, Forward and
+      New mail there open a composer tab in the main window, which comes
+      forward; Archive / Delete / Move / Junk close the window (Undo says
+      the window is not reopened); flags and server removals reach every
+      window; Esc and Ctrl+W close it; closing the main window closes all
+      first, then saves. Not in a window (deferred): the invitation card,
+      Show original, Save as .eml, Copy message ID, and parenting its Save
+      attachment dialog. A window marks its message read when it opens
+      (unless Settings say never). Tests
+      `popout_has_own_reader_and_closes_when_message_archived_from_main`,
+      `popout_actions_and_replies_go_to_the_main_window`,
+      `main_close_closes_popouts_then_flushes`,
+      `language_and_theme_switch_reach_popouts`. Snapshot action
+      `windows:n`.
+  - [ ] Hand checks on a real desktop: the window's caption in light,
+        dark, accent title bars and high contrast; a second start brings
+        the main window forward with message windows open; two or three
+        windows beside the main one while a draft tab is written; Narrator
+        names of the tabs.
+- [x] Measured (release, 2026-10-15, seeded 2,000-message cache, offline,
+      interleaved with the build before this stage, `timing.ps1`):
+  - First frame: before median 37.1 ms (min 34.8), after 39.2 ms (min
+    35.4), 15 runs each: within the run-to-run spread (34.8 to 76.7). With
+    20 saved tabs: median 36.9 ms (min 36.1), 9 runs.
+  - Memory (`examples/peak_memory`, 5 runs each, the windows opened by the
+    snapshot run): peak private 18.2-18.4 MiB with no window, 21.6-21.7
+    with one, 28.3-28.8 with three (about 3.4 MiB a window; working set
+    40.7 / 44.0 / 51.0 MiB). The snapshot run ends before a window's page
+    is rasterized, so tiles (up to 8 MB a window) come on top.
+  - Release exe 19,165,696 bytes (was 18,949,632; CI ceiling 20,000,000).
+  - [ ] Tab switch time to the first tile not measured (the switch runs
+        the open-message path, 3 to 55 ms in `docs/PERF.md`).
+- [ ] Known gaps: removing or downloading again an account, or a folder
+      vanishing, while one of its messages shows in a message tab leaves
+      the tab's reader empty (it should say the message is gone, as a
+      sync does). Settings opened from a message tab show without the
+      folder pane, and F6 there still aims at the pane. One full
+      `cargo test` run reported a single failure that ten later runs did
+      not repeat (its name was not captured; the reader's resize-debounce
+      test sleeps on real time and is the first suspect).
+- Later (designed for, not built): L1 the composer in its own window (its
+  fields live in `AppWindow` and `composer.rs` assumes the main window
+  throughout; each window also has its own `Rich` editor global, so this
+  is a larger refactor than reasonable here); L2 the app-drawn title bar
+  in message windows; L3 restoring message windows; L4 a "Double-click
+  opens: tab | window" setting; L5 hiding the message list in the Mail
+  tab.
+
+## Notifications, tray and background mode (2026-10-15)
+
+- [x] Plan non-goal reversed (approved): native Windows 11 notifications for
+      new mail, a tray icon, opt-in background mode. Local only, no push
+      service, no telemetry (plan, PRIVACY.md, AGENTS.md updated).
+- [x] `src/app/notifications.rs` wires `notify.rs` and `win_shell.rs`: a
+      rise of the inbox unread count reads the unread inbox messages stored
+      since the last check (`Db::new_unread_inbox`), `Notifier::decide`
+      dedupes and picks single / generic / burst, the tray balloon shows it
+      in the UI language; a click opens the message in a tab. Tray menu:
+      Open, Check mail, Pause notifications (saved, `notify_paused`), Quit.
+- [x] Settings > General: notifications on/off (`notify`), show sender and
+      subject (`notify_detail`), keep running in the notification area
+      (`close_to_tray`), start with Windows (HKCU Run, `--minimized`).
+- [x] Refresh: "Updated 14:05" beside the button (wide layout) and in its
+      tooltip, set when a sync pass ends without error; F5 unchanged.
+- [ ] Per-account notification switch in each account's page (the
+      `notify_off` setting and the filter exist; no UI yet).
+- [ ] Re-add the tray icon after an Explorer restart (TaskbarCreated is not
+      heard by a message-only window; `Shell::readd_icon` exists).
+- [ ] Snapshot of Settings > General in en and pt-PT at 1280x800 and 900x700.
+
+Manual desktop checks (cannot be automated):
+
+- [ ] With the window in the background, new mail shows one Windows
+      notification with sender and subject; with "Show the sender and
+      subject" off it says only "New mail"; 3+ at once give "N new messages".
+- [ ] Clicking the notification brings the window back and opens that
+      message in a tab; a message deleted meanwhile just shows the window.
+- [ ] No notification while the window is focused and visible, when paused
+      from the tray, or with notifications off.
+- [ ] Tray icon: left click opens; menu Open / Check mail / Pause (check
+      mark toggles and survives a restart) / Quit; labels switch with the
+      language setting; tooltip shows the unread count.
+- [ ] Close with "Keep running in the notification area" on: window hides,
+      mail keeps syncing, drafts saved; off: the app exits as before. Quit
+      from the tray always exits and saves drafts and tabs.
+- [ ] "Start with Windows" on: sign out and in, Komorebi starts hidden in
+      the tray; off removes the Run value. Launching Komorebi again while it
+      is hidden in the tray brings the window back.
+- [ ] Focus Assist / Do not disturb suppresses the notifications; high
+      contrast, dark mode and animation-off do not affect the tray.

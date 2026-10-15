@@ -262,13 +262,12 @@ validation): the bottom edge turns SystemFillColorCritical (1 px at rest,
 the field in Caption SystemFillColorCritical with no icon, in place of the
 field's caption while it shows. The message is the field's accessible
 description, so a screen reader reads it with the field. HC: the whole
-border is 2 px. Komorebi uses it on the add-account form only, and only
-after a press of Add account or Test connection (never while typing): an
-empty Email ("Enter your email address."), an address that is not one
-("Enter an email address like ana@example.com."), an empty Password
-("Enter your password."), no Provider chosen ("Choose your provider.")
-and, under Other server, an empty server name. A rejected password puts
-the Password box in this state too, and focuses it.
+border is 2 px. Komorebi uses it in the onboarding flow only, and only
+after a press of Continue or Sign in (never while typing): a missing or
+wrong address ("Enter an email address like name@example.com."), an
+empty Password ("Enter your password.") and, in manual setup, an empty
+server name. A rejected password puts the Password box in this state
+too, focuses it and selects its text.
 
 ### ComboBox
 As Button (fills, ControlElevationBorder), padding `12,5,0,7`, chevron
@@ -346,7 +345,8 @@ and pressed GrayText, pill Highlight (`SelectorBar.xaml`,
 - Komorebi's `RadioButtons`: the group header above it (a FieldHeader,
   8 below), then each item with an optional **one-line description** in
   Caption TextSecondary under its label (Windows Settings explains a
-  choice this way), items 4 apart. The add-account form's Provider:
+  choice this way), items 4 apart. The onboarding chip's provider choice
+(after a lookup found nothing):
   "Purelymail" / "Any domain hosted at Purelymail", "Postale.io" / "Any
   domain hosted at Postale", "Other server" / "Any other IMAP and SMTP
   server". Accessible: the group is a `radio-group` named by its header,
@@ -625,6 +625,16 @@ and Ctrl+, toggle Settings, whose header starts with a back arrow ("Back
 to mail (Esc)"). Text and icons stay `text` (`text-disabled` for a
 switched-off account).
 
+Folding the pane at any width ("Tabs and windows", P1): the pane toggle
+(E700, "Folders", the PaneToggleButton) sits at the top of the full pane
+too, as in WinUI's NavigationView, where it switches Expanded and Compact.
+From 1040 px it folds the 264 px pane to the rail and back (setting
+`nav_collapsed`, read with the other settings before the first frame);
+below 1040 px it keeps opening the pane over the content. Ctrl+Shift+E and
+the pane's row menu ("Hide folders" / "Show folders") do the same. The
+width change animates over `Theme.fast` (167 ms, ease-out; 0 with
+animation effects off). The Folders tip shows whenever the rail does.
+
 Navigation structure (UX plan Stage 1): with one account there is no All
 inboxes (the start opens on that account's Inbox); with more, accounts
 after the first start folded. The view shown is saved (`last_view`) and
@@ -808,7 +818,8 @@ Custom content (`InfoBar.Content`, `InfoBar.xaml` row 1) sits under the
 title and message, in the text column.
 Komorebi's `InfoBar` takes children for it (`@children`, under the
 message and above the content buttons, 12 below the message): the
-add-account form's error bar holds the check's step list (a 16 px state
+account page's error bar (and the onboarding error's "Show details")
+holds the check's step list (a 16 px state
 glyph and the step name in Body) with its actions ("Set username",
 "Review certificate") as the content buttons under the steps. Only that
 bar has children; the others stay property-only.
@@ -887,8 +898,10 @@ two accounts or more). Its column, at most 560 px wide, has groups (Body
 Strong, 24 above, 8 below): **Account** (the "Sync this account"
 SettingsCard with its ToggleSwitch, which says what Off does, then Name,
 Email (disabled, with the Caption "The address can't be changed. To use
-another one, add another account.") and Password), **Signature**,
-**Folders** (Save a copy of sent mail, then each role's header *above*
+another one, add another account.") and Password), **Signature** (two ComboBoxes, "New messages" and "Replies
+and forwards", each listing None and the signature names, with a
+"Manage signatures" link to the Signatures page; the Add-account form has
+no signature field), **Folders** (Save a copy of sent mail, then each role's header *above*
 its ComboBox, so no label is cut), **Server settings** (an `Expander`,
 collapsed, that opens by itself on a failed check or while a certificate
 is saved; Find settings inside it, and only for a server that isn't a
@@ -896,11 +909,10 @@ preset), then a **Downloaded mail** card (Download again) and the
 **Remove account** card (danger label) at the bottom. Save, Test
 connection and Cancel are pinned under the scroll view, after a 1 px
 divider, so they never scroll away; an error scrolls into view and
-focuses its first button. The add form is the same sub-page ("Accounts >
-Add an account"; with no account yet the title is just "Add an account"
-and Back or Cancel returns to the welcome when the welcome opened it),
-TextBox headers above the fields (8 below, 12 between fields), server and
-port (96 px) side by side.
+focuses its first button. There is no add form in Settings any more:
+the Accounts page's "Add account" opens the onboarding flow ("Onboarding"
+below) inside the content area, without the welcome; its server fields
+and port (96 px) side by side are the flow's manual setup.
 
 The certificate prompt ("Trust this certificate?") shows the SHA-256
 fingerprint in the code font as 4 lines of 8 bytes (never broken inside
@@ -928,31 +940,153 @@ cut from its start and the whole path in the tooltip, Source code, Made
 with Slint), every action at the cards' end. A language change redraws
 the window in the new language at once and puts an Informational InfoBar
 under the Language card: "Some text changes after Komorebi restarts."
-The add form (FLUENT2 "Onboarding": take action), in this order: Email
-(focused), Password with the Caption "Saved in Windows Credential Manager,
-never in Komorebi's files.", a Username field under it only after "Set
-username" (or while one is typed), Provider (`RadioButtons` with
-descriptions, picked from the address for purelymail.com and postale.io,
-otherwise none and required), under Other server "Find settings" and the
-Server settings `Expander`, then "Your name (optional)" with the
-placeholder "e.g. Ana Silva". Signature and "Save a copy of sent mail"
-are not on the add form (their defaults: none, and on); they stay on the
-account's Edit page. Add account and Test connection stay enabled: a
-press with a field missing shows the TextBox error state under each one
-instead of a disabled button with no reason. The buttons sit side by
-side, or one under the other when they do not fit the column (a large
-text size). The sign-in wait disables Add and Test but keeps Cancel, Back
-and Esc (they drop the check's answer and keep the form as typed), with a
-16 px ProgressRing and "Signing in…" after 1 s and, after 3 s, "Still
-signing in… You can cancel and check the server name.". A failure shows
-the Critical InfoBar with the steps inside it, above its buttons, scrolls
-it into view and focuses its first button, or the Password box when the
-password was rejected. When the bar is below the fold, the scroll puts
-its top 8 px under the header (the bar's whole height fits at 900×700),
-never its bottom at the pinned buttons: a bottom-aligned scroll leaves the
-header's edge cutting through whatever field sits there (a Password box's
-red underline under the page title), and the fields above stay one wheel
-notch up.
+
+### Onboarding (first run and Add account)
+Fluent 2 "Take action" (docs/FLUENT2.md "Onboarding"), built from the
+components above in `ui/onboarding.slint`; one page for the first run
+(the whole window under the title bar, no pane or rail; the bar keeps no
+search and drags as a whole) and for Settings > Accounts > Add account
+(the same page in the content area, its step indicator and "Make it
+yours" kept, the welcome hero not shown). The Settings "Add an account"
+sub-page is gone; the account page (Edit) is unchanged.
+
+- **Frame**: on `layer`; the column centred, its top at 40 % of the free
+  height (at least `s10`), scrolling when taller than the window. The
+  `StepIndicator` sits above the card, `s6` under the title bar.
+- **`OnboardCard`**: at most 480 px wide (560 px for manual setup),
+  padding `s8` wide / `s6` narrow, `card` fill, 1 px `card-stroke` (2 px
+  under a contrast theme), radius `radius-xl` (12, this card only). Its
+  content enters with opacity 0→1 and y +12→0 over `normal` (200 ms,
+  `ease-out`, decelerateMax); leaving fades over `faster` (`ease-in`);
+  Back reverses the offset.
+- **`StepIndicator`**: three 24 px circles joined by 1 px `stroke-strong`
+  lines, the label in Caption under each: done is an accent fill with a
+  check, current a 2 px accent ring with an accent dot, future a
+  `stroke-strong` outline with a `text-3` label (HC: Highlight /
+  HighlightText). Below 440 px of column or above 1.5× text it is just
+  "Step {0} of {1}" in Caption `text-2`. `accessible-role: list`, each
+  item "{label}, step {n} of 3, completed / current / not started"; the
+  current one is a polite live region.
+- **`BrandMark`**: vector only (a circle in `mark-a`, three leaves in
+  `mark-b` and `mark-c` (white, Light3 on dark) at 0.85, a sun with four rays), 96 px on the welcome and
+  64 px on the finish; `celebrate` sways the leaves ±6° and scales
+  0.92→1 over `slow` once (still with Animation effects off). HC: 2 px
+  `hc-text` outlines on `hc-window`. Accessible as an image named
+  "Komorebi".
+- **`ProviderChip`**: min height 48, radius 4, `card-fill-2`, 1 px
+  `card-stroke`: looking (a 16 px ring after 1 s), found (a 16 px success
+  circle with a check, the title in Body Strong, the detail in Caption
+  `text-2`), not found (Caution background, with the provider
+  RadioButtons inline under it), and a trailing subtle "Change" that opens
+  manual setup.
+- **Welcome** (only while there is no account): wide (window ≥ 1040 px),
+  two columns `s12` apart: the 96 px mark, the headline in `display` (40,
+  `display-font`, 600), the subhead in Subtitle 16 `text-2` (max 440 px),
+  the accent "Add your email account" (min 200 × 40) and the time line in
+  Caption; on the right three value rows (a 20 px glyph in a 36 px
+  accent-tinted rounded square, Body Strong title, Caption `text-2`
+  line, `s4` apart). Narrow: one centred column. Footer `s6` from the
+  bottom: "Need help?" · "Privacy" · a Language ComboBox (live; 160 px, or
+  wider for a language's own name, never cut) and a Settings IconButton.
+  The entrance (the mark over `gentle`, then the text and the rows each a
+  `stagger` later; opacity only for now) starts from a Timer after the
+  first frame; with Animation effects off everything is drawn at once.
+- **Your email**: Title 20 / 600, a Body `text-2` line, the TextBox
+  (`name@example.com`), then Back (standard) and Continue (accent),
+  stacked when they do not fit. Errors are the TextBox error state.
+- **Sign in**: the title "Sign in to {0}" (elided, the whole address in
+  the tooltip), the chip, the Password box (lock glyph `E72E` leading in
+  `text-3`, the reveal button), the Credential Manager caption, Back and
+  Sign in. The wait disables the Password box and Sign in only; the card's
+  lower half shows three stages (16 px state glyph and Body text) at once,
+  the ring on the running stage after 1 s, a Caption after 3 s and
+  another after 10 s. A failure is a Critical InfoBar inside the card,
+  above the buttons: title, one sentence, the next step as its buttons, and
+  a subtle "Show details" that unfolds the 7-step list and the long
+  sentence with the host names.
+- **Manual setup** (560 px): "Server settings", one Body `text-2` line,
+  the IMAP and SMTP host, port (96 px) and security ("Encrypted (SSL/TLS)"
+  / "Encrypted after connecting (STARTTLS)"; the port follows), "Same
+  sign-in as incoming", Username, Find settings with its note, the
+  certificate lines; Back returns to the chip.
+- **Make it yours**: "Your name" (prefilled from the address's local
+  part), the 4-line signature `ComposeBody`, a From preview strip on
+  `card-fill-2` in Caption, the sync line (3 px ProgressBar) under the
+  card, Skip (subtle) and Done (accent); no Back, Esc is Skip.
+- **Finish**: a centred column at most 440 px: the 64 px mark with
+  `celebrate`, "You're all set" in Title Large, a Body `text-2` line, the
+  sync line, the accent "Open your inbox" (focused) and a subtle "Add
+  another account".
+- **Keys**: Enter is the primary action, Esc goes back (the welcome from
+  the email step), Alt+Left is Back; the focus lands on the step's first
+  field, and on the primary button on the welcome and finish.
+- **Motion tokens**: `normal` 200, `gentle` 250, `slow` 300, `stagger`
+  50 (each 0 ms with Animation effects off), `ease-out`
+  cubic-bezier(0.1, 0.9, 0.2, 1), `ease-in` cubic-bezier(0.9, 0.1, 1,
+  0.2). Only opacity and a ≤16 px offset on the column, never the window.
+
+### Composer toolbar
+
+A CommandBar (the pattern of "CommandBar / AppBarButton" above) in the
+composer, one Tab stop with arrow-key roving focus, never clipped. Groups,
+in order: font ComboBox (140) and size ComboBox (64); Bold, Italic,
+Underline, Strikethrough (ToggleButtons exposing `accessible-checked`);
+font colour (a SplitButton whose flyout is a 4x3 grid of named swatches,
+Automatic first); bulleted and numbered list, decrease and increase indent;
+alignment (a DropDownButton of four options); link, quote, table (a flyout
+with a 10x10 hover grid labelled "{} x {} table" plus Rows and Columns
+NumberBoxes for the keyboard); clear formatting. On the right: Signature (a
+DropDownButton), High and Low importance, and More (...), which holds
+Preview and "Switch to plain text" / "Switch to formatted text". Below
+1040 px (or a composer under 940 px, which covers Portuguese) the font
+group, the indents and the alignment move into More; under 700 px the
+importance toggles follow, and under 560 px Quote and Clear formatting,
+so the bar never clips. In plain mode only Signature, importance and More
+remain. Komorebi's font and size boxes are the std ComboBox, each its own
+Tab stop before the buttons' one; the Rows and Columns boxes are
+ComboBoxes of 1 to 10. With the caret in a table the Table button's menu
+offers insert row above and below, insert column left and right, and
+delete row, column and table. Swapping to plain text asks first in a
+ContentDialog and can be undone (Ctrl+Z, or switching back before
+typing). Colours follow the system text colour in high contrast.
+
+### RichEditBox mapping
+
+Komorebi has no RichEditBox: `RichBody` is a TextBox-framed control whose
+text, caret, IME and clipboard belong to a `TextInput` proxy (one line per
+paragraph or table cell, U+FFFC for an atomic quote or logo), while the
+document model (`src/mail/rich/`) owns the formatting. The page is painted
+by Komorebi's own layout engine (`src/mail/rich/view.rs`, the reader's
+parley text and tiny-skia painter) in pieces per block, and only the block
+an edit changed is laid out again; the proxy is clipped to 1 px under the
+painted caret (kept inside the part in view: a focused item scrolled out of
+its clip stops taking keys), so the IME's candidate window opens there, and
+what the IME is composing shows in a chip at the caret (the proxy's
+`preedit-text`). The TextInput lays out all its text on every key, so a
+message over 16 KB puts only the lines around the caret and the whole
+selection in the proxy (Narrator reads that part); Ctrl+A, Ctrl+Home and
+Ctrl+End go through the controller, and the part moves as the caret nears
+its edge.
+The caret is 1 px of the text colour, steady; the selection is the
+SelectionHighlight colour under the text. Up, Down, Page Up and Down, Home
+and End, clicks, drags and double clicks are worked out from the page's
+layout. Frame, focus (2 px accent bottom edge), disabled and high-contrast
+states are the TextBox's. Narrator reads the proxy text as "Message
+body"; formatting is not announced, so the toolbar state is how to check
+it.
+
+### Signatures page
+
+Settings > Signatures is a list of `SettingsCard` rows (name, a first-line
+preview, Edit and Delete), an "Add signature" button and, when empty, a
+sentence saying signatures start new mail and replies. Deleting asks in a
+ContentDialog naming how many accounts use it as their default. The edit
+page has a required, unique Name `TextBox`, a `RichBody` with a reduced
+toolbar (no table, no quote), and "Add logo..." / "Remove logo" (PNG or JPEG
+up to 200 KB, shown at most 400 x 150 px), then Save (accent) and Cancel;
+Esc cancels. Komorebi's rows are `SettingsSurface` cards with the name in
+Body Strong and the preview in Caption TextSecondary, Edit a standard
+Button and Delete a subtle IconButton.
 
 ### Expander
 MinHeight 48, header padding `16,0,0,0`, header CardBackgroundFillColorDefault
@@ -965,7 +1099,7 @@ with a CardStrokeColorDefault border; HC chevron border 2
 Komorebi's invitation card uses only the chevron: Details is a subtle
 button with the 12 px E70D / E70E glyph among the card's tools, the
 description shown under them.
-The add-account form's **Server settings** (Other server) is the second
+The account page's **Server settings** is the second
 use, so it is a full `Expander` (`ui/widgets.slint`): a 48 px header row
 on the card fill with a 1 px CardStroke edge, the header in Body
 TextPrimary 16 from the left with an optional Caption TextSecondary line
@@ -976,8 +1110,8 @@ bottom corners square off and the content shows under it on
 CardBackgroundFillColorSecondary with the same edge, padding 16. The
 widget is the header; the page lays the content out under it (a widget
 with children is a second copy of its code). It opens by itself after
-"Find settings" filled it and whenever a check or the form's validation
-fails on one of its fields.
+"Find settings" filled it and whenever a check fails on one of its
+fields.
 
 ### ScrollBar
 Thumb 2 px idle, 6 px expanded (12 px hit area), radius 3, min length 30,
@@ -1029,17 +1163,73 @@ works.
   white.
 - Inactive window: glyphs TextDisabled, title TextTertiary, icon at 0.5
   opacity.
-- No account yet (the first-run welcome, and Settings opened from it):
+- No account yet, or the first-run flow still open (the welcome, its
+  steps, and Settings opened from it):
   the bar keeps the icon, title and caption buttons but hides the search
   box and its scope control (there is nothing to search) and pushes no
   passthrough rectangle, so the whole bar between the title and the
-  caption buttons drags the window. The search comes back with the first
-  account.
+  caption buttons drags the window. The search comes back when the
+  first-run flow closes on the first account's Inbox.
 - Accessibility: the caption buttons are `button`s named Minimize /
   Maximize or Restore / Close (pt-PT Minimizar / Maximizar / Restaurar /
   Fechar) whose default action sends the same system command. They are not
   Tab stops (as in Windows) but stay in the accessibility tree. The HWND
   title stays the window title (Alt+Tab, taskbar, Narrator).
+
+### TabView (message and composer tabs)
+From `controls/dev/TabView/TabView_themeresources.xaml` and `TabView.xaml`
+at the pinned commit (`TabViewWidthMode` Equal, `CloseButtonOverlayMode`
+OnPointerOver as Komorebi uses it).
+- Item: MinHeight 32 (`TabViewItemMinHeight`), MinWidth 100, MaxWidth 240;
+  padding `8,3,4,3` with a close button (`8,3,8,3` without), selected
+  `9,3,5,4`; top corners OverlayCornerRadius (8), bottom square; border 1,
+  the selected item's `1,1,1,0` in CardStrokeColorDefault, so it joins the
+  content below. Header text **12 px** (`TabViewItemHeaderFontSize`,
+  Caption), not Body. Icon 16 px with a 10 px gap after it (margin
+  `0,0,10,0`).
+- Close button: 32 × 24, glyph E711 at 12 px, margin `4,0,0,0`, subtle
+  (transparent, hover SubtleSecondary, pressed SubtleTertiary), not a Tab
+  stop, `IsTextScaleFactorEnabled=False` (it does not grow with the text
+  size). Shown on the selected tab and under the pointer
+  (OnPointerOver).
+- Backgrounds: rest LayerOnMicaBaseAltFillColorTransparent (transparent
+  on the layer), hover LayerOnMicaBaseAltFillColorSecondary, pressed
+  LayerOnMicaBaseAltFillColorDefault, **selected
+  SolidBackgroundFillColorTertiary** (Komorebi: the `card` the content sits
+  on, so the tab and its page read as one). Text TextSecondary at rest and
+  under the pointer, TextTertiary pressed, **TextPrimary selected**,
+  TextDisabled disabled; icons the same.
+- Separator: 1 px DividerStrokeColorDefault (`stroke`), margin `0,8,0,8`,
+  hidden beside the selected tab and the one under the pointer. The strip's
+  bottom line is TabViewBorderBrush (CardStrokeColorDefault), broken under
+  the selected tab.
+- Strip: padding `0,8,0,0` above the items (`TabViewHeaderPadding`); scroll
+  buttons 32 × 24 (glyphs EDD9 / EDDA at 8 px) when the items overflow
+  after shrinking to MinWidth. Komorebi has no add (+) button (New mail
+  and Ctrl+N make composer tabs) and puts an "All tabs" chevron (E70D)
+  menu at the strip's end instead of the scroll buttons.
+- High contrast (`HighContrast` dictionary): strip ButtonFace; items
+  ButtonFace with WindowText; **selected Window with Highlight text**;
+  pointer-over and pressed Highlight with HighlightText; disabled GrayText.
+  The close glyph ButtonText with a 1 px ButtonText border on hover,
+  pressed and selected; on the selected tab it is Highlight. Separator
+  WindowText; the strip's bottom line and the selected item's edge
+  Highlight.
+- Keys (WinUI TabView): Ctrl+Tab / Ctrl+Shift+Tab next / previous,
+  Ctrl+1..8 tab N, Ctrl+9 the last, Ctrl+W / Ctrl+F4 close, Left / Right
+  between tabs while the strip has the focus. A middle-click closes a tab.
+- Accessibility: the strip is a `tab-list`, each item a `tab` named by its
+  header (Komorebi adds "draft" or "unread" and "N of M"), the close button
+  "Close tab", the content a `tab-panel`.
+
+Komorebi (`TabStrip` in `ui/widgets.slint`): a full-width row under the
+title bar that shows only while more than the fixed Mail tab is open. The
+Mail tab is first, an icon only (E715), pinned, with no close button.
+Message tabs show E715, draft tabs E70F (pencil); titles elide with "…"
+inside the 100-240 px tab and never clip (Portuguese titles run longer).
+Below 720 px only the Mail tab, the active tab and the "All tabs" menu
+show. Heights follow the text size through the header text; the close
+button keeps its 32 × 24.
 
 ## Following the user's Windows theme
 
@@ -1202,6 +1392,25 @@ animations, which do not see the setting.
   to `WM_GETMINMAXINFO`, whose height alone the chrome proc corrects.
 - Window corners: leave `DWMWA_WINDOW_CORNER_PREFERENCE` at default.
 
+### Secondary windows
+Komorebi's read-only message windows ("Open in new window", Ctrl+O):
+- **System title bar.** They keep the system caption (Komorebi's own mode
+  for Windows 10 and high contrast, above), coloured for dark mode and the
+  accent caption with `DwmSetWindowAttribute` like the main window, with
+  the same icon. The app-drawn bar stays on the main window only (later:
+  L2).
+- **Placement.** A new window cascades 32 px right and down from the window
+  it was opened from, at 900 × 760 by default (the last size used,
+  `popout_size`), kept on that window's monitor.
+- **Closing.** Esc, Ctrl+W or the caption's close closes the window.
+  Closing the main window closes every message window first and then ends
+  the app, so a message window never outlives it (no background mode). A
+  second start brings the main window forward (only it is marked).
+- **Following the theme.** Accent, light / dark, high contrast, text size,
+  animation effects and the language switch live in every window: each has
+  its own `Theme`, `Tr` and `Palette` globals, pushed when it opens and on
+  every change.
+
 ### Mica
 Not used: Komorebi ships the solid fallback below (Stage 1 decision). With the software renderer every client pixel is opaque, so a
 backdrop alone shows nothing; showing it needs a transparent root, the frame
@@ -1293,6 +1502,11 @@ checks two of them.
 | `flyout-stroke` | SurfaceStrokeColorFlyout | #0f000000 | #33000000 | WindowText |
 | `surface-stroke` (dialogs) | SurfaceStrokeColorDefault | #66757575 | #66757575 | WindowText |
 | `hover` | SubtleFillColorSecondary | #09000000 | #0fffffff | Highlight |
+| `tab-hover` (a tab under the pointer) | LayerOnMicaBaseAltFillColorSecondary | #0a000000 | #0fffffff | Highlight |
+| `tab-pressed` | LayerOnMicaBaseAltFillColorDefault | #b3ffffff | #733a3a3a | Highlight |
+| `tab-selected` (joins the content card) | SolidBackgroundFillColorTertiary (Komorebi: `card`) | #ffffff | #2b2b2b | Window |
+| `tab-strip` | TabViewBackground | transparent | transparent | ButtonFace |
+| `tab-text` / `tab-text-selected` | TextFillColorSecondary / Primary | `text-2` / `text` | `text-2` / `text` | WindowText / Highlight |
 | `pressed` | SubtleFillColorTertiary | #06000000 | #0affffff | Highlight |
 | `selected` | SubtleFillColorSecondary | #09000000 | #0fffffff | Highlight |
 | `nav-selected` | SubtleFillColorSecondary on layer | #eaeaea | #2d2d2d | Highlight |
@@ -1355,7 +1569,8 @@ Rules that follow:
 None in `ui/app.slint` or `ui/widgets.slint` (UI plan Stage 2). Since
 Stage 3 the std `LineEdit`, `CheckBox` and `Spinner` are gone (Komorebi's
 `TextField`, `CheckBox`, `ProgressRing`), and since the final polish pass
-the Settings signature is a `ComposeBody`; only the std `ComboBox` still
+the Settings signature is a named-signature picker (a `ComboBox`, see
+"Composer toolbar" and "Signatures page"); only the std `ComboBox` still
 draws Slint's derived accent (in its open list) and has no HC palette
 (accepted near match, UI plan "Deferred"; `ComboEdge` gives every one its
 edge).
@@ -1457,7 +1672,7 @@ Highlight border, as on a Button); the reader lays them in a
   label measured)` wide, so it grows with the text size; From is the std
   ComboBox with a Button's elevation edge drawn over it; To, Cc, Bcc,
   Subject and the link field are `TextField`s and the body is
-  `ComposeBody` in the same frame (sides ControlStroke, bottom
+  `ComposeBody` (plain mode) or `RichBody` (formatted mode) in the same frame (sides ControlStroke, bottom
   ControlStrongStroke, 2 px accent while focused), every field ending at
   the same edge: Cc and Bcc are HyperlinkButtons inside the To field's
   end. The header: the title (Subtitle) with "Draft saved 14:05" under it
@@ -1474,24 +1689,20 @@ Highlight border, as on a Button); the reader lays them in a
   ("ComboBox": flyout surface, items margin 5,2, padding 11,5,11,7, radius
   3, the current one SubtleSecondary with the 3x16 pill), drawn over the
   composer 4 below the field typed in and as wide, not a popup (the field
-  keeps the keyboard). The formatting row: subtle 32 px buttons 4 apart,
-  the quote is E9B2 (Ctrl+Shift+Q), "1." is Body semibold text (E9D5,
-  proposed in the UX plan, is CheckList in both Segoe Fluent Icons and
-  Segoe MDL2 Assets, checked by rendering it; neither font has a
-  numbered-list glyph, so the text stays), a 1x20 DividerStroke separator,
-  then **Preview**, a ToggleButton ("ToggleButton": subtle at rest,
-  AccentFill with TextOnAccent while on) with the RedEye glyph E7B3 and
-  its label: while on, the body's frame shows the HTML part as sent,
-  rendered by `mail::render` off the UI thread on its own canvas colour
-  (the reader's dim in the dark theme), 1 px ControlStrongStroke edge,
-  radius 4, scrolled as the body, laid out at the column's width up to
-  960 and never stretched; drawn at once when turned on and again 150 ms
-  after a resize or theme change settles; focusing the body (Tab, a
-  click) turns Preview off; a Caption line under it says when only
-  the beginning fits (one 4096-row band) or drawing failed. The first
-  formatting edit ever shows a one-time Caption line under the row with
-  a 24 px dismiss button ("Marks like **bold** ... Preview shows how the
-  message looks."; setting `format_hint_seen`). A reply's or forward's
+  keeps the keyboard). The formatting row is the "Composer toolbar" below:
+  subtle 32 px buttons 4 apart, the quote is E9B2 (Ctrl+Shift+Q), "1." is
+  Body semibold text (E9D5, proposed in the UX plan, is CheckList in both
+  Segoe Fluent Icons and Segoe MDL2 Assets, checked by rendering it;
+  neither font has a numbered-list glyph, so the text stays), 1x20
+  DividerStroke separators. **Preview** is in More (a checkable item):
+  while on, the body's frame shows the HTML part as sent, rendered by
+  `mail::render` off the UI thread on its own canvas colour (the reader's
+  dim in the dark theme), 1 px ControlStrongStroke edge, radius 4,
+  scrolled as the body, laid out at the column's width up to 960 and
+  never stretched; drawn at once when turned on and again 150 ms after a
+  resize or theme change settles; focusing the body (Tab, a click) turns
+  Preview off; a Caption line under it says when only the beginning fits
+  (one 4096-row band) or drawing failed. A reply's or forward's
   quote is folded behind a "Show quoted text" HyperlinkButton under the
   body (new Outlook's "..."), and its attribution or forwarded heading is
   in the language shown; the fold takes the blank lines above the heading
@@ -1593,8 +1804,8 @@ also shows the caution badge and Try now; `select-mode` turns "Select messages" 
 Move flyout, `delete-confirm` asks the Trash / Junk question,
 `not-downloaded` shows the offline body state; `fresh-inbox` adds a
 made-up account to the throwaway cache (offline only) and shows its Inbox
-in its first download (1,234 of 5,000); `account-test-failed` the add form
-after a rejected password (the steps in the InfoBar, Set username);
+in its first download (1,234 of 5,000); `ob-error-rejected` the onboarding
+Sign in step after a rejected password (the InfoBar, Set username);
 `compose-invalid` and `compose-no-to` press Send on a wrong or missing
 recipient (the field's error), `compose-preview` shows Preview on,
 `compose-hint` the one-time formatting caption (offline), `drop-hover` and
@@ -1641,8 +1852,8 @@ since snapshots render only the client area and send no system messages.
    colour they keep Slint's light or dark palette (seen in hcblack /
    hcwhite snapshots); no HC colours. `ComboEdge` gives every ComboBox a
    ButtonText border (the account form's since the final polish pass);
-   the signature is a `ComposeBody` since then, with the TextBox's HC
-   border.
+   the signature box has since been replaced by the account defaults'
+   ComboBoxes (`ComboEdge`) and the Signatures page's `RichBody`.
 6. Mica only if pursued: does softbuffer's `BitBlt` keep alpha on screen?
    Not pursued (Deferred `KOMOREBI_MICA=1`).
 
@@ -1657,6 +1868,6 @@ the ButtonText edge, the account form's ComboBoxes and the signature
 
 Final polish pass (2026-10-12): 5 is closed as far as Komorebi can close
 it. The account form's three ComboBoxes have `ComboEdge` and the
-signature is a `ComposeBody` (TextBox frame, HC border); what remains is
+signature box was a `ComposeBody` then (since replaced, see "Signatures page"); what remains is
 the std ComboBox's own open list and animations (accepted, UI plan
 "Deferred").

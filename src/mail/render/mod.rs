@@ -22,6 +22,7 @@
     clippy::panic
 )]
 
+pub mod canvas;
 mod css;
 pub(crate) mod dom;
 mod float;

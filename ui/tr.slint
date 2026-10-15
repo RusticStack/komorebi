@@ -12,6 +12,19 @@ export global Tr {
         return unread > 0 ? @tr("window title" => "Inbox ({0}) - Komorebi", unread) : "Komorebi";
     }
     pure public function start-failed(detail: string) -> string { return @tr("Komorebi couldn't start.\n\n{0}", detail); }
+    // ---- Notifications, the tray and the last sync
+    pure public function updated-at(time: string) -> string { return @tr("Updated {0}", time); }
+    pure public function tray-open() -> string { return @tr("tray menu" => "Open Komorebi"); }
+    pure public function tray-check() -> string { return @tr("tray menu" => "Check mail"); }
+    pure public function tray-pause() -> string { return @tr("tray menu" => "Pause notifications"); }
+    pure public function tray-quit() -> string { return @tr("tray menu" => "Quit"); }
+    pure public function tray-tooltip(unread: int) -> string {
+        return unread > 0 ? @tr("Komorebi: {n} unread message" | "Komorebi: {n} unread messages" % unread) : "Komorebi";
+    }
+    pure public function toast-new-mail() -> string { return @tr("New mail"); }
+    pure public function toast-new-mail-body() -> string { return @tr("Open Komorebi to read it."); }
+    pure public function toast-burst(n: int) -> string { return @tr("{n} new message" | "{n} new messages" % n); }
+    pure public function toast-burst-body() -> string { return @tr("Open Komorebi to read them."); }
     pure public function crash-notice() -> string { return @tr("Komorebi closed unexpectedly last time; see crash.log"); }
     pure public function cache-damaged(name: string) -> string {
         return @tr("The mail cache was damaged, so Komorebi started a new one; the old file is kept as {0}. Add your accounts again in Settings.", name);
@@ -187,7 +200,6 @@ export global Tr {
     pure public function err-port(proto: string) -> string { return @tr("Enter a valid {0} port.", proto); }
     pure public function err-username(proto: string) -> string { return @tr("Enter a valid {0} username.", proto); }
     pure public function check-passed() -> string { return @tr("Every step passed. Nothing was saved; use Add account or Save to keep these settings."); }
-    pure public function account-added(email: string) -> string { return @tr("Added {0}. Downloading mail\u{a0}…", email); }
     pure public function account-saved(email: string) -> string { return @tr("Saved {0}.", email); }
     pure public function account-off() -> string { return @tr("Off: no connections; its downloaded mail stays"); }
     pure public function account-downloading(done: string, total: string) -> string { return @tr("Downloading {0} of {1}\u{a0}…", done, total); }
@@ -225,6 +237,13 @@ export global Tr {
     pure public function menu-mark-all-read() -> string { return @tr("Mark all as read"); }
     pure public function menu-collapse-all() -> string { return @tr("Collapse all"); }
     pure public function menu-collapse-all-folders() -> string { return @tr("Collapse all folders"); }
+    // The row menu and the reader's More menu: the message in a tab or a
+    // window of its own.
+    pure public function menu-open-tab() -> string { return @tr("Open in new tab"); }
+    pure public function menu-open-window() -> string { return @tr("Open in new window"); }
+    // The folder pane's own menu: fold it to the rail, or open it again.
+    pure public function menu-hide-folders() -> string { return @tr("Hide folders"); }
+    pure public function menu-show-folders() -> string { return @tr("Show folders"); }
     pure public function menu-refresh() -> string { return @tr("Refresh"); }
     pure public function menu-account-settings() -> string { return @tr("Account settings"); }
     // The account page's "…" menu (as `menu:account` prints it).
@@ -354,6 +373,16 @@ export global Tr {
     pure public function guard-no-attachment() -> string { return @tr("The text mentions an attachment, but nothing is attached."); }
     pure public function address-invalid(address: string) -> string { return @tr("\u{201c}{0}\u{201d} is not a valid address", address); }
     pure public function earlier-draft-saved() -> string { return @tr("Earlier draft saved in Drafts."); }
+    // The draft in the reading pane moved to a tab of its own (another
+    // message or draft took the pane).
+    pure public function draft-kept-in-tab() -> string { return @tr("Draft kept in a tab"); }
+    // A message window's title (its subject).
+    pure public function popout-title(subject: string) -> string { return @tr("window title" => "{0} - Komorebi", subject); }
+    // A tab's title for a draft without a subject.
+    pure public function tab-new-message() -> string { return @tr("tab title" => "New message"); }
+    // Undo of a move from a message window: the message is back, but its
+    // window is not opened again.
+    pure public function undo-window() -> string { return @tr("Undo brought the message back; open it from the list."); }
     pure public function add-account-write() -> string { return @tr("Add an account to write messages."); }
     pure public function add-account-send() -> string { return @tr("Add an account to send messages."); }
     pure public function still-downloading() -> string { return @tr("The message is still downloading."); }
@@ -457,6 +486,18 @@ export global Tr {
         return @tr("{n} unsent draft or Outbox message will be lost." | "{n} unsent drafts and Outbox messages will be lost." % n);
     }
     pure public function q-wipe-ok() -> string { return @tr("Remove all data"); }
+    // Settings > Signatures: Delete asks first, naming how many accounts use
+    // the signature as a default.
+    pure public function q-sig-delete-title(name: string) -> string { return @tr("Delete signature \u{201c}{0}\u{201d}?", name); }
+    pure public function q-sig-delete-text() -> string { return @tr("Messages already written keep it."); }
+    pure public function q-sig-delete-users(n: int) -> string {
+        return @tr("It is the default for {n} account; that account gets no signature." | "It is the default for {n} accounts; those accounts get no signature." % n);
+    }
+    pure public function sig-name-empty() -> string { return @tr("Give the signature a name."); }
+    pure public function sig-name-taken() -> string { return @tr("A signature with this name already exists."); }
+    pure public function sig-logo-refused() -> string { return @tr("The logo must be a PNG or JPEG file of 200 KB or less."); }
+    pure public function sig-none() -> string { return @tr("signature" => "None"); }
+    pure public function dlg-pick-logo() -> string { return @tr("Add a logo"); }
     pure public function q-trust-title() -> string { return @tr("Trust this certificate?"); }
     pure public function q-trust-text(address: string, host: string) -> string {
         return @tr("{0} presented a certificate that Windows doesn't trust. Trust this certificate for {1} only?", address, host);

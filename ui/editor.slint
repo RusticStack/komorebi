@@ -1,0 +1,990 @@
+// The formatted-text editor (docs/WINUI3.md "RichEditBox mapping" and
+// "Composer toolbar"): a page painted by Rust from Komorebi's own layout
+// engine (src/mail/rich/view.rs), over a hidden TextInput that owns the
+// text, the caret, IME, dead keys, the clipboard's plain text and the
+// screen reader's view (src/app/composer/rich.rs keeps both in step).
+import { Theme, Icons } from "theme.slint";
+import { ComboBox, ScrollView } from "std-widgets.slint";
+import { Focus, FocusRing, Icon, IconButton, InputFrame, Button, ComboEdge } from "widgets.slint";
+
+// One painted band of the page, in page coordinates (logical px), drawn
+// 1:1 at the device scale.
+export struct EdPiece {
+    img: image,
+    y: length,
+    h: length,
+}
+
+export struct EdRect {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+}
+
+// What the controller shows in one RichBody.
+export struct EdState {
+    pieces: [EdPiece],
+    page-h: length,
+    caret: EdRect,
+    sel: [EdRect],
+    // The projection the hidden input holds: put into it, with the
+    // selection, when `seq` changes and `push-text` is set (else only the
+    // selection is set).
+    text: string,
+    push-text: bool,
+    anchor: int,
+    cursor: int,
+    seq: int,
+    // A scroll position wanted (page y at the top), when `scroll-seq`
+    // changes.
+    scroll-y: length,
+    scroll-seq: int,
+    // Nothing written yet: the placeholder shows.
+    empty: bool,
+}
+
+// The formatting at the caret (or common to the selection), for the
+// toolbar's toggles and boxes.
+export struct EdFormat {
+    b: bool,
+    i: bool,
+    u: bool,
+    s: bool,
+    // Indexes into `Rich.fonts` and `Rich.sizes`.
+    font: int,
+    size: int,
+    // -1: Automatic; else an index into the named colours.
+    color: int,
+    // 0 left, 1 centre, 2 right, 3 justify.
+    align: int,
+    // 0 none, 1 bulleted, 2 numbered.
+    list-kind: int,
+    quote: bool,
+    in-table: bool,
+    in-signature: bool,
+    // The stored quote of a reply or forward shows (unfolded).
+    quote-shown: bool,
+    link: bool,
+    can-undo: bool,
+    can-redo: bool,
+}
+
+export enum EdAction {
+    bold, italic, underline, strike,
+    font, size, size-up, size-down, color,
+    bullets, numbers, indent, outdent, align, quote, clear,
+    row-above, row-below, col-left, col-right, delete-row, delete-col, delete-table,
+    undo, redo, show-quote, edit-quote,
+}
+
+export enum EdKey { up, down, page-up, page-down, home, end, doc-start, doc-end, select-all, tab, back-tab, paste, undo, redo }
+
+// The two editors' state and the calls into Rust. `id` 0 is the
+// composer's body, 1 the signature being edited in Settings.
+export global Rich {
+    in-out property <EdState> body;
+    in-out property <EdFormat> body-fmt;
+    in-out property <EdState> sig;
+    in-out property <EdFormat> sig-fmt;
+    // The font names (proper nouns, never translated) and point sizes.
+    in property <[string]> fonts: ["Segoe UI", "Arial", "Calibri", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Courier New", "Consolas"];
+    in property <[string]> sizes: ["8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "36"];
+    // The colour last picked with the colour button (-1: Automatic).
+    in-out property <int> last-color: 3;
+    callback edited(int, string, int, int);
+    callback moved(int, int, int);
+    callback key(int, EdKey, bool) -> bool;
+    // kind: 0 press, 1 Shift+press, 2 drag, 3 double click.
+    callback point(int, length, length, int);
+    // The page's width and the part of it in view (top, height).
+    callback geometry(int, length, length, length);
+    // The theme, the contrast theme or the text size changed: drawn again.
+    callback restyle(int);
+    callback act(int, EdAction, int);
+    // Make the selection a link to the address typed (false: not one).
+    callback link(int, string) -> bool;
+    callback insert-table(int, int, int);
+
+    // The composer's Signature menu: the signatures by name, the one in
+    // the message (-1: none), and a pick (-1: None, -2: Manage
+    // signatures…).
+    in property <[string]> sig-names;
+    in property <int> sig-current: -1;
+    callback pick-signature(int);
+    // The message's format: formatted (true) or plain text. Switching to
+    // plain text asks first (`plain-ask`).
+    in-out property <bool> plain-ask;
+    callback set-rich(bool);
+    // Settings > General > Compose: 0 formatted, 1 plain text; the default
+    // font, size and colour (-1: Automatic) as indexes; a sample drawn in
+    // them.
+    in property <int> def-format;
+    in property <int> def-font;
+    in property <int> def-size: 3;
+    in property <int> def-color: -1;
+
+    callback defaults-changed(int, int, int, int);
+
+    // The named colours (index order of `rich::ColorId::ALL`), for the
+    // swatches; their names come from the translations.
+    out property <[color]> swatches: [#000000, #595959, #A4262C, #D13438, #CA5010, #986F0B, #107C10, #038387, #0F6CBD, #8764B8];
+    public pure function color-name(i: int) -> string {
+        if i == 0 { return @tr("Black"); }
+        if i == 1 { return @tr("Grey"); }
+        if i == 2 { return @tr("Dark red"); }
+        if i == 3 { return @tr("Red"); }
+        if i == 4 { return @tr("Orange"); }
+        if i == 5 { return @tr("Gold"); }
+        if i == 6 { return @tr("Green"); }
+        if i == 7 { return @tr("Teal"); }
+        if i == 8 { return @tr("Blue"); }
+        if i == 9 { return @tr("Purple"); }
+        @tr("colour" => "Automatic")
+    }
+    public pure function align-name(i: int) -> string {
+        if i == 1 { return @tr("Center"); }
+        if i == 2 { return @tr("Align right"); }
+        if i == 3 { return @tr("Justify"); }
+        @tr("Align left")
+    }
+}
+
+// One signature in Settings > Signatures.
+export struct SigRow {
+    name: string,
+    preview: string,
+    logo: bool,
+}
+
+// Settings > Signatures and the account page's two boxes
+// (docs/WINUI3.md "Signatures page", src/app/signatures.rs).
+export global Sigs {
+    in property <[SigRow]> items;
+    // The edit page: open, its name and why it can't be saved, the logo
+    // (shown at most 400 x 150) and why it was refused.
+    in-out property <bool> editing;
+    in-out property <string> name;
+    in property <string> name-error;
+    in property <bool> has-logo;
+    in property <image> logo;
+    in property <length> logo-w;
+    in property <length> logo-h;
+    in property <string> logo-error;
+    // The account page: "None" and the names, and each default's index in
+    // them.
+    in property <[string]> choices;
+    in property <int> acct-new;
+    in property <int> acct-reply;
+    callback add();
+    callback edit(int);
+    callback delete(int);
+    callback save() -> bool;
+    callback cancel();
+    callback add-logo();
+    callback remove-logo();
+    callback set-defaults(int, int, int);
+
+}
+
+// The editor (docs/WINUI3.md "RichEditBox mapping"): the painted page in a
+// text field's frame, scrolled with the caret kept in view. Clicks and
+// drags are hit-tested in Rust; the keys the page needs (lines up and
+// down, Tab in tables and lists, undo, paste of formatted text) go to
+// Rust, the rest to the hidden input.
+export component RichBody inherits InputFrame {
+    in property <int> id;
+    in property <EdState> state;
+    in property <string> placeholder-text;
+    in property <string> label;
+    out property <bool> has-focus: input.has-focus;
+    // Keys for the editor's user before the editor's own (Ctrl+K: the
+    // link field).
+    callback user-key(KeyEvent) -> EventResult;
+
+    public function focus-top() {
+        input.focus();
+        input.set-selection-offsets(0, 0);
+        scroll.content-y = 0;
+    }
+    public function focus-input() {
+        input.focus();
+    }
+
+    forward-focus: input;
+    focused: input.has-focus;
+    hover: ta.has-hover;
+    accessible-role: none;
+
+    property <int> seq: root.state.seq;
+    // While the controller's text and selection go in, the input's own
+    // caret moves are not the user's.
+    property <bool> pushing;
+    changed seq => {
+        root.pushing = true;
+        if root.state.push-text {
+            input.text = root.state.text;
+        }
+        input.set-selection-offsets(root.state.anchor, root.state.cursor);
+        root.pushing = false;
+    }
+    property <int> scroll-seq: root.state.scroll-seq;
+    changed scroll-seq => {
+        scroll.content-y = -min(root.state.scroll-y, max(0px, root.state.page-h - scroll.visible-height));
+    }
+    init => {
+        root.pushing = true;
+        input.text = root.state.text;
+        input.set-selection-offsets(root.state.anchor, root.state.cursor);
+        root.pushing = false;
+        root.report();
+    }
+    function report() {
+        Rich.geometry(root.id, scroll.visible-width, -scroll.content-y, scroll.visible-height);
+    }
+    property <length> view-w: scroll.visible-width;
+    property <length> view-h: scroll.visible-height;
+    property <length> view-y: scroll.content-y;
+    changed view-w => { root.report(); }
+    changed view-h => { root.report(); }
+    changed view-y => { root.report(); }
+    property <bool> dark: Theme.dark;
+    property <bool> contrast: Theme.contrast;
+    property <length> text-size: Theme.body;
+    property <color> text-color: Theme.text;
+    changed dark => { Rich.restyle(root.id); }
+    changed contrast => { Rich.restyle(root.id); }
+    changed text-size => { Rich.restyle(root.id); }
+    changed text-color => { Rich.restyle(root.id); }
+
+    // Ctrl+Shift+8 and +7 report their shifted character, which depends on
+    // the keyboard layout (US "*" "&", Portuguese "(" "/").
+    function format-key(e: KeyEvent) -> bool {
+        if !e.modifiers.control || e.modifiers.alt {
+            return false;
+        }
+        if e.modifiers.shift {
+            if e.text == "8" || e.text == "*" || e.text == "(" {
+                Rich.act(root.id, EdAction.bullets, 0);
+            } else if e.text == "7" || e.text == "&" || e.text == "/" {
+                Rich.act(root.id, EdAction.numbers, 0);
+            } else if e.text == "x" || e.text == "X" {
+                Rich.act(root.id, EdAction.strike, 0);
+            } else if e.text == "q" || e.text == "Q" {
+                Rich.act(root.id, EdAction.quote, 0);
+            } else if e.text == "m" || e.text == "M" {
+                Rich.act(root.id, EdAction.outdent, 0);
+            } else if e.text == "z" || e.text == "Z" {
+                return Rich.key(root.id, EdKey.redo, false);
+            } else if e.text == "v" || e.text == "V" {
+                // Paste as plain text (Word, Outlook).
+                input.paste();
+            } else {
+                return false;
+            }
+            return true;
+        }
+        if e.text == "b" || e.text == "B" {
+            Rich.act(root.id, EdAction.bold, 0);
+        } else if e.text == "i" || e.text == "I" {
+            Rich.act(root.id, EdAction.italic, 0);
+        } else if e.text == "u" || e.text == "U" {
+            Rich.act(root.id, EdAction.underline, 0);
+        } else if e.text == "l" || e.text == "L" {
+            Rich.act(root.id, EdAction.align, 0);
+        } else if e.text == "e" || e.text == "E" {
+            Rich.act(root.id, EdAction.align, 1);
+        } else if e.text == "r" || e.text == "R" {
+            Rich.act(root.id, EdAction.align, 2);
+        } else if e.text == "j" || e.text == "J" {
+            Rich.act(root.id, EdAction.align, 3);
+        } else if e.text == "]" {
+            Rich.act(root.id, EdAction.size-up, 0);
+        } else if e.text == "[" {
+            Rich.act(root.id, EdAction.size-down, 0);
+        } else if e.text == "m" || e.text == "M" {
+            Rich.act(root.id, EdAction.indent, 0);
+        } else if e.text == " " {
+            Rich.act(root.id, EdAction.clear, 0);
+        } else if e.text == "z" || e.text == "Z" {
+            Rich.key(root.id, EdKey.undo, false);
+        } else if e.text == "y" || e.text == "Y" {
+            Rich.key(root.id, EdKey.redo, false);
+        } else if e.text == "a" || e.text == "A" {
+            Rich.key(root.id, EdKey.select-all, false);
+        } else if e.text == "v" || e.text == "V" {
+            // Formatted text from the clipboard; plain text pastes as usual.
+            return Rich.key(root.id, EdKey.paste, false);
+        } else {
+            return false;
+        }
+        true
+    }
+    function nav-key(e: KeyEvent) -> bool {
+        if e.modifiers.alt || e.modifiers.meta {
+            return false;
+        }
+        if e.text == Key.Tab && !e.modifiers.control {
+            return Rich.key(root.id, e.modifiers.shift ? EdKey.back-tab : EdKey.tab, false);
+        }
+        if e.text == Key.Backtab {
+            return Rich.key(root.id, EdKey.back-tab, false);
+        }
+        if e.modifiers.control {
+            // The message's start and end (the hidden input may hold only
+            // the part around the caret).
+            if e.text == Key.Home {
+                return Rich.key(root.id, EdKey.doc-start, e.modifiers.shift);
+            }
+            if e.text == Key.End {
+                return Rich.key(root.id, EdKey.doc-end, e.modifiers.shift);
+            }
+            return false;
+        }
+        if e.text == Key.UpArrow {
+            return Rich.key(root.id, EdKey.up, e.modifiers.shift);
+        }
+        if e.text == Key.DownArrow {
+            return Rich.key(root.id, EdKey.down, e.modifiers.shift);
+        }
+        if e.text == Key.PageUp {
+            return Rich.key(root.id, EdKey.page-up, e.modifiers.shift);
+        }
+        if e.text == Key.PageDown {
+            return Rich.key(root.id, EdKey.page-down, e.modifiers.shift);
+        }
+        if e.text == Key.Home {
+            return Rich.key(root.id, EdKey.home, e.modifiers.shift);
+        }
+        if e.text == Key.End {
+            return Rich.key(root.id, EdKey.end, e.modifiers.shift);
+        }
+        false
+    }
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        ContextMenuArea {
+            Menu {
+                MenuItem {
+                    title: @tr("Cut");
+                    activated => { input.cut(); }
+                }
+                MenuItem {
+                    title: @tr("Copy");
+                    activated => { input.copy(); }
+                }
+                MenuItem {
+                    title: @tr("Paste");
+                    activated => {
+                        if !Rich.key(root.id, EdKey.paste, false) {
+                            input.paste();
+                        }
+                    }
+                }
+                MenuItem {
+                    title: @tr("Paste as plain text");
+                    activated => { input.paste(); }
+                }
+                MenuItem {
+                    title: @tr("Select all");
+                    activated => { Rich.key(root.id, EdKey.select-all, false); }
+                }
+            }
+
+            if root.state.empty: Text {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                text: root.placeholder-text;
+                font-size: Theme.body;
+                color: Theme.text-2;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+            scroll := ScrollView {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                height: parent.height - 24px;
+                content-width: self.visible-width;
+                content-height: max(self.visible-height, root.state.page-h);
+                page := Rectangle {
+                    width: scroll.visible-width;
+                    height: max(scroll.visible-height, root.state.page-h);
+                    for r in root.state.sel: Rectangle {
+                        x: r.x;
+                        y: r.y;
+                        width: r.w;
+                        height: r.h;
+                        // Under the text, which keeps its colour (Komorebi
+                        // paints it): a contrast theme's Highlight would hide
+                        // white text, so it is lighter there and outlined.
+                        background: Theme.selection-bg.with-alpha(Theme.contrast ? 0.45 : 0.35);
+                        border-width: Theme.contrast ? 1px : 0;
+                        border-color: Theme.hc-highlight;
+                    }
+                    for p in root.state.pieces: Image {
+                        x: 0;
+                        y: p.y;
+                        width: scroll.visible-width;
+                        height: p.h;
+                        source: p.img;
+                        image-fit: fill;
+                        accessible-role: none;
+                    }
+                    // The hidden input, its caret held under the page's (so the
+                    // IME's candidate window opens at the caret), clipped to 1 px.
+                    // It never leaves the part in view: a focused item scrolled
+                    // out of its clip loses the keyboard (typing scrolls the
+                    // caret back into view).
+                    Rectangle {
+                        x: clamp(root.state.caret.x, 0, max(0, scroll.visible-width - 1px));
+                        y: clamp(root.state.caret.y, -scroll.content-y, max(-scroll.content-y, -scroll.content-y + scroll.visible-height - max(1px, root.state.caret.h)));
+                        width: 1px;
+                        height: max(1px, root.state.caret.h);
+                        clip: true;
+                        input := TextInput {
+                            property <length> cx;
+                            property <length> cy;
+                            x: -self.cx;
+                            y: -self.cy;
+                            width: 100000px;
+                            // As tall as its text: a shorter input scrolls its
+                            // text by itself and stops taking keys.
+                            height: self.preferred-height;
+                            single-line: false;
+                            wrap: no-wrap;
+                            font-size: Theme.body;
+                            color: transparent;
+                            selection-background-color: transparent;
+                            selection-foreground-color: transparent;
+                            text-cursor-width: 0px;
+                            accessible-role: text-input;
+                            accessible-label: root.label;
+                            accessible-placeholder-text: root.placeholder-text;
+                            edited => {
+                                Rich.edited(root.id, self.text, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                            }
+                            cursor-position-changed(p) => {
+                                self.cx = p.x;
+                                self.cy = p.y;
+                                if !root.pushing {
+                                    Rich.moved(root.id, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                                }
+                            }
+                            key-pressed(e) => {
+                                if root.user-key(e) == EventResult.accept {
+                                    return accept;
+                                }
+                                if root.format-key(e) || root.nav-key(e) {
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                    }
+                    // The caret (WinUI: 1 px wide at 100 %), in the text colour.
+                    if input.has-focus && root.state.sel.length == 0: Rectangle {
+                        x: root.state.caret.x;
+                        y: root.state.caret.y;
+                        width: max(1px, root.state.caret.w);
+                        height: root.state.caret.h;
+                        background: Theme.text;
+                    }
+                    // What the IME is composing, under the caret's line start
+                    // (the page shows the text once committed).
+                    if input.preedit-text != "": Rectangle {
+                        x: min(root.state.caret.x, max(0px, page.width - pre.preferred-width - 8px));
+                        y: root.state.caret.y;
+                        width: pre.preferred-width + 8px;
+                        height: max(root.state.caret.h, pre.preferred-height + 4px);
+                        background: Theme.card;
+                        border-width: 1px;
+                        border-color: Theme.accent;
+                        border-radius: 2px;
+                        pre := Text {
+                            x: 4px;
+                            text: input.preedit-text;
+                            font-size: Theme.body;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                            accessible-role: none;
+                        }
+                    }
+                    TouchArea {
+                        mouse-cursor: MouseCursor.text;
+                        pointer-event(e) => {
+                            if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                                Focus.keyboard = false;
+                                input.focus();
+                                Rich.point(root.id, self.mouse-x, self.mouse-y, e.modifiers.shift ? 1 : 0);
+                            }
+                        }
+                        moved => {
+                            if self.pressed {
+                                Rich.point(root.id, self.mouse-x, self.mouse-y, 2);
+                            }
+                        }
+                        double-clicked => {
+                            Rich.point(root.id, self.mouse-x, self.mouse-y, 3);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A colour square with its name (the colour flyout).
+component Swatch inherits Rectangle {
+    in property <color> swatch;
+    in property <bool> automatic;
+    in property <string> name;
+    in property <bool> current;
+    callback picked;
+    accessible-role: button;
+    accessible-label: root.name;
+    accessible-checkable: true;
+    accessible-checked: root.current;
+    accessible-action-default => { root.picked(); }
+    border-radius: Theme.radius;
+    background: ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.picked();
+                return accept;
+            }
+            reject
+        }
+    }
+    ta := TouchArea {
+        clicked => { root.picked(); }
+    }
+    col := VerticalLayout {
+        padding-top: Theme.s1;
+        spacing: Theme.s1;
+        alignment: start;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: Theme.radius;
+                // Under a contrast theme author colours show as text colour
+                // (WinUI), so the squares are outlines with their names.
+                background: Theme.contrast ? transparent : root.automatic ? Theme.text : root.swatch;
+                border-width: root.current ? 2px : 1px;
+                border-color: root.current ? Theme.accent : Theme.stroke-strong;
+                if root.automatic && !Theme.contrast: Rectangle {
+                    x: 1px;
+                    y: 12px;
+                    width: 22px;
+                    height: 11px;
+                    background: Theme.card;
+                }
+            }
+        }
+        Text {
+            text: root.name;
+            font-size: Theme.caption;
+            color: Theme.text;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            accessible-role: none;
+        }
+    }
+    FocusRing { shown: fs.has-focus; }
+}
+
+// The font colour flyout (docs/WINUI3.md "Composer toolbar"): Automatic and
+// the ten named colours, each square with its name, four to a row.
+export component ColorGrid inherits Rectangle {
+    in property <int> current;
+    callback picked(int);
+    property <length> cell: 88px;
+    width: 4 * root.cell + 2 * Theme.s2;
+    height: 3 * root.row-h + 2 * Theme.s2;
+    background: Theme.flyout;
+    border-radius: Theme.radius-lg;
+    border-width: 1px;
+    border-color: Theme.flyout-stroke;
+    accessible-role: list;
+    accessible-label: @tr("Font colour");
+    // Automatic first, then the ten colours; the names wrap to two lines.
+    property <length> row-h: 24px + 2 * Theme.caption-line + Theme.s3;
+    grid := Rectangle {
+        x: Theme.s2;
+        y: Theme.s2;
+        width: 4 * root.cell;
+        height: 3 * root.row-h;
+        for i in 11: Swatch {
+            x: mod(i, 4) * root.cell;
+            y: floor(i / 4) * root.row-h;
+            width: root.cell - Theme.s1;
+            height: root.row-h - Theme.s1;
+            swatch: i > 0 ? Rich.swatches[i - 1] : Theme.text;
+            automatic: i == 0;
+            name: Rich.color-name(i - 1);
+            current: root.current == i - 1;
+            picked => { root.picked(i - 1); }
+        }
+    }
+}
+
+// Insert table: a 10 x 10 grid that follows the pointer (and the arrows),
+// "{0} × {1} table" under it, and Rows and Columns boxes for the keyboard.
+export component TableGrid inherits Rectangle {
+    callback picked(int, int);
+    property <int> rows: 2;
+    property <int> cols: 2;
+    property <length> cell: 18px;
+    width: max(10 * (root.cell + 2px) + 2 * Theme.s3, form.preferred-width + 2 * Theme.s3);
+    height: col.preferred-height;
+    background: Theme.flyout;
+    border-radius: Theme.radius-lg;
+    border-width: 1px;
+    border-color: Theme.flyout-stroke;
+    function set(r: int, c: int) {
+        root.rows = clamp(r, 1, 10);
+        root.cols = clamp(c, 1, 10);
+    }
+    col := VerticalLayout {
+        padding: Theme.s3;
+        spacing: Theme.s2;
+        grid-keys := FocusScope {
+            accessible-role: table;
+            accessible-label: @tr("{0} × {1} table", root.rows, root.cols);
+            height: 10 * (root.cell + 2px);
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if e.text == Key.RightArrow { root.set(root.rows, root.cols + 1); return accept; }
+                if e.text == Key.LeftArrow { root.set(root.rows, root.cols - 1); return accept; }
+                if e.text == Key.DownArrow { root.set(root.rows + 1, root.cols); return accept; }
+                if e.text == Key.UpArrow { root.set(root.rows - 1, root.cols); return accept; }
+                if e.text == Key.Return || e.text == " " { root.picked(root.rows, root.cols); return accept; }
+                reject
+            }
+            for r in 10: Rectangle {
+                y: r * (root.cell + 2px);
+                height: root.cell;
+                for c in 10: Rectangle {
+                    x: c * (root.cell + 2px);
+                    width: root.cell;
+                    height: root.cell;
+                    property <bool> on: r < root.rows && c < root.cols;
+                    background: self.on ? Theme.accent.with-alpha(Theme.contrast ? 1 : 0.25) : Theme.control;
+                    border-width: 1px;
+                    border-color: self.on ? Theme.accent : Theme.stroke-strong;
+                    TouchArea {
+                        changed has-hover => {
+                            if self.has-hover {
+                                root.set(r + 1, c + 1);
+                            }
+                        }
+                        clicked => { root.picked(r + 1, c + 1); }
+                    }
+                }
+            }
+            FocusRing { shown: grid-keys.has-focus; radius: 0; }
+        }
+        Text {
+            text: @tr("{0} × {1} table", root.rows, root.cols);
+            font-size: Theme.body;
+            color: Theme.text;
+            horizontal-alignment: center;
+            accessible-role: none;
+        }
+        form := HorizontalLayout {
+            spacing: Theme.s2;
+            Text {
+                text: @tr("Rows");
+                font-size: Theme.body;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            ComboBox {
+                width: 64px;
+                model: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+                current-index: root.rows - 1;
+                accessible-label: @tr("Rows");
+                selected => { root.set(self.current-index + 1, root.cols); }
+            }
+            Text {
+                text: @tr("Columns");
+                font-size: Theme.body;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            ComboBox {
+                width: 64px;
+                model: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+                current-index: root.cols - 1;
+                accessible-label: @tr("Columns");
+                selected => { root.set(root.rows, self.current-index + 1); }
+            }
+            Button {
+                accent: true;
+                label: @tr("Insert");
+                clicked => { root.picked(root.rows, root.cols); }
+            }
+        }
+    }
+}
+
+// A toolbar separator: 1 x 20, centred in the row.
+component Sep inherits Rectangle {
+    width: 1px;
+    Rectangle { height: 20px; background: Theme.stroke; }
+}
+
+// The formatting toolbar (docs/WINUI3.md "Composer toolbar"): the font and
+// size boxes, then one Tab stop whose arrows move along the buttons, with
+// the colour, align and table flyouts. `reduced` (the signature editor):
+// no quote and no table. `compact`: the font, size, indent and align are
+// in the user's More menu instead.
+export component RichToolbar inherits Rectangle {
+    in property <int> id;
+    in property <EdFormat> fmt;
+    in property <bool> reduced;
+    in property <bool> compact;
+    // Quote and Clear formatting in the user's More menu too.
+    in property <bool> tight;
+    // The Link button (the user shows its address field).
+    callback link();
+
+    height: row.preferred-height;
+    min-width: row.min-width;
+    preferred-width: row.preferred-width;
+
+    function below(e: length, x: length) -> Point {
+        return { x: x - root.absolute-position.x, y: e - root.absolute-position.y };
+    }
+
+    align-menu := ContextMenuArea {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        enabled: false;
+        Menu {
+            MenuItem { title: @tr("Align left"); checkable: true; checked: root.fmt.align == 0; activated => { Rich.act(root.id, EdAction.align, 0); } }
+            MenuItem { title: @tr("Center"); checkable: true; checked: root.fmt.align == 1; activated => { Rich.act(root.id, EdAction.align, 1); } }
+            MenuItem { title: @tr("Align right"); checkable: true; checked: root.fmt.align == 2; activated => { Rich.act(root.id, EdAction.align, 2); } }
+            MenuItem { title: @tr("Justify"); checkable: true; checked: root.fmt.align == 3; activated => { Rich.act(root.id, EdAction.align, 3); } }
+        }
+    }
+    // With the caret in a table: its rows and columns.
+    table-menu := ContextMenuArea {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        enabled: false;
+        Menu {
+            MenuItem { title: @tr("Insert row above"); activated => { Rich.act(root.id, EdAction.row-above, 0); } }
+            MenuItem { title: @tr("Insert row below"); activated => { Rich.act(root.id, EdAction.row-below, 0); } }
+            MenuItem { title: @tr("Insert column left"); activated => { Rich.act(root.id, EdAction.col-left, 0); } }
+            MenuItem { title: @tr("Insert column right"); activated => { Rich.act(root.id, EdAction.col-right, 0); } }
+            MenuSeparator { }
+            MenuItem { title: @tr("Delete row"); activated => { Rich.act(root.id, EdAction.delete-row, 0); } }
+            MenuItem { title: @tr("Delete column"); activated => { Rich.act(root.id, EdAction.delete-col, 0); } }
+            MenuItem { title: @tr("Delete table"); activated => { Rich.act(root.id, EdAction.delete-table, 0); } }
+        }
+    }
+    // Where a flyout opens, under the button that opened it (set as it
+    // opens).
+    property <length> pop-x;
+    property <length> pop-y;
+    color-popup := PopupWindow {
+        x: root.pop-x;
+        y: root.pop-y;
+        width: color-grid.width;
+        height: color-grid.height;
+        close-policy: close-on-click-outside;
+        color-grid := ColorGrid {
+            current: root.fmt.color;
+            picked(i) => {
+                color-popup.close();
+                Rich.act(root.id, EdAction.color, i);
+            }
+        }
+    }
+    table-popup := PopupWindow {
+        x: root.pop-x;
+        y: root.pop-y;
+        width: table-grid.width;
+        height: table-grid.height;
+        close-policy: close-on-click-outside;
+        table-grid := TableGrid {
+            picked(r, c) => {
+                table-popup.close();
+                Rich.insert-table(root.id, r, c);
+            }
+        }
+    }
+
+    row := HorizontalLayout {
+        spacing: Theme.s1;
+        alignment: start;
+        if !root.compact: Rectangle {
+            width: 140px;
+            height: 32px;
+            ComboBox {
+                width: 100%;
+                height: 100%;
+                model: Rich.fonts;
+                current-index: root.fmt.font;
+                accessible-label: @tr("Font");
+                selected => { Rich.act(root.id, EdAction.font, self.current-index); }
+            }
+            ComboEdge { }
+        }
+        if !root.compact: Rectangle {
+            width: 64px;
+            height: 32px;
+            ComboBox {
+                width: 100%;
+                height: 100%;
+                model: Rich.sizes;
+                current-index: root.fmt.size;
+                accessible-label: @tr("Font size");
+                selected => { Rich.act(root.id, EdAction.size, self.current-index); }
+            }
+            ComboEdge { }
+        }
+        bar := FocusScope {
+            focus-on-click: false;
+            focus-on-tab-navigation: false;
+            // The button the arrows last reached (Tab returns to it), in
+            // the row's order; hidden buttons are passed over.
+            property <int> current;
+            function go(i: int, dir: int) {
+                let j0 = mod(i + 15, 15);
+                let j1 = root.compact && j0 >= 8 && j0 <= 10 ? (dir > 0 ? 11 : 7) : j0;
+                let j2 = (root.reduced || root.tight) && j1 >= 12 && j1 <= 13 ? (dir > 0 ? 14 : 11) : j1;
+                let j = root.tight && j2 == 14 ? (dir > 0 ? 0 : 11) : j2;
+                self.current = j;
+                if j == 0 { b-bold.focus(); }
+                else if j == 1 { b-italic.focus(); }
+                else if j == 2 { b-under.focus(); }
+                else if j == 3 { b-strike.focus(); }
+                else if j == 4 { b-color.focus(); }
+                else if j == 5 { b-color-more.focus(); }
+                else if j == 6 { b-bullets.focus(); }
+                else if j == 7 { b-numbers.focus(); }
+                else if j == 8 { b-outdent.focus(); }
+                else if j == 9 { b-indent.focus(); }
+                else if j == 10 { b-align.focus(); }
+                else if j == 11 { b-link.focus(); }
+                else if j == 12 { b-quote.focus(); }
+                else if j == 13 { b-table.focus(); }
+                else { b-clear.focus(); }
+            }
+            key-pressed(e) => {
+                if e.modifiers.control || e.modifiers.alt || e.modifiers.shift {
+                    return reject;
+                }
+                if e.text == Key.LeftArrow || e.text == Key.RightArrow {
+                    let d = e.text == Key.LeftArrow ? -1 : 1;
+                    self.go(self.current + d, d);
+                    return accept;
+                }
+                reject
+            }
+            HorizontalLayout {
+                spacing: Theme.s1;
+                b-bold := IconButton { icon: Icons.bold; tooltip: @tr("Bold (Ctrl+B)"); width: 32px; checkable: true; checked: root.fmt.b; tab-stop: bar.current == 0; clicked => { Rich.act(root.id, EdAction.bold, 0); } }
+                b-italic := IconButton { icon: Icons.italic; tooltip: @tr("Italic (Ctrl+I)"); width: 32px; checkable: true; checked: root.fmt.i; tab-stop: bar.current == 1; clicked => { Rich.act(root.id, EdAction.italic, 0); } }
+                b-under := IconButton { icon: Icons.underline; tooltip: @tr("Underline (Ctrl+U)"); width: 32px; checkable: true; checked: root.fmt.u; tab-stop: bar.current == 2; clicked => { Rich.act(root.id, EdAction.underline, 0); } }
+                b-strike := IconButton { icon: Icons.strikethrough; tooltip: @tr("Strikethrough (Ctrl+Shift+X)"); width: 32px; checkable: true; checked: root.fmt.s; tab-stop: bar.current == 3; clicked => { Rich.act(root.id, EdAction.strike, 0); } }
+                Sep { }
+                // A SplitButton: the colour picked last, and its flyout.
+                Rectangle {
+                    width: 32px;
+                    b-color := IconButton {
+                        icon: Icons.font-color;
+                        tooltip: @tr("Font colour: {0}", Rich.color-name(Rich.last-color));
+                        width: 32px;
+                        tab-stop: bar.current == 4;
+                        clicked => { Rich.act(root.id, EdAction.color, Rich.last-color); }
+                    }
+                    // The colour it applies, under the glyph.
+                    Rectangle {
+                        x: 9px;
+                        y: parent.height - 9px;
+                        width: 14px;
+                        height: 3px;
+                        background: Theme.contrast ? Theme.text : Rich.last-color >= 0 ? Rich.swatches[Rich.last-color] : Theme.text;
+                    }
+                }
+                b-color-more := IconButton {
+                    icon: Icons.chevron-down;
+                    icon-size: 10px;
+                    tooltip: @tr("More font colours");
+                    width: 20px;
+                    tab-stop: bar.current == 5;
+                    clicked => {
+                        root.pop-x = b-color.absolute-position.x - root.absolute-position.x;
+                        root.pop-y = self.absolute-position.y - root.absolute-position.y + self.height + Theme.s1;
+                        color-popup.show();
+                    }
+                }
+                Sep { }
+                b-bullets := IconButton { icon: Icons.bullets; tooltip: @tr("Bulleted list (Ctrl+Shift+8)"); width: 32px; checkable: true; checked: root.fmt.list-kind == 1; tab-stop: bar.current == 6; clicked => { Rich.act(root.id, EdAction.bullets, 0); } }
+                b-numbers := IconButton { icon: "1."; icon-font: Theme.text-font; icon-size: Theme.body; icon-weight: 600; tooltip: @tr("Numbered list (Ctrl+Shift+7)"); width: 32px; checkable: true; checked: root.fmt.list-kind == 2; tab-stop: bar.current == 7; clicked => { Rich.act(root.id, EdAction.numbers, 0); } }
+                b-outdent := IconButton { visible: !root.compact; width: root.compact ? 0 : 32px; icon: Icons.outdent; tooltip: @tr("Decrease indent (Ctrl+Shift+M)"); tab-stop: bar.current == 8; clicked => { Rich.act(root.id, EdAction.outdent, 0); } }
+                b-indent := IconButton { visible: !root.compact; width: root.compact ? 0 : 32px; icon: Icons.indent; tooltip: @tr("Increase indent (Ctrl+M)"); tab-stop: bar.current == 9; clicked => { Rich.act(root.id, EdAction.indent, 0); } }
+                Rectangle {
+                    visible: !root.compact;
+                    width: root.compact ? 0 : b-align.preferred-width;
+                    b-align := IconButton {
+                        icon: root.fmt.align == 1 ? Icons.align-center : root.fmt.align == 2 ? Icons.align-right : Icons.align-left;
+                        tooltip: @tr("Align: {0}", Rich.align-name(root.fmt.align));
+                        menu: true;
+                        tab-stop: bar.current == 10;
+                        clicked => { align-menu.show(root.below(self.absolute-position.y + self.height + Theme.s1, self.absolute-position.x)); }
+                    }
+                    Icon {
+                        x: parent.width - 20px;
+                        width: 12px;
+                        text: Icons.chevron-down;
+                        font-size: 12px;
+                        color: b-align.fg;
+                    }
+                }
+                Sep { }
+                b-link := IconButton { icon: Icons.link; tooltip: @tr("Link (Ctrl+K)"); width: 32px; checkable: true; checked: root.fmt.link; tab-stop: bar.current == 11; clicked => { root.link(); } }
+                b-quote := IconButton { visible: !root.reduced && !root.tight; width: root.reduced || root.tight ? 0 : 32px; icon: Icons.quote; tooltip: @tr("Quote (Ctrl+Shift+Q)"); checkable: true; checked: root.fmt.quote; tab-stop: bar.current == 12; clicked => { Rich.act(root.id, EdAction.quote, 0); } }
+                Rectangle {
+                    visible: !root.reduced;
+                    width: root.reduced ? 0 : b-table.preferred-width;
+                    b-table := IconButton {
+                        icon: Icons.table;
+                        tooltip: root.fmt.in-table ? @tr("Table") : @tr("Insert table");
+                        menu: true;
+                        tab-stop: bar.current == 13;
+                        clicked => {
+                            if root.fmt.in-table {
+                                table-menu.show(root.below(self.absolute-position.y + self.height + Theme.s1, self.absolute-position.x));
+                            } else {
+                                root.pop-x = self.absolute-position.x - root.absolute-position.x;
+                                root.pop-y = self.absolute-position.y - root.absolute-position.y + self.height + Theme.s1;
+                                table-popup.show();
+                            }
+                        }
+                    }
+                    Icon {
+                        x: parent.width - 20px;
+                        width: 12px;
+                        text: Icons.chevron-down;
+                        font-size: 12px;
+                        color: b-table.fg;
+                    }
+                }
+                b-clear := IconButton { visible: !root.tight; width: root.tight ? 0 : 32px; icon: Icons.clear-format; tooltip: @tr("Clear formatting (Ctrl+Space)"); tab-stop: bar.current == 14; clicked => { Rich.act(root.id, EdAction.clear, 0); } }
+            }
+        }
+    }
+}
