@@ -388,8 +388,8 @@ msgstr "Remover todos os dados"
 msgid "Deletes the saved passwords of all accounts from Windows Credential Manager, then everything Komorebi keeps in the data folder (downloaded mail, drafts, the Outbox, settings and logs), and closes Komorebi. Mail on the server is not affected."
 msgstr "Elimina as palavras-passe guardadas de todas as contas do Gestor de Credenciais do Windows e, depois, tudo o que o Komorebi mantém na pasta de dados (correio transferido, rascunhos, Caixa de saída, definições e registos), e fecha o Komorebi. O correio no servidor não é afetado."
 
-msgid "Version {0} · Apache License 2.0"
-msgstr "Versão {0} · Licença Apache 2.0"
+msgid "Version {0} · GPL-3.0-or-later"
+msgstr "Versão {0} · Licença GPL-3.0-or-later"
 
 msgid "Data folder"
 msgstr "Pasta de dados"
@@ -3164,3 +3164,92 @@ msgstr "O correio novo nesta conta pode mostrar uma notificação do Windows. No
 
 msgid "Notifications for {0}"
 msgstr "Notificações de {0}"
+
+msgctxt "about group"
+msgid "Updates"
+msgstr "Atualizações"
+
+msgid "Checking for updates…"
+msgstr "A procurar atualizações…"
+
+msgid "Komorebi is up to date."
+msgstr "O Komorebi está atualizado."
+
+msgid "Version {0} is available."
+msgstr "A versão {0} está disponível."
+
+msgid "Downloading version {0}…"
+msgstr "A transferir a versão {0}…"
+
+msgid "The update didn't work."
+msgstr "A atualização não funcionou."
+
+msgid "Starting the installer…"
+msgstr "A iniciar o instalador…"
+
+msgid "Check for updates"
+msgstr "Procurar atualizações"
+
+msgid "Komorebi is offline, so it can't look for updates."
+msgstr "O Komorebi está offline, por isso não pode procurar atualizações."
+
+msgid "GitHub couldn't be reached. Check the connection and try again."
+msgstr "Não foi possível contactar o GitHub. Verifique a ligação e tente novamente."
+
+msgid "The release on GitHub isn't complete yet. Try again later."
+msgstr "A versão no GitHub ainda não está completa. Tente mais tarde."
+
+msgid "The download was larger than expected, so it was stopped."
+msgstr "A transferência era maior do que o esperado, por isso foi interrompida."
+
+msgid "The download didn't pass the signature check, so it wasn't installed."
+msgstr "A transferência não passou a verificação da assinatura, por isso não foi instalada."
+
+msgid "The installer couldn't be saved or started."
+msgstr "Não foi possível guardar ou iniciar o instalador."
+
+msgid "The installer is checked against the project's signature before it runs."
+msgstr "O instalador é verificado com a assinatura do projeto antes de ser executado."
+
+msgid "Komorebi closes now and opens again when the update is done."
+msgstr "O Komorebi fecha agora e volta a abrir quando a atualização terminar."
+
+msgid "Nothing is downloaded until you press Download and install."
+msgstr "Nada é transferido até premir Transferir e instalar."
+
+msgid "Komorebi asks GitHub for the latest release. Nothing about you or your mail is sent."
+msgstr "O Komorebi pergunta ao GitHub qual é a versão mais recente. Nada sobre si ou o seu correio é enviado."
+
+msgid "Check GitHub for a newer version of Komorebi"
+msgstr "Procurar no GitHub uma versão mais recente do Komorebi"
+
+msgid "Checking for updates"
+msgstr "A procurar atualizações"
+
+msgid "Downloading version {0}"
+msgstr "A transferir a versão {0}"
+
+msgid "Release notes"
+msgstr "Notas da versão"
+
+msgid "Open the release notes of version {0} in the browser"
+msgstr "Abrir as notas da versão {0} no navegador"
+
+msgid "Download and install"
+msgstr "Transferir e instalar"
+
+msgid "Download version {0}, check its signature, then close Komorebi and install it"
+msgstr "Transferir a versão {0}, verificar a assinatura e depois fechar o Komorebi e instalá-la"
+
+msgctxt "update"
+msgid "Later"
+msgstr "Mais tarde"
+
+msgid "Hide the update bar until tomorrow"
+msgstr "Ocultar a barra de atualização até amanhã"
+
+msgid "Check for updates automatically"
+msgstr "Procurar atualizações automaticamente"
+
+msgid "Once a day, a few seconds after Komorebi starts. Updates are never installed without your press."
+msgstr "Uma vez por dia, alguns segundos depois de o Komorebi iniciar. As atualizações nunca são instaladas sem a sua confirmação."

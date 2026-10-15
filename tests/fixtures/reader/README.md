@@ -16,6 +16,6 @@ shell loop, so their content is repetitive on purpose.
 | `04-heavy-statement` | a 1,200-row bank statement table with `bgcolor` zebra rows, `<font color>` amounts and `nowrap` cells (311 KB) | open-time corpus |
 
 The open-time corpus is these four plus the 14 in `tests/fixtures/html`
-(18 messages; see TODO.md for the recorded p95).
+(18 messages; see CHANGELOG.md).
 
 Keep CRLF line endings when editing them (`.gitattributes`).

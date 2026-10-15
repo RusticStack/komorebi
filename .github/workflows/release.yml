@@ -22,8 +22,9 @@ jobs:
     permissions:
       contents: write  # the draft release
     env:
-      # Signing is optional: without these secrets the build is unsigned
-      # (see README, "Install"). SIGN_CERT_PFX is a base64 .pfx, signed
+      # Authenticode signing is optional: without these secrets the build
+      # is unsigned (see README, "Install"). The self-update signature is
+      # made locally by the maintainer and needs no secret here. SIGN_CERT_PFX is a base64 .pfx, signed
       # with signtool and an RFC 3161 timestamp. Secrets can't be read in
       # `if:`, so the step checks this flag.
       HAS_SIGNING: ${{ secrets.SIGN_CERT_PFX != '' }}
@@ -91,17 +92,16 @@ jobs:
           SIGN_TIMESTAMP_URL: ${{ vars.SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
         run: ./scripts/sign.ps1 target/release/komorebi.exe
 
-      # Inno Setup 6, if the runner image does not have it.
+      # Inno Setup 6, if the runner image does not have it. The script
+      # compiles installer/komorebi.iss around the (possibly signed) exe.
       - name: Installer
         shell: pwsh
         run: |
-          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
             choco install innosetup --no-progress -y
             if ($LASTEXITCODE -ne 0) { throw 'installing Inno Setup failed' }
           }
-          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" installer/komorebi.iss
-          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+          ./scripts/build-installer.ps1 -Exe target/release/komorebi.exe -Version '${{ steps.version.outputs.version }}'
 
       - name: Sign the installer
         if: env.HAS_SIGNING == 'true'

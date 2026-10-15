@@ -10,9 +10,11 @@ yanked = "deny"
 ignore = []
 
 [licenses]
-# Permissive licenses, MPL-2.0 (file-level copyleft, used unmodified) and
-# Slint's royalty-free license, whose attribution is Settings → About
-# (AboutSlint). Slint's GPL-3.0 option is not the one taken.
+# Komorebi is GPL-3.0-or-later. Allowed: permissive licenses (all GPLv3
+# compatible), MPL-2.0 (file-level copyleft, GPLv3 compatible, used
+# unmodified) and Slint's GPL-3.0 option (GPL-3.0-only; it is the licence
+# taken for Slint). The Slint royalty-free licence stays allowed as an
+# alternative in dual-licensed expressions. No GPL-2.0-only code is allowed.
 allow = [
     "0BSD",
     "Apache-2.0",
@@ -20,6 +22,8 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "CC0-1.0",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
     "LicenseRef-Slint-Royalty-free-2.0",
     "MIT",
     "MPL-2.0",

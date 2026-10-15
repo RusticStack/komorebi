@@ -1,6 +1,6 @@
 # Komorebi performance reference
 
-Binding for any speed, memory or size work. Product promises: launch < 200 ms, cached list < 600 ms, exe <= 20.0 MB, light on memory. Safety and correct mail semantics outrank speed (AGENTS.md). Panic strategy, `unsafe` and the panic-free lints in `src/mail/render` and `src/mail/ical.rs` are not performance levers.
+Binding for any speed, memory or size work. Product promises: launch < 200 ms, cached list < 600 ms, exe <= 20.0 MB, light on memory. Safety and correct mail semantics outrank speed (CONTRIBUTING.md). Panic strategy, `unsafe` and the panic-free lints in `src/mail/render` and `src/mail/ical.rs` are not performance levers.
 
 **The meta-rule: a change stays only if it beats the baseline by more than the run-to-run spread, or shrinks exe/memory measurably without slowing anything. Cite the rule below in the commit or changelog note, with numbers. Cleverness that does not measure is reverted.**
 

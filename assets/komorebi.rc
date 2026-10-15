@@ -26,7 +26,7 @@ BEGIN
             VALUE "FileDescription", "Komorebi"
             VALUE "FileVersion", VER_STRING
             VALUE "InternalName", "komorebi"
-            VALUE "LegalCopyright", "Apache-2.0, see LICENSE and NOTICE"
+            VALUE "LegalCopyright", "GPL-3.0-or-later, see LICENSE and NOTICE"
             VALUE "OriginalFilename", "komorebi.exe"
             VALUE "ProductName", "Komorebi"
             VALUE "ProductVersion", VER_STRING

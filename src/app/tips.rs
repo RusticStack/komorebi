@@ -1,5 +1,5 @@
-//! The teaching tips and the What's new bar (UI plan "Onboarding" 6 and 7;
-//! docs/WINUI3.md "TeachingTip"): when they start, what the window shows,
+//! The teaching tips and the What's new bar
+//! (docs/WINUI3.md "TeachingTip"): when they start, what the window shows,
 //! and the settings `tips_seen` and `whats_new_version`. Which tip comes
 //! next is `komorebi::onboard`'s. Both start from timers after the first
 //! frame, never during it, and never under `KOMOREBI_SNAPSHOT` unless a

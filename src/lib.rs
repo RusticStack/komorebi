@@ -18,6 +18,7 @@ pub mod secrets;
 pub mod theme;
 pub mod tree;
 pub mod trust;
+pub mod update;
 #[cfg(windows)]
 pub mod win_shell;
 

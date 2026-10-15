@@ -331,7 +331,7 @@ impl App {
     /// General choice `which` (0 theme, 1 check interval, 2 undo send,
     /// 3 mark as read, 4 taskbar flash, 5 the diagnostics log under
     /// Privacy, 6 the language: 0 System, 1 English, 2 Português
-    /// (Portugal), 7 reopen tabs at start) changed to `value` (an index into its choices; for the
+    /// (Portugal), 7 reopen tabs at start, 12 automatic update checks) changed to `value` (an index into its choices; for the
     /// switches 1 or 0): apply it and save it.
     pub(super) fn general_changed(&mut self, which: i32, value: i32) {
         let pick = |n: usize| (value.max(0) as usize).min(n - 1);
@@ -386,6 +386,11 @@ impl App {
             }
             8..=11 => {
                 self.notification_changed(which, value != 0);
+                return;
+            }
+            // Settings > About: Check for updates automatically.
+            12 => {
+                self.set_update_auto(value != 0);
                 return;
             }
             _ => return,

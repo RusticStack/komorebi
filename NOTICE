@@ -1,15 +1,16 @@
 Komorebi
 Copyright 2026 The Komorebi Authors
 
-Licensed under the Apache License, Version 2.0 (see LICENSE).
+Licensed under the GNU General Public License, version 3 or (at your option)
+any later version (GPL-3.0-or-later, see LICENSE).
 Source: https://github.com/RusticStack/komorebi
 
 Komorebi includes third-party software, linked into komorebi.exe from
 crates.io, each under its own license:
 
-- Slint (https://slint.dev), under the Slint Royalty-free Desktop, Mobile,
-  and Web Applications License 2.0; the attribution it requires is shown
-  in Settings > About.
+- Slint (https://slint.dev), used under its GPL-3.0 option (it is dual
+  licensed; GPL-3.0-only is compatible with GPL-3.0-or-later as a whole
+  work under GPL-3.0). Its attribution is still shown in Settings > About.
 - SQLite (https://sqlite.org), in the public domain, through rusqlite's
   bundled build (MIT).
 - Other crates under permissive licenses (MIT, Apache-2.0, BSD-2-Clause,
@@ -21,4 +22,7 @@ crates.io, each under its own license:
       cargo deny --locked list --layout crate
 
 The icon (assets/komorebi.ico) was made for Komorebi and is under the
-same license as the code.
+same license as the code (GPL-3.0-or-later).
+
+No fonts or other third-party assets are bundled in the repository; the
+interface uses the fonts installed with Windows.

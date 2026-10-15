@@ -542,11 +542,7 @@ fn add_accounts(db: &mut Db, seed: i64) -> Result<()> {
         ("Junk", 9, 5),
         ("Trash", 4, 2),
         ("Clientes", 3, 0),
-        (
-            "Clientes/Associação Mutualista de Lisboa - contratos",
-            1300,
-            1234,
-        ),
+        ("Clientes/Associação Exemplo - contratos", 1300, 1234),
         ("Clientes/Porto", 4, 1),
         ("Faturas", 6, 0),
     ];

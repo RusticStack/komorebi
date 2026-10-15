@@ -8,7 +8,7 @@
 #
 #   pwsh scripts/sign.ps1 target/release/komorebi.exe [more files]
 #
-# The provider and certificate are the maintainer's choice (TODO.md); a
+# The provider and certificate are the maintainer's choice; a
 # cloud signing service would replace this script with its own step.
 param([Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$Files)
 $ErrorActionPreference = 'Stop'

@@ -7,7 +7,13 @@ changes in the local data (the cache, its folders and Credential Manager).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-15
+
 ### Added
+
+- Relicensed to GPL-3.0-or-later (LICENSE, NOTICE).
+- Updates: Settings > About checks the project's GitHub releases (on a press, or once a day when automatic checks are on), says when a new version is available (also in a quiet bar), and downloads and installs it only when you press Download and install. The installer runs only if its SHA-256 and the Ed25519 signature over its version and hash verify against a public key compiled in (`src/update.rs`, `src/app/updates.rs`, `examples/sign_update.rs`). The installer is named `komorebi-<version>-setup.exe`.
+- Inno Setup installer rebuilt: per-user or all-users install, Start menu and optional desktop shortcut, optional start with Windows, mail client registration (mailto), English and Portuguese setup (`scripts/build-installer.ps1`).
 
 - Tabs and windows: the folder pane folds to the rail at any width (its
   toggle, Ctrl+Shift+E or Hide folders; remembered). Messages open in tabs
@@ -35,7 +41,7 @@ changes in the local data (the cache, its folders and Credential Manager).
   it), and a plain-text message is sent as text/plain only (the composer's
   old `**bold**` and `- ` marks are no longer turned into HTML). Settings > General > Compose picks how new messages start and their
   font. A key in a 2,000-line message with 20 tables is drawn in about
-  11 ms (TODO.md has the numbers).
+  11 ms.
 - Named signatures (Settings > Signatures): formatted, with at most one
   PNG or JPEG logo of 200 KB sent as an embedded `cid:` part; each account
   picks one for new messages and one for replies and forwards (or None);
@@ -124,11 +130,11 @@ changes in the local data (the cache, its folders and Credential Manager).
 
 ## [0.3.0] - 2026-10-13
 
-The rewrite: a small Slint app in place of the GPUI/AI prototype. This
+The rewrite: a small Slint app in place of an earlier prototype. This
 section lists everything since the start of the rewrite, including what
 the 0.2.0 pre-release (2026-10-07) already had. It is still a
 pre-release: the binary is not code-signed, and self-hosted servers have
-been tested only against local fakes (see TODO.md).
+been tested only against local fakes (see TODO.md for the open items).
 
 ### Added
 
@@ -145,7 +151,7 @@ been tested only against local fakes (see TODO.md).
   counts are neutral instead of accent-coloured and stop at 999+; the
   server's Drafts folder shows how many drafts it holds; long folder names
   show in full as a tooltip. Local data: none.
-- Narrow windows (UX final, Stage 8): the window goes down to 500 px wide
+- Narrow windows: the window goes down to 500 px wide
   (was 720), so Snap Layouts' halves and thirds fit common screens. Below
   720 px one pane shows at a time: the list, or the open message, composer
   or Outbox entry with a back arrow ("Back to list (Esc)"); the status line
@@ -157,7 +163,7 @@ been tested only against local fakes (see TODO.md).
   follow Windows' short-date format, read once at start, with ISO 8601 as
   the fallback; quote headers in sent replies keep ISO, so what is sent
   does not depend on the PC. Local data: none.
-- Onboarding tips, help and shortcuts (UX final, Stage 5): short
+- Onboarding tips, help and shortcuts: short
   teaching tips, one at a time and never in the way (no smoke, no focus
   taken, Esc is Got it): Search and Help on a wide window, and Folders
   first when the folder pane is folded into the narrow rail; "1 of 2",
@@ -173,7 +179,7 @@ been tested only against local fakes (see TODO.md).
   `tips_seen` and `whats_new_version`, in the existing settings table (no
   schema change); the version is saved silently when the first account
   is added.
-- Settings, accounts and trust surfaces (UX final, Stage 7): each account
+- Settings, accounts and trust surfaces: each account
   is a card that opens its page ("Accounts › name"): "Sync this account"
   with what Off does, Name, Email (with why it can't change), Password,
   Signature, Folders (each role's header above its box, so no label is
@@ -196,7 +202,7 @@ been tested only against local fakes (see TODO.md).
   the whole path in its tooltip, and a Made with Slint card. A language
   change says that some text changes after a restart. Local data: none
   changed (no new settings, no schema change).
-- Composer, drafts and Outbox (UX final, Stage 6): a Close button in the
+- Composer, drafts and Outbox: a Close button in the
   composer's header, and every way out of it (Close, Esc, a click on a
   message or an Outbox row) saves the draft on this PC and copies it to
   the server's Drafts at once, saying "Draft saved"; the header shows
@@ -224,7 +230,7 @@ been tested only against local fakes (see TODO.md).
   schema change). Behaviour: a click on a message or an Outbox row while
   writing now also copies the draft to the server, as Esc did; nothing
   else changes in what is sent, saved or deleted.
-- First run and account setup (UX final, Stage 4): the welcome has the
+- First run and account setup: the welcome has the
   whole window (no folder pane, rail or search until there is an account)
   with a line on what stays private and the links "Need help?", "Privacy"
   and "Settings". The add form asks Email, Password (saved in Windows
@@ -236,8 +242,8 @@ been tested only against local fakes (see TODO.md).
   expander, and with no server typed Add or Test looks them up first (only
   on that press). Cancel, Back and Esc stop a running check; after 3 s the
   wait says what to check. A failure keeps the steps inside its message,
-  scrolls it into view (its top under the page header, never cut by it;
-  final UX audit) and offers Set username (a username now works with
+  scrolls it into view (its top under the page header, never cut by it)
+  and offers Set username (a username now works with
   Purelymail and Postale.io too) or Review certificate; a rejected password
   marks the Password box, and the sentence fits the provider. A new account
   opens on its Inbox with its download's progress in the empty list ("Newest
@@ -246,7 +252,7 @@ been tested only against local fakes (see TODO.md).
   longer opens at its minimum height on a first run. Local data: none (no
   schema or setting change; a username typed for a preset is stored in the
   existing columns).
-- Easier navigation (UX final, Stage 1): Settings has a back arrow ("Back
+- Easier navigation: Settings has a back arrow ("Back
   to mail", Esc), and the gear and Ctrl+, open and close it. With one
   account there is no All inboxes: Komorebi opens on its Inbox, and the
   view you left is opened again at the next start. Long folder trees start
@@ -269,7 +275,7 @@ been tested only against local fakes (see TODO.md).
   `last_view` and `nav_folds_init` (no schema change); the first start
   after the update folds each account's parent folders without unread
   mail once.
-- A Windows 11 title bar (UX final, Stage 2): Komorebi draws its own 48 px
+- A Windows 11 title bar: Komorebi draws its own 48 px
   title bar as Windows 11 Mail and the new Outlook do, with the icon and
   name, the search box in the middle and the minimize, maximize and close
   buttons (Snap Layouts, drag, double-click and the system menu work as
@@ -285,7 +291,7 @@ been tested only against local fakes (see TODO.md).
   read is off while results show: it would cover the whole folder). Archive is now Backspace
   (on a message or the reader), as in the new Outlook. The window keeps
   its size across restarts. Local data: none.
-- Easier triage (UX final, Stage 3): rows say unread with bold text and a
+- Easier triage: rows say unread with bold text and a
   small accent dot at the end of the subject line, and in All inboxes
   name their account in a text tag (no more coloured dots). Pointing at a
   row (or reaching it with the keyboard) shows Archive, Delete, Flag and
@@ -459,7 +465,7 @@ been tested only against local fakes (see TODO.md).
 - Reliability: a crash note (`crash.log`, no mail content), a damaged
   cache renamed aside, a clear message for a cache from a newer version,
   one app per cache.
-- Release foundations: LICENSE (Apache-2.0), NOTICE, this changelog, the
+- Release foundations: LICENSE, NOTICE, this changelog, the
   app icon (also in the title bar and taskbar), version information and a
   manifest in `komorebi.exe` (UTF-8 code page, Windows 10/11, asInvoker),
   a title bar that follows the app's theme, and CI gates: clippy with
@@ -517,5 +523,6 @@ everything kept on disk.
   empty. The uninstaller deletes `%LOCALAPPDATA%\komorebi` only if you
   answer Yes, and never touches Credential Manager. No schema change.
 
+[0.4.0]: https://github.com/RusticStack/komorebi/releases/tag/v0.4.0
 [0.3.0]: https://github.com/RusticStack/komorebi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/RusticStack/komorebi/releases/tag/v0.2.0

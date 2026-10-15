@@ -367,8 +367,8 @@ component StatusBar inherits FocusScope {
     }
 }
 
-// Settings, a page in the content area as in Windows 11's own apps (UI
-// plan "Settings"): the title, SelectorBar tabs and a column of
+// Settings, a page in the content area as in Windows 11's own apps
+// the title, SelectorBar tabs and a column of
 // SettingsCards on the layer, at most 1000 px wide; the account form is a
 // sub-page ("Accounts > Add an account").
 component SettingsPage inherits Rectangle {
@@ -446,6 +446,19 @@ component SettingsPage inherits Rectangle {
     callback show-tips-again();
     callback show-shortcuts();
     callback about-link(int);
+    // About > Updates (src/app/updates.rs): the state (0 not checked, 1
+    // checking, 2 up to date, 3 available, 4 downloading, 5 failed, 6
+    // starting the installer), the version found, the error (0 offline,
+    // 1 network, 2 release incomplete, 3 too large, 4 verify, 5 file),
+    // whether a found release can be tried again, the automatic switch
+    // (reported as general-changed 12) and the presses (0 Check, 1
+    // Download and install, 2 Later, 3 Release notes).
+    in property <int> up-state;
+    in property <string> up-version;
+    in property <int> up-error;
+    in property <bool> up-retry;
+    in property <bool> up-auto;
+    callback update-action(int);
     // The status line (the list's is hidden under the page).
     in property <string> status;
     in property <Severity> status-severity;
@@ -1936,9 +1949,97 @@ component SettingsPage inherits Rectangle {
                         SettingsCard {
                             icon: Icons.mail;
                             header: "Komorebi";
-                            description: @tr("Version {0} · Apache License 2.0", root.about-version);
+                            description: @tr("Version {0} · GPL-3.0-or-later", root.about-version);
                         }
-                        // Help that is findable later (UI plan "Onboarding" 8):
+                        // Updates (src/app/updates.rs): the state on the
+                        // card, Check for updates at its end; under it what
+                        // can be done with a version found, and the switch.
+                        Rectangle { height: Theme.s6 - 2 * Theme.s1; }
+                        GroupHeader { text: @tr("about group" => "Updates"); }
+                        Rectangle { height: 0; }
+                        SettingsCard {
+                            icon: Icons.refresh;
+                            header: root.up-state == 1 ? @tr("Checking for updates…")
+                                : root.up-state == 2 ? @tr("Komorebi is up to date.")
+                                : root.up-state == 3 ? @tr("Version {0} is available.", root.up-version)
+                                : root.up-state == 4 ? @tr("Downloading version {0}…", root.up-version)
+                                : root.up-state == 5 ? @tr("The update didn't work.")
+                                : root.up-state == 6 ? @tr("Starting the installer…")
+                                : @tr("Check for updates");
+                            description: root.up-state == 5 ? (
+                                    root.up-error == 0 ? @tr("Komorebi is offline, so it can't look for updates.")
+                                    : root.up-error == 1 ? @tr("GitHub couldn't be reached. Check the connection and try again.")
+                                    : root.up-error == 2 ? @tr("The release on GitHub isn't complete yet. Try again later.")
+                                    : root.up-error == 3 ? @tr("The download was larger than expected, so it was stopped.")
+                                    : root.up-error == 4 ? @tr("The download didn't pass the signature check, so it wasn't installed.")
+                                    : @tr("The installer couldn't be saved or started."))
+                                : root.up-state == 4 ? @tr("The installer is checked against the project's signature before it runs.")
+                                : root.up-state == 6 ? @tr("Komorebi closes now and opens again when the update is done.")
+                                : root.up-state == 3 ? @tr("Nothing is downloaded until you press Download and install.")
+                                : @tr("Komorebi asks GitHub for the latest release. Nothing about you or your mail is sent.");
+                            action: root.up-state == 3 || root.up-state == 4 || root.up-state == 6 ? "" : @tr("Check for updates");
+                            action-enabled: root.up-state != 1;
+                            action-description: @tr("Check GitHub for a newer version of Komorebi");
+                            action-clicked => { root.update-action(0); }
+                        }
+                        if root.up-state == 1 || root.up-state == 4: Rectangle {
+                            height: Theme.s3;
+                            ProgressBar {
+                                y: Theme.s1;
+                                indeterminate: true;
+                                accessible-label: root.up-state == 1 ? @tr("Checking for updates") : @tr("Downloading version {0}", root.up-version);
+                            }
+                        }
+                        if root.up-state == 3 || (root.up-state == 5 && root.up-retry): SettingsSurface {
+                            height: up-row.preferred-height;
+                            up-row := VerticalLayout {
+                                padding: Theme.s4;
+                                spacing: Theme.s2;
+                                HorizontalLayout {
+                                    alignment: start;
+                                    HyperlinkButton {
+                                        text: @tr("Release notes");
+                                        label: @tr("Open the release notes of version {0} in the browser", root.up-version);
+                                        clicked => { root.update-action(3); }
+                                    }
+                                }
+                                // Side by side, or one under the other when
+                                // they don't fit (a long translation).
+                                up-btns := Rectangle {
+                                    property <bool> stacked: up-install.preferred-width + Theme.s2 + up-later.preferred-width > self.width;
+                                    height: self.stacked && up-later.visible ? up-later.y + up-later.height : up-install.height;
+                                    up-install := Button {
+                                        x: 0;
+                                        y: 0;
+                                        width: self.preferred-width;
+                                        accent: true;
+                                        label: root.up-state == 5 ? @tr("Try again") : @tr("Download and install");
+                                        description: @tr("Download version {0}, check its signature, then close Komorebi and install it", root.up-version);
+                                        clicked => { root.update-action(1); }
+                                    }
+                                    up-later := Button {
+                                        x: up-btns.stacked ? 0 : up-install.width + Theme.s2;
+                                        y: up-btns.stacked ? up-install.height + Theme.s2 : 0;
+                                        width: self.preferred-width;
+                                        visible: root.up-state == 3;
+                                        enabled: self.visible;
+                                        label: @tr("update" => "Later");
+                                        description: @tr("Hide the update bar until tomorrow");
+                                        clicked => { root.update-action(2); }
+                                    }
+                                }
+                            }
+                        }
+                        SettingsCard {
+                            icon: Icons.calendar;
+                            header: @tr("Check for updates automatically");
+                            description: @tr("Once a day, a few seconds after Komorebi starts. Updates are never installed without your press.");
+                            toggle: true;
+                            toggle-label: @tr("Check for updates automatically");
+                            checked: root.up-auto;
+                            toggled(on) => { root.general-changed(12, on ? 1 : 0); }
+                        }
+                        // Help that is findable later:
                         // every page opens through the link prompt.
                         Rectangle { height: Theme.s6 - 2 * Theme.s1; }
                         GroupHeader { text: @tr("about group" => "Help"); }
@@ -2960,13 +3061,22 @@ export component AppWindow inherits Window {
     // The diagnostics log switch (Privacy), reported as which = 5.
     in property <bool> g-diag;
     callback general-changed(int, int);
+    // Settings > About > Updates and the "Version X is available" bar
+    // (src/app/updates.rs; see SettingsPage).
+    in property <int> up-state;
+    in property <string> up-version;
+    in property <int> up-error;
+    in property <bool> up-retry;
+    in property <bool> up-auto;
+    in property <bool> up-banner;
+    callback update-action(int);
     // About: the version and the folder holding the cache.
     in property <string> about-version;
     in property <string> about-data;
     callback open-repository();
     callback open-data-folder();
-    // Where the focus goes when Settings close (UI plan Stage 8, "Focus
-    // return"): 0 where it was before (the list, or the composer's body),
+    // Where the focus goes when Settings close:
+    // 0 where it was before (the list, or the composer's body),
     // 1 the Settings item, 2 nowhere (a folder or New mail takes it).
     property <int> settings-from;
     property <int> chrome-refocus;
@@ -3978,6 +4088,25 @@ export component AppWindow inherits Window {
                                 text: @tr("Clear search");
                                 clicked => { root.clear-search(); }
                             }
+                        }
+                    }
+                    // An automatic check found a newer version: a quiet
+                    // bar (docs/WINUI3.md "InfoBar"), nothing installed
+                    // without the press; Later (or its close) hides it
+                    // until tomorrow.
+                    if root.up-banner: HorizontalLayout {
+                        padding-left: Theme.s3;
+                        padding-right: Theme.s3;
+                        padding-top: Theme.s1;
+                        padding-bottom: Theme.s2;
+                        InfoBar {
+                            severity: Severity.info;
+                            message: @tr("Version {0} is available.", root.up-version);
+                            button1: @tr("Download and install");
+                            button2: @tr("update" => "Later");
+                            close-label: @tr("Hide the update bar until tomorrow");
+                            button-clicked(i) => { root.update-action(i == 0 ? 1 : 2); }
+                            closed => { root.update-action(2); }
                         }
                     }
                     // The status line (docs/WINUI3.md "InfoBar"): at the top
@@ -5612,8 +5741,8 @@ export component AppWindow inherits Window {
                                 }
                             }
                             // A draft from the server's Drafts folder: where it
-                            // came from and how to go on with it here (UX plan
-                            // "Drafts": editing it in place is deferred).
+                            // came from and how to go on with it here:
+                            // editing it in place is deferred.
                             if root.r-server-draft: VerticalLayout {
                                 InfoBar {
                                     severity: Severity.info;
@@ -6080,7 +6209,7 @@ export component AppWindow inherits Window {
             Rectangle { width: root.show-reader ? root.tab-gutter : 0; }
         }
 
-        // ---- Settings, a page over the content card (UI plan Stage 8)
+        // ---- Settings, a page over the content card
         if root.show-settings: SettingsPage {
             x: root.mail-shown ? root.nav-width + 1px : 0;
             y: root.content-top + (root.mail-shown ? 1px : 0);
@@ -6142,6 +6271,12 @@ export component AppWindow inherits Window {
             show-tips-again => { root.show-tips-again(); }
             show-shortcuts => { root.open-shortcuts(); }
             about-link(which) => { root.welcome-link(which); }
+            up-state: root.up-state;
+            up-version: root.up-version;
+            up-error: root.up-error;
+            up-retry: root.up-retry;
+            up-auto: root.up-auto;
+            update-action(which) => { root.update-action(which); }
             copy-text(t) => { root.r-copy-text(t); }
             forget-remote(a) => { root.forget-remote(a); }
             forget-all-remote => { root.forget-all-remote(); }

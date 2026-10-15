@@ -714,7 +714,129 @@ msgid "Deletes the saved passwords of all accounts from Windows Credential Manag
 msgstr ""
 
 #: ui/app.slint
-msgid "Version {0} · Apache License 2.0"
+msgid "Version {0} · GPL-3.0-or-later"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "about group"
+msgid "Updates"
+msgstr ""
+
+#: ui/app.slint
+msgid "Checking for updates…"
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi is up to date."
+msgstr ""
+
+#: ui/app.slint
+msgid "Version {0} is available."
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloading version {0}…"
+msgstr ""
+
+#: ui/app.slint
+msgid "The update didn't work."
+msgstr ""
+
+#: ui/app.slint
+msgid "Starting the installer…"
+msgstr ""
+
+#: ui/app.slint
+msgid "Check for updates"
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi is offline, so it can't look for updates."
+msgstr ""
+
+#: ui/app.slint
+msgid "GitHub couldn't be reached. Check the connection and try again."
+msgstr ""
+
+#: ui/app.slint
+msgid "The release on GitHub isn't complete yet. Try again later."
+msgstr ""
+
+#: ui/app.slint
+msgid "The download was larger than expected, so it was stopped."
+msgstr ""
+
+#: ui/app.slint
+msgid "The download didn't pass the signature check, so it wasn't installed."
+msgstr ""
+
+#: ui/app.slint
+msgid "The installer couldn't be saved or started."
+msgstr ""
+
+#: ui/app.slint
+msgid "The installer is checked against the project's signature before it runs."
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi closes now and opens again when the update is done."
+msgstr ""
+
+#: ui/app.slint
+msgid "Nothing is downloaded until you press Download and install."
+msgstr ""
+
+#: ui/app.slint
+msgid "Komorebi asks GitHub for the latest release. Nothing about you or your mail is sent."
+msgstr ""
+
+#: ui/app.slint
+msgid "Check GitHub for a newer version of Komorebi"
+msgstr ""
+
+#: ui/app.slint
+msgid "Checking for updates"
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloading version {0}"
+msgstr ""
+
+#: ui/app.slint
+msgid "Release notes"
+msgstr ""
+
+#: ui/app.slint
+msgid "Open the release notes of version {0} in the browser"
+msgstr ""
+
+#: ui/app.slint ui/onboarding.slint
+msgid "Try again"
+msgstr ""
+
+#: ui/app.slint
+msgid "Download and install"
+msgstr ""
+
+#: ui/app.slint
+msgid "Download version {0}, check its signature, then close Komorebi and install it"
+msgstr ""
+
+#: ui/app.slint
+msgctxt "update"
+msgid "Later"
+msgstr ""
+
+#: ui/app.slint
+msgid "Hide the update bar until tomorrow"
+msgstr ""
+
+#: ui/app.slint
+msgid "Check for updates automatically"
+msgstr ""
+
+#: ui/app.slint
+msgid "Once a day, a few seconds after Komorebi starts. Updates are never installed without your press."
 msgstr ""
 
 #: ui/app.slint
@@ -2056,10 +2178,6 @@ msgstr ""
 
 #: ui/onboarding.slint
 msgid "Review it before you continue."
-msgstr ""
-
-#: ui/onboarding.slint
-msgid "Try again"
 msgstr ""
 
 #: ui/onboarding.slint

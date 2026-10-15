@@ -1,4 +1,4 @@
-//! Triage on the message list and the reader (UX plan Stage 3): the row
+//! Triage on the message list and the reader: the row
 //! and More menus with their accelerator text, the rows' quick actions,
 //! the Move flyout (filter, recent folders, depth), the Undo offer's own
 //! slot and its clock, the Trash / Junk delete question and the Unread

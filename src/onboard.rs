@@ -1,4 +1,4 @@
-//! First-run teaching (UI plan "Onboarding" 6 and 7): the teaching tips and
+//! First-run teaching: the teaching tips and
 //! the What's new bar, as plain state the app drives with its timers.
 //!
 //! - The tips: **Folders** (the narrow rail only), **Search** and **Help**,

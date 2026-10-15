@@ -392,7 +392,7 @@ ALTER TABLE drafts ADD COLUMN importance INTEGER NOT NULL DEFAULT 0;
 /// v14 adds named signatures, the account's two defaults, and a draft's
 /// formatted form. `import_signatures` turns each non-empty
 /// `accounts.signature` into a signature once. The column stays: until the
-/// Signatures page ships (TODO.md, composer upgrade Phase 3) the app still
+/// Signatures page ships the app still
 /// reads and writes it, so edits made meanwhile have to be carried over
 /// when the readers switch. `drafts.body` stays the plain text.
 const MIGRATE_V13_TO_V14: &str = r#"
@@ -765,6 +765,11 @@ pub struct Settings {
     /// The version the What's new bar last told about (key
     /// `whats_new_version`; `None`: never, a version from before the bar).
     pub whats_new_version: Option<String>,
+    /// Automatic update checks (key `update_auto`: `1` or `0`, on when
+    /// unset) and the time of the last one (key `update_last_check`, Unix
+    /// seconds); raw, for [`crate::update::auto_due`].
+    pub update_auto: Option<String>,
+    pub update_last_check: Option<String>,
     /// The composer's one-time caption about the formatting marks was
     /// shown (key `format_hint_seen`).
     pub format_hint_seen: bool,
@@ -889,6 +894,8 @@ impl Default for Settings {
             move_recent: String::new(),
             tips_seen: String::new(),
             whats_new_version: None,
+            update_auto: None,
+            update_last_check: None,
             format_hint_seen: false,
             compose_rich: true,
             compose_font: rich::FontId::default(),
@@ -963,6 +970,8 @@ impl Settings {
             "move_recent" => self.move_recent = value.to_string(),
             "tips_seen" => self.tips_seen = value.to_string(),
             "whats_new_version" => self.whats_new_version = Some(value.trim().to_string()),
+            "update_auto" => self.update_auto = Some(value.trim().to_string()),
+            "update_last_check" => self.update_last_check = Some(value.trim().to_string()),
             "format_hint_seen" => self.format_hint_seen = value == "1",
             "compose_format" => match value.trim() {
                 "rich" => self.compose_rich = true,

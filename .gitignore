@@ -1,14 +1,38 @@
-.task
-bin
+# Build output
+/target/
 target
-# Installer and release packages (installer/komorebi.iss, release.yml).
+/dist/
 dist
 test-results
+
+# Local tooling and editors
+.task
+bin
 .freebuff/
+.claude/
+.vscode/
+.idea/
+.vs/
+scratch/
+tmp/
 
 # Local secrets (test account credentials) must never be committed.
 .env
 .env.*
+*.key
+*.pfx
+*.p12
+
+# Local databases and logs
+*.sqlite3
+*.sqlite3-*
+*.db
+crash.log
+*.log
 
 # Screenshots of real mail, never committed
 /screenshots/
+
+# OS files
+Thumbs.db
+desktop.ini

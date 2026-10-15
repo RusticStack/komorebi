@@ -1,9 +1,9 @@
 [package]
 name = "komorebi"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "A small, fast, privacy-respecting email client for Windows"
-license = "Apache-2.0"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/RusticStack/komorebi"
 build = "build.rs"
 
@@ -46,6 +46,11 @@ idna = "=1.1.0"
 # "Find settings" reads a provider's autoconfig file. Already linked through
 # Slint (resvg); pinned to the locked version.
 roxmltree = "=0.21.1"
+# Update check (src/update.rs): the installer's SHA-256 and its Ed25519
+# signature against the public key compiled into the app. Both small and
+# pure Rust; no key generation or randomness in the app.
+ed25519-compact = { version = "2.6.0", default-features = false, features = ["std"] }
+sha2 = { version = "0.11.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # Windows Credential Manager, the store `keyring` v4 used: pinned, so saved
@@ -80,6 +85,8 @@ slint-build = "1.18"
 
 [dev-dependencies]
 base64 = "0.22"
+# examples/sign_update.rs keygen: a random seed (tests use fixed seeds).
+ed25519-compact = { version = "2.6.0", default-features = false, features = ["std", "random"] }
 
 # Size-optimized, except Slint's core and software renderer, whose pixel
 # loops need full optimization to keep frame times unchanged. Never "z".

@@ -21,6 +21,7 @@ fn main() -> anyhow::Result<()> {
     if !single_instance(&db_path) {
         return Ok(());
     }
+    hold_app_mutex();
     WINDOW_MARK.set(window_mark(&db_path));
     let crash_log = crash::log_path(&db_path);
     crash::install(crash_log.clone());
@@ -903,6 +904,42 @@ fn single_instance(_: &Path) -> bool {
     true
 }
 
+/// The fixed mutex every running Komorebi holds (whatever its cache), which
+/// the installer's `AppMutex` names: an install waits for it to go.
+const APP_MUTEX: &str = "Komorebi.App";
+
+/// The handle of [`APP_MUTEX`] (0: none).
+static APP_MUTEX_HANDLE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Take [`APP_MUTEX`] for the life of the process (or until
+/// [`release_app_mutex`]). Shared: a second cache's Komorebi opens the same
+/// one.
+#[cfg(windows)]
+fn hold_app_mutex() {
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let name: Vec<u16> = APP_MUTEX.encode_utf16().chain([0]).collect();
+    // SAFETY: `name` is NUL-terminated and outlives the call; the handle is
+    // kept until `release_app_mutex` or the process exits.
+    let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+    APP_MUTEX_HANDLE.store(handle as usize, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(not(windows))]
+fn hold_app_mutex() {}
+
+/// Let go of [`APP_MUTEX`] just before the self-update starts the installer
+/// (which would otherwise refuse to run while this process is exiting).
+pub(crate) fn release_app_mutex() {
+    let handle = APP_MUTEX_HANDLE.swap(0, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(windows)]
+    if handle != 0 {
+        // SAFETY: a handle from CreateMutexW, closed once (swapped out).
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(handle as _) };
+    }
+    #[cfg(not(windows))]
+    let _ = handle;
+}
+
 /// Development aid: render the window (optionally at `KOMOREBI_SIZE=WxH`),
 /// save it as a BMP, and exit. Used to check layouts without screen capture.
 fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
@@ -1122,6 +1159,18 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
             "settings" => ui.set_show_settings(true),
             // Settings on one section: `settings:general`, `:privacy`,
             // `:about` (or `:accounts`).
+            // Settings > About in a made-up update state (nothing is looked
+            // up): `update:checking`, `:uptodate`, `:available`,
+            // `:downloading`, `:failed`, `:failed-verify`, or `:banner` (the
+            // bar over the list, as an automatic check shows it).
+            s if s.starts_with("update:") => {
+                let state = &s["update:".len()..];
+                app::sample_update(state);
+                if state != "banner" {
+                    ui.set_settings_section(4);
+                    ui.set_show_settings(true);
+                }
+            }
             s if s.starts_with("settings:") => {
                 let section = ["accounts", "signatures", "general", "privacy", "about"]
                     .iter()

@@ -75,6 +75,7 @@ mod text;
 mod text_calls;
 mod tips;
 mod triage;
+mod updates;
 mod windows;
 mod wipe;
 
@@ -534,6 +535,8 @@ struct App {
     flash: bool,
     /// New-mail notifications, the tray icon and background mode.
     notes: notifications::Notes,
+    /// Settings > About > Updates and its bar (`updates.rs`).
+    updates: updates::Updates,
     /// When the last sync pass ended (unix seconds), for "Updated 14:05".
     last_updated: Option<i64>,
     /// The language choice in Settings (setting `language`) and the
@@ -670,6 +673,7 @@ pub fn install_with(
     ui.set_rail_items(ModelRc::from(rail.clone()));
     ui.set_rows(ModelRc::from(rows.clone()));
 
+    let update_last = settings.update_last_check.clone();
     let mut app = App {
         ui: ui.as_weak(),
         db,
@@ -773,6 +777,7 @@ pub fn install_with(
         last_full_sync: None,
         flash: settings.flash_taskbar,
         notes: notifications::Notes::from_settings(&settings),
+        updates: updates::Updates::new(settings.update_auto.as_deref()),
         last_updated: None,
         language,
         lang,
@@ -828,6 +833,7 @@ pub fn install_with(
     mark("model ready");
     wire(ui);
     app.show_compose_defaults();
+    app.show_updates();
     APP.with(|cell| *cell.borrow_mut() = Some(app));
     if let Some(aside) = damaged {
         let name = aside.file_name().unwrap_or_default().to_string_lossy();
@@ -841,6 +847,7 @@ pub fn install_with(
     }
 
     Timer::single_shot(START_SYNC_AFTER, start_sync);
+    updates::schedule_auto(update_last);
     Timer::single_shot(tips::WHATS_NEW_AFTER, || {
         with_app(|a| a.whats_new_due_now());
     });
@@ -992,6 +999,12 @@ pub fn sample_tips(tip: Option<&str>) -> bool {
         Some(None) => false,
     })
     .unwrap_or(false)
+}
+
+/// Snapshots (`KOMOREBI_SNAPSHOT_ACTION=update:<state>`): Settings > About
+/// in a made-up update state (see `updates.rs`).
+pub fn sample_update(state: &str) {
+    with_app(|a| a.sample_update(state));
 }
 
 /// Snapshots (`KOMOREBI_SNAPSHOT_ACTION=whats-new`): the What's new bar, if
@@ -1784,6 +1797,9 @@ fn wire(ui: &AppWindow) {
     onboarding::wire(ui);
     composer::rich::wire(ui);
     signatures::wire(ui);
+    ui.on_update_action(|which| {
+        with_app(|a| a.update_action(which));
+    });
     ui.on_welcome_link(|which| {
         with_app(|a| a.welcome_link(which));
     });
@@ -2876,7 +2892,7 @@ impl App {
             .map(|r| (r.kind, r.id));
         // All inboxes with more than one account (one account opens on its
         // Inbox); Drafts always (the local drafts, the one place a draft is
-        // found; UX plan "Drafts").
+        // found).
         let mut items = Vec::new();
         if self.accounts.len() > 1 {
             items.push(NavItem {
@@ -3405,7 +3421,7 @@ impl App {
     }
 
     /// The list's "..." menu, for the view shown (`menu:list` prints the
-    /// same list): Mark all as read (Stage 3 adds Select messages). Not
+    /// same list): Mark all as read. Not
     /// while a search is showing: it would mark the whole view read, not
     /// the results listed (the folder pane's row menu still offers it).
     fn list_menu(&self) -> Vec<MenuCommand> {

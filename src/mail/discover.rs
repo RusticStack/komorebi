@@ -122,6 +122,7 @@ fn fetch_autoconfig(url: &str, domain: &str) -> Result<Vec<u8>, FetchError> {
             max_body: MAX_XML,
             total: FETCH_TIME,
             redirect_ok: &allowed,
+            user_agent: fetch::USER_AGENT,
         },
     )
 }

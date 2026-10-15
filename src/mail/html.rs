@@ -533,7 +533,8 @@ fn numeric(num: &str) -> Option<char> {
 /// bytes without a meaning keep their C1 code point.
 const CP1252_C1: [char; 32] = [
     '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}',
-    '\u{90}', '‘', '’', '“', '”', '•', '-', ' - ', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',
+    '\u{90}', '‘', '’', '“', '”', '•', '\u{2013}', '\u{2014}', '˜', '™', 'š', '›', 'œ', '\u{9D}',
+    'ž', 'Ÿ',
 ];
 
 #[cfg(test)]
@@ -752,7 +753,7 @@ ação ›› fim"
         );
         assert_eq!(
             decode_entities("&#150; &#+65; &#0; &#x110000;"),
-            "- &#+65; \u{FFFD} \u{FFFD}"
+            "\u{2013} &#+65; \u{FFFD} \u{FFFD}"
         );
         assert_eq!(decode_entities("a&shy;b&zwnj;c"), "abc");
         assert_eq!(decode_entities("AT&T and &amp; more;"), "AT&T and & more;");

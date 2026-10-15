@@ -23,7 +23,7 @@ const MAX_HEAD: u64 = 64 * 1024;
 const MAX_REDIRECTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
-const USER_AGENT: &str = "Mozilla/5.0";
+pub const USER_AGENT: &str = "Mozilla/5.0";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchError {
@@ -88,6 +88,8 @@ pub struct Options<'a> {
     pub total: Duration,
     /// Whether a redirect may be followed to this (already `https`) URL.
     pub redirect_ok: &'a dyn Fn(&Url) -> bool,
+    /// The `User-Agent` header ([`USER_AGENT`] for images and autoconfig).
+    pub user_agent: &'a str,
 }
 
 impl Options<'_> {
@@ -98,6 +100,7 @@ impl Options<'_> {
             max_body: MAX_BODY,
             total: TOTAL_TIMEOUT,
             redirect_ok: &|_| true,
+            user_agent: USER_AGENT,
         }
     }
 }
@@ -188,9 +191,10 @@ impl Client {
             None => host.to_string(),
         };
         let req = format!(
-            "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: {USER_AGENT}\r\n\
+            "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: {ua}\r\n\
              Accept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
-            accept = opts.accept
+            accept = opts.accept,
+            ua = opts.user_agent
         );
         stream.write_all(req.as_bytes())?;
         stream.flush()?;
@@ -597,6 +601,7 @@ mod tests {
                     max_body,
                     total: Duration::from_secs(5),
                     redirect_ok,
+                    user_agent: USER_AGENT,
                 },
             )
         };
@@ -619,6 +624,7 @@ mod tests {
                     max_body: 64,
                     total: Duration::from_secs(5),
                     redirect_ok: ok,
+                    user_agent: USER_AGENT,
                 },
             )
         };

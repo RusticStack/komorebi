@@ -1007,7 +1007,7 @@ impl App {
         id.or_else(|| self.accounts.first().map(|a| a.id))
     }
 
-    /// New mail: always a blank message (UX plan "Drafts"). A draft in
+    /// New mail: always a blank message. A draft in
     /// progress, shown or parked, is saved and stays in Drafts.
     pub(super) fn compose_new(&mut self) {
         let Some(account) = self.current_account() else {
@@ -7418,7 +7418,7 @@ mod tests {
     }
 
     /// The sender notice, the encrypted state and Unsubscribe in the reader
-    /// (Stage 16): computed on open, reset for the next message, and the
+    ///: computed on open, reset for the next message, and the
     /// two unsubscribe paths (composer, confirm prompt), with nothing sent.
     #[test]
     fn notice_encryption_and_unsubscribe_in_the_reader() {
@@ -7496,7 +7496,7 @@ mod tests {
         assert!(!ui.get_l_show() && !ui.get_composing());
     }
 
-    /// The invite card (Stage 17): what it offers, the prompt naming the
+    /// The invite card: what it offers, the prompt naming the
     /// one recipient, the reply queued in the outbox (nothing is sent: the
     /// harness runs no worker), the answer kept, Change, an answer kept
     /// without a reply, and a cancelled invite.
@@ -8600,7 +8600,7 @@ mod tests {
         assert!(ui.get_has_message());
     }
 
-    // ------------------------------------------- keyboard focus (Stage 21)
+    // ------------------------------------------- keyboard focus
 
     fn key(k: Key) -> SharedString {
         SharedString::from(k)
@@ -8894,7 +8894,7 @@ mod tests {
         assert!(!db::drafts_dir(&path).exists());
     }
 
-    // ------------------------------------------------ triage (UX Stage 3)
+    // ------------------------------------------------ triage
 
     /// The reader bar's labels go by priority, each measured on its own:
     /// pt-PT at 1280 x 800 keeps Reply, Archive and Delete, English also
@@ -9472,7 +9472,7 @@ mod tests {
         assert_eq!(ui.get_c_title(), "Reply");
     }
 
-    // --------------------------------- teaching tips and What's new (Stage 5)
+    // --------------------------------- teaching tips and What's new
 
     use crate::app::tips;
     use komorebi::onboard::Tip;

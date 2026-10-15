@@ -130,7 +130,7 @@ fn double_click_selects_a_word() {
 fn triple_click_selects_the_paragraph() {
     let d = doc("12-personal-applemail", 600.0);
     // The P.S. wraps over three lines; a click on the middle one takes all.
-    let mid = line(&d, |t| t.starts_with("Beatriz"));
+    let mid = line(&d, |t| t.starts_with("que a reserva"));
     let (x, y) = at(&mid, 0.5);
     let (a, b) = d.block_at(x, y).unwrap();
     let text = d.selection_text(a, b);

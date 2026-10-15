@@ -32,16 +32,28 @@ effects and whether title bars show the accent (from your user's
 registry, `HKCU`, and Windows' system settings). It only reads them,
 keeps them in memory while it runs, and sends them nowhere.
 
+Updates: when you press Check for updates in Settings > About, or once a
+day at most when "Check for updates automatically" is on, Komorebi makes
+one HTTPS request to `api.github.com` for the project's latest release.
+It carries the User-Agent `Komorebi/<version>` and nothing else about
+you or your mail. Only when you press Download and install does it
+download the installer and its `.sha256` and `.sig` files from
+`github.com` (GitHub's download servers), into a new
+`komorebi-update-*` folder in your temporary folder, and runs it after
+checking its hash and signature. Nothing is sent with `KOMOREBI_OFFLINE`.
+
 Komorebi writes nothing else: no registry keys, no files elsewhere, no
 temporary files outside `cache.open` (Windows itself may remember the
 folder a file dialog last showed). Files you save (attachments, `.eml`,
 `.ics`) go only where you choose. The sections below describe each item.
 
 The installer (if you use it rather than the portable zip) adds only the
-app itself: `%LOCALAPPDATA%\Programs\Komorebi` (the program, its license,
-notices and this statement), a Start menu shortcut, and the uninstall
-entry Windows lists under Apps (in your user's registry, `HKCU`). It
-collects and sends nothing.
+app itself: the program, its license, notices and this statement in
+`%LOCALAPPDATA%\Programs\Komorebi` (installed for you only, the default) or
+in `Program Files\Komorebi` (installed for all users, which asks for
+administrator rights), a Start menu shortcut, the mail app registration and
+the uninstall entry Windows lists under Apps (in your user's registry,
+`HKCU`, or for all users in `HKLM`). It collects and sends nothing.
 
 ## Removing everything
 

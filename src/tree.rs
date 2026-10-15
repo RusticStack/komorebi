@@ -198,7 +198,7 @@ pub fn prune_folds(folds: &mut HashSet<Fold>, accounts: &[i64], folders: &[Folde
 }
 
 /// The lines folded for an account when its folders first arrive, so a
-/// long tree starts short (UX plan "Folds by default"): every user parent
+/// long tree starts short: every user parent
 /// folder (any depth under the account line; role folders such as an
 /// Inbox with subfolders stay open) without unread mail of its own, and,
 /// with more than one account, the account line itself after the first

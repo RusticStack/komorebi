@@ -35,7 +35,7 @@ pub(super) struct Notes {
     /// Set by the tray's Quit: the next close really exits.
     pub(super) quitting: bool,
     #[cfg(windows)]
-    shell: Option<komorebi::win_shell::Shell>,
+    pub(super) shell: Option<komorebi::win_shell::Shell>,
 }
 
 impl Notes {
@@ -136,7 +136,7 @@ impl App {
         crate::bring_to_front(&ui);
     }
 
-    fn save_setting(&mut self, key: &str, value: &str) {
+    pub(super) fn save_setting(&mut self, key: &str, value: &str) {
         if let Err(e) = self.db.set_setting(key, value) {
             self.set_status(
                 &crate::tr::t!(invoke_not_saved, format!("{e:#}").into()),

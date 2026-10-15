@@ -479,8 +479,8 @@ them").
 ### Layout breakpoints
 WinUI's NavigationView switches at 641 and 1008 px (Minimal / Compact /
 Expanded), and its list-details pattern shows one pane at a time on a
-narrow window, with a back button on the details. Komorebi (UI plan
-Stage 8), in logical px:
+narrow window, with a back button on the details. Komorebi,
+in logical px:
 
 | Width | Navigation | List and reader |
 |---|---|---|
@@ -527,8 +527,8 @@ transparent, hover SubtleSecondary, pressed SubtleTertiary, selected
 SubtleSecondary, **selected + hover SubtleTertiary**, selected + pressed
 SubtleSecondary; text TextPrimary, **pressed TextSecondary**, disabled
 TextDisabled. Selection indicator 3×16, radius 2, AccentFillDefault,
-at the item's left edge, animated between items (Komorebi: it jumps, UI
-plan "Deferred"). Expand chevron E70D at 8 px
+at the item's left edge, animated between items (Komorebi: it jumps).
+Expand chevron E70D at 8 px
 (`NavigationViewItemExpandedGlyphFontSize`), turned over while expanded,
 at the item's end. Group headers TextSecondary, margin `16,0`. Separator
 1 px DividerStroke, margin `0,3,0,4` (8 px a row). PaneToggleButton 40×36
@@ -635,7 +635,7 @@ the pane's row menu ("Hide folders" / "Show folders") do the same. The
 width change animates over `Theme.fast` (167 ms, ease-out; 0 with
 animation effects off). The Folders tip shows whenever the rail does.
 
-Navigation structure (UX plan Stage 1): with one account there is no All
+Navigation structure: with one account there is no All
 inboxes (the start opens on that account's Inbox); with more, accounts
 after the first start folded. The view shown is saved (`last_view`) and
 opened at the next start while it exists, else the Inbox. When an
@@ -794,7 +794,7 @@ theirs:
   Settings, the composer or Show original. Screen readers hear it once,
   politely (`accessible-live-region: polite` on the card, a groupbox named
   by its title).
-- Komorebi's series (UI plan "Onboarding" 6): **Folders** (the narrow
+- Komorebi's series: **Folders** (the narrow
   rail only: "Accounts and folders are behind this button when the window
   is narrow."), **Search** and **Help** (Settings › About and F1). A tip
   must teach what is not visible on screen. They start 1.5 s after the
@@ -866,7 +866,7 @@ Komorebi can reach the server." with Retry; never a blank page.
 
 ### SettingsCard (Windows Community Toolkit)
 Not in WinUI itself; the card Windows 11 Settings is built from
-(CommunityToolkit/Windows `SettingsControls`, UI plan Stage 8). MinHeight
+(CommunityToolkit/Windows `SettingsControls`). MinHeight
 68, padding 16, background CardBackgroundFillColorDefault, 1 px
 CardStrokeColorDefault border, radius 4 (ControlCornerRadius); header
 icon 20 px with margin `2,0,20,0`; header Body 14 TextPrimary,
@@ -1126,7 +1126,7 @@ once rather than after 400 ms, and narrows when the pointer leaves; drag
 moves it, a click beside it pages, the wheel scrolls. The thumb is 3.3:1
 on the light card (#8d8d8d) and 5.7:1 on the dark one. The folder pane
 uses the same bar (`ScrollThumb`), from its rows' laid-out height. The
-reader keeps Slint's bar (UI plan Stage 6).
+reader keeps Slint's bar.
 
 ### Progress, PersonPicture, InfoBadge
 - ProgressRing 32 (min 16), stroke 4, AccentFillDefault (HC Highlight).
@@ -1412,7 +1412,7 @@ Komorebi's read-only message windows ("Open in new window", Ctrl+O):
   every change.
 
 ### Mica
-Not used: Komorebi ships the solid fallback below (Stage 1 decision). With the software renderer every client pixel is opaque, so a
+Not used: Komorebi ships the solid fallback below. With the software renderer every client pixel is opaque, so a
 backdrop alone shows nothing; showing it needs a transparent root, the frame
 extended into the client area and softbuffer's `BitBlt` to keep alpha
 [unverified]. Komorebi uses the solid Mica fallback (layer #F3F3F3 /
@@ -1566,13 +1566,13 @@ Rules that follow:
   button's label is ButtonFace.
 
 ### Residual `Palette.*` uses
-None in `ui/app.slint` or `ui/widgets.slint` (UI plan Stage 2). Since
-Stage 3 the std `LineEdit`, `CheckBox` and `Spinner` are gone (Komorebi's
+None in `ui/app.slint` or `ui/widgets.slint`. Since
+After the native round the std `LineEdit`, `CheckBox` and `Spinner` are gone (Komorebi's
 `TextField`, `CheckBox`, `ProgressRing`), and since the final polish pass
 the Settings signature is a named-signature picker (a `ComboBox`, see
 "Composer toolbar" and "Signatures page"); only the std `ComboBox` still
 draws Slint's derived accent (in its open list) and has no HC palette
-(accepted near match, UI plan "Deferred"; `ComboEdge` gives every one its
+(accepted near match; `ComboEdge` gives every one its
 edge).
 
 ### Components (`ui/widgets.slint`)
@@ -1691,7 +1691,7 @@ Highlight border, as on a Button); the reader lays them in a
   composer 4 below the field typed in and as wide, not a popup (the field
   keeps the keyboard). The formatting row is the "Composer toolbar" below:
   subtle 32 px buttons 4 apart, the quote is E9B2 (Ctrl+Shift+Q), "1." is
-  Body semibold text (E9D5, proposed in the UX plan, is CheckList in both
+  Body semibold text (E9D5 is CheckList in both
   Segoe Fluent Icons and Segoe MDL2 Assets, checked by rendering it;
   neither font has a numbered-list glyph, so the text stays), 1x20
   DividerStroke separators. **Preview** is in More (a checkable item):
@@ -1827,7 +1827,7 @@ WinUI blue `#002642,#004275,#005a9e,#0078d7,#429ce3,#76b9ed,#a6d8ff`.
 
 ## Open checks
 
-Stage 1 status: the startup read was confirmed on this machine (no
+Status: the startup read was confirmed on this machine (no
 switches: dark apps and the green ramp's Light2 #357c58 on New mail, the
 `AccentPalette` values above); the rest needs a person at the machine,
 since snapshots render only the client area and send no system messages.
@@ -1845,10 +1845,10 @@ since snapshots render only the client area and send no system messages.
    that arrives after it posts another.
 4. HC AccentButton (Highlight / HighlightText) and link (Hotlight) mappings
    are [inferred] from the legacy `SystemControl*` brushes; confirm in
-   `generic.xaml`. Stage 1 uses Highlight / HighlightText for `accent` /
+   `generic.xaml`. The first round uses Highlight / HighlightText for `accent` /
    `on-accent` and WindowText for `accent-text`.
 5. HC rendering of Slint's std `ComboBox` and `TextEdit` (the only std
-   inputs left after Stage 3): with `Palette.color-scheme` from the Window
+   inputs left after the native round): with `Palette.color-scheme` from the Window
    colour they keep Slint's light or dark palette (seen in hcblack /
    hcwhite snapshots); no HC colours. `ComboEdge` gives every ComboBox a
    ButtonText border (the account form's since the final polish pass);
@@ -1857,17 +1857,16 @@ since snapshots render only the client area and send no system messages.
 6. Mica only if pursued: does softbuffer's `BitBlt` keep alpha on screen?
    Not pursued (Deferred `KOMOREBI_MICA=1`).
 
-Stage 11 status (2026-10-12): 1, 2 and 3 are still open and can only be
-closed by a person at the machine (TODO.md "Check by hand once (native
-round, Stage 1)"). 4 stays [inferred]: `generic.xaml` was not re-read,
+Status: 1, 2 and 3 are still open and can only be
+closed by a person at the machine (TODO.md "Windows 11 look"),
+ 4 stays [inferred]: `generic.xaml` was not re-read,
 and the hcblack / hcwhite snapshots show the mapping as implemented
 (accent fills Highlight with HighlightText, links Hotlight). 5 is an
-accepted gap (UI plan "Deferred"): the General and From ComboBoxes have
+accepted gap: the General and From ComboBoxes have
 the ButtonText edge, the account form's ComboBoxes and the signature
 `TextEdit` keep Slint's faint one. 6 is not pursued.
 
 Final polish pass (2026-10-12): 5 is closed as far as Komorebi can close
 it. The account form's three ComboBoxes have `ComboEdge` and the
 signature box was a `ComposeBody` then (since replaced, see "Signatures page"); what remains is
-the std ComboBox's own open list and animations (accepted, UI plan
-"Deferred").
+the std ComboBox's own open list and animations (accepted).
