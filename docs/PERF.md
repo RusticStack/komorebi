@@ -6,7 +6,7 @@ Binding for any speed, memory or size work. Product promises: launch < 200 ms, c
 
 ## 1. Where time goes (measured, release, 2000 messages, 2026-10)
 
-- Launch to first frame is about 37 ms. Roughly 45 percent is Windows/winit (window creation about 7 ms, ShowWindow about 9 ms). `AppWindow::new` is about 2 ms (fonts). Cache load (DB open, folders, ids, model) is 6 to 10 ms. Do not touch `chrome.rs`, IME or font setup for speed.
+- Launch to first frame is about 37 ms in 0.3.0 and about 50 ms in 0.4.0 on a quiet machine (the cache is ready at about 20 ms; the extra time sits between database open and the first frame, not yet profiled). Roughly 45 percent is Windows/winit (window creation about 7 ms, ShowWindow about 9 ms). `AppWindow::new` is about 2 ms (fonts). Cache load (DB open, folders, ids, model) is 6 to 10 ms. Do not touch `chrome.rs`, IME or font setup for speed.
 - The list is not the cost: 9 visible rows cost about 0.2 ms, `header()` is about 7 us. 20000 messages add about 2 ms at launch (id Vec, unread count scan).
 - Reader open-to-first-tile is 3 to 55 ms, dominated by layout, shaping (parley) and image resampling, all pixel/text loops.
 - Search is a full scan: about 1.3 to 2.3 ms at 2000 messages, 10 to 15 ms at 20000 (was 2.4 and 20 before the one-pass `fold_has`).

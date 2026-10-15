@@ -198,8 +198,8 @@ only.
   the maintainer's own testing, nor against real self-hosted servers; see
   "Providers and servers".
 - The local mail cache is plaintext.
-- No release is published yet; the installer and release workflow exist but
-  the binary is not code-signed.
+- Release 0.4.0 is published; the installer is not code-signed with a
+  certificate (updates are verified with an Ed25519 signature instead).
 - Dovecot-style servers that keep a selected folder do not report later
   deliveries on that session. Komorebi handles it by re-selecting before an
   action on a UID at or above the folder's UIDNEXT, and by running its

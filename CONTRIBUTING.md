@@ -60,7 +60,7 @@ For layout changes, verify the window at desktop and narrow widths (the compact 
 - Not yet validated against real Purelymail/Postale.io accounts; the onboarding flow (`ui/onboarding.slint`) is checked only offline, on the local fakes and in snapshots.
 - Not yet validated against a real self-hosted server (Dovecot, Stalwart, Cyrus, Proton Bridge, ...): manual accounts, certificate pinning, "Find settings" and the capability fallbacks are tested only on the local fakes. SPKI/CA pinning, SMTP without sign-in and a native-tls submission client are deferred (`TODO.md`).
 - The local mail cache is plaintext.
-- No release published yet; the installer and release workflow exist, but code signing waits for a certificate (the signing step is optional).
+- Release 0.4.0 is published. The installer is not Authenticode-signed (a certificate is pending, the signing step is optional); self-updates are verified with an Ed25519 signature.
 - See `TODO.md`.
 
 ## Releases

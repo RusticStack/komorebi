@@ -598,9 +598,8 @@ you press "Open your inbox", which opens the new Inbox.
 
 ## Install
 
-No release has been published yet (see TODO.md); until then, build from
-source below. Releases (GitHub Releases, Windows 10/11 x64) come in two
-forms:
+Download the latest release from the GitHub Releases page (Windows 10/11
+x64), or build from source below. Releases come in two forms:
 
 - `komorebi-<version>-setup.exe` installs for the current user by default,
   with no administrator rights, into `%LOCALAPPDATA%\Programs\Komorebi`, or
