@@ -761,7 +761,7 @@ heading), one **Close** button (accent, focused; Esc and Enter close;
 Up / Down, PageUp / PageDown, Home and End scroll the list, and F6 stays
 inside the dialog). The card has the groupbox role and the title as its
 name, as ContentDialog does.
-Its rows are the README "Keyboard" table's keys, kept equal by a test
+Its rows are the docs/USAGE.md "Keyboard" table's keys, kept equal by a test
 (`tests/shortcuts_table.rs`), with short actions.
 
 ### TeachingTip

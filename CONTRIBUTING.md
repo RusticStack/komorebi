@@ -32,7 +32,7 @@ Run the relevant checks before sending a change:
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, `scripts/check-pins.ps1`, a release build with a 20.5 MB size check, an offline boot snapshot (`KOMOREBI_SNAPSHOT_CHECK`) on a seeded cache, and `cargo deny --locked check licenses advisories`.
 
-For layout changes, verify the window at desktop and narrow widths (the compact rail starts below 1040 px). `KOMOREBI_SNAPSHOT` renders the window to a file against a throwaway `KOMOREBI_DB` with `KOMOREBI_OFFLINE=1`, without capturing the screen (see README).
+For layout changes, verify the window at desktop and narrow widths (the compact rail starts below 1040 px). `KOMOREBI_SNAPSHOT` renders the window to a file against a throwaway `KOMOREBI_DB` with `KOMOREBI_OFFLINE=1`, without capturing the screen (see docs/ENVIRONMENT.md).
 
 ## Priorities
 
@@ -66,5 +66,5 @@ For layout changes, verify the window at desktop and narrow widths (the compact 
 ## Releases
 
 - Changes reach `main` only through a pull request with passing checks.
-- Releases are made by the maintainer by hand: release build, `scripts/build-installer.ps1`, `cargo run --example sign_update -- sign <installer> <version>`, then `gh release create` with the installer, its `.sha256` and its `.sig` (README, "Signing a release"). `.github/workflows/release.yml` is manual-only, builds the packages as a workflow artifact and never publishes; pushing a tag starts nothing. The signing key lives outside the repository.
+- Releases are made by the maintainer by hand: release build, `scripts/build-installer.ps1`, `cargo run --example sign_update -- sign <installer> <version>`, then `gh release create` with the installer, its `.sha256` and its `.sig` (see docs/RELEASING.md). `.github/workflows/release.yml` builds the unsigned packages in CI on a version tag or by hand, for code signing and a draft release; the update signature stays a local step and the signing key lives outside the repository.
 - If checks pass but product gaps remain, say that clearly. Buildable is not the same as production-complete.

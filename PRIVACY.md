@@ -1,6 +1,6 @@
 # Komorebi Privacy Statement
 
-Last updated: 2026-10-09
+Last updated: 2026-10-23
 
 Komorebi is a local-first email client with zero telemetry. It does not
 collect analytics, run ads, upload crash reports, or send mailbox content
@@ -372,7 +372,10 @@ Komorebi connects only to the servers you configure:
   remote images (see below).
 
 Plaintext connections are refused. Komorebi makes no other network
-requests: no analytics, no update checks and no remote fonts.
+requests: no analytics and no remote fonts. The only other contact with
+the internet is the update check described above (an HTTPS request to
+GitHub, when you press Check for updates or once a day while "Check for
+updates automatically" is on).
 
 ## Remote content and attachments
 

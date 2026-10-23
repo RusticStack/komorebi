@@ -1,14 +1,26 @@
 name: Release
 
-# Run by hand only (Actions > Release > Run workflow): a dry run that
-# builds, checks and packages the installer, the portable zip, the debug
-# symbols and SHA256SUMS, and keeps them as a workflow artifact. It never
-# creates a tag or a release. Releases are made by hand with the signed
-# update files, because the in-app update accepts only an installer signed
-# with the maintainer's private key, which never leaves their machine (see
-# README, "Signing a release").
+# A CI release build that Authenticode signing (SignPath) can sign.
+#
+# Runs when a version tag (v*) is pushed, or by hand (Actions > Release >
+# Run workflow). It tests, builds the release exe, checks its size, builds
+# the installer, and keeps the UNSIGNED exe and installer as workflow
+# artifacts with stable names (unsigned-exe, unsigned-installer), which a
+# SignPath signing request takes as input. Then it attaches the packages
+# to a DRAFT release. It never publishes a release.
+#
+# The in-app update signature (Ed25519) is NOT made here: the private key
+# never goes to CI. It stays a manual local step on the maintainer's
+# machine, done on the final, signed installer bytes (docs/RELEASING.md).
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      create_draft:
+        description: 'Also attach the packages to a draft release (v<version>)'
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -23,14 +35,11 @@ jobs:
     # installed below when the image lacks it.
     runs-on: blacksmith-8vcpu-windows-2025
     permissions:
-      contents: read
-    env:
-      # Authenticode signing is optional: without these secrets the build
-      # is unsigned (see README, "Install"). The self-update signature is
-      # made locally by the maintainer and needs no secret here. SIGN_CERT_PFX is a base64 .pfx, signed
-      # with signtool and an RFC 3161 timestamp. Secrets can't be read in
-      # `if:`, so the step checks this flag.
-      HAS_SIGNING: ${{ secrets.SIGN_CERT_PFX != '' }}
+      # contents: write only to create the draft release; actions: read is
+      # what SignPath needs to fetch the artifact (used once the signing
+      # steps below are enabled).
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +55,9 @@ jobs:
           $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages |
             Where-Object name -eq 'komorebi' | Select-Object -ExpandProperty version
           if (-not $version) { throw 'no komorebi package version' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "tag $env:GITHUB_REF_NAME does not match the Cargo version $version"
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "Komorebi $version"
 
@@ -83,17 +95,42 @@ jobs:
           Get-Content (Join-Path $env:RUNNER_TEMP 'boot.log')
           if ($p.ExitCode -ne 0) { throw "boot snapshot failed (exit $($p.ExitCode))" }
 
-      - name: Sign komorebi.exe
-        if: env.HAS_SIGNING == 'true'
-        shell: pwsh
-        env:
-          SIGN_CERT_PFX: ${{ secrets.SIGN_CERT_PFX }}
-          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
-          SIGN_TIMESTAMP_URL: ${{ vars.SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
-        run: ./scripts/sign.ps1 target/release/komorebi.exe
+      # The unsigned exe, uploaded alone under a stable name. SignPath
+      # signs this first, because the installer wraps the exe.
+      - name: Upload the unsigned exe
+        id: upload-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: target/release/komorebi.exe
+          if-no-files-found: error
+
+      # ---------------------------------------------------------------
+      # SIGNPATH, STEP 1 OF 2 (DISABLED): sign komorebi.exe.
+      # Enable once the SignPath Foundation application is approved and
+      # the placeholders below are filled in. Then the installer step
+      # must use the signed exe (see the note on that step).
+      # Needs the repository secret SIGNPATH_API_TOKEN.
+      # ---------------------------------------------------------------
+      # - name: Sign komorebi.exe with SignPath
+      #   id: sign-exe
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+      #     organization-id: '<SIGNPATH_ORGANIZATION_ID>'
+      #     project-slug: '<SIGNPATH_PROJECT_SLUG>'
+      #     signing-policy-slug: '<SIGNPATH_SIGNING_POLICY_SLUG>'
+      #     github-artifact-id: '${{ steps.upload-exe.outputs.artifact-id }}'
+      #     wait-for-completion: true
+      #     output-artifact-directory: 'signed-exe'
+      #
+      # - name: Use the signed exe
+      #   shell: pwsh
+      #   run: Copy-Item signed-exe/komorebi.exe target/release/komorebi.exe -Force
 
       # Inno Setup 6, if the runner image does not have it. The script
-      # compiles installer/komorebi.iss around the (possibly signed) exe.
+      # compiles installer/komorebi.iss around target/release/komorebi.exe
+      # (the signed copy, once the SignPath steps above are enabled).
       - name: Installer
         shell: pwsh
         run: |
@@ -103,17 +140,43 @@ jobs:
           }
           ./scripts/build-installer.ps1 -Exe target/release/komorebi.exe -Version '${{ steps.version.outputs.version }}'
 
-      - name: Sign the installer
-        if: env.HAS_SIGNING == 'true'
-        shell: pwsh
-        env:
-          SIGN_CERT_PFX: ${{ secrets.SIGN_CERT_PFX }}
-          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
-          SIGN_TIMESTAMP_URL: ${{ vars.SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
-        run: ./scripts/sign.ps1 "dist/komorebi-${{ steps.version.outputs.version }}-setup.exe"
+      - name: Upload the unsigned installer
+        id: upload-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/komorebi-${{ steps.version.outputs.version }}-setup.exe
+          if-no-files-found: error
 
-      # The portable zip (the same, possibly signed, komorebi.exe), the
-      # debug symbols as their own asset, and checksums of everything.
+      # ---------------------------------------------------------------
+      # SIGNPATH, STEP 2 OF 2 (DISABLED): sign the installer.
+      # Same placeholders and secret as step 1. The signed installer is
+      # what the maintainer then signs for the in-app update, locally.
+      # ---------------------------------------------------------------
+      # - name: Sign the installer with SignPath
+      #   id: sign-installer
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+      #     organization-id: '<SIGNPATH_ORGANIZATION_ID>'
+      #     project-slug: '<SIGNPATH_PROJECT_SLUG>'
+      #     signing-policy-slug: '<SIGNPATH_SIGNING_POLICY_SLUG>'
+      #     github-artifact-id: '${{ steps.upload-installer.outputs.artifact-id }}'
+      #     wait-for-completion: true
+      #     output-artifact-directory: 'signed-installer'
+      #
+      # - name: Use the signed installer
+      #   shell: pwsh
+      #   run: Copy-Item "signed-installer/komorebi-${{ steps.version.outputs.version }}-setup.exe" dist/ -Force
+
+      # NOT DONE HERE: the Ed25519 update signature (.sig and .sha256 of
+      # the final installer). The private key never goes to CI; the
+      # maintainer makes both locally with `cargo run --example
+      # sign_update -- sign <installer> <version>` on the final signed
+      # installer and adds them to the draft release (docs/RELEASING.md).
+
+      # The portable zip (the same komorebi.exe as built above), the debug
+      # symbols as their own asset, and checksums of everything in dist/.
       - name: Package
         shell: pwsh
         run: |
@@ -145,11 +208,7 @@ jobs:
           $text = Get-Content CHANGELOG.md -Raw
           $m = [regex]::Match($text, "(?ms)^## \[$v\][^\n]*\n(.*?)(?=^## \[|\z)")
           if (-not $m.Success) { throw 'CHANGELOG.md has no section for this version' }
-          $notes = $m.Groups[1].Value.Trim()
-          if ($env:HAS_SIGNING -ne 'true') {
-            $notes += "`n`nThis build is not code-signed: Windows SmartScreen may warn before it runs (More info > Run anyway). Check the download against SHA256SUMS first."
-          }
-          Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'notes.md') $notes
+          Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'notes.md') $m.Groups[1].Value.Trim()
 
       - name: Keep the packages
         uses: actions/upload-artifact@v4
@@ -160,3 +219,18 @@ jobs:
             ${{ runner.temp }}/notes.md
             ${{ runner.temp }}/boot.bmp
           if-no-files-found: error
+
+      # A draft only: the maintainer reviews it, replaces the files with
+      # the signed ones, adds the update signature files and publishes.
+      - name: Attach to a draft release
+        if: github.ref_type == 'tag' || inputs.create_draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $files = Get-ChildItem dist -File | ForEach-Object FullName
+          gh release create "v$v" --draft --title "Komorebi $v" `
+            --notes-file (Join-Path $env:RUNNER_TEMP 'notes.md') `
+            --target '${{ github.sha }}' @files
+          if ($LASTEXITCODE -ne 0) { throw 'creating the draft release failed' }

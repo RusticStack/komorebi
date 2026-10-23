@@ -1,5 +1,5 @@
 //! The Keyboard shortcuts dialog (`ui/shortcuts.slint`) lists exactly the
-//! keys of the README "Keyboard" table: every key cell there is a row of
+//! keys of the docs/USAGE.md "Keyboard" table: every key cell there is a row of
 //! the dialog, word for word, and the dialog has no other key.
 
 use std::fs;
@@ -14,11 +14,11 @@ fn read(rel: &str) -> String {
 
 /// The first cell of each row of the table under `## Keyboard`.
 fn readme_keys() -> Vec<String> {
-    let readme = read("README.md");
+    let readme = read("docs/USAGE.md");
     let section = readme
         .split("\n## Keyboard\n")
         .nth(1)
-        .expect("a Keyboard section in the README");
+        .expect("a Keyboard section in docs/USAGE.md");
     let section = section.split("\n## ").next().unwrap();
     section
         .lines()
@@ -52,14 +52,18 @@ fn dialog_keys() -> Vec<String> {
 fn the_dialog_lists_the_readme_keys() {
     let mut readme = readme_keys();
     let mut dialog = dialog_keys();
-    assert!(readme.len() > 30, "only {} README rows found", readme.len());
+    assert!(
+        readme.len() > 30,
+        "only {} USAGE.md rows found",
+        readme.len()
+    );
     readme.sort();
     dialog.sort();
     let missing: Vec<_> = readme.iter().filter(|k| !dialog.contains(k)).collect();
     let extra: Vec<_> = dialog.iter().filter(|k| !readme.contains(k)).collect();
     assert!(
         missing.is_empty() && extra.is_empty(),
-        "README keys missing from the dialog: {missing:?}; dialog keys not in the README: {extra:?}"
+        "USAGE.md keys missing from the dialog: {missing:?}; dialog keys not in USAGE.md: {extra:?}"
     );
     assert_eq!(readme, dialog, "a key appears a different number of times");
 }
