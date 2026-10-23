@@ -97,9 +97,19 @@ impl TlsFake {
             let mut io = tcp;
             io.write_all(greeting).ok();
             let mut upgraded = mode == Mode::Implicit;
+            // SMTP: inside DATA until the lone dot (the message's lines are
+            // seen but not answered).
+            let mut in_data = false;
             while let Some(line) = io.read_line() {
                 seen.push(line.clone());
                 let up = line.to_ascii_uppercase();
+                if in_data {
+                    if line == "." {
+                        in_data = false;
+                        io.write_all(b"250 queued\r\n").ok();
+                    }
+                    continue;
+                }
                 let reply: String = match proto {
                     Proto::Imap => {
                         let tag = line.split(' ').next().unwrap_or("a").to_string();
@@ -156,6 +166,9 @@ impl TlsFake {
                             }
                         } else if up.starts_with("AUTH") {
                             "235 ok\r\n".to_string()
+                        } else if up == "DATA" {
+                            in_data = true;
+                            "354 go on\r\n".to_string()
                         } else if up.starts_with("QUIT") {
                             io.write_all(b"221 bye\r\n").ok();
                             break;

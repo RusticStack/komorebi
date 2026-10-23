@@ -14,13 +14,17 @@ when that development switch is set), except the passwords:
 
 | Where | What | Removed |
 |---|---|---|
-| `cache.sqlite3` (with `cache.sqlite3-wal` and `-shm`) | Accounts (no passwords), settings, folders, message headers and previews, downloaded messages, drafts, the Outbox, invitation answers, the address index, the image-sender list | With the file; per account when it is removed |
+| `cache.sqlite3` (with `cache.sqlite3-wal` and `-shm`) | Accounts (no passwords), settings, folders, message headers and previews, downloaded messages, drafts, the Outbox, invitation answers, the address index, the image-sender list, the calendar (events of the local "On this PC" calendar, see below) | With the file; per account when it is removed |
+| `cache.sqlite3`, rules tables | Your rules (names, conditions, actions) and the activity of automatic runs: time, rule name, the message's Message-ID, subject and sender, what was done and where to, at most 500 lines per account. Nothing of it leaves this computer; the diagnostics log gets counts only | With the file; per account when it is removed; Clear activity removes the activity |
 | `cache.drafts\<draft number>\` | Copies of a draft's attachments | With the draft |
+| `cache.sqlite3.key` (only for an encrypted cache) | The cache's key, protected by Windows (DPAPI) for your Windows user | With the cache, by Remove all data |
 | `cache.open\<random>\` | Attachments you opened | At the next start |
 | `crash.log`, `crash.seen` | One line per crash: time, version, thread, source line (no mail) | By hand (capped at 64 KB) |
 | `logs\komorebi.log` (`.1`, `.2`) | Only if you turn on the diagnostics log: server command names, codes, timings (no mail) | By hand (capped at 1 MB each) |
 | `cache.damaged-<date>.sqlite3` (and its `-wal`, `-shm`, `.drafts`) | A damaged cache, renamed aside as it was | By hand |
+| `cache.sqlite3` | Contacts and address books: names, email addresses, phone numbers, organization, job title, notes, groups, the vCards as last synced, sync tokens and ETags, a contact's local version while a sync conflict waits, and each account's CardDAV address and user name (plaintext, like the rest of the cache) | With the file; synced books when sync is turned off and removed, or with their account |
 | Windows Credential Manager, generic credential `account:<n>:password.komorebi` (`<n>` is the account's number in the cache) | The account's password | When the account is removed |
+| Windows Credential Manager, generic credential `account:<n>:dav.komorebi` | Only if "Same as the mail password" is off: the CardDAV password | When the account is removed |
 
 Settings → Privacy → **Remove all data** removes every item above at
 once (see "Removing everything" below).
@@ -66,7 +70,7 @@ Settings → Privacy → Remove all data asks first, then:
    window is not sent, and an archive, delete or move still in its undo
    window is not done);
 3. closes the window and deletes the cache with its `-wal` and `-shm`
-   files, `cache.drafts`, `cache.open`, `crash.log`, `crash.seen`, the
+   files, `cache.sqlite3.key`, `cache.drafts`, `cache.open`, `crash.log`, `crash.seen`, the
    diagnostics log files (and the `logs` folder once it is empty) and
    any damaged caches set aside, then the
    `%LOCALAPPDATA%\komorebi` folder itself if nothing else is in it. A
@@ -140,6 +144,45 @@ The cache lives at `%LOCALAPPDATA%\komorebi\cache.sqlite3` and holds:
   answer (accepted, tentative or declined) and when. Nothing else from the
   invite (title, attendees, description) is copied; it is deleted with
   the account.
+- The calendar: when you accept (or tentatively accept) an invitation,
+  its calendar part (title, time, place, description, organizer,
+  attendees, its repeat rule) is stored as written, in plain text, in the
+  local calendar "On this PC", with the times of its occurrences for
+  about a year back and two ahead; Decline removes it. This calendar
+  exists only in the cache: it is not synced anywhere, it is not removed
+  with an account, and "Remove all data" deletes it with the cache.
+- CalDAV calendars, when you press Find calendars on the Calendar page's
+  Calendars pane: their names and addresses, and each event as the
+  server sent it (title, time, place, description, organizer, attendees,
+  reminders, its repeat rule), in plain text in the cache, with the
+  server's version tags for the next sync. Events you create, change or
+  delete in them are written to the cache at once and kept in a queue of
+  changes not yet sent (the event as you saved it) until the next sync
+  sends them to that calendar's server (and to no other host); a change
+  the server refused because the event changed elsewhere stays in that
+  queue until you apply it again or discard it. Events in the local
+  calendar "On this PC" exist only in the cache. They are deleted with the account, when the
+  calendar is no longer found, and by "Remove all data". The sign-in is
+  the one Contacts uses: the mail password, or the separate
+  `account:{id}:dav` password, both in Windows Credential Manager, sent
+  only over TLS (HTTP Basic) and only to the calendar server address: the
+  one you typed, or one looked up for your mail domain (or a name under
+  it). A server found elsewhere is shown in the pane first, and Komorebi
+  signs in there only after you press Find calendars again; a redirect
+  to another server is refused, not followed with credentials. The
+  address that worked is kept for calendars, apart from the Contacts
+  one. Komorebi contacts that server only on Find calendars, when
+  the Calendar page opens, on Sync now and at most every 15 minutes while
+  a CalDAV calendar is on and Komorebi is open (never under
+  `KOMOREBI_OFFLINE`); with the address empty, Find calendars first asks
+  DNS (SRV `_caldavs._tcp`) and `https://<your domain>/.well-known/caldav`
+  without credentials.
+- Event reminders: which reminders were already shown (an event id and
+  the occurrence's start, no text) are kept in the cache for two days so
+  none shows twice. Reminder notifications are off unless you turn them
+  on; they are made on this computer by the running app (title, start
+  time and place; never the event's notes), and nothing is scheduled with
+  Windows.
 
 Komorebi keeps an index of addresses from your cached mail to suggest
 recipients; it is rebuilt from messages and deleted with the account. Each
@@ -162,9 +205,19 @@ messages, their raw copies and its address index from the cache (in one
 step) and downloads the mail again; nothing on the server changes, and
 the account, its password, drafts, Outbox and the settings stay.
 
-The cache, the draft copies and the opened copies are **not encrypted**. Deleting the file
-(and `cache.drafts`) resets the app; your mail stays on the server, but
-unsent drafts and Outbox messages are lost.
+The cache is **plaintext unless you turn on** Settings → Privacy → Encrypt
+the mail cache on this computer (off by default). Then every page of the
+cache and its `-wal` is sealed with AES-256-GCM, and a changed, swapped or
+zeroed page is refused rather than read; the key is in `cache.sqlite3.key`,
+protected by Windows (DPAPI) for your Windows user. The choice waits in
+`cache.sqlite3.encrypt` until the next start converts the cache (crash-safe,
+both ways). A cache whose key is missing or belongs to another Windows user
+cannot be opened: Komorebi says so and offers to set it aside (dated, not
+deleted) and start a fresh cache, or to quit. The draft copies
+(`cache.drafts`) and the opened copies (`cache.open`) stay plaintext even
+then, and the setting says so. Deleting the file (and `cache.drafts`) resets
+the app; your mail stays on the server, but unsent drafts and Outbox
+messages are lost.
 
 If Komorebi stops on an internal error, it appends one line to
 `crash.log` in the same folder: the time (UTC), the app version, the
@@ -224,7 +277,18 @@ reached, the account is not removed.
 - Windows checks revocation from its cache only; building a certificate chain
   may still fetch a missing intermediate certificate from the address named in
   the certificate (an unpinned public server or a CA-issued pinned one).
-- A pinned certificate must be reviewed again when the server renews it.
+- The prompt offers what to trust: this exact certificate (reviewed again
+  when the server renews it), or this server key (the SHA-256 of its public
+  key; a renewal that keeps the key passes, checked after the handshake and
+  before anything else is sent, on IMAP and SMTP alike), or the issuing CA
+  (offered only when the chain the server sent reaches past its own
+  certificate; its subject and SHA-256 are shown; Windows then checks every
+  certificate against that CA alone, with the host name). Reading the
+  chain uses the same accept-everything handshake as the review, which
+  sends nothing.
+- An account can say its SMTP server needs no sign-in (a relay on your own
+  network): no password is read or sent for sending, and TLS or STARTTLS
+  is still required.
 - Before TLS, Komorebi asks an IMAP server only for its capabilities and
   for STARTTLS; nothing the server lists then is trusted (they are asked for
   again under TLS). A server that does not list STARTTLS, answers it with
@@ -242,6 +306,19 @@ reached, the account is not removed.
 
 Komorebi connects only to the servers you configure:
 
+- CardDAV, only for an account where you turned on address book sync:
+  HTTPS to the server address you entered, with HTTP Basic sign-in (your
+  mail password, or the separate one), only to that address's server and
+  never across a redirect to another one. "Find" sends your email domain
+  to your DNS resolver (`_carddavs._tcp`) and asks
+  `https://<domain>/.well-known/carddav` where the address books are,
+  without credentials. "Find address books" is the first signed-in
+  request. A pass runs when Contacts opens, on Sync now, after an edit,
+  and at most every 30 minutes with the mail check, never before the
+  window shows and never under `KOMOREBI_OFFLINE`. Read only never writes
+  to the server; read and write sends the contacts you add, change or
+  delete. The server is never changed when you turn sync off.
+
 - IMAP (TLS or STARTTLS) to sync folders, headers, flags and message bodies,
   and to apply your actions (read, flag, move, delete, save to Sent). An
   action that couldn't reach the server is tried once more when a
@@ -253,6 +330,12 @@ Komorebi connects only to the servers you configure:
   replaces, and the copy of a draft you send or discard, is removed.
   While the app runs, one read-only IMAP connection waits on the inbox
   (IDLE) so new mail shows up without waiting for the next sync.
+  Your rules (Settings > Rules) act on new Inbox mail by themselves, with
+  no press per message: on the same IMAP connection to your own server,
+  one command per flag (read, important) and one move per destination
+  folder. They never send mail, and the rules themselves stay on this
+  computer. Copy as Sieve only puts text on your clipboard; nothing is
+  sent.
 - Looking up your server settings, only when you press Continue on the
   "Your email" step of adding an account (and only for a domain Komorebi
   has no built-in settings for), or "Find settings" in manual setup or on
@@ -330,8 +413,11 @@ computer from the message already in the cache (its headers, including the
 `Authentication-Results` your own server added); nothing is looked up.
 Encrypted mail is never decrypted, and no keys are stored.
 The meeting-invitation card is read on this computer from the calendar
-part already in the message; nothing is fetched, added to a calendar, or
-looked up (time zones come only from the invite itself). Its Join button
+part already in the message; nothing is fetched or looked up (a named
+time zone is read from the invite, else from Windows' own time zone
+data on this computer). Accepting adds the event to the local calendar
+only; nothing about it leaves the computer except the reply you choose
+to send. Its Join button
 opens the meeting link only through the same confirm prompt as a link,
 and Save .ics saves the calendar file where you choose.
 Attachments are never opened automatically; you can save them to a folder

@@ -41,19 +41,29 @@ msgid "Suggested recipients"
 msgstr ""
 
 #: ui/app.slint
+msgid "{0}, group of {1}"
+msgstr ""
+
+#: ui/app.slint ui/contacts.slint
 msgctxt "suggestion"
 msgid "{0}, {1}"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint
+msgid "{n} person"
+msgid_plural "{n} people"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/app.slint ui/rules.slint ui/tr.slint
 msgid "Move up"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/rules.slint ui/tr.slint
 msgid "Move down"
 msgstr ""
 
-#: ui/app.slint ui/onboarding.slint
+#: ui/app.slint ui/contacts.slint ui/onboarding.slint
 msgid "Back"
 msgstr ""
 
@@ -83,6 +93,10 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Signatures"
+msgstr ""
+
+#: ui/app.slint
+msgid "Rules"
 msgstr ""
 
 #: ui/app.slint
@@ -167,7 +181,7 @@ msgstr ""
 msgid "Notifications for {0}"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/contacts.slint
 msgid "Name"
 msgstr ""
 
@@ -175,7 +189,7 @@ msgstr ""
 msgid "Shown to recipients"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/contacts.slint
 msgid "Email"
 msgstr ""
 
@@ -187,7 +201,7 @@ msgstr ""
 msgid "The address can't be changed. To use another one, add another account."
 msgstr ""
 
-#: ui/app.slint ui/onboarding.slint
+#: ui/app.slint ui/contacts.slint ui/onboarding.slint
 msgid "Password"
 msgstr ""
 
@@ -324,10 +338,6 @@ msgstr ""
 msgid "SMTP username"
 msgstr ""
 
-#: ui/app.slint
-msgid "Komorebi always signs in to the sending server."
-msgstr ""
-
 #: ui/app.slint ui/onboarding.slint
 msgid "Set username"
 msgstr ""
@@ -356,7 +366,7 @@ msgstr ""
 msgid "Removes the account and its downloaded mail from this computer. Mail on the server is not affected."
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/contacts.slint ui/tr.slint
 msgid "Remove"
 msgstr ""
 
@@ -368,11 +378,11 @@ msgstr ""
 msgid "No signatures yet. Add one to use it in new mail and replies."
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/contacts.slint ui/rules.slint
 msgid "Edit"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/rules.slint
 msgid "Delete {0}"
 msgstr ""
 
@@ -420,11 +430,11 @@ msgstr ""
 msgid "The logo must be a PNG or JPEG file of 200 KB or less."
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/calendar.slint ui/contacts.slint ui/rules.slint
 msgid "Save"
 msgstr ""
 
-#: ui/app.slint ui/widgets.slint
+#: ui/app.slint ui/calendar.slint ui/contacts.slint ui/rules.slint ui/widgets.slint
 msgid "Cancel"
 msgstr ""
 
@@ -481,7 +491,7 @@ msgstr ""
 msgid "Holds a sent message this long so it can be taken back."
 msgstr ""
 
-#: ui/app.slint ui/widgets.slint
+#: ui/app.slint ui/rules.slint ui/widgets.slint
 msgid "Off"
 msgstr ""
 
@@ -501,7 +511,7 @@ msgstr ""
 msgid "30 seconds"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/rules.slint ui/tr.slint
 msgid "Mark as read"
 msgstr ""
 
@@ -555,6 +565,14 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Show the sender and subject in notifications"
+msgstr ""
+
+#: ui/app.slint
+msgid "Notifications for event reminders"
+msgstr ""
+
+#: ui/app.slint
+msgid "Windows shows a notification when an event's reminder is due, only while Komorebi is open or in the notification area. The agenda marks due events either way."
 msgstr ""
 
 #: ui/app.slint
@@ -698,6 +716,34 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Open the logs folder in File Explorer"
+msgstr ""
+
+#: ui/app.slint
+msgid "Mail cache"
+msgstr ""
+
+#: ui/app.slint
+msgid "Encrypt the mail cache on this computer"
+msgstr ""
+
+#: ui/app.slint
+msgid "Downloaded mail, drafts and the Outbox are encrypted with a key only your Windows user can unlock. If that key is lost, drafts and the Outbox, which exist only in the cache, are lost too. Attachment copies are not encrypted."
+msgstr ""
+
+#: ui/app.slint
+msgid "The cache is encrypted when Komorebi next starts."
+msgstr ""
+
+#: ui/app.slint
+msgid "The cache is decrypted when Komorebi next starts."
+msgstr ""
+
+#: ui/app.slint
+msgid "This can take a minute for a large cache."
+msgstr ""
+
+#: ui/app.slint
+msgid "Restart now"
 msgstr ""
 
 #: ui/app.slint
@@ -943,7 +989,7 @@ msgstr ""
 msgid "Data folder"
 msgstr ""
 
-#: ui/app.slint ui/editor.slint ui/widgets.slint
+#: ui/app.slint ui/contacts.slint ui/editor.slint ui/widgets.slint
 msgid "Copy"
 msgstr ""
 
@@ -1015,8 +1061,16 @@ msgstr ""
 msgid "Nothing here"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/contacts.slint ui/tr.slint
 msgid "New message"
+msgstr ""
+
+#: ui/app.slint ui/contacts.slint
+msgid "Contacts"
+msgstr ""
+
+#: ui/app.slint ui/calendar.slint
+msgid "Calendar"
 msgstr ""
 
 #: ui/app.slint ui/tr.slint
@@ -1052,7 +1106,7 @@ msgstr ""
 msgid "Open"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/calendar.slint ui/contacts.slint ui/tr.slint
 msgid "Discard"
 msgstr ""
 
@@ -1072,7 +1126,7 @@ msgstr ""
 msgid "Maximize"
 msgstr ""
 
-#: ui/app.slint ui/widgets.slint
+#: ui/app.slint ui/calendar.slint ui/contacts.slint ui/widgets.slint
 msgid "Close"
 msgstr ""
 
@@ -1308,7 +1362,7 @@ msgstr ""
 msgid "Archive (Backspace)"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/calendar.slint ui/contacts.slint ui/rules.slint ui/tr.slint
 msgid "Delete"
 msgstr ""
 
@@ -1340,7 +1394,7 @@ msgstr ""
 msgid "Mark as unread (Ctrl+U)"
 msgstr ""
 
-#: ui/app.slint ui/tr.slint
+#: ui/app.slint ui/rules.slint ui/tr.slint
 msgid "Mark as important"
 msgstr ""
 
@@ -1504,7 +1558,7 @@ msgstr ""
 msgid "Decline"
 msgstr ""
 
-#: ui/app.slint
+#: ui/app.slint ui/calendar.slint
 msgid "Change"
 msgstr ""
 
@@ -1514,6 +1568,10 @@ msgstr ""
 
 #: ui/app.slint
 msgid "Save .ics"
+msgstr ""
+
+#: ui/app.slint ui/calendar.slint
+msgid "Remove from calendar"
 msgstr ""
 
 #: ui/app.slint
@@ -1692,6 +1750,10 @@ msgid "Copy all"
 msgstr ""
 
 #: ui/app.slint
+msgid "What to trust"
+msgstr ""
+
+#: ui/app.slint
 msgid "Why am I seeing this?"
 msgstr ""
 
@@ -1703,6 +1765,258 @@ msgstr ""
 msgid "Don't open its links or attachments, reply, or enter a password unless you're sure. If you know the sender, check with them another way. Report junk moves it to your Junk folder."
 msgstr ""
 
+#: ui/cachelock.slint
+msgid "Encrypt the mail cache?"
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "The key is kept for your Windows user on this computer. If it is lost (another Windows user, a reset Windows password, a copied data folder), the cache cannot be opened: mail can be downloaded again, but drafts and the Outbox exist only in the cache and are lost."
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "Encrypt at next start"
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "The mail cache is locked"
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "Komorebi cannot unlock its encrypted mail cache on this computer: its key is missing or belongs to another Windows user."
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "Start a fresh cache"
+msgstr ""
+
+#: ui/cachelock.slint
+msgctxt "dialog button"
+msgid "Quit"
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "Start a fresh cache?"
+msgstr ""
+
+#: ui/cachelock.slint
+msgid "The locked cache is set aside, not deleted. Komorebi starts empty: add your accounts again and their mail is downloaded again. Drafts and the Outbox in the locked cache are not recovered."
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Show each account's CalDAV calendars here, read only. Komorebi looks for them only when you press Find calendars, and syncs them only while it is open. The user name and password are the ones set in Contacts > Sync, or your mail address and mail password."
+msgstr ""
+
+#: ui/calendar.slint ui/contacts.slint
+msgid "Add a mail account first."
+msgstr ""
+
+#: ui/calendar.slint ui/contacts.slint
+msgid "Account"
+msgstr ""
+
+#: ui/calendar.slint ui/contacts.slint
+msgid "Server address"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Leave it empty to look it up from your mail address. For Purelymail, copy it from purelymail.com/manage/calDavUrl."
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Find calendars"
+msgstr ""
+
+#: ui/calendar.slint ui/contacts.slint
+msgid "Sync now"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "{0}, {n} event"
+msgid_plural "{0}, {n} events"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/calendar.slint ui/tr.slint
+msgid "{0}, {1}"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "+{n} more"
+msgid_plural "+{n} more"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/calendar.slint ui/tr.slint
+msgid "All day"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Cancelled: {}"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Repeats; has a reminder"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Repeats"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Has a reminder"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Choose a date"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Previous month"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Next month"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Organized by {0}"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Answer the invitation from its message. You can remove the event from your calendar here."
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Only this event"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "The whole series"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Title"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Add a title"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Starts"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Ends"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Repeat"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Repeats by a rule set in another app ({0}). It is kept as it is."
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Reminder"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "None"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "At the start"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "5 minutes before"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "15 minutes before"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "30 minutes before"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "1 hour before"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "1 day before"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Location"
+msgstr ""
+
+#: ui/calendar.slint ui/contacts.slint
+msgid "Notes"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Calendars"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "New event"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Event"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "{n} change wasn't saved because the event changed on another device."
+msgid_plural "{n} changes weren't saved because the events changed on another device."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/calendar.slint
+msgid "Apply my changes again"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Today"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Previous (Page Up)"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Next (Page Down)"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Agenda"
+msgstr ""
+
+#: ui/calendar.slint
+msgctxt "calendar view"
+msgid "Day"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Week"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Month"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "Choose which calendars to show and sync"
+msgstr ""
+
+#: ui/calendar.slint
+msgid "No events in these 30 days. Invitations you accept are added here."
+msgstr ""
+
 #: ui/chips.slint
 msgctxt "recipient"
 msgid "{0}, {1}"
@@ -1710,6 +2024,193 @@ msgstr ""
 
 #: ui/chips.slint
 msgid "Not a valid address"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Read only"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "This address book syncs read only. Turn on Read and write in address book sync to edit it."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "This contact changed on the server while you were editing it"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "The server's version is shown. Your version is kept until you choose."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Keep mine"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Keep the server's"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "New message to {}"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Phone"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Groups"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Address book"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "On this computer"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Edit contact"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "New contact"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Given name"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Family name"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Organization"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Job title"
+msgstr ""
+
+#: ui/contacts.slint ui/onboarding.slint
+msgid "name@example.com"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Remove email"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Add email"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Remove phone"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Add phone"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Separate groups with commas."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Address book sync"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Sync each account's CardDAV address books. Sync is off until you turn it on, and runs only while Komorebi is open."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Sync address books"
+msgstr ""
+
+#: ui/contacts.slint
+msgctxt "sync"
+msgid "Off"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Read and write"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "For Purelymail, copy it from purelymail.com/manage/cardDavUrl."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Find"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "User name"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Same as the mail password"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Kept in Windows Credential Manager."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Find address books"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Sync"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Search contacts"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "No contacts match."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "No contacts yet. Add one with New contact, or turn on address book sync."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "{n} contact"
+msgid_plural "{n} contacts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/contacts.slint
+msgid "Delete this contact?"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "It is removed from this computer."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "It is removed from this computer and from the address book on the server."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Discard your changes?"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Remove the synced contacts from this computer?"
+msgstr ""
+
+#: ui/contacts.slint
+msgid "The address books on the server are not changed."
+msgstr ""
+
+#: ui/contacts.slint
+msgid "Keep"
 msgstr ""
 
 #: ui/editor.slint
@@ -1896,6 +2397,14 @@ msgid "Clear formatting (Ctrl+Space)"
 msgstr ""
 
 #: ui/forms.slint
+msgid "This server does not need a sign-in for sending"
+msgstr ""
+
+#: ui/forms.slint
+msgid "Komorebi sends without a password, for a relay that trusts your network. The connection still has to be encrypted: a server without TLS is refused."
+msgstr ""
+
+#: ui/forms.slint
 msgid "Find the incoming server"
 msgstr ""
 
@@ -2049,10 +2558,6 @@ msgstr ""
 
 #: ui/onboarding.slint
 msgid "We'll look up the right settings for you."
-msgstr ""
-
-#: ui/onboarding.slint
-msgid "name@example.com"
 msgstr ""
 
 #: ui/onboarding.slint
@@ -2262,6 +2767,121 @@ msgstr ""
 
 #: ui/onboarding.slint
 msgid "Open your inbox"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Rules run while Komorebi is open. Mail that arrives while it is closed is sorted the next time it starts."
+msgstr ""
+
+#: ui/rules.slint
+msgid "No rules yet. A rule can file, delete or mark new mail in the Inbox."
+msgstr ""
+
+#: ui/rules.slint
+msgid "Folder not found. This rule is paused."
+msgstr ""
+
+#: ui/rules.slint ui/widgets.slint
+msgid "On"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Add rule"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Copy as Sieve"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Copy the rules as a script for your provider’s mail filters"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Activity"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Clear activity"
+msgstr ""
+
+#: ui/rules.slint
+msgctxt "rule field"
+msgid "From"
+msgstr ""
+
+#: ui/rules.slint
+msgid "To or Cc"
+msgstr ""
+
+#: ui/rules.slint
+msgctxt "rule field"
+msgid "Subject"
+msgstr ""
+
+#: ui/rules.slint ui/widgets.slint
+msgid "Has attachment"
+msgstr ""
+
+#: ui/rules.slint
+msgid "contains"
+msgstr ""
+
+#: ui/rules.slint
+msgid "does not contain"
+msgstr ""
+
+#: ui/rules.slint
+msgctxt "rule operator"
+msgid "is"
+msgstr ""
+
+#: ui/rules.slint
+msgid "starts with"
+msgstr ""
+
+#: ui/rules.slint
+msgid "ends with"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Value"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Remove condition"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Rule name"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Conditions"
+msgstr ""
+
+#: ui/rules.slint
+msgid "All must match"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Any can match"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Add condition"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Do this"
+msgstr ""
+
+#: ui/rules.slint
+msgid "Move to folder"
+msgstr ""
+
+#: ui/rules.slint ui/tr.slint
+msgid "Stop processing more rules"
 msgstr ""
 
 #: ui/shortcuts.slint
@@ -2737,6 +3357,16 @@ msgstr ""
 #: ui/shortcuts.slint
 msgctxt "shortcut"
 msgid "Pick, take or close a suggested address"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut key"
+msgid "Enter (in the contact editor's Name box)"
+msgstr ""
+
+#: ui/shortcuts.slint
+msgctxt "shortcut"
+msgid "Save the contact"
 msgstr ""
 
 #: ui/shortcuts.slint
@@ -3267,6 +3897,159 @@ msgstr ""
 
 #: ui/tr.slint
 msgid "Answer kept on this computer; no reply was sent."
+msgstr ""
+
+#: ui/tr.slint
+msgid "In your calendar on this PC."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} to {1}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Today, {}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Tomorrow, {}"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "event"
+msgid "Now"
+msgstr ""
+
+#: ui/tr.slint
+msgid "In {n} minute"
+msgid_plural "In {n} minutes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Starts at {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Starts at {0}, {1}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Calendar sync is off while Komorebi is offline."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The calendar server refused the user name or password."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No calendar was found at this address."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The calendar server's certificate couldn't be checked."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Calendar sync failed ({0})."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No calendars with events were found at this address."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{n} event from this account on this computer."
+msgid_plural "{n} events from this account on this computer."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Found a calendar server at {0}. Check that it belongs to your mail provider, then press Find calendars again to sign in there."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Working with the calendar server..."
+msgstr ""
+
+#: ui/tr.slint
+msgid "On this PC"
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} ({1})"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Does not repeat"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every day"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every week on {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every month on day {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every month on the first {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every month on the second {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every month on the third {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every month on the fourth {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every month on the last {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Every year on {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "dd/mm/yyyy"
+msgstr ""
+
+#: ui/tr.slint
+msgid "yyyy-mm-dd"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Type the dates as {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Type the times as 09:30."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The event ends before it starts."
+msgstr ""
+
+#: ui/tr.slint
+msgid "That time doesn't exist here: the clocks change then."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This calendar is read only. Choose another one."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The event couldn't be saved ({0})."
 msgstr ""
 
 #: ui/tr.slint
@@ -3851,6 +4634,14 @@ msgid "Certificate: pinned (SHA-256 {0})"
 msgstr ""
 
 #: ui/tr.slint
+msgid "Certificate: server key pinned (SHA-256 {0})"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Certificate: issued by the pinned authority {0}"
+msgstr ""
+
+#: ui/tr.slint
 msgid "The saved certificate for {0} is damaged. Forget it and review the certificate again."
 msgstr ""
 
@@ -4093,7 +4884,228 @@ msgid "Trust this certificate"
 msgstr ""
 
 #: ui/tr.slint
+msgid "This exact certificate"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Any other certificate is refused, including a renewal."
+msgstr ""
+
+#: ui/tr.slint
+msgid "This server key"
+msgstr ""
+
+#: ui/tr.slint
+msgid "A renewed certificate with the same key is accepted. Key SHA-256: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "The issuing CA: {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Certificates it issues for this server name are accepted. CA SHA-256: {0}"
+msgstr ""
+
+#: ui/tr.slint
 msgid "Ask whoever runs the server for its fingerprint, or run openssl x509 -noout -fingerprint -sha256 on its certificate, and compare every byte. Only trust it on a network you control. A saved certificate has to be reviewed again when the server renews it."
+msgstr ""
+
+#: ui/tr.slint
+msgid "All contacts"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "contact label"
+msgid "Work"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "contact label"
+msgid "Home"
+msgstr ""
+
+#: ui/tr.slint
+msgctxt "contact label"
+msgid "Mobile"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Add a name, an email address or a phone number."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{0} is not an email address."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Copied"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Address book sync is off while Komorebi is offline."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The address book server refused the user name or password."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The server sent Komorebi to another server. Enter that server's address instead."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No address book was found at this address."
+msgstr ""
+
+#: ui/tr.slint
+msgid "The address book server's certificate couldn't be checked."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Address book sync failed ({0})."
+msgstr ""
+
+#: ui/tr.slint
+msgid "No address books were found at this address."
+msgstr ""
+
+#: ui/tr.slint
+msgid "{n} contact on this computer."
+msgid_plural "{n} contacts on this computer."
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/tr.slint
+msgid "Last synced {0}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Working with the address book server..."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Has an attachment"
+msgstr ""
+
+#: ui/tr.slint
+msgid "From contains {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "From does not contain {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "From is {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "From starts with {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "From ends with {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "To or Cc contains {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "To or Cc does not contain {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "To or Cc is {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "To or Cc starts with {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "To or Cc ends with {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Subject contains {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Subject does not contain {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Subject is {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Subject starts with {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Subject ends with {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Any of these"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Move to {0}"
+msgstr ""
+
+#: ui/tr.slint
+msgid "New rule"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Give the rule a name."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Each condition needs a value."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Choose at least one action."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Add a condition."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Moved “{0}” from {1} to {2}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Deleted “{0}” from {1}."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Marked “{0}” from {1} as read."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Marked “{0}” from {1} as important."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Couldn’t act on “{0}” from {1}. It stayed in the Inbox."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Delete rule “{0}”?"
+msgstr ""
+
+#: ui/tr.slint
+msgid "Mail it already moved stays where it is."
+msgstr ""
+
+#: ui/tr.slint
+msgid "Copied as a Sieve script. Paste it into your provider’s mail filters."
 msgstr ""
 
 #: ui/tr.slint
@@ -4159,10 +5171,6 @@ msgid "Important"
 msgstr ""
 
 #: ui/widgets.slint
-msgid "Has attachment"
-msgstr ""
-
-#: ui/widgets.slint
 msgid "Replied"
 msgstr ""
 
@@ -4205,10 +5213,6 @@ msgstr ""
 
 #: ui/widgets.slint
 msgid "Search (Ctrl+E)"
-msgstr ""
-
-#: ui/widgets.slint
-msgid "On"
 msgstr ""
 
 #: ui/widgets.slint

@@ -52,8 +52,15 @@ const RESUME_GAP: Duration = Duration::from_secs(120);
 /// After a wake, the network gets this long to come back before the sync.
 const RESUME_SETTLE: Duration = Duration::from_secs(3);
 
+mod cachelock;
+mod calendar;
+mod calendar_edit;
+mod calendar_sync;
 mod cert;
 mod composer;
+mod contacts;
+mod contacts_sync;
+mod reminders;
 pub(crate) use composer::above_quote;
 mod files;
 mod find;
@@ -62,11 +69,16 @@ mod flow;
 mod invite;
 mod notifications;
 mod onboarding;
+pub use cachelock::{is_locked, show_locked};
+pub use calendar::sample_calendar;
+pub use calendar_sync::sample_calendar_sync;
+pub use contacts::sample_contacts;
 pub use onboarding::sample_onboard;
 mod original;
 mod outbox;
 mod reader;
 mod roles;
+mod rules;
 mod settings;
 mod signatures;
 mod tabs;
@@ -230,6 +242,8 @@ enum Question {
     },
     /// Delete a signature (Settings > Signatures).
     DeleteSignature(i64),
+    /// Delete a rule (Settings > Rules).
+    DeleteRule(i64),
 }
 
 impl Question {
@@ -245,6 +259,7 @@ impl Question {
                 | Question::TrustCert
                 | Question::DeleteFrom { .. }
                 | Question::DeleteSignature(_)
+                | Question::DeleteRule(_)
         )
     }
 }
@@ -449,6 +464,8 @@ struct App {
     /// whether it changed since it opened.
     sig_open: Option<i64>,
     sig_logo: Option<komorebi::mail::rich::Logo>,
+    /// The Contacts view (`app::contacts`).
+    contacts: contacts::ContactsState,
     sig_dirty: bool,
     /// How long Send waits so it can be undone (setting `undo_send_secs`;
     /// 0 sends at once).
@@ -739,6 +756,7 @@ pub fn install_with(
         sig_list: Vec::new(),
         sig_open: None,
         sig_logo: None,
+        contacts: contacts::ContactsState::default(),
         sig_dirty: false,
         undo_delay: Duration::from_secs(settings.undo_send_secs),
         builder: Rc::new(composer::spawn_build),
@@ -746,11 +764,15 @@ pub fn install_with(
         forget_password: if komorebi::dev_var("KOMOREBI_OFFLINE").is_some() {
             Rc::new(|_| Ok(()))
         } else {
-            Rc::new(secrets::delete_password)
+            // The separate DAV password (if any) goes with it.
+            Rc::new(|id| {
+                secrets::delete_dav_password(id).ok();
+                secrets::delete_password(id)
+            })
         },
         store_password: Rc::new(secrets::set_password),
         workers_on: komorebi::dev_var("KOMOREBI_OFFLINE").is_none(),
-        verifier: mail::verify_account,
+        verifier: mail::verify_account_with,
         check_seq: 0,
         form_pins: cert::FormPins::default(),
         find_seq: 0,
@@ -842,6 +864,7 @@ pub fn install_with(
     );
     mark("model ready");
     wire(ui);
+    cachelock::wire(ui, &app.db_path);
     app.show_compose_defaults();
     app.show_updates();
     APP.with(|cell| *cell.borrow_mut() = Some(app));
@@ -877,7 +900,12 @@ pub fn install_with(
         });
     }
     Timer::single_shot(START_SYNC_AFTER, || {
-        with_app(|a| a.start_notifications());
+        with_app(|a| {
+            a.start_notifications();
+            // Reminders due in the last five minutes fire once; only
+            // when the user turned reminder notifications on.
+            a.arm_reminders();
+        });
     });
     Timer::single_shot(WARM_RENDER_AFTER, move || {
         with_app(|a| a.reader.warm());
@@ -957,6 +985,7 @@ type Verifier = fn(
     mail::Pins,
     (&str, &str),
     &str,
+    bool,
     &mut dyn FnMut(mail::errors::Step),
 ) -> Result<(), mail::errors::StepError>;
 
@@ -1369,6 +1398,11 @@ pub fn sample_signatures(edit: bool) {
     with_app(|a| a.sample_signatures(edit));
 }
 
+/// Settings > Rules with made-up rules (snapshots), and a rule's page.
+pub fn sample_rules(edit: bool) {
+    with_app(|a| a.sample_rules(edit));
+}
+
 /// A file is dragged over the window (or the drag left it): the composer
 /// shows where it goes.
 pub fn file_hover(on: bool) {
@@ -1467,6 +1501,7 @@ pub fn sample_fresh_inbox() {
             save_sent: true,
             imap_user: String::new(),
             smtp_user: String::new(),
+            smtp_no_auth: false,
         };
         let Ok(id) = a.db.add_account(&new) else {
             return;
@@ -1510,12 +1545,34 @@ fn sample_certificate() -> Vec<u8> {
     }
 }
 
+/// Snapshot QA: a server certificate issued by a test CA, and that CA
+/// (the `tests/fixtures/tls` ones in dev builds).
+fn sample_ca_chain() -> (Vec<u8>, Vec<u8>) {
+    #[cfg(debug_assertions)]
+    {
+        let der = |pem: &[u8]| {
+            native_tls::Certificate::from_pem(pem)
+                .and_then(|c| c.to_der())
+                .unwrap_or_default()
+        };
+        (
+            der(include_bytes!("../tests/fixtures/tls/ca-leaf-cert.pem")),
+            der(include_bytes!("../tests/fixtures/tls/ca-cert.pem")),
+        )
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        (b"synthetic certificate".to_vec(), b"synthetic CA".to_vec())
+    }
+}
+
 /// Snapshot QA: the edit form of the first account in a certificate state
 /// (made-up; nothing is sent): `failed` (the secure connection failed on an
 /// untrusted certificate: the sentence and Review certificate), `prompt`
 /// (the Trust this certificate? prompt), `again` (the prompt as when a
-/// forgotten certificate is reviewed again) or `pinned` (a certificate saved
-/// for each server).
+/// forgotten certificate is reviewed again), `ca` (the prompt for a
+/// certificate a CA issued, offering that CA) or `pinned` (a certificate
+/// saved for each server).
 pub fn sample_cert(state: &str) {
     use mail::errors::{Class, Step, describe};
     use mail::pin::Kind;
@@ -1536,6 +1593,14 @@ pub fn sample_cert(state: &str) {
                 a.form_pins.set(Kind::Smtp, der, acc.smtp);
                 a.show_cert_state(0);
             }
+            "ca" => {
+                let (leaf, ca) = sample_ca_chain();
+                a.check_seq += 1;
+                let seq = a.check_seq;
+                a.finish_review(seq, Kind::Imap, acc.imap, Ok((leaf, Some(ca))));
+                // Show the CA choice picked.
+                a.ui().set_q_choice(2);
+            }
             _ => {
                 if state == "again" {
                     let old = b"the old certificate".to_vec();
@@ -1544,7 +1609,7 @@ pub fn sample_cert(state: &str) {
                 }
                 a.check_seq += 1;
                 let seq = a.check_seq;
-                a.finish_review(seq, Kind::Imap, acc.imap, Ok(der));
+                a.finish_review(seq, Kind::Imap, acc.imap, Ok((der, None)));
             }
         }
     });
@@ -1844,6 +1909,8 @@ fn wire(ui: &AppWindow) {
     composer::rich::wire(ui);
     composer::recipients::wire(ui);
     signatures::wire(ui);
+    contacts::wire(ui);
+    rules::wire(ui);
     ui.on_update_action(|which| {
         with_app(|a| a.update_action(which));
     });
@@ -1887,10 +1954,22 @@ fn wire(ui: &AppWindow) {
     ui.on_r_load_remote(|always| {
         with_app(|a| a.load_remote(always));
     });
+    calendar_sync::wire(ui);
+    calendar::wire(ui);
+    ui.on_cal_opened(|| {
+        with_app(|a| a.calendar_opened());
+    });
+    ui.on_cal_today(|| {
+        with_app(|a| a.calendar_move(0));
+    });
+    ui.on_cal_move(|days| {
+        with_app(|a| a.calendar_move(i64::from(days)));
+    });
     ui.on_settings_opened(|| {
         with_app(|a| {
             a.show_remote_senders();
             a.show_general();
+            a.reload_rules();
             // The accounts' cards show a download's progress there.
             if a.progress_shown.get() {
                 a.set_status("", false);
@@ -2252,6 +2331,8 @@ impl App {
                         .is_none_or(|t| t.elapsed() >= settings::FULL_SYNC_EVERY);
                     app.sync_all(full);
                     app.drain_outbox();
+                    app.contacts_timer_tick();
+                    app.calendar_timer_tick();
                 });
             });
     }
@@ -2299,6 +2380,7 @@ impl App {
                 save_sent: form.save_sent && providers::save_sent_default(form_preset(&form)),
                 imap_user,
                 smtp_user,
+                smtp_no_auth: settings::form_no_auth(&form),
             })
         })();
         let new = match parsed {
@@ -2330,6 +2412,7 @@ impl App {
             pins,
             cert::is_manual(&form),
             logins,
+            !new.smtp_no_auth,
             Some(given),
             0,
             Some(Box::new(move |app| {
@@ -2350,6 +2433,7 @@ impl App {
         pins: (Option<Vec<u8>>, Option<Vec<u8>>),
         manual: bool,
         logins: (String, String),
+        smtp_sign_in: bool,
         password: Option<String>,
         saved: i64,
         then: Option<AfterCheck>,
@@ -2388,6 +2472,7 @@ impl App {
                     pins,
                     logins,
                     &password,
+                    smtp_sign_in,
                     &mut |step| {
                         let done = step.index() + 1;
                         on_ui(Box::new(move |app| app.check_progress(seq, done)));
@@ -2542,6 +2627,7 @@ impl App {
             pins,
             cert::is_manual(&form),
             logins,
+            !settings::form_no_auth(&form),
             password,
             id,
             None,
@@ -2570,6 +2656,7 @@ impl App {
                 smtp_user: new.smtp_user.clone(),
                 imap_pin: pins.0,
                 smtp_pin: pins.1,
+                smtp_no_auth: new.smtp_no_auth,
             };
             (self.store_password)(id, &password)
                 .and_then(|()| self.db.update_account(&with_signature).map(drop))
@@ -2652,6 +2739,7 @@ impl App {
             imap_user: a.imap_user.as_str().into(),
             smtp_user: a.smtp_user.as_str().into(),
             smtp_own_login: a.smtp_user != a.imap_user,
+            smtp_no_auth: a.smtp_no_auth,
         });
         ui.set_a_edit_id(id as i32);
         self.show_account_signatures(id);
@@ -2709,6 +2797,7 @@ impl App {
             smtp_pin: pins.1.clone(),
             save_sent: form.save_sent,
             signature: form.signature.to_string(),
+            smtp_no_auth: settings::form_no_auth(&form),
             ..old.clone()
         };
         let password = Some(form.password.to_string()).filter(|p| !p.is_empty());
@@ -2717,7 +2806,8 @@ impl App {
             && edited.imap_user == old.imap_user
             && edited.smtp_user == old.smtp_user
             && edited.imap_pin == old.imap_pin
-            && edited.smtp_pin == old.smtp_pin;
+            && edited.smtp_pin == old.smtp_pin
+            && edited.smtp_no_auth == old.smtp_no_auth;
         if password.is_none() && same_servers {
             return self.finish_update_account(old, edited, None);
         }
@@ -2732,6 +2822,7 @@ impl App {
             pins,
             cert::is_manual(&form),
             logins,
+            !edited.smtp_no_auth,
             given,
             id,
             Some(Box::new(move |app| {
@@ -5299,6 +5390,7 @@ impl App {
                 }
             }
             Question::DeleteSignature(id) => self.signature_question(id),
+            Question::DeleteRule(id) => self.rule_question(id),
             Question::TrustCert => match self.trust_prompt() {
                 Some(p) => {
                     let said = (p.title.clone(), p.text.clone(), p.ok.clone());
@@ -5322,6 +5414,12 @@ impl App {
         ui.set_q_old_label(field(|p| &p.old_label));
         ui.set_q_caution(field(|p| &p.caution));
         ui.set_q_note(field(|p| &p.note));
+        let choices = match (q, &self.cert_review) {
+            (Question::TrustCert, Some(review)) => review.choice_items(),
+            _ => Vec::new(),
+        };
+        ui.set_q_choice(0);
+        ui.set_q_choices(ModelRc::new(VecModel::from(choices)));
         let alt = match q {
             Question::Rsvp(..) => t!(invoke_q_rsvp_alt),
             _ => String::new(),
@@ -5355,6 +5453,7 @@ impl App {
             Question::TrustCert => self.trust_certificate(),
             Question::DeleteFrom { .. } => self.delete_confirmed(),
             Question::DeleteSignature(id) => self.delete_signature_now(id),
+            Question::DeleteRule(id) => self.delete_rule_now(id),
         }
     }
 
@@ -5785,6 +5884,7 @@ mod tests {
             smtp_user: String::new(),
             imap_pin: None,
             smtp_pin: None,
+            smtp_no_auth: false,
         };
         let folder = |id: i64, account_id: i64, role: Role| Folder {
             id,
@@ -6104,14 +6204,15 @@ mod tests {
     /// (the Windows 10 icon font; Windows 11's Segoe Fluent Icons, used
     /// when present, has them all too). None needed a substitute. A new
     /// icon is added here only once it is checked in that font.
-    const MDL2_GLYPHS: [u32; 80] = [
+    const MDL2_GLYPHS: [u32; 81] = [
         0xE700, 0xE70B, 0xE70D, 0xE70E, 0xE70F, 0xE710, 0xE711, 0xE712, 0xE713, 0xE715, 0xE71B,
         0xE721, 0xE723, 0xE724, 0xE72A, 0xE72B, 0xE72C, 0xE73E, 0xE74D, 0xE74E, 0xE762, 0xE76C,
         0xE77B, 0xE783, 0xE787, 0xE7B3, 0xE7B8, 0xE7BA, 0xE7C1, 0xE7C3, 0xE894, 0xE898, 0xE8A5,
         0xE8B7, 0xE8B9, 0xE8BB, 0xE8C2, 0xE8C3, 0xE8C8, 0xE8C9, 0xE8DB, 0xE8DD, 0xE8DE, 0xE8FB,
         0xE8FD, 0xE921, 0xE922, 0xE923, 0xE943, 0xE946, 0xE97A, 0xE9B2, 0xE9CE, 0xEB4B, 0xEC59,
         0xF136, 0xF13C, 0xF13D, 0xF13E, 0xF13F, 0xE765, 0xE897, 0xEA18, 0xEA80, 0xED15, 0xE74B,
-        // Onboarding: LightningBolt, Globe, Lock.
+        // Contacts: People.
+        0xE716, // Onboarding: LightningBolt, Globe, Lock.
         0xE945, 0xE774, 0xE72E,
         // The composer's toolbar: Underline, Strikethrough, FontColor,
         // DecreaseIndent, IncreaseIndent, AlignLeft, AlignCenter,

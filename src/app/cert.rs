@@ -6,12 +6,14 @@
 //! security is edited.
 
 use super::*;
+use crate::RadioItem;
 use crate::mail::errors::{Class, Special, Step, StepError};
-use crate::mail::pin::{self, Kind, PinState};
+use crate::mail::pin::{self, Kind, PinState, Trust};
 
 /// A certificate pinned for one server of the open form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Pinned {
+    /// The saved bytes ([`pin::encode`]): what is trusted and its certificate.
     pub der: Vec<u8>,
     /// The server it was confirmed for; the pin is void for any other.
     pub server: Server,
@@ -35,6 +37,11 @@ struct Slot {
 pub(super) struct FormPins {
     account: i64,
     slots: [Slot; 2],
+}
+
+/// The certificate a saved pin keeps (the server's, or its CA's).
+fn shown(blob: &[u8]) -> &[u8] {
+    pin::usable(Some(blob)).map_or(blob, |p| p.der)
 }
 
 fn index(kind: Kind) -> usize {
@@ -71,9 +78,9 @@ impl FormPins {
             let slot = &mut pins.slots[index(kind)];
             match pin::state(blob.as_deref()) {
                 PinState::None => {}
-                PinState::Pinned(der) => {
+                PinState::Pinned(_) => {
                     slot.pinned = Some(Pinned {
-                        der: der.to_vec(),
+                        der: blob.clone().unwrap_or_default(),
                         server: server.clone(),
                     });
                 }
@@ -117,7 +124,7 @@ impl FormPins {
     pub fn forget(&mut self, kind: Kind) {
         let slot = &mut self.slots[index(kind)];
         if let Some(p) = slot.pinned.take() {
-            slot.before = Some((pin::fingerprint_sha256(&p.der), p.server));
+            slot.before = Some((pin::fingerprint_sha256(shown(&p.der)), p.server));
         }
         slot.damaged = None;
     }
@@ -139,10 +146,24 @@ impl FormPins {
     pub fn line(&self, kind: Kind) -> String {
         let slot = &self.slots[index(kind)];
         match (&slot.pinned, &slot.damaged) {
-            (Some(p), _) => t!(
-                invoke_cert_pinned,
-                pin::fingerprint_short(&p.der).as_str().into()
-            ),
+            (Some(p), _) => match pin::usable(Some(&p.der)).map(|p| p.trust) {
+                Some(Trust::Key) => t!(
+                    invoke_cert_pinned_key,
+                    pin::key_fingerprint_short(shown(&p.der)).as_str().into()
+                ),
+                Some(Trust::Ca) => t!(
+                    invoke_cert_pinned_ca,
+                    pin::describe(shown(&p.der))
+                        .map(|i| i.subject)
+                        .unwrap_or_default()
+                        .as_str()
+                        .into()
+                ),
+                _ => t!(
+                    invoke_cert_pinned,
+                    pin::fingerprint_short(shown(&p.der)).as_str().into()
+                ),
+            },
             (None, Some(s)) => t!(invoke_cert_damaged, s.host.as_str().into()),
             (None, None) => t!(invoke_cert_windows),
         }
@@ -155,6 +176,77 @@ pub(super) struct CertReview {
     kind: Kind,
     server: Server,
     der: Vec<u8>,
+    /// The certificate of the CA that issued `der`, when the server sent it.
+    issuer: Option<Vec<u8>>,
+}
+
+impl CertReview {
+    /// What the prompt offers to trust, in its order.
+    pub(super) fn choices(&self) -> Vec<Trust> {
+        let mut out = vec![Trust::Certificate, Trust::Key];
+        if self.issuer.is_some() {
+            out.push(Trust::Ca);
+        }
+        out
+    }
+
+    /// The prompt's choices as radio items.
+    pub(super) fn choice_items(&self) -> Vec<RadioItem> {
+        self.choices()
+            .into_iter()
+            .map(|trust| match trust {
+                Trust::Certificate => RadioItem {
+                    label: t!(invoke_trust_cert).into(),
+                    description: t!(invoke_trust_cert_note).into(),
+                },
+                Trust::Key => RadioItem {
+                    label: t!(invoke_trust_key).into(),
+                    description: t!(
+                        invoke_trust_key_note,
+                        pin::key_fingerprint_sha256(&self.der).as_str().into()
+                    )
+                    .into(),
+                },
+                Trust::Ca => RadioItem {
+                    label: t!(
+                        invoke_trust_ca,
+                        self.issuer
+                            .as_deref()
+                            .and_then(pin::describe)
+                            .map(|i| i.subject)
+                            .unwrap_or_default()
+                            .as_str()
+                            .into()
+                    )
+                    .into(),
+                    description: t!(
+                        invoke_trust_ca_note,
+                        self.issuer
+                            .as_deref()
+                            .map(pin::fingerprint_sha256)
+                            .unwrap_or_default()
+                            .as_str()
+                            .into()
+                    )
+                    .into(),
+                },
+            })
+            .collect()
+    }
+
+    /// The bytes to save for the choice `index` of [`Self::choices`].
+    fn blob(&self, index: i32) -> Vec<u8> {
+        let choices = self.choices();
+        let trust = usize::try_from(index)
+            .ok()
+            .and_then(|i| choices.get(i).copied())
+            .unwrap_or(Trust::Certificate);
+        match (trust, &self.issuer) {
+            (Trust::Ca, Some(ca)) => pin::encode(Trust::Ca, ca),
+            (Trust::Key, _) => pin::encode(Trust::Key, &self.der),
+            _ => self.der.clone(),
+        }
+    }
 }
 
 /// The server a typed host, port and security make, if they are valid.
@@ -416,6 +508,7 @@ impl App {
         self.show_cert_state(0);
         let probe = move || {
             let result = pin::probe_certificate(&server.host, server.port, server.security, kind)
+                .map(|p| (p.leaf, p.issuer))
                 .map_err(|e| unreadable(&server, &e));
             on_ui(Box::new(move |app| {
                 app.finish_review(seq, kind, server, result)
@@ -430,7 +523,7 @@ impl App {
         seq: u64,
         kind: Kind,
         server: Server,
-        result: Result<Vec<u8>, Unreadable>,
+        result: Result<(Vec<u8>, Option<Vec<u8>>), Unreadable>,
     ) {
         if seq != self.check_seq {
             return;
@@ -445,8 +538,13 @@ impl App {
             Err(Unreadable::Unread { address }) => {
                 ui.set_a_error(t!(invoke_cert_unreadable, address.into()).into())
             }
-            Ok(der) => {
-                self.cert_review = Some(CertReview { kind, server, der });
+            Ok((der, issuer)) => {
+                self.cert_review = Some(CertReview {
+                    kind,
+                    server,
+                    der,
+                    issuer,
+                });
                 self.ask(Question::TrustCert);
             }
         }
@@ -465,8 +563,8 @@ impl App {
         let Some(review) = self.cert_review.take() else {
             return;
         };
-        self.form_pins
-            .set(review.kind, review.der, review.server.clone());
+        let blob = review.blob(self.ui().get_q_choice());
+        self.form_pins.set(review.kind, blob, review.server.clone());
         let ui = self.ui();
         ui.set_a_test(ModelRc::default());
         ui.set_a_error(SharedString::new());
@@ -546,6 +644,7 @@ mod tests {
             smtp_user: String::new(),
             imap_pin,
             smtp_pin: None,
+            smtp_no_auth: false,
         }
     }
 
@@ -621,6 +720,7 @@ mod tests {
             kind: Kind::Imap,
             server: server("mail.example.org", 993, Security::Tls),
             der: der(),
+            issuer: None,
         };
         let prompt = trust_prompt(&review, pins.before(Kind::Imap));
         assert_eq!(
@@ -642,6 +742,7 @@ mod tests {
             kind: Kind::Imap,
             server: server("mail.example.org", 993, Security::Tls),
             der: der(),
+            issuer: None,
         };
         let p = trust_prompt(&review, None);
         assert_eq!(p.title, "Trust this certificate?");
@@ -666,6 +767,10 @@ mod tests {
         assert_eq!(p.code, group_fingerprint(&p.fingerprint));
         assert_eq!(p.code_label, "SHA-256 fingerprint");
         // An unreadable certificate still shows its fingerprint.
+        assert_eq!(review.choices(), vec![Trust::Certificate, Trust::Key]);
+        assert_eq!(review.blob(0), der());
+        assert_eq!(review.blob(1), pin::encode(Trust::Key, &der()));
+        assert_eq!(review.blob(7), der());
         let broken = CertReview {
             der: vec![0x30, 0x03, 1, 2, 3],
             ..review

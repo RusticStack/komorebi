@@ -1,11 +1,14 @@
 [package]
 name = "komorebi"
-version = "0.5.0"
+version = "0.7.0"
 edition = "2024"
 description = "A small, fast, privacy-respecting email client for Windows"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/RusticStack/komorebi"
 build = "build.rs"
+
+[workspace]
+members = ["crates/komorebi-ui"]
 
 [dependencies]
 anyhow = "1"
@@ -24,6 +27,9 @@ rfd = { version = "0.17", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled", "functions"] }
 # Pinned: the HTML renderer's parley/tiny-skia versions below are coupled to it.
 slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
+# The generated user interface (ui/*.slint), a crate of its own so the release
+# profile can size-optimize it.
+komorebi-ui = { path = "crates/komorebi-ui" }
 # HTML renderer (src/mail/render). Each is already linked into the app through
 # Slint; pinned to the exact locked version so no second copy appears.
 gif = "=0.14.2"
@@ -56,6 +62,10 @@ sha2 = { version = "0.11.1", default-features = false }
 # Windows Credential Manager, the store `keyring` v4 used: pinned, so saved
 # passwords keep their credential names. No `search` (it links `regex`).
 windows-native-keyring-store = { version = "=1.1.0", default-features = false }
+# SChannel, already linked through native-tls: the certificate review reads
+# the chain the server presented (src/mail/pin.rs), which native-tls hides.
+# Pinned to the copy native-tls links.
+schannel = "=0.1.29"
 # ShellExecuteW, to open a confirmed http(s) link in the default browser or
 # an opened attachment; CreateMutexW (Threading, Security) and FindWindowW
 # for one app per cache; GetClipboardData (DataExchange) and GlobalLock
@@ -72,7 +82,7 @@ windows-native-keyring-store = { version = "=1.1.0", default-features = false }
 # instance. The app-drawn title bar (src/chrome.rs): GetDpiForWindow,
 # GetSystemMetricsForDpi and AdjustWindowRectExForDpi (UI_HiDpi) and
 # TrackMouseEvent (UI_Input_KeyboardAndMouse).
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_Dns", "Win32_Security", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_Dns", "Win32_Security", "Win32_Security_Cryptography", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [features]
 # Honor KOMOREBI_PASSWORD (with KOMOREBI_DB) in release builds too.
@@ -81,7 +91,6 @@ dev-env-password = []
 [build-dependencies]
 # Compiles assets/komorebi.rc (icon, version information, manifest).
 embed-resource = "3"
-slint-build = "1.18"
 
 [dev-dependencies]
 base64 = "0.22"
@@ -115,6 +124,58 @@ opt-level = 3
 # queries; docs/PERF.md 4.2.
 [profile.release.package.libsqlite3-sys]
 opt-level = 3
+
+# The generated user interface: instantiation code run once per window, no
+# loop that matters (the pixel loops are Slint core and the software renderer,
+# at 3). Measured in docs/PERF.md 4.1.
+[profile.release.package.komorebi-ui]
+opt-level = "z"
+
+# Code that is cold or runs once per user action (the update check's
+# signature, SVG and XML parsing, the platform glue, the SMTP client) takes
+# "z"; it holds no loop that matters. Pixel, shaping, decoding and parsing
+# crates stay at "s" or 3 (docs/PERF.md 4.1).
+[profile.release.package.ed25519-compact]
+opt-level = "z"
+
+[profile.release.package.sha2]
+opt-level = "z"
+
+[profile.release.package.usvg]
+opt-level = "z"
+
+[profile.release.package.resvg]
+opt-level = "z"
+
+[profile.release.package.svgtypes]
+opt-level = "z"
+
+[profile.release.package.simplecss]
+opt-level = "z"
+
+[profile.release.package.roxmltree]
+opt-level = "z"
+
+[profile.release.package.winit]
+opt-level = "z"
+
+[profile.release.package.accesskit]
+opt-level = "z"
+
+[profile.release.package.accesskit_consumer]
+opt-level = "z"
+
+[profile.release.package.accesskit_windows]
+opt-level = "z"
+
+[profile.release.package.accesskit_winit]
+opt-level = "z"
+
+[profile.release.package.lettre]
+opt-level = "z"
+
+[profile.release.package.muda]
+opt-level = "z"
 
 # Slint's software renderer is unusably slow unoptimized; optimize
 # dependencies in debug builds and keep our own crate fast to rebuild.

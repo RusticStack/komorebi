@@ -3,7 +3,12 @@
 //! appearance settings. The desktop app (`src/main.rs`) and development
 //! tools (`examples/`) build on it.
 
+#[cfg(windows)]
+pub mod cachecrypt;
+pub mod cal;
 pub mod chrome;
+pub mod contacts;
+pub mod dav;
 pub mod db;
 pub mod diag;
 pub mod fetch;
@@ -15,6 +20,7 @@ pub mod notify;
 pub mod onboard;
 pub mod providers;
 pub mod role;
+pub mod rules;
 pub mod secrets;
 pub mod theme;
 pub mod tree;

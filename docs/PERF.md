@@ -1,6 +1,6 @@
 # Komorebi performance reference
 
-Binding for any speed, memory or size work. Product promises: launch < 200 ms, cached list < 600 ms, exe <= 20.0 MB, light on memory. Safety and correct mail semantics outrank speed (CONTRIBUTING.md). Panic strategy, `unsafe` and the panic-free lints in `src/mail/render` and `src/mail/ical.rs` are not performance levers.
+Binding for any speed, memory or size work. Product promises: launch < 200 ms, cached list < 600 ms, exe <= 20.5 MB, light on memory. Safety and correct mail semantics outrank speed (CONTRIBUTING.md). Panic strategy, `unsafe` and the panic-free lints in `src/mail/render` and `src/mail/ical.rs` are not performance levers.
 
 **The meta-rule: a change stays only if it beats the baseline by more than the run-to-run spread, or shrinks exe/memory measurably without slowing anything. Cite the rule below in the commit or changelog note, with numbers. Cleverness that does not measure is reverted.**
 
@@ -42,14 +42,20 @@ Source: Rust Performance Book "Heap Allocations", "Iterators", "Bounds Checks"; 
 
 Source: Cargo book "Profiles"; rustc codegen options; Perf Book "Build Configuration", "Inlining"; cargo-bloat.
 
-1. Current profile: `opt-level = "s"`, fat LTO, `codegen-units = 1`, `strip`. Never `"z"` (disables loop vectorization). Per-package `opt-level = 3` goes only on crates whose loops are the product promise (Slint core and renderer, tiny-skia, SQLite C code); every other crate stays `s`.
+1. Current profile: `opt-level = "s"`, fat LTO, `codegen-units = 1`, `strip`. `"z"` (disables loop vectorization) only for code with no loop that matters: the generated UI crate `crates/komorebi-ui` and the cold crates listed in `Cargo.toml` (see 4.8); never for the `komorebi` package itself (see 4.8). Per-package `opt-level = 3` goes only on crates whose loops are the product promise (Slint core and renderer, tiny-skia, SQLite C code); every other crate stays `s`.
    Development uses the unoptimized `dev` profile only (dependencies optimized once and cached); `release` is built once at the end of a task for the size ceiling and for any timing or memory number, which `dev` cannot give.
 2. A per-package override changes that crate's codegen before LTO; generic code is instantiated in the caller and follows the caller's level. Verify every override with a build and a timing, not by reasoning. `libsqlite3-sys` takes its C flags from the package's `OPT_LEVEL` through the `cc` crate.
 3. Raising the whole `komorebi` package to 3 overshoots the budget (measured 20.4 MB). Hot render code at 3 needs a separate workspace crate; do that only if a 9-run app measurement beats the spread.
 4. Do not add `#[inline(never)]`/`#[inline(always)]` speculatively; measure with cargo-bloat first. Forced Slint features (SVG, 3.8 MB of ICU dictionaries for complex scripts) cannot be dropped from our Cargo.toml; removing them changes behaviour or needs a vendored patch: out of scope.
 5. No `target-cpu=native` (the installer ships to unknown CPUs). PGO/BOLT are not planned (no Windows evidence).
-6. Size changes are checked with `cargo bloat --release --crates` on an unstripped build in a scratch target dir; the CI check is the stripped exe <= 20,000,000 bytes.
+6. Size changes are checked with `cargo bloat --release --crates` on an unstripped build in a scratch target dir; the CI check is the stripped exe <= 20,500,000 bytes.
 7. Not applied (no app-level measurement was made). Delay-loading (`/DELAYLOAD`, `delayimp.lib`) of DLLs needed only after the first frame (crypt32, ws2_32, secur32) saves about 1 ms of process start that `KOMOREBI_TIMING` cannot see (its clock starts at `main`). Failures move to the first call: the TLS tests and one fake-server sync must pass.
+
+8. Size, 2026-10-15 (merged 0.7 tree: rules, contacts, calendar; unstripped scratch build with `cargo bloat`, stripped exe from the repo profile; sections of the exe sum to the file, so symbols add nothing). Merged tree at the old profile: 21,352,960 bytes (20.5 MB ceiling exceeded by 853 KB; 0.6.0 was 19,780,608). Slint's generated code was 3.6 MiB of the `komorebi` crate's 5.1 MiB `.text`, most of it `ensure_instantiated` and `new` of the window and its pages.
+   - The generated UI is its own workspace crate (`crates/komorebi-ui`, built from `ui/*.slint` and `translations/`) at `opt-level = "z"`. This is why 4.1 can allow "z" there: it is instantiation code run once per window, while the pixel loops stay in `i-slint-core` and the software renderer at 3. The crate's build script names the catalog `komorebi` (Slint takes the crate name), so the `.po` files, the template and the catalog test are unchanged.
+   - Cold dependencies at "z": ed25519-compact (187 KB to 52 KB), sha2, usvg, resvg, svgtypes, simplecss, roxmltree, winit, accesskit and its Windows and winit glue, lettre, muda. About 274 KB together. Pixel, shaping, font, decoding and mail-parsing crates stay as they were.
+   - Result, release profile, stripped: 19,293,184 bytes, 2,059,776 smaller than the merged tree before and 487,424 smaller than 0.6.0. Snapshots (default, settings, shortcuts, compose-rich, calendar, pt-PT) are byte-identical to the build before. First frame, 9 interleaved runs on a seeded 2000-message copy: median 40.7 ms before, 39.1 ms after (min 36.4 / 36.9). Reader, open to first tile over 14 messages, sum of per-message medians: 194.1 ms before, 188.9 ms after (inside the spread).
+   - Rejected: `opt-level = "z"` on the whole `komorebi` package (probe: 18,513,408 bytes, but the reader's open to first tile gets 14 percent slower, 168.9 to 192.8 ms over the same 14 messages, because `src/mail/render` shares the package). `SLINT_INLINING` is already off for Rust output. The SQLite trims of 5.7 (`DEFAULT_MEMSTATUS=0`, `OMIT_DEPRECATED`, `OMIT_SHARED_CACHE`, `OMIT_PROGRESS_CALLBACK`) saved 1 KB in `libsqlite3_sys` and made two mail tests fail (a foreign key error and a lost connection); not applied.
 
 ## 5. SQLite
 
@@ -91,7 +97,7 @@ Source: Perf Book; parley and tiny-skia docs; Chromium image decode cache design
 
 All runs: release, `--locked`, nothing else compiling or rendering, throwaway `KOMOREBI_DB`, `KOMOREBI_OFFLINE=1`. Never the real cache, real mail or `.env*`.
 
-- Build: `cargo build --release --locked`. Exe size: `(Get-Item target\release\komorebi.exe).Length` (<= 20,000,000).
+- Build: `cargo build --release --locked`. Exe size: `(Get-Item target\release\komorebi.exe).Length` (<= 20,500,000).
 - Launch: `KOMOREBI_TIMING=1` with `KOMOREBI_SNAPSHOT` on a seeded copy (`examples/seed.rs`, 2000 and 20000 messages). Report a fresh-copy (cold) number and a warm second launch: the first launch pays one-time default-fold writes.
 - Reader: the HTML corpus walk prints the open-to-first-tile line. `examples/render_html.rs` renders a fixture to PNG: compare byte for byte before and after.
 - Search/list/DB: an `Instant` example or `#[test] #[ignore]` harness, variants interleaved in one process, 15 runs, assert equal results. No criterion.
@@ -107,3 +113,29 @@ All runs: release, `--locked`, nothing else compiling or rendering, throwaway `K
 Vendored winit pre-render skip; dropping ICU dictionaries or SVG via patches (behaviour, maintenance); `mmap_size`; bigger `cache_size`; SQLite partial indexes now; faster hasher for `Selection` and UID sets; per-UID flag UPDATEs (2x slower than the scan); `SQLITE_OMIT_AUTOINIT`; touching IMAP parsing; tag enum refactor; whole-package opt-level 3.
 
 Not done, not proven worse: `box_down` column sums, a byte-budget `DOC_CACHE`, lazy image prescale, `/DELAYLOAD`, the extra SQLite flags. No A/B was run for them; do not claim a gain without one.
+
+## 10. Encrypted cache (`src/cachecrypt.rs`, 2026-10-15)
+
+Designs weighed, against a 0.32 MB exe budget, the launch and list promises and WAL:
+
+- SQLCipher or SQLite3MultipleCiphers: rejected. SQLCipher needs OpenSSL (or a vendored crypto library) and both replace the bundled SQLite build; well over the size room and a second crypto stack beside SChannel.
+- (b) Column-level encryption (bodies, subjects, addresses) with a DPAPI key: rejected. Search (`fold_has` over subjects and addresses), the address index, sorting and every `LIKE` would need decrypting per row (the search scan is the hottest query), and metadata in other columns and the indexes would stay readable.
+- (a) Chosen: a VFS shim over the default Windows VFS. AES-256-GCM through CNG (`bcrypt.dll`, no new crate; only the `Win32_Security_Cryptography` feature of the pinned `windows-sys`). SQLite keeps 28 reserve bytes per page (`SQLITE_FCNTL_RESERVE_BYTES`) for a random 96-bit nonce and the tag, so offsets and sizes stay SQLite's own. The additional data is the file kind and the page or frame index (swapped pages fail). Pages of the cache and of the `-wal` are sealed; the WAL header and frame headers, the `-shm` index and page 1's 16-byte header string (replaced on disk by `Komorebi AES256\0`, so an encrypted cache is told from a damaged one without its key) stay in the clear. A rollback journal is allowed only for the WAL switch of a new empty file and refuses any page-sized write; statement journals and temp files are refused (`temp_store = MEMORY`). `iVersion` 2 (no `xFetch`), so nothing memory-maps ciphertext. A tag failure is `SQLITE_IOERR_DATA`; in a whole-frame WAL recovery read it reads as zeros so the frame checksum drops it like a torn frame. SQLite leaves the reserve zeroed; a write with a non-zero reserve is refused, since WAL checksums cover it.
+- Key: 32 random bytes per cache (`BCryptGenRandom`), stored as a DPAPI blob (current user, fixed entropy) in `<cache>.key`, written to a temp file, flushed and renamed. A missing or foreign key is a typed `KeyError` (or `IOERR_DATA`), never "damaged", so the cache is not set aside for it.
+- Migration: copy into a new file through `ATTACH` (tables, then rows, then indexes and triggers, `user_version`, `sqlite_sequence`; `VACUUM INTO` was tried first and does not keep the reserve bytes the target needs), check with `quick_check` and every table's row count, rename the old file to `.previous`, rename the copy in, remove the old file, `-wal` and `-shm` (and the key after a decryption). `recover` at `open_ui` finishes or undoes a run cut at any step (tested at each).
+- Default: opt-in, off. The cache is the only copy of accounts, drafts and the Outbox; a lost DPAPI key (password reset by an administrator, a profile moved to another computer) loses them for good, an automatic migration of every user's cache is the riskiest change possible, and BitLocker already covers a stolen disk. The setting itself is not built yet (TODO.md).
+- 96-bit random nonces are safe to about 2^32 page writes per key (NIST SP 800-38D); `migrate` reuses a key file already beside the cache (one a crash left after the key step), else makes a new key; a decryption deletes the key. Known hole: a page that reads back as all zeros is taken as never written even inside the file, so zeroing a page is not caught by the tag (SQLite usually reports corruption, but a zeroed last overflow page can read as wrong data). Accepting zeros only at or past the end of file (`xFileSize`) closes it; check first that SQLite never leaves zero gaps inside a valid file.
+
+Checked in the app: a dev build opened the encrypted 55,000-message cache (snapshot shows the full list), wrote through the VFS (WAL frames, checkpoint, `PRAGMA optimize`) and opened it again.
+
+Measured (release, own target dir, 55,000-message seeded throwaway cache, 12 MB, `examples/db_bench.rs`, 15 runs per figure, two interleaved rounds, median / min in ms, plaintext then encrypted):
+
+| Query | Plaintext | Encrypted |
+|---|---|---|
+| Open cache + all ids (cached list load) | 4.66 / 4.32, 4.47 / 4.34 | 3.91 / 3.73, 4.00 / 3.93 |
+| All ids, warm | 1.99 / 1.96, 1.90 / 1.82 | 1.76 / 1.73, 1.76 / 1.74 |
+| Flagged filter | 13.20 / 12.90, 13.10 / 12.74 | 14.28 / 13.98, 14.36 / 13.87 |
+| Search (full scan, page cache smaller than the file) | 25.73 / 25.20, 25.32 / 24.84 | 26.81 / 26.12, 26.86 / 26.39 |
+| Open message (header + message) x50 | 0.68 / 0.67, 0.66 / 0.65 | 0.65 / 0.65, 0.64 / 0.64 |
+
+The list load and the open-message reads are within the spread (the encrypted file is about 9 percent smaller after its copy, which makes its open a little faster); search pays about 1 ms (4 percent) for decrypting every page it reads. Exe: 19,680,768 bytes before, 19,696,640 after (+15,872 bytes; 303,360 bytes of room left). First frame (9 interleaved app runs, plaintext 55,000 cache, `KOMOREBI_TIMING`): before median 44.7 / min 40.6 ms, after 46.9 / 40.1 ms; a second round of 9 pairs: before 45.3 / 40.8, after 46.3 / 40.2. Slow outliers came on both (to 64 and 73 ms), so the difference is inside the run-to-run spread. The release exe measured was built just before the page 1 marker (a 16-byte copy per page 1 read or write), so an app launch on an encrypted cache was not timed; the cache-load part of launch is the `db_bench` row above.

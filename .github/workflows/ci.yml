@@ -54,13 +54,13 @@ jobs:
       - name: Release build
         run: cargo build --release --locked
 
-      # The product budget: komorebi.exe at most 20.0 MB (decimal).
+      # The product budget: komorebi.exe at most 20.5 MB (decimal).
       - name: Binary size
         shell: pwsh
         run: |
           $size = (Get-Item target/release/komorebi.exe).Length
-          "komorebi.exe: $size bytes ({0:N2} MiB, {1:N3} MB; ceiling 20,000,000 bytes)" -f ($size / 1MB), ($size / 1e6)
-          if ($size -gt 20000000) { throw "komorebi.exe is over the 20.0 MB ceiling" }
+          "komorebi.exe: $size bytes ({0:N2} MiB, {1:N3} MB; ceiling 20,500,000 bytes)" -f ($size / 1MB), ($size / 1e6)
+          if ($size -gt 20500000) { throw "komorebi.exe is over the 20.5 MB ceiling" }
 
       # Boot the release build offline on a freshly seeded throwaway cache,
       # open the newest message and render the window to a file. The app

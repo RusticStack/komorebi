@@ -160,6 +160,47 @@ pub(super) const CALLS: &[(&str, Call)] = &[
     ("undo-too-late", |t| t.invoke_undo_too_late()),
     ("reply-in-outbox", |t| t.invoke_reply_in_outbox()),
     ("answer-kept", |t| t.invoke_answer_kept()),
+    ("invite-in-calendar", |t| t.invoke_invite_in_calendar()),
+    ("cal-range", |t| {
+        t.invoke_cal_range("t0".into(), "t1".into())
+    }),
+    ("cal-today", |t| t.invoke_cal_today("t0".into())),
+    ("cal-tomorrow", |t| t.invoke_cal_tomorrow("t0".into())),
+    ("cal-all-day", |t| t.invoke_cal_all_day()),
+    ("cal-now", |t| t.invoke_cal_now()),
+    ("cal-in-min", |t| t.invoke_cal_in_min(3)),
+    ("cal-remind-at", |t| t.invoke_cal_remind_at("t0".into())),
+    ("cal-remind-at-place", |t| {
+        t.invoke_cal_remind_at_place("t0".into(), "t1".into())
+    }),
+    ("cal-dav-offline", |t| t.invoke_cal_dav_offline()),
+    ("cal-dav-auth", |t| t.invoke_cal_dav_auth()),
+    ("cal-dav-not-found", |t| t.invoke_cal_dav_not_found()),
+    ("cal-dav-tls", |t| t.invoke_cal_dav_tls()),
+    ("cal-dav-failed", |t| t.invoke_cal_dav_failed("t0".into())),
+    ("cal-dav-none-found", |t| t.invoke_cal_dav_none_found()),
+    ("cal-dav-count", |t| t.invoke_cal_dav_count(3)),
+    ("cal-dav-check-host", |t| {
+        t.invoke_cal_dav_check_host("t0".into())
+    }),
+    ("cal-dav-working", |t| t.invoke_cal_dav_working()),
+    ("cal-local-name", |t| t.invoke_cal_local_name()),
+    ("cal-named", |t| {
+        t.invoke_cal_named("t0".into(), "t1".into())
+    }),
+    ("cal-rep-none", |t| t.invoke_cal_rep_none()),
+    ("cal-rep-daily", |t| t.invoke_cal_rep_daily()),
+    ("cal-rep-weekly", |t| t.invoke_cal_rep_weekly("t0".into())),
+    ("cal-rep-monthly", |t| t.invoke_cal_rep_monthly(3)),
+    ("cal-rep-nth", |t| t.invoke_cal_rep_nth(3, "t0".into())),
+    ("cal-rep-yearly", |t| t.invoke_cal_rep_yearly("t0".into())),
+    ("cal-date-hint", |t| t.invoke_cal_date_hint(true)),
+    ("cal-ed-bad-date", |t| t.invoke_cal_ed_bad_date("t0".into())),
+    ("cal-ed-bad-time", |t| t.invoke_cal_ed_bad_time()),
+    ("cal-ed-end-before", |t| t.invoke_cal_ed_end_before()),
+    ("cal-ed-gap", |t| t.invoke_cal_ed_gap()),
+    ("cal-ed-read-only", |t| t.invoke_cal_ed_read_only()),
+    ("cal-ed-failed", |t| t.invoke_cal_ed_failed("t0".into())),
     ("action-undo", |t| t.invoke_action_undo()),
     ("action-retry", |t| t.invoke_action_retry()),
     ("action-review-certificate", |t| {
@@ -402,6 +443,8 @@ pub(super) const CALLS: &[(&str, Call)] = &[
         t.invoke_attach_failed("t0".into(), "t1".into())
     }),
     ("cert-pinned", |t| t.invoke_cert_pinned("t0".into())),
+    ("cert-pinned-key", |t| t.invoke_cert_pinned_key("t0".into())),
+    ("cert-pinned-ca", |t| t.invoke_cert_pinned_ca("t0".into())),
     ("cert-damaged", |t| t.invoke_cert_damaged("t0".into())),
     ("cert-windows", |t| t.invoke_cert_windows()),
     ("cert-unreadable", |t| t.invoke_cert_unreadable("t0".into())),
@@ -474,17 +517,80 @@ pub(super) const CALLS: &[(&str, Call)] = &[
         t.invoke_q_sig_delete_title("t0".into())
     }),
     ("q-sig-delete-text", |t| t.invoke_q_sig_delete_text()),
+    ("rule-cond", |t| t.invoke_rule_cond(0, 0, "t0".into())),
+    ("rule-any", |t| t.invoke_rule_any()),
+    ("rule-move", |t| t.invoke_rule_move("t0".into())),
+    ("rule-delete", |t| t.invoke_rule_delete()),
+    ("rule-read", |t| t.invoke_rule_read()),
+    ("rule-flag", |t| t.invoke_rule_flag()),
+    ("rule-stop", |t| t.invoke_rule_stop()),
+    ("rule-new-name", |t| t.invoke_rule_new_name()),
+    ("rule-err-name", |t| t.invoke_rule_err_name()),
+    ("rule-err-value", |t| t.invoke_rule_err_value()),
+    ("rule-err-action", |t| t.invoke_rule_err_action()),
+    ("rule-err-conds", |t| t.invoke_rule_err_conds()),
+    ("rule-log-title", |t| {
+        t.invoke_rule_log_title("t0".into(), "t1".into())
+    }),
+    ("rule-log-move", |t| {
+        t.invoke_rule_log_move("t0".into(), "t1".into(), "t2".into())
+    }),
+    ("rule-log-delete", |t| {
+        t.invoke_rule_log_delete("t0".into(), "t1".into())
+    }),
+    ("rule-log-read", |t| {
+        t.invoke_rule_log_read("t0".into(), "t1".into())
+    }),
+    ("rule-log-flag", |t| {
+        t.invoke_rule_log_flag("t0".into(), "t1".into())
+    }),
+    ("rule-log-failed", |t| {
+        t.invoke_rule_log_failed("t0".into(), "t1".into())
+    }),
+    ("q-rule-delete-title", |t| {
+        t.invoke_q_rule_delete_title("t0".into())
+    }),
+    ("q-rule-delete-text", |t| t.invoke_q_rule_delete_text()),
+    ("rule-sieve-copied", |t| t.invoke_rule_sieve_copied()),
     ("q-sig-delete-users", |t| t.invoke_q_sig_delete_users(3)),
     ("sig-name-empty", |t| t.invoke_sig_name_empty()),
     ("sig-name-taken", |t| t.invoke_sig_name_taken()),
     ("sig-logo-refused", |t| t.invoke_sig_logo_refused()),
     ("sig-none", |t| t.invoke_sig_none()),
+    ("contacts-all", |t| t.invoke_contacts_all()),
+    ("contact-label-work", |t| t.invoke_contact_label_work()),
+    ("contact-label-home", |t| t.invoke_contact_label_home()),
+    ("contact-label-mobile", |t| t.invoke_contact_label_mobile()),
+    ("contact-title-at", |t| {
+        t.invoke_contact_title_at("t0".into(), "t1".into())
+    }),
+    ("contact-empty", |t| t.invoke_contact_empty()),
+    ("contact-bad-email", |t| {
+        t.invoke_contact_bad_email("t0".into())
+    }),
+    ("contact-copied", |t| t.invoke_contact_copied()),
+    ("dav-offline", |t| t.invoke_dav_offline()),
+    ("dav-auth", |t| t.invoke_dav_auth()),
+    ("dav-redirect", |t| t.invoke_dav_redirect()),
+    ("dav-not-found", |t| t.invoke_dav_not_found()),
+    ("dav-tls", |t| t.invoke_dav_tls()),
+    ("dav-failed", |t| t.invoke_dav_failed("t0".into())),
+    ("dav-none-found", |t| t.invoke_dav_none_found()),
+    ("dav-count", |t| t.invoke_dav_count(3)),
+    ("dav-synced-at", |t| t.invoke_dav_synced_at("t0".into())),
+    ("dav-working", |t| t.invoke_dav_working()),
     ("dlg-pick-logo", |t| t.invoke_dlg_pick_logo()),
     ("q-trust-title", |t| t.invoke_q_trust_title()),
     ("q-trust-text", |t| {
         t.invoke_q_trust_text("t0".into(), "t1".into())
     }),
     ("q-trust-ok", |t| t.invoke_q_trust_ok()),
+    ("trust-cert", |t| t.invoke_trust_cert()),
+    ("trust-cert-note", |t| t.invoke_trust_cert_note()),
+    ("trust-key", |t| t.invoke_trust_key()),
+    ("trust-key-note", |t| t.invoke_trust_key_note("t0".into())),
+    ("trust-ca", |t| t.invoke_trust_ca("t0".into())),
+    ("trust-ca-note", |t| t.invoke_trust_ca_note("t0".into())),
     ("q-trust-note", |t| t.invoke_q_trust_note()),
     ("dlg-save-attachment", |t| t.invoke_dlg_save_attachment()),
     ("dlg-save-invitation", |t| t.invoke_dlg_save_invitation()),

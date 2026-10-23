@@ -22,7 +22,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 14;
+pub mod contacts;
+mod rule_store;
+pub use rule_store::{LogAction, LogEntry, LogOutcome};
+
+const SCHEMA_VERSION: i64 = 18;
 
 /// How long a sync worker waits for another connection's write lock.
 const WORKER_BUSY: Duration = Duration::from_secs(10);
@@ -415,6 +419,18 @@ ALTER TABLE draft_attachments ADD COLUMN cid TEXT;
 
 /// A stored body's row: preview, attachment, `has_body`, and the sender's
 /// importance where the row has none yet (a header-fetched one stays).
+/// v17: the calendar's tables and its local calendar (`cal::store`).
+const CALENDAR: &str = crate::cal::store::SCHEMA;
+
+/// v18: an account whose SMTP server needs no sign-in (off for every
+/// account until the user sets it). `accounts.smtp_no_auth` 1: the SMTP
+/// server takes mail without a sign-in (a local relay; TLS is still
+/// required); 0: sign in. A fresh install runs it too, so its `accounts`
+/// is the same as an upgraded one's.
+const MIGRATE_V17_TO_V18: &str = r#"
+ALTER TABLE accounts ADD COLUMN smtp_no_auth INTEGER NOT NULL DEFAULT 0;
+"#;
+
 const SET_BODY_SQL: &str = "UPDATE messages SET preview = ?2, has_attach = ?3, has_body = 1,
      priority = CASE WHEN priority = 0 THEN ?4 ELSE priority END WHERE id = ?1";
 
@@ -464,6 +480,20 @@ impl std::fmt::Display for NewerCache {
 }
 
 impl std::error::Error for NewerCache {}
+
+/// Open the cache file, through the encrypting VFS when it is an
+/// encrypted cache (`src/cachecrypt.rs`). A missing or locked key is a
+/// typed [`crate::cachecrypt::KeyError`], never "damaged", so the cache is
+/// not set aside for it.
+fn connect(path: &Path, flags: OpenFlags) -> Result<Connection> {
+    #[cfg(windows)]
+    if crate::cachecrypt::is_encrypted(path) {
+        let key = crate::cachecrypt::load_key(path)?;
+        return crate::cachecrypt::open(path, &key, flags)
+            .with_context(|| format!("opening {}", path.display()));
+    }
+    Connection::open_with_flags(path, flags).with_context(|| format!("opening {}", path.display()))
+}
 
 /// SQLite says the file is damaged: corrupt, or not a database.
 fn damaged(e: &anyhow::Error) -> bool {
@@ -535,6 +565,8 @@ pub struct Account {
     /// DER of the pinned certificate of the IMAP / SMTP server.
     pub imap_pin: Option<Vec<u8>>,
     pub smtp_pin: Option<Vec<u8>>,
+    /// The SMTP server takes mail without a sign-in (TLS still required).
+    pub smtp_no_auth: bool,
 }
 
 impl Account {
@@ -564,6 +596,8 @@ pub struct NewAccount {
     pub save_sent: bool,
     pub imap_user: String,
     pub smtp_user: String,
+    /// The SMTP server takes mail without a sign-in.
+    pub smtp_no_auth: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1393,7 +1427,7 @@ impl Db {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
-        let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+        let conn = connect(path, OpenFlags::default())?;
         let mut db = Self::init(conn)?;
         db.drafts = Some(drafts_dir(path));
         Ok(db)
@@ -1408,6 +1442,14 @@ impl Db {
     /// with it (they live in the cache). A cache made by a newer Komorebi
     /// is refused ([`NewerCache`]) and left alone.
     pub fn open_ui(path: &Path) -> Result<(Self, Option<PathBuf>)> {
+        // Finish or undo an encryption change a crash interrupted.
+        #[cfg(windows)]
+        crate::cachecrypt::recover(path)?;
+        // Encrypt or decrypt as Settings asked, before any worker opens it.
+        #[cfg(windows)]
+        if let Err(e) = crate::cachecrypt::apply_intent(path) {
+            eprintln!("cache encryption change failed: {e:#}");
+        }
         let opened = Self::open(path).and_then(|db| {
             // Reads the schema page, which a damaged file often fails.
             db.conn
@@ -1430,8 +1472,7 @@ impl Db {
     /// cache, so they refuse a file at any other schema version.
     pub fn open_worker(path: &Path) -> Result<Self> {
         let flags = OpenFlags::default() - OpenFlags::SQLITE_OPEN_CREATE;
-        let conn = Connection::open_with_flags(path, flags)
-            .with_context(|| format!("opening {}", path.display()))?;
+        let conn = connect(path, flags)?;
         configure(&conn)?;
         let version = user_version(&conn)?;
         if version != SCHEMA_VERSION {
@@ -1442,6 +1483,12 @@ impl Db {
             conn,
             drafts: Some(drafts_dir(path)),
         })
+    }
+
+    /// The connection, for the queries kept in other modules
+    /// (`cal::store`).
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     #[cfg(test)]
@@ -1457,7 +1504,8 @@ impl Db {
         }
         if version == 0 {
             conn.execute_batch(&format!(
-                "BEGIN; {SCHEMA} {ADDRESSES} {RSVP} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+                "BEGIN; {SCHEMA} {ADDRESSES} {RSVP} {} {RULES} {CALENDAR} {MIGRATE_V17_TO_V18} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;",
+                contacts::CONTACTS
             ))
             .context("creating cache schema")?;
             return Ok(Self { conn, drafts: None });
@@ -1472,6 +1520,7 @@ impl Db {
             version = 2;
         }
         let v8 = format!("{MIGRATE_V7_TO_V8} {ADDRESSES}");
+        use rule_store::RULES;
         for (from, step) in [
             (2, MIGRATE_V2_TO_V3),
             (3, MIGRATE_V3_TO_V4),
@@ -1485,6 +1534,12 @@ impl Db {
             (11, MIGRATE_V11_TO_V12),
             (12, MIGRATE_V12_TO_V13),
             (13, MIGRATE_V13_TO_V14),
+            // Contacts, rules and calendars are user data: a clean-slate
+            // step must keep them.
+            (14, contacts::CONTACTS),
+            (15, RULES),
+            (16, CALENDAR),
+            (17, MIGRATE_V17_TO_V18),
         ] {
             if version != from {
                 continue;
@@ -1529,7 +1584,7 @@ impl Db {
     }
 
     /// Start a transaction that takes the write lock up front.
-    fn write(&self) -> rusqlite::Result<Transaction<'_>> {
+    pub(crate) fn write(&self) -> rusqlite::Result<Transaction<'_>> {
         Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)
     }
 
@@ -1539,7 +1594,7 @@ impl Db {
         let mut stmt = self.conn.prepare_cached(
             "SELECT id, email, name, imap_host, imap_port, imap_tls, smtp_host, smtp_port,
                     smtp_tls, save_sent, signature, enabled, imap_user, smtp_user,
-                    imap_pin, smtp_pin
+                    imap_pin, smtp_pin, smtp_no_auth
              FROM accounts ORDER BY position, id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -1564,6 +1619,7 @@ impl Db {
                 smtp_user: r.get(13)?,
                 imap_pin: r.get(14)?,
                 smtp_pin: r.get(15)?,
+                smtp_no_auth: r.get(16)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1575,7 +1631,8 @@ impl Db {
         let n = self.conn.execute(
             "UPDATE accounts SET name = ?2, imap_host = ?3, imap_port = ?4, imap_tls = ?5,
                 smtp_host = ?6, smtp_port = ?7, smtp_tls = ?8, save_sent = ?9, signature = ?10,
-                imap_user = ?11, smtp_user = ?12, imap_pin = ?13, smtp_pin = ?14
+                imap_user = ?11, smtp_user = ?12, imap_pin = ?13, smtp_pin = ?14,
+                smtp_no_auth = ?15
              WHERE id = ?1",
             params![
                 a.id,
@@ -1592,6 +1649,7 @@ impl Db {
                 a.smtp_user,
                 a.imap_pin,
                 a.smtp_pin,
+                a.smtp_no_auth,
             ],
         )?;
         Ok(n == 1)
@@ -1601,8 +1659,9 @@ impl Db {
         self.conn
             .execute(
                 "INSERT INTO accounts (email, name, imap_host, imap_port, imap_tls,
-                    smtp_host, smtp_port, smtp_tls, save_sent, imap_user, smtp_user, position)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    smtp_host, smtp_port, smtp_tls, save_sent, imap_user, smtp_user,
+                    smtp_no_auth, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                     (SELECT COALESCE(MAX(position), 0) + 1 FROM accounts))",
                 params![
                     a.email,
@@ -1616,6 +1675,7 @@ impl Db {
                     a.save_sent,
                     a.imap_user,
                     a.smtp_user,
+                    a.smtp_no_auth,
                 ],
             )
             .context("saving account (is it already added?)")?;
@@ -3964,6 +4024,7 @@ mod tests {
             save_sent: true,
             imap_user: String::new(),
             smtp_user: String::new(),
+            smtp_no_auth: false,
         })
         .unwrap()
     }
@@ -4056,6 +4117,7 @@ mod tests {
             save_sent: a.save_sent,
             imap_user: a.imap_user.clone(),
             smtp_user: a.smtp_user.clone(),
+            smtp_no_auth: false,
         }
     }
 
@@ -4492,7 +4554,16 @@ mod tests {
     const DROP_V7: &str = "ALTER TABLE accounts DROP COLUMN signature; DROP TABLE settings;";
     /// Undo v8 (after v9).
     const DROP_V8: &str = "DROP TABLE addresses; ALTER TABLE accounts DROP COLUMN addr_backfill;";
-    /// Undo v14 (run first: it is the newest).
+    /// Undo v18, SMTP without sign-in (run first: it is the newest).
+    const DROP_V18: &str = "ALTER TABLE accounts DROP COLUMN smtp_no_auth;";
+    /// Undo v17, the calendar (after v18). Its `dav_accounts` belongs to
+    /// v15, the contacts, which is idempotent and may stay.
+    const DROP_V17: &str = "DROP TABLE alarms_done; DROP TABLE cal_queue; DROP TABLE occurrences;
+        DROP TABLE events; DROP TABLE calendars;";
+    /// Undo v16, the rules (after v17).
+    const DROP_V16: &str = "DROP TABLE rule_log; DROP TABLE rule_conditions; DROP TABLE rules;
+        ALTER TABLE folders DROP COLUMN rules_uidvalidity; ALTER TABLE folders DROP COLUMN rules_uidnext;";
+    /// Undo v14 (after v16).
     const DROP_V14: &str = "ALTER TABLE accounts DROP COLUMN sig_new;
         ALTER TABLE accounts DROP COLUMN sig_reply; DROP TABLE signatures;
         ALTER TABLE drafts DROP COLUMN body_rich; ALTER TABLE drafts DROP COLUMN signature_id;
@@ -4516,7 +4587,7 @@ mod tests {
     /// Turn a current database back into v2 (no fingerprint columns).
     fn downgrade_to_v2(conn: &Connection) {
         conn.execute_batch(&format!(
-            "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
+            "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7}
              ALTER TABLE folders DROP COLUMN sync_uidnext;
              ALTER TABLE folders DROP COLUMN sync_messages;
              ALTER TABLE folders DROP COLUMN sync_hms;
@@ -4630,7 +4701,7 @@ mod tests {
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} DROP TABLE remote_allow; {DROP_V5} PRAGMA user_version = 3;"
             ))
             .unwrap();
 
@@ -4851,11 +4922,35 @@ mod tests {
     }
 
     #[test]
+    fn a_v17_cache_gets_smtp_sign_in_on_for_every_account() {
+        let old = Db::in_memory().unwrap();
+        old.conn
+            .execute_batch(&format!("{DROP_V18} PRAGMA user_version = 17;"))
+            .unwrap();
+        old.conn
+            .execute(
+                "INSERT INTO accounts (email, imap_host, imap_port, imap_tls, smtp_host,
+                    smtp_port, smtp_tls) VALUES ('a@x.org', 'h', 993, 1, 'h', 465, 1)",
+                [],
+            )
+            .unwrap();
+        let migrated = Db::init(old.conn).unwrap();
+        let accounts = migrated.accounts().unwrap();
+        assert!(!accounts[0].smtp_no_auth);
+        // Saved and read back.
+        let mut a = accounts[0].clone();
+        a.smtp_no_auth = true;
+        migrated.update_account(&a).unwrap();
+        assert!(migrated.accounts().unwrap()[0].smtp_no_auth);
+        assert_eq!(shape(&migrated.conn), shape(&Db::in_memory().unwrap().conn));
+    }
+
+    #[test]
     fn a_v11_cache_migrates_to_the_new_shape() {
         let old = Db::in_memory().unwrap();
         old.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} PRAGMA user_version = 11;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} PRAGMA user_version = 11;"
             ))
             .unwrap();
         let migrated = Db::init(old.conn).unwrap();
@@ -4993,7 +5088,7 @@ mod tests {
         db.allow_remote("news@shop.example").unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} {DROP_V5} PRAGMA user_version = 4;"
             ))
             .unwrap();
 
@@ -5211,7 +5306,7 @@ mod tests {
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} ALTER TABLE drafts DROP COLUMN raw; ALTER TABLE drafts DROP COLUMN attempts;
                  ALTER TABLE drafts DROP COLUMN next_try; ALTER TABLE drafts DROP COLUMN last_error;
                  PRAGMA user_version = 5;"
             ))
@@ -5238,7 +5333,7 @@ mod tests {
         let acc = account(&db);
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} {DROP_V7} PRAGMA user_version = 6;"
             ))
             .unwrap();
 
@@ -5553,7 +5648,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} PRAGMA user_version = 8;"
             ))
             .unwrap();
 
@@ -5583,7 +5678,7 @@ example.com"
         let id = db.insert_draft(&draft(acc)).unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} PRAGMA user_version = 9;"
             ))
             .unwrap();
 
@@ -5602,7 +5697,7 @@ example.com"
         db.set_setting("undo_send_secs", "10").unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} PRAGMA user_version = 10;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} PRAGMA user_version = 10;"
             ))
             .unwrap();
 
@@ -5622,7 +5717,7 @@ example.com"
         let acc = account(&db);
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} PRAGMA user_version = 11;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} PRAGMA user_version = 11;"
             ))
             .unwrap();
 
@@ -5674,6 +5769,7 @@ example.com"
             save_sent: true,
             imap_user: String::new(),
             smtp_user: String::new(),
+            smtp_no_auth: false,
         })
         .unwrap()
     }
@@ -5700,7 +5796,7 @@ example.com"
         let upper = account_named(&db, "Lines@Example.com");
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14}
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14}
                  UPDATE accounts SET signature = 'Ana' || char(10) || char(10) || 'Ana Ltd' WHERE id = {lines};
                  UPDATE accounts SET signature = '**Ana**' || char(10) || '- one' || char(10) || '[site](https://example.org)' WHERE id = {marked};
                  UPDATE accounts SET signature = '  ' || char(10) WHERE id = {blank};
@@ -5776,10 +5872,43 @@ example.com"
         let db = Db::in_memory().unwrap();
         account(&db);
         db.conn
-            .execute_batch(&format!("{DROP_V14} PRAGMA user_version = 13;"))
+            .execute_batch(&format!(
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} PRAGMA user_version = 13;"
+            ))
             .unwrap();
         let db = Db::init(db.conn).unwrap();
         assert!(db.signatures().unwrap().is_empty());
+    }
+
+    #[test]
+    fn migrating_v16_adds_the_calendar_and_keeps_data() {
+        let db = Db::in_memory().unwrap();
+        let id = account(&db);
+        let fresh: Vec<String> = db
+            .conn
+            .prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        db.conn
+            .execute_batch(&format!("{DROP_V18} {DROP_V17} PRAGMA user_version = 16;"))
+            .unwrap();
+        let db = Db::init(db.conn).unwrap();
+        assert_eq!(db.accounts().unwrap()[0].id, id);
+        let cals = db.calendars().unwrap();
+        assert_eq!(cals.len(), 1);
+        assert!(cals[0].local());
+        let migrated: Vec<String> = db
+            .conn
+            .prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(fresh, migrated);
     }
 
     #[test]
@@ -6046,7 +6175,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13}
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13}
                  INSERT INTO messages (id, account_id, folder_id, uid, subject)
                      VALUES (1, {acc}, {f}, 10, 'Old');
                  INSERT INTO drafts (id, account_id, message_id, created, updated)
@@ -6105,7 +6234,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13}
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13}
                  INSERT INTO messages (id, account_id, folder_id, uid, subject, has_body)
                      VALUES (1, {acc}, {f}, 10, 'Old', 1);
                  INSERT INTO bodies (message_id, raw) VALUES (1, x'41');
@@ -6257,6 +6386,7 @@ example.com"
                     security: Security::Tls,
                 },
                 save_sent: true,
+                smtp_no_auth: false,
             })
             .unwrap()
         };
@@ -6526,7 +6656,7 @@ example.com"
             .unwrap();
         db.conn
             .execute_batch(&format!(
-                "{DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
+                "{DROP_V18} {DROP_V17} {DROP_V16} {DROP_V14} {DROP_V13} {DROP_V12} {DROP_V11} {DROP_V10} {DROP_V9} {DROP_V8} PRAGMA user_version = 7;"
             ))
             .unwrap();
 

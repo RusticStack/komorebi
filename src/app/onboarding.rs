@@ -475,6 +475,7 @@ pub fn sample_onboard(state: &str) {
                     save_sent: true,
                     imap_user: String::new(),
                     smtp_user: String::new(),
+                    smtp_no_auth: false,
                 };
                 let Ok(id) = a.db.add_account(&new) else {
                     return;

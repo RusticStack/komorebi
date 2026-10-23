@@ -58,12 +58,73 @@ pub enum Kind {
     Smtp,
 }
 
+/// What a saved pin trusts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trust {
+    /// This exact certificate, byte for byte (the DER is the server's).
+    Certificate,
+    /// The server's key: any certificate with the same SubjectPublicKeyInfo
+    /// (the DER is the server's certificate it was read from; its key's
+    /// SHA-256 is compared after the handshake).
+    Key,
+    /// The issuing CA: any certificate for this host that the saved CA
+    /// certificate signed (the DER is the CA's; Windows checks the chain
+    /// and the host name, with no other roots).
+    Ca,
+}
+
+/// A usable pin: what it trusts and the certificate it keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pin<'a> {
+    pub trust: Trust,
+    pub der: &'a [u8],
+}
+
+/// The saved form of a key or CA pin: this tag, a byte for the kind, and
+/// the certificate. A bare certificate (the first form, starting `0x30`)
+/// is a certificate pin. A build that predates the tag reads a tagged pin
+/// as damaged and lets Windows validate, so a downgrade fails safe.
+const TAG: &[u8] = b"KPIN";
+
+/// The bytes to save for `trust` of `der`.
+pub fn encode(trust: Trust, der: &[u8]) -> Vec<u8> {
+    let kind = match trust {
+        Trust::Certificate => return der.to_vec(),
+        Trust::Key => 1,
+        Trust::Ca => 2,
+    };
+    let mut out = Vec::with_capacity(TAG.len() + 1 + der.len());
+    out.extend_from_slice(TAG);
+    out.push(kind);
+    out.extend_from_slice(der);
+    out
+}
+
+/// What `blob` trusts and its certificate, before checking the certificate.
+fn decode(blob: &[u8]) -> Option<Pin<'_>> {
+    match blob.strip_prefix(TAG) {
+        None => Some(Pin {
+            trust: Trust::Certificate,
+            der: blob,
+        }),
+        Some([1, der @ ..]) => Some(Pin {
+            trust: Trust::Key,
+            der,
+        }),
+        Some([2, der @ ..]) => Some(Pin {
+            trust: Trust::Ca,
+            der,
+        }),
+        Some(_) => None,
+    }
+}
+
 /// A saved pin, as it can be used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinState<'a> {
     /// Nothing saved: Windows validates the certificate.
     None,
-    Pinned(&'a [u8]),
+    Pinned(Pin<'a>),
     /// Something is saved but it is empty, too long or not a certificate.
     /// Never trusted: the server is validated by Windows, and the form says
     /// the saved certificate needs review.
@@ -71,20 +132,27 @@ pub enum PinState<'a> {
 }
 
 pub fn state(blob: Option<&[u8]>) -> PinState<'_> {
-    match blob {
-        None => PinState::None,
-        Some(der) if der.is_empty() || der.len() > MAX_PIN => PinState::Damaged,
-        Some(der) if Certificate::from_der(der).is_err() || describe(der).is_none() => {
-            PinState::Damaged
+    let Some(blob) = blob else {
+        return PinState::None;
+    };
+    match decode(blob) {
+        Some(pin)
+            if !pin.der.is_empty()
+                && pin.der.len() <= MAX_PIN
+                && Certificate::from_der(pin.der).is_ok()
+                && describe(pin.der).is_some()
+                && super::x509::spki(pin.der).is_some() =>
+        {
+            PinState::Pinned(pin)
         }
-        Some(der) => PinState::Pinned(der),
+        _ => PinState::Damaged,
     }
 }
 
-/// The pin to connect with: `blob` if it is a good certificate.
-pub fn usable(blob: Option<&[u8]>) -> Option<&[u8]> {
+/// The pin to connect with: `blob` if it holds a good certificate.
+pub fn usable(blob: Option<&[u8]>) -> Option<Pin<'_>> {
     match state(blob) {
-        PinState::Pinned(der) => Some(der),
+        PinState::Pinned(pin) => Some(pin),
         PinState::None | PinState::Damaged => None,
     }
 }
@@ -102,60 +170,131 @@ impl std::fmt::Display for PinMismatch {
 
 impl std::error::Error for PinMismatch {}
 
-/// The connector for one server: with a usable `pin`, that certificate is
-/// the only root (never the Windows roots) and the host name is not
-/// compared; without, the default validation.
+/// The connector for one server. Without a usable `pin`, the default
+/// validation. A certificate pin is the only root (never the Windows
+/// roots) and the host name is not compared; a CA pin is the only root and
+/// the host name is checked (a CA signs for many hosts); a key pin accepts
+/// any certificate in the handshake, so it is only sound followed by
+/// [`check_peer`] before anything is sent (the IMAP connect does both).
 pub fn connector(pin: Option<&[u8]>) -> Result<TlsConnector> {
     let mut builder = TlsConnector::builder();
-    if let Some(der) = usable(pin) {
-        builder
-            .add_root_certificate(
-                Certificate::from_der(der).context("reading the saved certificate")?,
-            )
-            .disable_built_in_roots(true)
-            .danger_accept_invalid_hostnames(true);
+    match usable(pin) {
+        None => {}
+        Some(Pin {
+            trust: Trust::Certificate,
+            der,
+        }) => {
+            builder
+                .add_root_certificate(
+                    Certificate::from_der(der).context("reading the saved certificate")?,
+                )
+                .disable_built_in_roots(true)
+                .danger_accept_invalid_hostnames(true);
+        }
+        Some(Pin {
+            trust: Trust::Ca,
+            der,
+        }) => {
+            builder
+                .add_root_certificate(
+                    Certificate::from_der(der).context("reading the saved certificate")?,
+                )
+                .disable_built_in_roots(true);
+        }
+        Some(Pin {
+            trust: Trust::Key, ..
+        }) => {
+            builder
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true);
+        }
     }
     builder.build().context("initializing TLS")
 }
 
-/// SMTP's TLS parameters for the same two cases.
+/// SMTP's TLS parameters for the same cases; the key pin is only sound
+/// followed by [`check_presented`] before AUTH (`smtp::session` does both).
 pub fn smtp_tls_parameters(
     host: &str,
     pin: Option<&[u8]>,
 ) -> Result<lettre::transport::smtp::client::TlsParameters> {
     use lettre::transport::smtp::client::{Certificate as Cert, CertificateStore, TlsParameters};
     let mut builder = TlsParameters::builder(host.to_string());
-    if let Some(der) = usable(pin) {
-        builder = builder
-            .add_root_certificate(Cert::from_der(der.to_vec())?)
-            .certificate_store(CertificateStore::None)
-            .dangerous_accept_invalid_hostnames(true);
+    match usable(pin) {
+        None => {}
+        Some(Pin {
+            trust: Trust::Certificate,
+            der,
+        }) => {
+            builder = builder
+                .add_root_certificate(Cert::from_der(der.to_vec())?)
+                .certificate_store(CertificateStore::None)
+                .dangerous_accept_invalid_hostnames(true);
+        }
+        Some(Pin {
+            trust: Trust::Ca,
+            der,
+        }) => {
+            builder = builder
+                .add_root_certificate(Cert::from_der(der.to_vec())?)
+                .certificate_store(CertificateStore::None);
+        }
+        Some(Pin {
+            trust: Trust::Key, ..
+        }) => {
+            builder = builder
+                .dangerous_accept_invalid_certs(true)
+                .dangerous_accept_invalid_hostnames(true);
+        }
     }
     Ok(builder.build_native()?)
 }
 
-/// After the handshake of a pinned IMAP connection: the certificate the
-/// server presented must be the saved one, byte for byte, before anything
-/// else is sent. (The connector already refused others; this does not rely
-/// on that.)
+/// After the handshake of a pinned connection, before anything else is
+/// sent: the certificate the server presented (`presented`, its DER) must
+/// be the saved one byte for byte, or carry the saved key. A CA pin was
+/// checked by Windows against the CA alone. (The connector already refused
+/// other certificates for a certificate pin; this does not rely on that.)
+pub fn check_presented(presented: Option<&[u8]>, pin: Option<&[u8]>, host: &str) -> Result<()> {
+    let ok = match usable(pin) {
+        None => true,
+        Some(Pin {
+            trust: Trust::Certificate,
+            der,
+        }) => presented == Some(der),
+        Some(Pin {
+            trust: Trust::Key,
+            der,
+        }) => {
+            let saved = super::x509::spki_sha256(der);
+            saved.is_some() && presented.and_then(super::x509::spki_sha256) == saved
+        }
+        Some(Pin {
+            trust: Trust::Ca, ..
+        }) => presented.is_some(),
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(PinMismatch(host.to_string()).into())
+    }
+}
+
+/// [`check_presented`] on a TLS stream.
 pub fn check_peer<S: Read + Write>(
     stream: &TlsStream<S>,
     pin: Option<&[u8]>,
     host: &str,
 ) -> Result<()> {
-    let Some(pin) = usable(pin) else {
+    if usable(pin).is_none() {
         return Ok(());
-    };
+    }
     let presented = stream
         .peer_certificate()
         .ok()
         .flatten()
         .and_then(|c| c.to_der().ok());
-    if presented.as_deref() == Some(pin) {
-        Ok(())
-    } else {
-        Err(PinMismatch(host.to_string()).into())
-    }
+    check_presented(presented.as_deref(), pin, host)
 }
 
 // ---- the probe ---------------------------------------------------------
@@ -188,12 +327,29 @@ pub(crate) fn read_line_capped<R: BufRead>(reader: &mut R) -> Result<String> {
     }
 }
 
+/// What the review read from a server: its certificate and, when Windows
+/// could build the chain from what the server sent, the certificate of the
+/// CA that issued it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Probed {
+    /// The server's own certificate (DER).
+    pub leaf: Vec<u8>,
+    /// The issuing CA's certificate (DER): the chain's second element, never
+    /// the leaf itself (a self-signed certificate has none).
+    pub issuer: Option<Vec<u8>>,
+}
+
 /// Read the certificate `host:port` presents, sending no credentials: TCP,
 /// then TLS or (STARTTLS) the plain greeting and the STARTTLS exchange, then
-/// a handshake that accepts any certificate, then the certificate's DER,
-/// then close. For the user's explicit "Review certificate" only, on a
-/// short-lived thread.
-pub fn probe_certificate(host: &str, port: u16, security: Security, kind: Kind) -> Result<Vec<u8>> {
+/// a handshake that accepts any certificate, then the certificate's DER and
+/// its issuer from the chain Windows built, then close. For the user's
+/// explicit "Review certificate" only, on a short-lived thread.
+///
+/// SChannel directly (native-tls hides the chain): its verify callback sees
+/// the chain built from the certificates the server sent (with the same
+/// cache-only revocation flags as every connection) and accepts it, which is
+/// sound only because nothing is sent on this connection.
+pub fn probe_certificate(host: &str, port: u16, security: Security, kind: Kind) -> Result<Probed> {
     let addrs: Vec<_> = (host, port)
         .to_socket_addrs()
         .with_context(|| format!("resolving {host}"))?
@@ -214,24 +370,61 @@ pub fn probe_certificate(host: &str, port: u16, security: Security, kind: Kind) 
             probe_starttls(tcp, smtp_exchange).context("SMTP STARTTLS failed")?
         }
     };
-    let tls = TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .danger_accept_invalid_hostnames(true)
-        .build()
+    probe_handshake(host, tcp)
+}
+
+/// The accept-everything handshake of the probe, keeping the chain.
+fn probe_handshake<S: Read + Write>(host: &str, tcp: S) -> Result<Probed> {
+    use schannel::schannel_cred::{Direction, SchannelCred};
+    use std::sync::{Arc, Mutex};
+    let cred = SchannelCred::builder()
+        .acquire(Direction::Outbound)
         .context("initializing TLS")?;
-    let stream = tls
-        .connect(host, tcp)
-        .map_err(|e| anyhow!("TLS handshake failed: {e}"))?;
-    let der = stream
+    let chain: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
+    let seen = Arc::clone(&chain);
+    let mut builder = schannel::tls_stream::Builder::new();
+    builder
+        .domain(host)
+        .accept_invalid_hostnames(true)
+        .verify_callback(move |res| {
+            if let Some(c) = res.chain() {
+                let certs = c.certificates().take(8).map(|c| c.to_der().to_vec());
+                if let Ok(mut out) = seen.lock() {
+                    *out = certs.collect();
+                }
+            }
+            Ok(())
+        });
+    let stream = builder.connect(cred, tcp).map_err(|e| match e {
+        schannel::tls_stream::HandshakeError::Failure(e) => anyhow!("TLS handshake failed: {e}"),
+        schannel::tls_stream::HandshakeError::Interrupted(_) => anyhow!("TLS handshake failed"),
+    })?;
+    let leaf = stream
         .peer_certificate()
         .context("reading the certificate")?
-        .context("the server presented no certificate")?
         .to_der()
-        .context("reading the certificate")?;
-    if der.is_empty() || der.len() > MAX_PIN {
+        .to_vec();
+    if leaf.is_empty() || leaf.len() > MAX_PIN {
         bail!("the certificate is too large to pin");
     }
-    Ok(der)
+    let chain = chain.lock().map(|c| c.clone()).unwrap_or_default();
+    Ok(Probed {
+        issuer: issuer_of(&leaf, &chain),
+        leaf,
+    })
+}
+
+/// The CA certificate to offer for `leaf`: the chain's second element, if
+/// the chain starts at `leaf` and that element is a different certificate
+/// of a usable size. A self-signed leaf, or a chain Windows could not
+/// build past the leaf, offers none.
+fn issuer_of(leaf: &[u8], chain: &[Vec<u8>]) -> Option<Vec<u8>> {
+    match chain {
+        [first, ca, ..] if first.as_slice() == leaf && ca.as_slice() != leaf => {
+            (!ca.is_empty() && ca.len() <= MAX_PIN).then(|| ca.clone())
+        }
+        _ => None,
+    }
 }
 
 /// Run `exchange` over the plain socket; it must leave the socket exactly
@@ -383,6 +576,32 @@ pub fn fingerprint_sha256(der: &[u8]) -> String {
     out
 }
 
+/// The start of the SHA-256 of a certificate's key (SubjectPublicKeyInfo),
+/// for a status line; empty if the key cannot be read.
+pub fn key_fingerprint_short(der: &[u8]) -> String {
+    super::x509::spki_sha256(der)
+        .map(|d| {
+            d.iter()
+                .take(8)
+                .map(|b| format!("{b:02X}"))
+                .collect::<Vec<_>>()
+                .join(":")
+        })
+        .unwrap_or_default()
+}
+
+/// The SHA-256 of a certificate's key as `AB:CD:...`.
+pub fn key_fingerprint_sha256(der: &[u8]) -> String {
+    super::x509::spki_sha256(der)
+        .map(|d| {
+            d.iter()
+                .map(|b| format!("{b:02X}"))
+                .collect::<Vec<_>>()
+                .join(":")
+        })
+        .unwrap_or_default()
+}
+
 /// The start of a fingerprint, for a status line (the prompt shows all of it).
 pub fn fingerprint_short(der: &[u8]) -> String {
     fingerprint_sha256(der)[..23].to_string()
@@ -405,56 +624,7 @@ pub struct CertInfo {
     pub not_after: String,
 }
 
-/// A DER value: its tag and contents, and what follows it.
-struct Der<'a> {
-    tag: u8,
-    body: &'a [u8],
-    whole: &'a [u8],
-}
-
-fn take(data: &[u8]) -> Option<(Der<'_>, &[u8])> {
-    let tag = *data.first()?;
-    if tag & 0x1f == 0x1f {
-        return None; // long tag numbers do not occur here
-    }
-    let first = *data.get(1)?;
-    let (len, header) = if first < 0x80 {
-        (first as usize, 2)
-    } else {
-        let n = (first & 0x7f) as usize;
-        if n == 0 || n > 3 {
-            return None;
-        }
-        let bytes = data.get(2..2 + n)?;
-        (
-            bytes.iter().fold(0usize, |l, &b| (l << 8) | b as usize),
-            2 + n,
-        )
-    };
-    let end = header.checked_add(len)?;
-    let whole = data.get(..end)?;
-    Some((
-        Der {
-            tag,
-            body: &whole[header..],
-            whole,
-        },
-        &data[end..],
-    ))
-}
-
-fn items(mut data: &[u8]) -> Option<Vec<Der<'_>>> {
-    let mut out = Vec::new();
-    while !data.is_empty() {
-        let (item, rest) = take(data)?;
-        out.push(item);
-        data = rest;
-        if out.len() > 256 {
-            return None;
-        }
-    }
-    Some(out)
-}
+use super::x509::{Der, items, take};
 
 /// Text from a DER string, without control characters, at most 80 chars.
 fn der_string(item: &Der) -> String {
@@ -639,7 +809,13 @@ mod tests {
     fn a_corrupt_or_oversized_pin_is_no_pin() {
         let der = der_of(CERT);
         assert_eq!(state(None), PinState::None);
-        assert_eq!(state(Some(&der)), PinState::Pinned(&der));
+        assert_eq!(
+            state(Some(&der)),
+            PinState::Pinned(Pin {
+                trust: Trust::Certificate,
+                der: &der
+            })
+        );
         assert_eq!(state(Some(&[])), PinState::Damaged);
         assert_eq!(state(Some(&[1, 2, 3])), PinState::Damaged);
         let mut big = der.clone();
@@ -649,7 +825,7 @@ mod tests {
         cut.truncate(100);
         assert_eq!(state(Some(&cut)), PinState::Damaged);
         assert_eq!(usable(Some(&[1, 2, 3])), None);
-        assert_eq!(usable(Some(&der)), Some(&der[..]));
+        assert_eq!(usable(Some(&der)).map(|p| p.der), Some(&der[..]));
     }
 
     #[test]
@@ -769,7 +945,9 @@ mod tests {
                 Kind::Smtp
             };
             let got = probe_certificate("localhost", fake.addr.port(), security, kind).unwrap();
-            assert_eq!(got, der);
+            assert_eq!(got.leaf, der);
+            // A self-signed certificate has no issuer to offer.
+            assert_eq!(got.issuer, None);
             let seen = fake.finish();
             let upper: Vec<String> = seen.iter().map(|l| l.to_ascii_uppercase()).collect();
             assert!(
@@ -957,13 +1135,260 @@ mod tests {
             Security::StartTls
         };
         let server = imap_server(fake.addr, security);
-        let result = verify_smtp(&server, pin, "relay", "pw", &mut |_| {});
+        let result = verify_smtp(&server, pin, "relay", "pw", true, &mut |_| {});
         (result, fake.finish())
     }
 
     fn sent_auth(seen: &[String]) -> bool {
         seen.iter()
             .any(|l| l.to_ascii_uppercase().starts_with("AUTH"))
+    }
+
+    const RENEWED: &[u8] = include_bytes!("../../tests/fixtures/tls/renewed-cert.pem");
+    const CA: &[u8] = include_bytes!("../../tests/fixtures/tls/ca-cert.pem");
+    const CA_LEAF: &[u8] = include_bytes!("../../tests/fixtures/tls/ca-leaf-cert.pem");
+    const CA_LEAF2: &[u8] = include_bytes!("../../tests/fixtures/tls/ca-leaf2-cert.pem");
+
+    #[test]
+    fn a_key_pin_passes_a_renewed_certificate_and_refuses_another_key() {
+        let pin = encode(Trust::Key, &der_of(CERT));
+        assert_eq!(usable(Some(&pin)).map(|p| p.trust), Some(Trust::Key));
+        for mode in [Mode::Implicit, Mode::StartTls] {
+            for served in [CERT, RENEWED] {
+                let (result, seen) = smtp_check(mode, (served, KEY), Some(&pin));
+                result.unwrap_or_else(|e| panic!("{:#}", e.source));
+                assert!(sent_auth(&seen), "{seen:?}");
+            }
+            let (result, seen) = smtp_check(mode, (OTHER_CERT, OTHER_KEY), Some(&pin));
+            let e = result.unwrap_err();
+            assert_eq!(e.special, Special::CertChanged, "{:#}", e.source);
+            assert!(!sent_auth(&seen), "{seen:?}");
+        }
+    }
+
+    #[test]
+    fn a_ca_pin_passes_what_the_ca_issued_and_refuses_the_rest() {
+        let pin = encode(Trust::Ca, &der_of(CA));
+        assert_eq!(usable(Some(&pin)).map(|p| p.trust), Some(Trust::Ca));
+        for mode in [Mode::Implicit, Mode::StartTls] {
+            // Two certificates the CA issued, with different keys.
+            for (cert, key) in [(CA_LEAF, OTHER_KEY), (CA_LEAF2, KEY)] {
+                let (result, seen) = smtp_check(mode, (cert, key), Some(&pin));
+                result.unwrap_or_else(|e| panic!("{:#}", e.source));
+                assert!(sent_auth(&seen), "{seen:?}");
+            }
+            // A self-signed certificate for the same names is refused.
+            let (result, seen) = smtp_check(mode, (CERT, KEY), Some(&pin));
+            let e = result.unwrap_err();
+            assert_eq!(e.special, Special::CertChanged, "{:#}", e.source);
+            assert!(!sent_auth(&seen), "{seen:?}");
+        }
+    }
+
+    #[test]
+    fn an_exact_pin_refuses_a_renewed_certificate() {
+        let pin = der_of(CERT);
+        let (result, seen) = smtp_check(Mode::Implicit, (RENEWED, KEY), Some(&pin));
+        assert_eq!(result.unwrap_err().special, Special::CertChanged);
+        assert!(!sent_auth(&seen), "{seen:?}");
+    }
+
+    #[test]
+    fn a_key_or_ca_pin_on_imap_is_checked_before_any_credentials() {
+        let key = encode(Trust::Key, &der_of(CERT));
+        let ca = encode(Trust::Ca, &der_of(CA));
+        for (pin, served, ok) in [
+            (&key, (RENEWED, KEY), true),
+            (&key, (OTHER_CERT, OTHER_KEY), false),
+            (&ca, (CA_LEAF, OTHER_KEY), true),
+            (&ca, (CERT, KEY), false),
+        ] {
+            let fake = TlsFake::start(Proto::Imap, Mode::Implicit, served.0, served.1);
+            let server = imap_server(fake.addr, Security::Tls);
+            let result = crate::mail::imap::Imap::connect(&server, Some(pin), "me", "pw");
+            let seen = fake.finish();
+            assert_eq!(result.is_ok(), ok, "{seen:?}");
+            assert_eq!(seen.iter().any(|l| l.contains("LOGIN")), ok, "{seen:?}");
+        }
+    }
+
+    /// One TLS handshake on `127.0.0.1` presenting `leaf` (with `key`) and,
+    /// in the identity's store, the further certificates `chain` (what a
+    /// server configured with its CA sends), then close.
+    fn chain_server(
+        leaf: &'static [u8],
+        key: &'static [u8],
+        chain: &'static [&'static [u8]],
+    ) -> u16 {
+        use schannel::cert_context::{CertContext, KeySpec};
+        use schannel::cert_store::{CertAdd, Memory};
+        use schannel::crypt_prov::{AcquireOptions, ProviderType};
+        use schannel::schannel_cred::{Direction, SchannelCred};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let mut store = Memory::new().unwrap().into_store();
+            let cert = CertContext::from_pem(std::str::from_utf8(leaf).unwrap()).unwrap();
+            let name = format!("komorebi-chain-test-{port}");
+            let mut options = AcquireOptions::new();
+            options.container(&name);
+            let mut prov = match options.acquire(ProviderType::rsa_full()) {
+                Ok(p) => p,
+                Err(_) => options
+                    .new_keyset(true)
+                    .acquire(ProviderType::rsa_full())
+                    .unwrap(),
+            };
+            prov.import().import_pkcs8_pem(key).unwrap();
+            cert.set_key_prov_info()
+                .container(&name)
+                .type_(ProviderType::rsa_full())
+                .keep_open(true)
+                .key_spec(KeySpec::key_exchange())
+                .set()
+                .unwrap();
+            let context = store.add_cert(&cert, CertAdd::Always).unwrap();
+            for pem in chain {
+                let c = CertContext::from_pem(std::str::from_utf8(pem).unwrap()).unwrap();
+                store.add_cert(&c, CertAdd::Always).unwrap();
+            }
+            let cred = SchannelCred::builder()
+                .cert(context)
+                .acquire(Direction::Inbound)
+                .unwrap();
+            let (tcp, _) = listener.accept().unwrap();
+            let _ = schannel::tls_stream::Builder::new().accept(cred, tcp);
+        });
+        port
+    }
+
+    #[test]
+    fn the_review_offers_no_ca_that_is_not_in_the_chain() {
+        // SChannel as a server sends only a chain that ends at a root its
+        // machine trusts, so a fake cannot present the private test CA and
+        // the offered path is covered by `issuer_of` below, not end to end.
+        let port = chain_server(CA_LEAF, OTHER_KEY, &[]);
+        let got = probe_certificate("127.0.0.1", port, Security::Tls, Kind::Imap).unwrap();
+        assert_eq!(got.leaf, der_of(CA_LEAF));
+        assert_eq!(got.issuer, None);
+    }
+
+    #[test]
+    fn the_issuer_is_never_the_leaf_and_never_oversized() {
+        let leaf = der_of(CA_LEAF);
+        let ca = der_of(CA);
+        assert_eq!(issuer_of(&leaf, std::slice::from_ref(&leaf)), None);
+        assert_eq!(issuer_of(&leaf, &[leaf.clone(), leaf.clone()]), None);
+        assert_eq!(issuer_of(&leaf, &[ca.clone(), leaf.clone()]), None);
+        assert_eq!(
+            issuer_of(&leaf, &[leaf.clone(), vec![0; MAX_PIN + 1]]),
+            None
+        );
+        assert_eq!(issuer_of(&leaf, &[leaf.clone(), ca.clone()]), Some(ca));
+        assert_eq!(issuer_of(&leaf, &[]), None);
+    }
+
+    #[test]
+    fn tagged_pins_round_trip_and_unknown_tags_are_damaged() {
+        let der = der_of(CERT);
+        assert_eq!(encode(Trust::Certificate, &der), der);
+        for trust in [Trust::Key, Trust::Ca] {
+            let blob = encode(trust, &der);
+            assert_eq!(usable(Some(&blob)), Some(Pin { trust, der: &der }));
+        }
+        let mut odd = b"KPIN".to_vec();
+        odd.push(9);
+        odd.extend_from_slice(&der);
+        assert_eq!(state(Some(&odd)), PinState::Damaged);
+        assert_eq!(state(Some(b"KPIN")), PinState::Damaged);
+    }
+
+    #[test]
+    fn a_relay_without_sign_in_gets_no_auth_and_still_needs_tls() {
+        let fake = TlsFake::start(Proto::Smtp, Mode::StartTls, CERT, KEY);
+        let server = imap_server(fake.addr, Security::StartTls);
+        let pin = der_of(CERT);
+        verify_smtp(&server, Some(&pin), "", "", false, &mut |_| {})
+            .unwrap_or_else(|e| panic!("{:#}", e.source));
+        let seen = fake.finish();
+        assert!(!sent_auth(&seen), "{seen:?}");
+        assert!(seen.iter().any(|l| l.starts_with("STARTTLS")), "{seen:?}");
+        assert!(seen.iter().any(|l| l.starts_with("NOOP")), "{seen:?}");
+        // Without STARTTLS on offer nothing goes on in the clear.
+        let fake = TlsFake::start(Proto::Smtp, Mode::NoStartTls, CERT, KEY);
+        let server = imap_server(fake.addr, Security::StartTls);
+        assert!(verify_smtp(&server, Some(&pin), "", "", false, &mut |_| {}).is_err());
+        let seen = fake.finish();
+        assert!(
+            !seen
+                .iter()
+                .any(|l| l.starts_with("MAIL") || l.starts_with("NOOP"))
+        );
+    }
+
+    #[test]
+    fn an_account_without_smtp_sign_in_sends_over_tls_without_auth_or_password() {
+        use lettre::address::{Address, Envelope};
+        let me: Address = "me@example.com".parse().unwrap();
+        let envelope = Envelope::new(Some(me.clone()), vec![me]).unwrap();
+        let raw = b"From: me@example.com\r\nTo: me@example.com\r\nSubject: x\r\n\r\nhi\r\n";
+        for mode in [Mode::Implicit, Mode::StartTls] {
+            let fake = TlsFake::start(Proto::Smtp, mode, CERT, KEY);
+            let security = if mode == Mode::Implicit {
+                Security::Tls
+            } else {
+                Security::StartTls
+            };
+            let server = imap_server(fake.addr, security);
+            let account = crate::db::Account {
+                // No password is saved for this id: reading one would fail.
+                id: -4242,
+                email: "me@example.com".into(),
+                name: String::new(),
+                imap: server.clone(),
+                smtp: server,
+                save_sent: false,
+                signature: String::new(),
+                enabled: true,
+                imap_user: String::new(),
+                smtp_user: String::new(),
+                imap_pin: None,
+                smtp_pin: Some(der_of(CERT)),
+                smtp_no_auth: true,
+            };
+            super::super::smtp_account(&account, &envelope, raw)
+                .unwrap_or_else(|e| panic!("{e:#}"));
+            let seen = fake.finish();
+            assert!(!sent_auth(&seen), "{seen:?}");
+            assert!(seen.iter().any(|l| l == "DATA"), "{seen:?}");
+            if mode == Mode::StartTls {
+                assert!(seen.iter().any(|l| l.starts_with("STARTTLS")), "{seen:?}");
+            }
+        }
+        // Without STARTTLS on offer nothing is sent in the clear.
+        let fake = TlsFake::start(Proto::Smtp, Mode::NoStartTls, CERT, KEY);
+        let server = imap_server(fake.addr, Security::StartTls);
+        let account = crate::db::Account {
+            id: -4242,
+            email: "me@example.com".into(),
+            name: String::new(),
+            imap: server.clone(),
+            smtp: server,
+            save_sent: false,
+            signature: String::new(),
+            enabled: true,
+            imap_user: String::new(),
+            smtp_user: String::new(),
+            imap_pin: None,
+            smtp_pin: Some(der_of(CERT)),
+            smtp_no_auth: true,
+        };
+        assert!(super::super::smtp_account(&account, &envelope, raw).is_err());
+        let seen = fake.finish();
+        assert!(
+            !seen.iter().any(|l| l.starts_with("MAIL") || l == "DATA"),
+            "{seen:?}"
+        );
     }
 
     #[test]
@@ -1187,8 +1612,12 @@ mod tests {
             imap_server(imap.addr, Security::Tls),
             imap_server(smtp.addr, Security::StartTls),
         );
-        let imap_der = probe_certificate(&i.host, i.port, i.security, Kind::Imap).unwrap();
-        let smtp_der = probe_certificate(&s.host, s.port, s.security, Kind::Smtp).unwrap();
+        let imap_der = probe_certificate(&i.host, i.port, i.security, Kind::Imap)
+            .unwrap()
+            .leaf;
+        let smtp_der = probe_certificate(&s.host, s.port, s.security, Kind::Smtp)
+            .unwrap()
+            .leaf;
         assert_eq!(imap_der, der_of(CERT));
         assert_eq!(fingerprint_sha256(&smtp_der), fingerprint_sha256(&imap_der));
         for fake in [imap, smtp] {
@@ -1237,6 +1666,7 @@ mod tests {
                 save_sent: true,
                 imap_user: String::new(),
                 smtp_user: String::new(),
+                smtp_no_auth: false,
             })
             .unwrap();
         let mut a = db.accounts().unwrap().remove(0);
@@ -1247,7 +1677,10 @@ mod tests {
         let b = db.accounts().unwrap().remove(0);
         assert_eq!(b.id, id);
         assert_eq!(
-            (usable(b.imap_pin.as_deref()), usable(b.smtp_pin.as_deref())),
+            (
+                usable(b.imap_pin.as_deref()).map(|p| p.der),
+                usable(b.smtp_pin.as_deref()).map(|p| p.der),
+            ),
             (Some(&imap_der[..]), Some(&smtp_der[..]))
         );
         // An edit of the name or login keeps both.
@@ -1372,8 +1805,12 @@ mod tests {
                 ..s
             },
         );
-        let imap_der = probe_certificate(&i.host, i.port, i.security, Kind::Imap).unwrap();
-        let smtp_der = probe_certificate(&s.host, s.port, s.security, Kind::Smtp).unwrap();
+        let imap_der = probe_certificate(&i.host, i.port, i.security, Kind::Imap)
+            .unwrap()
+            .leaf;
+        let smtp_der = probe_certificate(&s.host, s.port, s.security, Kind::Smtp)
+            .unwrap()
+            .leaf;
         assert_eq!(imap_der, der_of(CERT));
         let shown = fingerprint_sha256(&imap_der);
         assert_eq!(shown.len(), 32 * 3 - 1, "the whole fingerprint is shown");
@@ -1425,6 +1862,7 @@ mod tests {
             save_sent: true,
             imap_user: String::new(),
             smtp_user: String::new(),
+            smtp_no_auth: false,
         })
         .unwrap();
         let mut account = db.accounts().unwrap().remove(0);
@@ -1433,7 +1871,10 @@ mod tests {
         assert!(db.update_account(&account).unwrap());
         let account = db.accounts().unwrap().remove(0);
         assert_eq!(account.imap_login(), "alice@example.org");
-        assert_eq!(usable(account.imap_pin.as_deref()), Some(&imap_der[..]));
+        assert_eq!(
+            usable(account.imap_pin.as_deref()).map(|p| p.der),
+            Some(&imap_der[..])
+        );
 
         // 6. Sync starts: the worker's connection, from the stored account,
         //    signs in to the pinned server.

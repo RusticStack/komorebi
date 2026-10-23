@@ -30,6 +30,10 @@ impl App {
             ui.set_i_title(SharedString::new());
             return;
         };
+        if ev.cancelled() && !ev.uid.is_empty() && ev.recurrence_id.is_empty() {
+            // The organizer cancelled it: the stored copy says so.
+            self.db.cancel_event_uid(&ev.uid, ev.sequence).ok();
+        }
         let past = ev.past(&chrono::Local::now());
         let answerable = ev.answerable(self.invite_me(m, ev), past);
         // An answer to an earlier version of the invite doesn't count.
@@ -66,6 +70,10 @@ impl App {
             lines.push(t!(invoke_invite_where, ev.location.as_str().into()));
         }
         lines.push(ev.repeats_in(self.lang));
+        let stored = !ev.uid.is_empty() && matches!(self.db.event_by_uid(&ev.uid), Ok(Some(_)));
+        if stored {
+            lines.push(t!(invoke_invite_in_calendar));
+        }
         let title = if ev.summary.is_empty() {
             t!(invoke_invite_no_title)
         } else {
@@ -88,6 +96,10 @@ impl App {
         if !ev.join.is_empty() && !ev.cancelled() {
             tools.push(0);
         }
+        // A cancelled event still in the calendar: Remove from calendar.
+        if stored && ev.cancelled() && ev.recurrence_id.is_empty() {
+            tools.push(7);
+        }
         if !ev.description.is_empty() {
             tools.push(6);
         }
@@ -107,6 +119,17 @@ impl App {
             0 if !ev.join.is_empty() => self.reader.follow(ev.join.clone()),
             5 => {
                 self.invite_change = true;
+                self.show_invite();
+            }
+            7 => {
+                let uid = ev.uid.clone();
+                let removed = self
+                    .db
+                    .local_calendar()
+                    .and_then(|cal| self.db.remove_event_uid(cal, &uid));
+                if let Err(e) = removed {
+                    self.set_status(&text::detail(&e), true);
+                }
                 self.show_invite();
             }
             _ => {
@@ -214,9 +237,19 @@ impl App {
             }
         }
         let account_id = account.id;
+        // The calendar copy: accepting adds (or updates) the event in the
+        // local calendar, declining removes it.
+        let me_addr = self
+            .invite_me(m, ev)
+            .map_or_else(|| account.email.clone(), |p| p.addr.clone());
+        let cal_raw = m.raw.as_deref().and_then(mime::calendar_file);
         if let Err(e) = self
             .db
             .record_rsvp(account_id, &uid, &rid, seq, answer as i64)
+        {
+            self.set_status(&text::detail(&e), true);
+        } else if let Err(e) =
+            self.invite_to_calendar(cal_raw.as_deref(), (&uid, &rid), &me_addr, answer)
         {
             self.set_status(&text::detail(&e), true);
         } else if send {
@@ -229,6 +262,37 @@ impl App {
             self.outbox_changed();
         }
         self.show_invite();
+    }
+}
+
+impl App {
+    /// Keep the local calendar in step with an answer: Accept and
+    /// Tentative store the invitation (`raw`, its calendar part), Decline
+    /// removes a stored copy (of the one occurrence `rid` only, when the
+    /// invitation is for one).
+    fn invite_to_calendar(
+        &self,
+        raw: Option<&[u8]>,
+        (uid, rid): (&str, &str),
+        me: &str,
+        answer: Answer,
+    ) -> anyhow::Result<()> {
+        let cal = self.db.local_calendar()?;
+        let now = chrono::Utc::now().timestamp();
+        match answer {
+            Answer::Declined if !rid.is_empty() => {
+                self.db.decline_occurrence(cal, uid, rid, now)?;
+            }
+            Answer::Declined => {
+                self.db.remove_event_uid(cal, uid)?;
+            }
+            Answer::Accepted | Answer::Tentative => {
+                if let Some(raw) = raw {
+                    self.db.store_invite(cal, raw, me, answer.partstat(), now)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -72,3 +72,34 @@ pub fn delete_password(account_id: i64) -> Result<()> {
         Err(e) => Err(anyhow!("{UNAVAILABLE} ({e})")),
     }
 }
+
+/// The optional separate CardDAV/CalDAV password (`account:{id}:dav`),
+/// for servers that want an app password of their own.
+fn dav_entry(account_id: i64) -> Result<keyring_core::Entry> {
+    if let Err(e) = &*STORE {
+        return Err(anyhow!("{UNAVAILABLE} ({e})"));
+    }
+    keyring_core::Entry::new(SERVICE, &format!("account:{account_id}:dav"))
+        .map_err(|e| anyhow!("{UNAVAILABLE} ({e})"))
+}
+
+pub fn get_dav_password(account_id: i64) -> Result<String> {
+    match dav_entry(account_id)?.get_password() {
+        Ok(v) => Ok(v),
+        Err(keyring_core::Error::NoEntry) => Err(NoPassword.into()),
+        Err(e) => Err(anyhow!("{UNAVAILABLE} ({e})")),
+    }
+}
+
+pub fn set_dav_password(account_id: i64, password: &str) -> Result<()> {
+    dav_entry(account_id)?
+        .set_password(password)
+        .map_err(|e| anyhow!("{UNAVAILABLE} ({e})"))
+}
+
+pub fn delete_dav_password(account_id: i64) -> Result<()> {
+    match dav_entry(account_id)?.delete_credential() {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(e) => Err(anyhow!("{UNAVAILABLE} ({e})")),
+    }
+}

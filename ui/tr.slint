@@ -168,6 +168,48 @@ export global Tr {
     pure public function undo-too-late() -> string { return @tr("Too late to undo: the message is being sent."); }
     pure public function reply-in-outbox() -> string { return @tr("Your reply is in the Outbox; only the organizer gets it."); }
     pure public function answer-kept() -> string { return @tr("Answer kept on this computer; no reply was sent."); }
+    pure public function invite-in-calendar() -> string { return @tr("In your calendar on this PC."); }
+    // The Calendar page's agenda: the range shown ("Oct 15, 2026 to Nov 13, 2026"),
+    // a day header for today and tomorrow ("Today, Thu, Oct 15") and an all-day event's time.
+    pure public function cal-range(from: string, to: string) -> string { return @tr("{0} to {1}", from, to); }
+    pure public function cal-today(day: string) -> string { return @tr("Today, {}", day); }
+    pure public function cal-tomorrow(day: string) -> string { return @tr("Tomorrow, {}", day); }
+    pure public function cal-all-day() -> string { return @tr("All day"); }
+    pure public function cal-now() -> string { return @tr("event" => "Now"); }
+    pure public function cal-in-min(n: int) -> string { return @tr("In {n} minute" | "In {n} minutes" % n); }
+    pure public function cal-remind-at(time: string) -> string { return @tr("Starts at {0}.", time); }
+    pure public function cal-remind-at-place(time: string, place: string) -> string { return @tr("Starts at {0}, {1}.", time, place); }
+    pure public function cal-dav-offline() -> string { return @tr("Calendar sync is off while Komorebi is offline."); }
+    pure public function cal-dav-auth() -> string { return @tr("The calendar server refused the user name or password."); }
+    pure public function cal-dav-not-found() -> string { return @tr("No calendar was found at this address."); }
+    pure public function cal-dav-tls() -> string { return @tr("The calendar server's certificate couldn't be checked."); }
+    pure public function cal-dav-failed(detail: string) -> string { return @tr("Calendar sync failed ({0}).", detail); }
+    pure public function cal-dav-none-found() -> string { return @tr("No calendars with events were found at this address."); }
+    pure public function cal-dav-count(n: int) -> string { return @tr("{n} event from this account on this computer." | "{n} events from this account on this computer." % n); }
+    pure public function cal-dav-check-host(url: string) -> string { return @tr("Found a calendar server at {0}. Check that it belongs to your mail provider, then press Find calendars again to sign in there.", url); }
+    pure public function cal-dav-working() -> string { return @tr("Working with the calendar server..."); }
+    // ---- The event editor and the calendar views
+    pure public function cal-local-name() -> string { return @tr("On this PC"); }
+    pure public function cal-named(name: string, account: string) -> string { return @tr("{0} ({1})", name, account); }
+    pure public function cal-rep-none() -> string { return @tr("Does not repeat"); }
+    pure public function cal-rep-daily() -> string { return @tr("Every day"); }
+    pure public function cal-rep-weekly(day: string) -> string { return @tr("Every week on {0}", day); }
+    pure public function cal-rep-monthly(n: int) -> string { return @tr("Every month on day {0}", n); }
+    pure public function cal-rep-nth(n: int, day: string) -> string {
+        return n == 1 ? @tr("Every month on the first {0}", day)
+            : n == 2 ? @tr("Every month on the second {0}", day)
+            : n == 3 ? @tr("Every month on the third {0}", day)
+            : n == 4 ? @tr("Every month on the fourth {0}", day)
+            : @tr("Every month on the last {0}", day);
+    }
+    pure public function cal-rep-yearly(date: string) -> string { return @tr("Every year on {0}", date); }
+    pure public function cal-date-hint(day-first: bool) -> string { return day-first ? @tr("dd/mm/yyyy") : @tr("yyyy-mm-dd"); }
+    pure public function cal-ed-bad-date(hint: string) -> string { return @tr("Type the dates as {0}.", hint); }
+    pure public function cal-ed-bad-time() -> string { return @tr("Type the times as 09:30."); }
+    pure public function cal-ed-end-before() -> string { return @tr("The event ends before it starts."); }
+    pure public function cal-ed-gap() -> string { return @tr("That time doesn't exist here: the clocks change then."); }
+    pure public function cal-ed-read-only() -> string { return @tr("This calendar is read only. Choose another one."); }
+    pure public function cal-ed-failed(detail: string) -> string { return @tr("The event couldn't be saved ({0}).", detail); }
 
     // ---- Status line actions
     pure public function action-undo() -> string { return @tr("Undo"); }
@@ -407,6 +449,8 @@ export global Tr {
 
     // ---- Certificates in the account form
     pure public function cert-pinned(fingerprint: string) -> string { return @tr("Certificate: pinned (SHA-256 {0})", fingerprint); }
+    pure public function cert-pinned-key(fingerprint: string) -> string { return @tr("Certificate: server key pinned (SHA-256 {0})", fingerprint); }
+    pure public function cert-pinned-ca(issuer: string) -> string { return @tr("Certificate: issued by the pinned authority {0}", issuer); }
     pure public function cert-damaged(host: string) -> string { return @tr("The saved certificate for {0} is damaged. Forget it and review the certificate again.", host); }
     pure public function cert-windows() -> string { return @tr("Certificate: checked by Windows"); }
     pure public function cert-unreadable(address: string) -> string {
@@ -503,10 +547,89 @@ export global Tr {
         return @tr("{0} presented a certificate that Windows doesn't trust. Trust this certificate for {1} only?", address, host);
     }
     pure public function q-trust-ok() -> string { return @tr("Trust this certificate"); }
+    pure public function trust-cert() -> string { return @tr("This exact certificate"); }
+    pure public function trust-cert-note() -> string { return @tr("Any other certificate is refused, including a renewal."); }
+    pure public function trust-key() -> string { return @tr("This server key"); }
+    pure public function trust-key-note(fingerprint: string) -> string { return @tr("A renewed certificate with the same key is accepted. Key SHA-256: {0}", fingerprint); }
+    pure public function trust-ca(issuer: string) -> string { return @tr("The issuing CA: {0}", issuer); }
+    pure public function trust-ca-note(fingerprint: string) -> string { return @tr("Certificates it issues for this server name are accepted. CA SHA-256: {0}", fingerprint); }
     // Behind "How do I check this?" in the prompt.
     pure public function q-trust-note() -> string {
         return @tr("Ask whoever runs the server for its fingerprint, or run openssl x509 -noout -fingerprint -sha256 on its certificate, and compare every byte. Only trust it on a network you control. A saved certificate has to be reviewed again when the server renews it.");
     }
+
+    // ---- Contacts
+    pure public function contacts-all() -> string { return @tr("All contacts"); }
+    pure public function contact-label-work() -> string { return @tr("contact label" => "Work"); }
+    pure public function contact-label-home() -> string { return @tr("contact label" => "Home"); }
+    pure public function contact-label-mobile() -> string { return @tr("contact label" => "Mobile"); }
+    pure public function contact-title-at(title: string, org: string) -> string { return @tr("{0}, {1}", title, org); }
+    pure public function contact-empty() -> string { return @tr("Add a name, an email address or a phone number."); }
+    pure public function contact-bad-email(addr: string) -> string { return @tr("{0} is not an email address.", addr); }
+    pure public function contact-copied() -> string { return @tr("Copied"); }
+    pure public function dav-offline() -> string { return @tr("Address book sync is off while Komorebi is offline."); }
+    pure public function dav-auth() -> string { return @tr("The address book server refused the user name or password."); }
+    pure public function dav-redirect() -> string { return @tr("The server sent Komorebi to another server. Enter that server's address instead."); }
+    pure public function dav-not-found() -> string { return @tr("No address book was found at this address."); }
+    pure public function dav-tls() -> string { return @tr("The address book server's certificate couldn't be checked."); }
+    pure public function dav-failed(detail: string) -> string { return @tr("Address book sync failed ({0}).", detail); }
+    pure public function dav-none-found() -> string { return @tr("No address books were found at this address."); }
+    pure public function dav-count(n: int) -> string { return @tr("{n} contact on this computer." | "{n} contacts on this computer." % n); }
+    pure public function dav-synced-at(time: string) -> string { return @tr("Last synced {0}.", time); }
+    pure public function dav-working() -> string { return @tr("Working with the address book server..."); }
+    // ---- Settings > Rules (src/app/rules.rs): a rule's summary, one
+    // sentence per condition (field 0 From, 1 To or Cc, 2 Subject, 3 Has
+    // attachment; op 0 contains, 1 does not contain, 2 is, 3 starts with,
+    // 4 ends with) and per action, joined by middle dots.
+    pure public function rule-cond(field: int, op: int, value: string) -> string {
+        if field == 3 { return @tr("Has an attachment"); }
+        if field == 0 && op == 0 { return @tr("From contains {0}", value); }
+        if field == 0 && op == 1 { return @tr("From does not contain {0}", value); }
+        if field == 0 && op == 2 { return @tr("From is {0}", value); }
+        if field == 0 && op == 3 { return @tr("From starts with {0}", value); }
+        if field == 0 { return @tr("From ends with {0}", value); }
+        if field == 1 && op == 0 { return @tr("To or Cc contains {0}", value); }
+        if field == 1 && op == 1 { return @tr("To or Cc does not contain {0}", value); }
+        if field == 1 && op == 2 { return @tr("To or Cc is {0}", value); }
+        if field == 1 && op == 3 { return @tr("To or Cc starts with {0}", value); }
+        if field == 1 { return @tr("To or Cc ends with {0}", value); }
+        if op == 0 { return @tr("Subject contains {0}", value); }
+        if op == 1 { return @tr("Subject does not contain {0}", value); }
+        if op == 2 { return @tr("Subject is {0}", value); }
+        if op == 3 { return @tr("Subject starts with {0}", value); }
+        return @tr("Subject ends with {0}", value);
+    }
+    pure public function rule-any() -> string { return @tr("Any of these"); }
+    pure public function rule-move(folder: string) -> string { return @tr("Move to {0}", folder); }
+    pure public function rule-delete() -> string { return @tr("Delete"); }
+    pure public function rule-read() -> string { return @tr("Mark as read"); }
+    pure public function rule-flag() -> string { return @tr("Mark as important"); }
+    pure public function rule-stop() -> string { return @tr("Stop processing more rules"); }
+    pure public function rule-new-name() -> string { return @tr("New rule"); }
+    pure public function rule-err-name() -> string { return @tr("Give the rule a name."); }
+    pure public function rule-err-value() -> string { return @tr("Each condition needs a value."); }
+    pure public function rule-err-action() -> string { return @tr("Choose at least one action."); }
+    pure public function rule-err-conds() -> string { return @tr("Add a condition."); }
+    // The activity of automatic runs: what was done to which message.
+    pure public function rule-log-title(rule: string, when: string) -> string { return @tr("{0}, {1}", rule, when); }
+    pure public function rule-log-move(subject: string, from: string, folder: string) -> string {
+        return @tr("Moved \u{201c}{0}\u{201d} from {1} to {2}.", subject, from, folder);
+    }
+    pure public function rule-log-delete(subject: string, from: string) -> string {
+        return @tr("Deleted \u{201c}{0}\u{201d} from {1}.", subject, from);
+    }
+    pure public function rule-log-read(subject: string, from: string) -> string {
+        return @tr("Marked \u{201c}{0}\u{201d} from {1} as read.", subject, from);
+    }
+    pure public function rule-log-flag(subject: string, from: string) -> string {
+        return @tr("Marked \u{201c}{0}\u{201d} from {1} as important.", subject, from);
+    }
+    pure public function rule-log-failed(subject: string, from: string) -> string {
+        return @tr("Couldn\u{2019}t act on \u{201c}{0}\u{201d} from {1}. It stayed in the Inbox.", subject, from);
+    }
+    pure public function q-rule-delete-title(name: string) -> string { return @tr("Delete rule \u{201c}{0}\u{201d}?", name); }
+    pure public function q-rule-delete-text() -> string { return @tr("Mail it already moved stays where it is."); }
+    pure public function rule-sieve-copied() -> string { return @tr("Copied as a Sieve script. Paste it into your provider\u{2019}s mail filters."); }
 
     // ---- Titles of the file dialogs
     pure public function dlg-save-attachment() -> string { return @tr("Save attachment"); }

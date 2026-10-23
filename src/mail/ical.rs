@@ -1,14 +1,18 @@
 //! Meeting invitations (iCalendar, RFC 5545, with iTIP methods, RFC 5546):
 //! the first event of a `text/calendar` part or `.ics` file, read for the
-//! reader's invite card, and the REPLY that answers it.
+//! reader's invite card, and the REPLY that answers it; and a whole
+//! calendar resource ([`parse_resource`]: the series, its edited single
+//! occurrences, exceptions and alarms) for the calendar (`crate::cal`),
+//! written with [`write_event`] and edited in place with [`patch`].
 //!
 //! The input is untrusted, so this module denies the lints below (as
 //! `render/` does), refuses input over [`MAX_BYTES`], [`MAX_LINES`] lines
 //! or [`MAX_PROPS`] properties before reading it, and returns `None` for
 //! anything it can't read: the message then shows as it always did. There
-//! is no built-in time zone table: a TZID is resolved only through a
-//! VTIMEZONE in the same file; otherwise its wall time is shown with the
-//! zone's name. Recurrences are summarized, never expanded.
+//! is a TZID is resolved through a VTIMEZONE in the same file, else through
+//! Windows' own zone rules (`crate::cal::tz`); otherwise its wall time is
+//! shown with the zone's name. Recurrences are summarized here and
+//! expanded by `crate::cal::recur`.
 
 #![deny(
     clippy::unwrap_used,
@@ -33,6 +37,12 @@ const MAX_OBSERVANCES: usize = 32;
 /// Characters kept of a one-line field, and of the description.
 const MAX_TEXT: usize = 300;
 const MAX_DESCRIPTION: usize = 2_000;
+/// Edited single occurrences of one resource read at most.
+pub const MAX_OVERRIDES: usize = 500;
+/// EXDATE plus RDATE values of one event read at most.
+pub const MAX_DATES: usize = 1_000;
+/// Alarms of one event read at most.
+pub const MAX_ALARMS: usize = 8;
 
 /// When an event starts or ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +57,8 @@ pub struct When {
     /// The TZID of a time whose instant is unknown; empty for a floating
     /// time.
     pub zone: String,
+    /// The TZID as written (empty for UTC, floating and dates).
+    pub tzid: String,
 }
 
 /// An organizer or attendee.
@@ -155,25 +167,49 @@ impl Prop {
 }
 
 /// A STANDARD or DAYLIGHT part of a VTIMEZONE.
-#[derive(Default)]
+#[derive(Default, Clone, Debug, PartialEq)]
 struct Observance {
     tzid: String,
     start: Option<NaiveDateTime>,
     offset: Option<i64>,
+    /// TZOFFSETFROM: the offset before this observance starts.
+    from: Option<i64>,
     rrule: String,
 }
 
 /// Read the first event of an iCalendar text. `None` if it is too large,
 /// not a calendar, or has no event with a start.
 pub fn parse(bytes: &[u8]) -> Option<Event> {
+    let cal = read(bytes, 1)?;
+    let first = cal.events.first()?;
+    build(cal.method, &first.props, &cal.zones)
+}
+
+/// One VEVENT's properties and its VALARMs' properties.
+struct RawEvent {
+    props: Vec<Prop>,
+    alarms: Vec<Vec<Prop>>,
+}
+
+/// A calendar's METHOD, its top-level events (at most `max`) and its
+/// time zone observances.
+struct RawCal {
+    method: String,
+    events: Vec<RawEvent>,
+    zones: Vec<Observance>,
+}
+
+fn read(bytes: &[u8], max: usize) -> Option<RawCal> {
     if bytes.len() > MAX_BYTES {
         return None;
     }
     let text = String::from_utf8_lossy(bytes);
     let mut stack: Vec<String> = Vec::new();
-    let (mut calendar, mut done) = (false, false);
+    let mut calendar = false;
     let mut method = String::new();
-    let mut event: Option<Vec<Prop>> = None;
+    let mut events: Vec<RawEvent> = Vec::new();
+    // Inside an event that is kept.
+    let mut open = false;
     let (mut tzid, mut obs, mut zones) = (String::new(), None::<Observance>, Vec::new());
     for line in unfold(&text)? {
         let Some(p) = content_line(&line) else {
@@ -188,7 +224,18 @@ pub fn parse(bytes: &[u8]) -> Option<Event> {
                 let kind = p.value.trim().to_ascii_uppercase();
                 match (parent, kind.as_str()) {
                     (None, "VCALENDAR") => calendar = true,
-                    (Some("VCALENDAR"), "VEVENT") if event.is_none() => event = Some(Vec::new()),
+                    (Some("VCALENDAR"), "VEVENT") if events.len() < max => {
+                        events.push(RawEvent {
+                            props: Vec::new(),
+                            alarms: Vec::new(),
+                        });
+                        open = true;
+                    }
+                    (Some("VEVENT"), "VALARM") if open && stack.len() == 2 => {
+                        if let Some(e) = events.last_mut().filter(|e| e.alarms.len() < MAX_ALARMS) {
+                            e.alarms.push(Vec::new());
+                        }
+                    }
                     (Some("VCALENDAR"), "VTIMEZONE") => tzid.clear(),
                     (Some("VTIMEZONE"), "STANDARD" | "DAYLIGHT") => {
                         obs = Some(Observance {
@@ -201,7 +248,7 @@ pub fn parse(bytes: &[u8]) -> Option<Event> {
                 stack.push(kind);
             }
             "END" => match stack.pop().as_deref() {
-                Some("VEVENT") if stack.len() == 1 && event.is_some() => done = true,
+                Some("VEVENT") if stack.len() == 1 => open = false,
                 Some("STANDARD" | "DAYLIGHT") => {
                     if let Some(o) = obs.take().filter(|_| zones.len() < MAX_OBSERVANCES) {
                         zones.push(o);
@@ -213,9 +260,14 @@ pub fn parse(bytes: &[u8]) -> Option<Event> {
                 Some("VCALENDAR") if name == "METHOD" => {
                     method = p.value.trim().to_ascii_uppercase();
                 }
-                Some("VEVENT") if stack.len() == 2 && !done => {
-                    if let Some(e) = event.as_mut() {
-                        e.push(p);
+                Some("VEVENT") if stack.len() == 2 && open => {
+                    if let Some(e) = events.last_mut() {
+                        e.props.push(p);
+                    }
+                }
+                Some("VALARM") if stack.len() == 3 && open => {
+                    if let Some(a) = events.last_mut().and_then(|e| e.alarms.last_mut()) {
+                        a.push(p);
                     }
                 }
                 Some("VTIMEZONE") if name == "TZID" => tzid = p.value.trim().to_string(),
@@ -224,6 +276,7 @@ pub fn parse(bytes: &[u8]) -> Option<Event> {
                         match name {
                             "DTSTART" => o.start = date_time(&p.value).map(|(t, _)| t),
                             "TZOFFSETTO" => o.offset = utc_offset(&p.value),
+                            "TZOFFSETFROM" => o.from = utc_offset(&p.value),
                             "RRULE" => o.rrule = p.value.to_ascii_uppercase(),
                             _ => {}
                         }
@@ -233,10 +286,11 @@ pub fn parse(bytes: &[u8]) -> Option<Event> {
             },
         }
     }
-    if !calendar {
-        return None;
-    }
-    build(method, &event?, &zones)
+    calendar.then_some(RawCal {
+        method,
+        events,
+        zones,
+    })
 }
 
 /// The content lines of `text`, unfolded (a line starting with a space or
@@ -468,30 +522,49 @@ fn date_time(value: &str) -> Option<(NaiveDateTime, bool)> {
 
 /// `DTSTART` or `DTEND`, resolved as far as the file allows.
 fn when(p: &Prop, zones: &[Observance]) -> Option<When> {
-    let (wall, utc) = date_time(&p.value)?;
-    let all_day = p
+    let date = p
         .param("VALUE")
-        .is_some_and(|v| v.eq_ignore_ascii_case("DATE"))
-        || p.value.trim().len() == 8;
+        .is_some_and(|v| v.eq_ignore_ascii_case("DATE"));
     let tzid = p.param("TZID").map(one_line).unwrap_or_default();
+    when_value(&p.value, date, &tzid, zones)
+}
+
+/// One date or date-time value with its `VALUE=DATE` and TZID.
+fn when_value(value: &str, date: bool, tzid: &str, zones: &[Observance]) -> Option<When> {
+    let (wall, utc) = date_time(value)?;
+    let all_day = date || value.trim().len() == 8;
     let instant = if all_day {
         None
     } else if utc {
         Some(Utc.from_utc_datetime(&wall).timestamp())
     } else {
-        offset_at(zones, &tzid, wall)
-            .and_then(|off| Utc.from_utc_datetime(&wall).timestamp().checked_sub(off))
+        zoned(zones, tzid, wall)
     };
+    let tzid = if all_day || utc { "" } else { tzid };
     Some(When {
         wall,
         utc: instant,
         all_day,
         zone: if instant.is_none() && !all_day {
-            tzid
+            tzid.to_string()
         } else {
             String::new()
         },
+        tzid: tzid.to_string(),
     })
+}
+
+/// The instant of wall time `wall` in zone `tzid`: through the file's
+/// VTIMEZONE, else Windows' rules for the zone; `None` for a floating
+/// time or an unknown zone.
+fn zoned(zones: &[Observance], tzid: &str, wall: NaiveDateTime) -> Option<i64> {
+    if tzid.is_empty() {
+        return None;
+    }
+    match offset_at(zones, tzid, wall) {
+        Some(off) => Utc.from_utc_datetime(&wall).timestamp().checked_sub(off),
+        None => crate::cal::tz::to_utc(tzid, wall),
+    }
 }
 
 /// `+HHMM[SS]` or `-HHMM[SS]` in seconds.
@@ -515,6 +588,10 @@ fn utc_offset(value: &str) -> Option<i64> {
 
 /// The UTC offset of zone `tzid` at local time `wall`, from its VTIMEZONE:
 /// the observance whose latest onset is at or before `wall`.
+///
+/// A wall time in the gap an onset opens (clocks jump forward) takes the
+/// offset before it (RFC 5545 3.3.5); one in an overlap takes the first
+/// occurrence (the observance before the onset).
 fn offset_at(zones: &[Observance], tzid: &str, wall: NaiveDateTime) -> Option<i64> {
     let ours: Vec<&Observance> = zones.iter().filter(|o| o.tzid == tzid).collect();
     let latest = ours
@@ -526,12 +603,22 @@ fn offset_at(zones: &[Observance], tzid: &str, wall: NaiveDateTime) -> Option<i6
                 .flatten()
                 .filter_map(|y| onset(o, y))
                 .filter(|t| *t <= wall)
-                .map(move |t| (t, o.offset))
+                .map(move |t| (t, *o))
         })
-        .max_by_key(|(t, _)| *t)
-        .and_then(|(_, off)| off);
+        .max_by_key(|(t, _)| *t);
+    if let Some((t, o)) = latest {
+        // In the gap: the offset before the onset.
+        if let (Some(to), Some(from)) = (o.offset, o.from)
+            && to > from
+            && let Some(gap) = to.checked_sub(from).and_then(TimeDelta::try_seconds)
+            && t.checked_add_signed(gap).is_some_and(|end| wall < end)
+        {
+            return Some(from);
+        }
+        return o.offset;
+    }
     // Before every onset: the first observance's offset.
-    latest.or_else(|| ours.first().and_then(|o| o.offset))
+    ours.first().and_then(|o| o.offset)
 }
 
 /// When observance `o` starts in `year`: its `DTSTART` if it has no
@@ -581,25 +668,10 @@ fn weekday(s: &str) -> Option<Weekday> {
     })
 }
 
-/// The `n`-th `wd` of a month (from its end when `n` is negative).
-fn nth_weekday(year: i32, month: u32, wd: Weekday, n: i8) -> Option<NaiveDate> {
-    if n >= 0 {
-        return NaiveDate::from_weekday_of_month_opt(year, month, wd, u8::try_from(n).ok()?);
-    }
-    let first_next = match month {
-        12 => NaiveDate::from_ymd_opt(year.checked_add(1)?, 1, 1)?,
-        m => NaiveDate::from_ymd_opt(year, m.checked_add(1)?, 1)?,
-    };
-    let mut day = first_next.pred_opt()?;
-    while day.weekday() != wd {
-        day = day.pred_opt()?;
-    }
-    let back = TimeDelta::try_weeks(i64::from(n).checked_add(1)?.checked_abs()?)?;
-    day.checked_sub_signed(back).filter(|d| d.month() == month)
-}
+use crate::cal::tz::nth_weekday;
 
 /// A non-negative `DURATION` (`P1W`, `P1DT2H`, `PT30M`).
-fn duration(value: &str) -> Option<TimeDelta> {
+pub(crate) fn duration(value: &str) -> Option<TimeDelta> {
     let v = value.trim();
     let v = v.strip_prefix('+').unwrap_or(v).strip_prefix('P')?;
     let (mut secs, mut num, mut time) = (0i64, 0i64, false);
@@ -960,6 +1032,445 @@ fn fold(line: &str) -> String {
     out
 }
 
+/// A reminder (VALARM): minutes before the start (or the end), negative
+/// for after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Alarm {
+    pub before_min: i64,
+    pub related_end: bool,
+}
+
+/// One VEVENT of a resource with what the calendar needs beyond the card.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub event: Event,
+    pub exdates: Vec<When>,
+    pub rdates: Vec<When>,
+    pub alarms: Vec<Alarm>,
+    /// `TRANSP`, upper case (`TRANSPARENT`: doesn't block time).
+    pub transp: String,
+}
+
+/// A calendar resource (one UID): the series or single event, and its
+/// edited single occurrences (with `RECURRENCE-ID`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Resource {
+    pub method: String,
+    pub master: Option<Item>,
+    pub overrides: Vec<Item>,
+    zones: Vec<Observance>,
+}
+
+impl Resource {
+    /// The instant of wall time `wall` in zone `tzid`, as the resource's
+    /// own VTIMEZONE (else Windows) says; `None` when floating or unknown.
+    pub fn to_utc(&self, tzid: &str, wall: NaiveDateTime) -> Option<i64> {
+        zoned(&self.zones, tzid, wall)
+    }
+
+    /// The UID (the master's, else the first override's).
+    pub fn uid(&self) -> &str {
+        self.master
+            .as_ref()
+            .or(self.overrides.first())
+            .map_or("", |i| i.event.uid.as_str())
+    }
+}
+
+/// A whole resource: every top-level VEVENT (one master, up to
+/// [`MAX_OVERRIDES`] overrides). `None` past the caps, when it isn't a
+/// calendar, or when no event has a start.
+pub fn parse_resource(bytes: &[u8]) -> Option<Resource> {
+    let cal = read(bytes, MAX_OVERRIDES.saturating_add(1))?;
+    let mut master = None;
+    let mut overrides = Vec::new();
+    for raw in &cal.events {
+        let Some(event) = build(cal.method.clone(), &raw.props, &cal.zones) else {
+            continue;
+        };
+        let mut dates = 0usize;
+        let mut list = |name: &str| -> Vec<When> {
+            let mut out = Vec::new();
+            for p in raw.props.iter().filter(|p| p.name == name) {
+                let date = p
+                    .param("VALUE")
+                    .is_some_and(|v| v.eq_ignore_ascii_case("DATE"));
+                let tzid = p.param("TZID").map(one_line).unwrap_or_default();
+                for v in p.value.split(',') {
+                    if dates >= MAX_DATES {
+                        return out;
+                    }
+                    dates = dates.saturating_add(1);
+                    // A PERIOD (RDATE): its start.
+                    let v = v.split('/').next().unwrap_or_default();
+                    out.extend(when_value(v, date, &tzid, &cal.zones));
+                }
+            }
+            out
+        };
+        let exdates = list("EXDATE");
+        let rdates = list("RDATE");
+        let alarms = raw.alarms.iter().filter_map(|a| alarm(a)).collect();
+        let transp = raw
+            .props
+            .iter()
+            .find(|p| p.name == "TRANSP")
+            .map_or(String::new(), |p| p.value.trim().to_ascii_uppercase());
+        let item = Item {
+            event,
+            exdates,
+            rdates,
+            alarms,
+            transp,
+        };
+        if item.event.recurrence_id.is_empty() && master.is_none() {
+            master = Some(item);
+        } else if !item.event.recurrence_id.is_empty() {
+            overrides.push(item);
+        }
+    }
+    if master.is_none() && overrides.is_empty() {
+        return None;
+    }
+    Some(Resource {
+        method: cal.method,
+        master,
+        overrides,
+        zones: cal.zones,
+    })
+}
+
+/// A VALARM's trigger as minutes before; only relative triggers.
+fn alarm(props: &[Prop]) -> Option<Alarm> {
+    let t = props.iter().find(|p| p.name == "TRIGGER")?;
+    if t.param("VALUE")
+        .is_some_and(|v| v.eq_ignore_ascii_case("DATE-TIME"))
+    {
+        return None;
+    }
+    let v = t.value.trim();
+    let (sign, rest) = match v.strip_prefix('-') {
+        Some(r) => (1i64, r),
+        None => (-1i64, v.strip_prefix('+').unwrap_or(v)),
+    };
+    let mins = duration(rest)?.num_minutes().checked_mul(sign)?;
+    Some(Alarm {
+        before_min: mins,
+        related_end: t
+            .param("RELATED")
+            .is_some_and(|r| r.eq_ignore_ascii_case("END")),
+    })
+}
+
+/// The logical lines of a raw resource: each line with its folded
+/// continuation lines, as written (line ends kept).
+fn logical_lines(raw: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut start = 0usize;
+    let mut pos = 0usize;
+    for line in raw.split_inclusive('\n') {
+        let next = pos.saturating_add(line.len());
+        if pos > start && !line.starts_with([' ', '\t']) {
+            out.extend(raw.get(start..pos));
+            start = pos;
+        }
+        pos = next;
+    }
+    if pos > start {
+        out.extend(raw.get(start..pos));
+    }
+    out
+}
+
+/// The property name of a logical line (upper case).
+fn line_name(line: &str) -> String {
+    line.split([':', ';'])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_uppercase()
+}
+
+/// The raw text without the calendar's METHOD (a stored copy of an
+/// invitation, which a CalDAV resource must not carry), CRLF kept.
+pub fn strip_method(raw: &str) -> String {
+    let mut depth = 0usize;
+    let mut out = String::with_capacity(raw.len());
+    for l in logical_lines(raw) {
+        let name = line_name(l);
+        match name.as_str() {
+            "BEGIN" => depth = depth.saturating_add(1),
+            "END" => depth = depth.saturating_sub(1),
+            "METHOD" if depth == 1 => continue,
+            _ => {}
+        }
+        out.push_str(l);
+    }
+    out
+}
+
+/// What [`write_event`] and [`patch`] write.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Edit {
+    pub uid: String,
+    pub summary: String,
+    pub location: String,
+    pub description: String,
+    pub start: When,
+    pub end: Option<When>,
+    /// An RRULE value, or empty.
+    pub rrule: String,
+    /// Minutes before the start for Komorebi's reminder.
+    pub alarm_min: Option<i64>,
+    pub now: DateTime<Utc>,
+}
+
+impl Edit {
+    fn lines(&self) -> Vec<String> {
+        let mut l = vec![format!("DTSTART{}", self.start.value())];
+        if let Some(e) = &self.end {
+            l.push(format!("DTEND{}", e.value()));
+        }
+        for (name, v) in [
+            ("SUMMARY", &self.summary),
+            ("LOCATION", &self.location),
+            ("DESCRIPTION", &self.description),
+        ] {
+            if !v.trim().is_empty() {
+                l.push(format!("{name}:{}", escape(&clean(v))));
+            }
+        }
+        if !self.rrule.is_empty() {
+            l.push(format!("RRULE:{}", one_line(&self.rrule).replace(':', "")));
+        }
+        l
+    }
+
+    fn alarm(&self) -> Vec<String> {
+        match self.alarm_min {
+            Some(m) => vec![
+                "BEGIN:VALARM".into(),
+                "X-KOMOREBI:1".into(),
+                "ACTION:DISPLAY".into(),
+                "DESCRIPTION:Reminder".into(),
+                format!("TRIGGER:-PT{}M", m.max(0)),
+                "END:VALARM".into(),
+            ],
+            None => Vec::new(),
+        }
+    }
+}
+
+/// A new resource for `e`: VCALENDAR (PRODID `-//Komorebi//EN`, no
+/// METHOD) with one VEVENT, CRLF ends, folded at 75 octets.
+pub fn write_event(e: &Edit) -> String {
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".into(),
+        "PRODID:-//Komorebi//EN".into(),
+        "BEGIN:VEVENT".into(),
+        format!("UID:{}", escape(&e.uid)),
+        e.now.format("DTSTAMP:%Y%m%dT%H%M%SZ").to_string(),
+        "SEQUENCE:0".into(),
+    ];
+    lines.extend(e.lines());
+    lines.extend(e.alarm());
+    lines.extend(["END:VEVENT".into(), "END:VCALENDAR".into()]);
+    lines.iter().map(|l| fold(l)).collect()
+}
+
+/// One edited occurrence of a series, as a VCALENDAR holding a single
+/// VEVENT with `RECURRENCE-ID{rid}` (`rid`: the parameters and value after
+/// the name, in the series' own form), for merging into the resource.
+pub fn override_event(e: &Edit, rid: &str) -> String {
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "BEGIN:VEVENT".into(),
+        format!("UID:{}", escape(&e.uid)),
+        e.now.format("DTSTAMP:%Y%m%dT%H%M%SZ").to_string(),
+        format!("RECURRENCE-ID{}", one_line(rid)),
+        "SEQUENCE:0".into(),
+    ];
+    lines.extend(e.lines());
+    lines.extend(e.alarm());
+    lines.extend(["END:VEVENT".into(), "END:VCALENDAR".into()]);
+    lines.iter().map(|l| fold(l)).collect()
+}
+
+/// The master VEVENT of `raw` edited: SUMMARY, LOCATION, DESCRIPTION,
+/// DTSTART, DTEND/DURATION, RRULE and the VALARM Komorebi wrote replaced,
+/// SEQUENCE bumped and DTSTAMP renewed; every other line kept byte for
+/// byte. `None` when `raw` has no master event.
+pub fn patch(raw: &str, e: &Edit) -> Option<String> {
+    const REPLACED: [&str; 10] = [
+        "SUMMARY",
+        "LOCATION",
+        "DESCRIPTION",
+        "DTSTART",
+        "DTEND",
+        "DURATION",
+        "RRULE",
+        "SEQUENCE",
+        "DTSTAMP",
+        "LAST-MODIFIED",
+    ];
+    let lines = logical_lines(raw);
+    let mut out = String::with_capacity(raw.len().saturating_add(256));
+    let mut stack: Vec<String> = Vec::new();
+    // The VEVENT being read is the master (no RECURRENCE-ID): decided at
+    // its end, so its lines are held until then.
+    let mut held: Vec<&str> = Vec::new();
+    let mut in_ours_alarm = false;
+    let mut alarm_buf: Vec<&str> = Vec::new();
+    let mut done = false;
+    let mut sequence = 0i64;
+    for l in lines {
+        let name = line_name(l);
+        let value = || {
+            l.split_once(':')
+                .map_or("", |(_, v)| v)
+                .trim()
+                .to_ascii_uppercase()
+        };
+        let depth = stack.len();
+        if name == "BEGIN" {
+            stack.push(value());
+        }
+        let in_event = stack.get(1).is_some_and(|k| k == "VEVENT") && !done;
+        if !in_event {
+            if name == "END" {
+                stack.pop();
+            }
+            out.push_str(l);
+            continue;
+        }
+        // Inside a top-level VEVENT.
+        if name == "BEGIN" && depth == 2 && value() == "VALARM" {
+            in_ours_alarm = true;
+            alarm_buf.clear();
+            alarm_buf.push(l);
+            continue;
+        }
+        if in_ours_alarm {
+            alarm_buf.push(l);
+            if name == "END" && stack.len() == 3 {
+                stack.pop();
+                in_ours_alarm = false;
+                // Komorebi's own alarm is dropped (rewritten); others kept.
+                if !alarm_buf.iter().any(|a| line_name(a) == "X-KOMOREBI") {
+                    held.extend(alarm_buf.iter());
+                }
+            } else if name == "END" {
+                stack.pop();
+            }
+            continue;
+        }
+        if name == "END" && depth == 2 {
+            stack.pop();
+            let master = !held.iter().any(|h| line_name(h) == "RECURRENCE-ID");
+            if master {
+                for h in held.drain(..) {
+                    let n = line_name(h);
+                    if n == "SEQUENCE" {
+                        sequence = h
+                            .split_once(':')
+                            .and_then(|(_, v)| v.trim().parse().ok())
+                            .unwrap_or(0);
+                    }
+                    if !REPLACED.contains(&n.as_str()) {
+                        out.push_str(h);
+                    }
+                }
+                let mut new = vec![
+                    format!("SEQUENCE:{}", sequence.saturating_add(1)),
+                    e.now.format("DTSTAMP:%Y%m%dT%H%M%SZ").to_string(),
+                ];
+                new.extend(e.lines());
+                new.extend(e.alarm());
+                for n in new {
+                    out.push_str(&fold(&n));
+                }
+                done = true;
+            } else {
+                for h in held.drain(..) {
+                    out.push_str(h);
+                }
+            }
+            out.push_str(l);
+            continue;
+        }
+        if name == "END" {
+            stack.pop();
+        }
+        held.push(l);
+    }
+    done.then_some(out)
+}
+
+/// `raw` with attendee `addr`'s PARTSTAT set to `partstat` in every
+/// VEVENT (and RSVP dropped); `None` if `addr` is not an attendee.
+pub fn set_partstat(raw: &str, addr: &str, partstat: &str) -> Option<String> {
+    let mut found = false;
+    let mut out = String::with_capacity(raw.len());
+    for l in logical_lines(raw) {
+        if line_name(l) != "ATTENDEE" {
+            out.push_str(l);
+            continue;
+        }
+        let unfolded: String = l
+            .replace("\r\n ", "")
+            .replace("\r\n\t", "")
+            .replace("\n ", "")
+            .trim_end_matches(['\r', '\n'])
+            .to_string();
+        let Some(p) = content_line(&unfolded) else {
+            out.push_str(l);
+            continue;
+        };
+        let theirs = p.value.trim();
+        let mine = theirs
+            .get(..7)
+            .filter(|s| s.eq_ignore_ascii_case("mailto:"))
+            .and_then(|_| theirs.get(7..))
+            .is_some_and(|a| a.trim().eq_ignore_ascii_case(addr));
+        if !mine {
+            out.push_str(l);
+            continue;
+        }
+        found = true;
+        let head = unfolded.get(
+            ..unfolded
+                .len()
+                .saturating_sub(p.value.len())
+                .saturating_sub(1),
+        );
+        let params: Vec<&str> = split_unquoted(head.unwrap_or("ATTENDEE"), ';')
+            .into_iter()
+            .skip(1)
+            .filter(|kv| {
+                let k = kv
+                    .split('=')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_ascii_uppercase();
+                k != "PARTSTAT" && k != "RSVP"
+            })
+            .collect();
+        let mut line = String::from("ATTENDEE");
+        for kv in params {
+            line.push(';');
+            line.push_str(kv);
+        }
+        line.push_str(";PARTSTAT=");
+        line.push_str(partstat);
+        line.push(':');
+        line.push_str(&p.value);
+        out.push_str(&fold(&line));
+    }
+    found.then_some(out)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -1174,5 +1685,165 @@ DTEND:20261008T140000Z
             floating.when_text(&lisbon_summer),
             "Thu 2026-10-08 13:00 (floating time)"
         );
+    }
+
+    const APPLE: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Apple Inc.//macOS 14//EN\r\nMETHOD:REQUEST\r\n\
+        BEGIN:VEVENT\r\nUID:r1@x\r\nSEQUENCE:3\r\nDTSTART:20261008T130000Z\r\nDTEND:20261008T140000Z\r\n\
+        SUMMARY:Old title\r\nX-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC\r\nX-LONG:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n bbbbbbbbbbbb\r\n\
+        ORGANIZER;CN=Jane:mailto:jane@x.org\r\nATTENDEE;CN=Me;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:me@x.org\r\n\
+        ATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@x.org\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\nEXDATE:20261015T130000Z,20261022T130000Z\r\n\
+        BEGIN:VALARM\r\nX-WR-ALARMUID:abc\r\nACTION:AUDIO\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n\
+        END:VEVENT\r\n\
+        BEGIN:VEVENT\r\nUID:r1@x\r\nRECURRENCE-ID:20261029T130000Z\r\nDTSTART:20261029T150000Z\r\nSUMMARY:Moved\r\nEND:VEVENT\r\n\
+        END:VCALENDAR\r\n";
+
+    #[test]
+    fn resource_with_overrides_dates_and_alarms() {
+        let r = parse_resource(APPLE.as_bytes()).unwrap();
+        let m = r.master.as_ref().unwrap();
+        assert_eq!(r.uid(), "r1@x");
+        assert_eq!(m.exdates.len(), 2);
+        assert_eq!(
+            m.alarms,
+            [Alarm {
+                before_min: 15,
+                related_end: false
+            }]
+        );
+        assert_eq!(r.overrides.len(), 1);
+        assert_eq!(r.overrides[0].event.summary, "Moved");
+        // `parse` still reads the first event for the card.
+        assert_eq!(parse(APPLE.as_bytes()).unwrap().summary, "Old title");
+    }
+
+    #[test]
+    fn strip_method_and_partstat() {
+        let raw = strip_method(APPLE);
+        assert!(!raw.contains("METHOD:"));
+        assert!(raw.contains("PRODID:-//Apple Inc.//macOS 14//EN\r\n"));
+        let raw = set_partstat(&raw, "ME@x.org", "ACCEPTED").unwrap();
+        assert!(raw.contains("ATTENDEE;CN=Me;PARTSTAT=ACCEPTED:mailto:me@x.org\r\n"));
+        assert!(raw.contains("ATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@x.org\r\n"));
+        assert!(set_partstat(&raw, "nobody@x.org", "ACCEPTED").is_none());
+        let ev = parse_resource(raw.as_bytes()).unwrap();
+        let me = ev.master.unwrap().event;
+        assert_eq!(me.attendees[0].partstat, "ACCEPTED");
+        assert!(ev.method.is_empty());
+    }
+
+    fn edit() -> Edit {
+        Edit {
+            uid: "new-1@komorebi".into(),
+            summary: "Dentist, 2nd floor; bring card".into(),
+            location: "Rua Augusta".into(),
+            description: "Line 1\nLine 2".into(),
+            start: When {
+                wall: NaiveDate::from_ymd_opt(2026, 11, 3)
+                    .unwrap()
+                    .and_hms_opt(9, 30, 0)
+                    .unwrap(),
+                utc: None,
+                all_day: false,
+                zone: "Europe/Lisbon".into(),
+                tzid: "Europe/Lisbon".into(),
+            },
+            end: None,
+            rrule: "FREQ=MONTHLY;BYDAY=1TU".into(),
+            alarm_min: Some(30),
+            now: Utc.with_ymd_and_hms(2026, 10, 1, 9, 30, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn write_event_round_trips() {
+        let ics = write_event(&edit());
+        assert!(!ics.contains("METHOD"));
+        assert!(ics.contains("PRODID:-//Komorebi//EN\r\n"));
+        let r = parse_resource(ics.as_bytes()).unwrap();
+        let m = r.master.unwrap();
+        assert_eq!(m.event.summary, "Dentist, 2nd floor; bring card");
+        assert_eq!(m.event.description, "Line 1\nLine 2");
+        assert_eq!(m.event.rrule, "FREQ=MONTHLY;BYDAY=1TU");
+        assert_eq!(m.event.start.tzid, "Europe/Lisbon");
+        assert_eq!(m.alarms[0].before_min, 30);
+    }
+
+    #[test]
+    fn patch_keeps_what_it_does_not_know() {
+        let mut e = edit();
+        e.summary = "New title".into();
+        e.alarm_min = None;
+        let out = patch(APPLE, &e).unwrap();
+        for kept in [
+            "X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC\r\n",
+            "X-LONG:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n bbbbbbbbbbbb\r\n",
+            "ATTENDEE;CN=Me;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:me@x.org\r\n",
+            "X-WR-ALARMUID:abc\r\n",
+            "EXDATE:20261015T130000Z,20261022T130000Z\r\n",
+            "RECURRENCE-ID:20261029T130000Z\r\n",
+            "SUMMARY:Moved\r\n",
+        ] {
+            assert!(out.contains(kept), "{kept}");
+        }
+        assert!(out.contains("SEQUENCE:4\r\n"));
+        assert!(!out.contains("Old title"));
+        let r = parse_resource(out.as_bytes()).unwrap();
+        assert_eq!(r.master.as_ref().unwrap().event.summary, "New title");
+        assert_eq!(r.master.unwrap().event.sequence, 4);
+        assert_eq!(r.overrides.len(), 1);
+        // Our own alarm is replaced, not added twice.
+        e.alarm_min = Some(10);
+        let once = patch(&write_event(&e), &e).unwrap();
+        assert_eq!(once.matches("BEGIN:VALARM").count(), 1);
+        assert!(patch("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", &e).is_none());
+    }
+
+    #[test]
+    fn hostile_resources() {
+        assert!(parse_resource(&vec![b'a'; MAX_BYTES + 1]).is_none());
+        for cut in (0..APPLE.len()).step_by(37) {
+            let _ = parse_resource(APPLE.get(..cut).unwrap_or_default().as_bytes());
+            let _ = patch(APPLE.get(..cut).unwrap_or_default(), &edit());
+            let _ = strip_method(APPLE.get(..cut).unwrap_or_default());
+        }
+        let many = format!(
+            "BEGIN:VCALENDAR\r\n{}END:VCALENDAR\r\n",
+            "BEGIN:VEVENT\r\nUID:a\r\nRECURRENCE-ID:20260101T000000Z\r\nDTSTART:20260101T000000Z\r\nEND:VEVENT\r\n"
+                .repeat(MAX_OVERRIDES + 50)
+        );
+        assert_eq!(
+            parse_resource(many.as_bytes()).unwrap().overrides.len(),
+            MAX_OVERRIDES + 1
+        );
+        let dates = format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260101T000000Z\r\nEXDATE:{}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            vec!["20260101T000000Z"; MAX_DATES + 10].join(",")
+        );
+        assert_eq!(
+            parse_resource(dates.as_bytes())
+                .unwrap()
+                .master
+                .unwrap()
+                .exdates
+                .len(),
+            MAX_DATES
+        );
+    }
+
+    #[test]
+    fn spring_gap_through_vtimezone() {
+        let ev = parse(
+            "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nTZID:NY\r\n\
+             BEGIN:DAYLIGHT\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\nDTSTART:20070311T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU\r\nEND:DAYLIGHT\r\n\
+             BEGIN:STANDARD\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\nDTSTART:20071104T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU\r\nEND:STANDARD\r\n\
+             END:VTIMEZONE\r\nBEGIN:VEVENT\r\nDTSTART;TZID=NY:20260308T023000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+                .as_bytes(),
+        )
+        .unwrap();
+        let want = Utc
+            .with_ymd_and_hms(2026, 3, 8, 7, 30, 0)
+            .unwrap()
+            .timestamp();
+        assert_eq!(ev.start.utc, Some(want));
     }
 }

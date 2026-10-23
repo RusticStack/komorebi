@@ -112,6 +112,12 @@ fn query_srv_online(name: &str) -> Vec<SrvRecord> {
     dns::query_srv(name)
 }
 
+/// The usable SRV records of `name` in the order to try them (none under
+/// `KOMOREBI_OFFLINE`), for DAV discovery (`crate::dav::discover`).
+pub fn srv_ordered(name: &str) -> Vec<SrvRecord> {
+    srv_order(&query_srv_online(name))
+}
+
 fn fetch_autoconfig(url: &str, domain: &str) -> Result<Vec<u8>, FetchError> {
     let domain = domain.to_string();
     let allowed = move |u: &url::Url| redirect_allowed(u, &domain);

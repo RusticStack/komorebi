@@ -8,7 +8,8 @@ mod tr;
 
 use komorebi::{db, mail, providers, role, secrets, trust};
 
-slint::include_modules!();
+// The generated UI lives in its own crate (crates/komorebi-ui).
+use komorebi_ui::*;
 
 use std::path::Path;
 use std::time::Instant;
@@ -16,6 +17,9 @@ use std::time::Instant;
 fn main() -> anyhow::Result<()> {
     let started = Instant::now();
     let db_path = db::default_path();
+    // Started by Restart now or Start a fresh cache: wait for the app that
+    // started this one to close (it holds the cache and the one-app lock).
+    wait_for_restart();
     // One app per cache, before the cache opens: two would drain one
     // outbox and double the connections.
     if !single_instance(&db_path) {
@@ -88,8 +92,20 @@ fn main() -> anyhow::Result<()> {
         );
     }
     mark("window created");
+    let db_path_for_lock = db_path.clone();
     let geometry = match app::install_with(&ui, db_path, &mark, opening) {
         Ok(geometry) => geometry,
+        // A cache this Windows user cannot unlock: its own dialog (Start a
+        // fresh cache or Quit) over the empty window, never the generic
+        // error.
+        Err(e) if app::is_locked(&e) => {
+            app::show_locked(&ui, db_path_for_lock);
+            if let Some(path) = komorebi::dev_var("KOMOREBI_SNAPSHOT") {
+                snapshot_locked(&ui, path.into());
+            }
+            ui.run()?;
+            return Ok(());
+        }
         Err(e) => {
             // The release build has no console, so say it on screen.
             rfd::MessageDialog::new()
@@ -866,6 +882,32 @@ fn instance_name(db_path: &Path) -> String {
 const WINDOW_PROP: &str = "Komorebi.Instance";
 
 /// The property value for a cache's window (never 0, which means "none").
+/// The app that asked for a restart (`KOMOREBI_RESTART_AFTER`, its process
+/// id; set by `app::cachelock`), waited for up to 15 s.
+fn wait_for_restart() {
+    let Some(pid) = std::env::var("KOMOREBI_RESTART_AFTER")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+    else {
+        return;
+    };
+    // SAFETY: plain Win32 calls; the handle is closed once.
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        };
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !h.is_null() {
+            WaitForSingleObject(h, 15_000);
+            CloseHandle(h);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = pid;
+}
+
 fn window_mark(db_path: &Path) -> usize {
     (instance_hash(db_path) as usize) | 1
 }
@@ -1159,6 +1201,10 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 app::sample_rich(false);
             }
             "signature-edit" => app::sample_signatures(true),
+            // Settings > Rules with three made-up rules (written to the
+            // throwaway cache, offline only), and the second one's page.
+            "settings-rules" => app::sample_rules(false),
+            "rule-edit" => app::sample_rules(true),
             // A file dragged over the window, with a composer open
             // (`drop-hover-compose`) or not: the drop overlay.
             "drop-hover" => app::sample_file_hover(),
@@ -1257,6 +1303,24 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 ui.set_pane_open(true);
             }
             "settings" => ui.set_show_settings(true),
+            // The Calendar page; `calendar:sample` (offline only, on a
+            // throwaway cache, as it writes made-up events to it) first adds
+            // a few events to the local calendar.
+            "calendar" => ui.set_show_calendar(true),
+            // `calendar:month`, `:week`, `:day`, `:agenda` and `:edit` (the
+            // editor on one of them) show that view; `:sample` the month.
+            s @ ("calendar:sample" | "calendar:month" | "calendar:week" | "calendar:day"
+            | "calendar:agenda" | "calendar:edit")
+                if komorebi::dev_var("KOMOREBI_OFFLINE").is_some() =>
+            {
+                app::sample_calendar(&s["calendar:".len()..]);
+            }
+            // The same with the Calendars pane open on the first account,
+            // with two made-up calendars listed (nothing is looked up).
+            "calendar:calendars" if komorebi::dev_var("KOMOREBI_OFFLINE").is_some() => {
+                app::sample_calendar("agenda");
+                app::sample_calendar_sync();
+            }
             // Settings on one section: `settings:general`, `:privacy`,
             // `:about` (or `:accounts`).
             // Settings > About in a made-up update state (nothing is looked
@@ -1267,22 +1331,36 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                 let state = &s["update:".len()..];
                 app::sample_update(state);
                 if state != "banner" {
-                    ui.set_settings_section(4);
+                    ui.set_settings_section(5);
                     ui.set_show_settings(true);
                 }
             }
             s if s.starts_with("settings:") => {
-                let section = ["accounts", "signatures", "general", "privacy", "about"]
-                    .iter()
-                    .position(|n| s.ends_with(n))
-                    .unwrap_or(0);
+                let section = [
+                    "accounts",
+                    "signatures",
+                    "rules",
+                    "general",
+                    "privacy",
+                    "about",
+                ]
+                .iter()
+                .position(|n| s.ends_with(n))
+                .unwrap_or(0);
                 ui.set_settings_section(section as i32);
                 ui.set_show_settings(true);
+            }
+            // Settings > Privacy with Encrypt the mail cache's question
+            // (nothing is recorded until it is confirmed).
+            "encrypt-ask" => {
+                ui.set_settings_section(3);
+                ui.set_show_settings(true);
+                ui.global::<CacheLock>().set_ask(1);
             }
             // Settings > Privacy with the Remove all data prompt (nothing
             // is removed until it is confirmed).
             "remove-data" => {
-                ui.set_settings_section(3);
+                ui.set_settings_section(4);
                 ui.set_show_settings(true);
                 ui.invoke_remove_all_data();
             }
@@ -1335,11 +1413,13 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
             // is sent): the sentence and Review certificate. `account-cert-prompt`
             // opens the Trust this certificate? prompt over it (and
             // `account-cert-again` the one that replaces a forgotten
-            // certificate); `account-cert-pinned` the form with a certificate
+            // certificate, and `account-cert-ca` the one for a certificate a
+            // test CA issued, offering that CA); `account-cert-pinned` the form with a certificate
             // saved for each server.
             "account-cert-failed"
             | "account-cert-prompt"
             | "account-cert-again"
+            | "account-cert-ca"
             | "account-cert-pinned" => {
                 use slint::Model;
                 if let Some(a) = ui.get_accounts().row_data(0) {
@@ -1385,6 +1465,19 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
                     });
                 }
             }
+            // The same with "This server does not need a sign-in for
+            // sending" set (`settings-edit-relay`; nothing is saved).
+            "settings-edit-relay" => {
+                use slint::Model;
+                if let Some(a) = ui.get_accounts().row_data(0) {
+                    ui.invoke_edit_account(a.id);
+                    ui.set_a_edit(AccountForm {
+                        smtp_no_auth: true,
+                        ..ui.get_a_edit()
+                    });
+                    ui.set_a_scroll_folders(true);
+                }
+            }
             // The first account's status as when its server can't be
             // reached (a made-up Offline problem): the status line, and
             // with `offline-settings` its line in Settings.
@@ -1403,6 +1496,13 @@ fn snapshot_and_quit(ui: &AppWindow, path: std::path::PathBuf) {
             // A made-up account added to the throwaway cache, as just added:
             // its Inbox in its first download (1,234 of 5,000). Offline
             // only, as it writes the cache.
+            // The Contacts view on made-up contacts (offline only, as it
+            // writes the cache): the list, the editor, the sync pane.
+            "contacts" | "contact-edit" | "contacts-sync"
+                if komorebi::dev_var("KOMOREBI_OFFLINE").is_some() =>
+            {
+                app::sample_contacts(&action);
+            }
             "fresh-inbox" if komorebi::dev_var("KOMOREBI_OFFLINE").is_some() => {
                 app::sample_fresh_inbox();
             }
@@ -1875,6 +1975,29 @@ fn save_bmp(ui: &AppWindow, path: &std::path::Path) {
     if let Ok(buf) = ui.window().take_snapshot() {
         write_bmp(&buf, path);
     }
+}
+
+/// Snapshot QA: the locked-cache dialog (a throwaway encrypted cache whose
+/// key was removed), at `KOMOREBI_SIZE`, then quit.
+fn snapshot_locked(ui: &AppWindow, path: std::path::PathBuf) {
+    use slint::ComponentHandle;
+    if let Some((w, h)) = std::env::var("KOMOREBI_SIZE")
+        .ok()
+        .and_then(|s| {
+            s.split_once('x')
+                .map(|(w, h)| (w.parse().ok(), h.parse().ok()))
+        })
+        .and_then(|(w, h)| Some((w?, h?)))
+    {
+        ui.window().set_size(slint::LogicalSize::new(w, h));
+    }
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+        if let Some(Ok(buf)) = weak.upgrade().map(|ui| ui.window().take_snapshot()) {
+            write_bmp(&buf, &path);
+        }
+        slint::quit_event_loop().ok();
+    });
 }
 
 fn write_bmp(buf: &slint::SharedPixelBuffer<slint::Rgba8Pixel>, path: &std::path::Path) {

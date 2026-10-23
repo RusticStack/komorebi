@@ -4,16 +4,14 @@ use super::errors::{Class, Special, Step, StepError};
 use crate::db::Importance;
 use crate::providers::{Security, Server};
 use anyhow::{Context, Result, anyhow, bail};
-use lettre::Transport;
 use lettre::address::{Address, Envelope};
 use lettre::message::header::{self, ContentTransferEncoding, ContentType, Headers};
 use lettre::message::{
     Attachment, Body, Mailbox, Mailboxes, Message, MessageBuilder, MultiPart, SinglePart,
 };
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::transport::smtp::client::Tls;
+use lettre::transport::smtp::authentication::{Credentials, DEFAULT_MECHANISMS};
+use lettre::transport::smtp::client::SmtpConnection;
 use lettre::transport::smtp::extension::ClientId;
-use lettre::transport::smtp::{SmtpTransport, SmtpTransportBuilder};
 use std::net::{Ipv4Addr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -368,12 +366,73 @@ pub fn sent_copy(raw: &[u8], bcc: &str) -> Result<Vec<u8>> {
     Ok(copy)
 }
 
-/// Settings shared by every connection. EHLO greets with the address literal
-/// `[127.0.0.1]` (RFC 5321 4.1.4) instead of this machine's hostname.
-fn configure(builder: SmtpTransportBuilder) -> SmtpTransportBuilder {
-    builder
-        .hello_name(ClientId::Ipv4(Ipv4Addr::LOCALHOST))
-        .timeout(Some(Duration::from_secs(60)))
+/// EHLO greets with the address literal `[127.0.0.1]` (RFC 5321 4.1.4)
+/// instead of this machine's hostname.
+fn hello() -> ClientId {
+    ClientId::Ipv4(Ipv4Addr::LOCALHOST)
+}
+
+/// How long one SMTP read or write may take.
+const SMTP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Where a session goes and how it is secured. `tls` is `None` only for the
+/// plain local fakes of the tests.
+struct Target<'a> {
+    host: &'a str,
+    port: u16,
+    tls: Option<Security>,
+    pin: Option<&'a [u8]>,
+}
+
+impl<'a> Target<'a> {
+    fn of(server: &'a Server, pin: Option<&'a [u8]>) -> Self {
+        Self {
+            host: &server.host,
+            port: server.port,
+            tls: Some(server.security),
+            pin,
+        }
+    }
+}
+
+/// The sign-in of a session: `None` for a server that takes mail without
+/// one (a local relay; the connection is still TLS, see [`Target`]).
+fn credentials(username: &str, password: &str, sign_in: bool) -> Option<Credentials> {
+    sign_in.then(|| Credentials::new(username.into(), password.into()))
+}
+
+/// Open a session: connect (SSL/TLS wraps the connection; STARTTLS is
+/// required, never optional), check the pinned certificate or key before
+/// anything else is sent, then sign in when `creds` are given. lettre's
+/// errors stay lettre errors, so [`step_of`] still reads them.
+fn session(t: &Target, creds: Option<&Credentials>) -> Result<SmtpConnection> {
+    let hello = hello();
+    let params = match t.tls {
+        Some(_) => Some(super::pin::smtp_tls_parameters(t.host, t.pin)?),
+        None => None,
+    };
+    let wrapper = match t.tls {
+        Some(Security::Tls) => params.as_ref(),
+        _ => None,
+    };
+    let mut conn =
+        SmtpConnection::connect((t.host, t.port), Some(SMTP_TIMEOUT), &hello, wrapper, None)
+            .map_err(anyhow::Error::new)?;
+    if let (Some(Security::StartTls), Some(params)) = (t.tls, params.as_ref()) {
+        conn.starttls(params, &hello).map_err(anyhow::Error::new)?;
+    }
+    if t.tls.is_some() && super::pin::usable(t.pin).is_some() {
+        let presented = conn.peer_certificate().ok();
+        if let Err(e) = super::pin::check_presented(presented.as_deref(), t.pin, t.host) {
+            conn.abort();
+            return Err(e);
+        }
+    }
+    if let Some(creds) = creds {
+        conn.auth(DEFAULT_MECHANISMS, creds)
+            .map_err(anyhow::Error::new)?;
+    }
+    Ok(conn)
 }
 
 pub fn send(server: &Server, username: &str, password: &str, msg: &Message) -> Result<()> {
@@ -382,54 +441,51 @@ pub fn send(server: &Server, username: &str, password: &str, msg: &Message) -> R
         None,
         username,
         password,
+        true,
         msg.envelope(),
         &msg.formatted(),
     )
 }
 
-/// Send the built bytes `raw` (see [`build_raw`]) to `envelope`.
+/// Send the built bytes `raw` (see [`build_raw`]) to `envelope`; without a
+/// sign-in when `sign_in` is false.
 pub fn send_raw(
     server: &Server,
     pin: Option<&[u8]>,
     username: &str,
     password: &str,
+    sign_in: bool,
     envelope: &Envelope,
     raw: &[u8],
 ) -> Result<()> {
-    transport(server, pin, username, password)?
-        .send_raw(envelope, raw)
-        .map_err(|e| pinned_failure(anyhow::Error::new(e), server, pin))
-        .context("sending failed")?;
+    send_to(
+        &Target::of(server, pin),
+        credentials(username, password, sign_in).as_ref(),
+        envelope,
+        raw,
+    )
+    .map_err(|e| pinned_failure(e, server, pin))
+    .context("sending failed")?;
     Ok(())
 }
 
-fn transport(
-    server: &Server,
-    pin: Option<&[u8]>,
-    username: &str,
-    password: &str,
-) -> Result<SmtpTransport> {
-    // SSL/TLS wraps the connection; STARTTLS is required, never optional.
-    let params = super::pin::smtp_tls_parameters(&server.host, pin)?;
-    let tls = match server.security {
-        Security::Tls => Tls::Wrapper(params),
-        Security::StartTls => Tls::Required(params),
-    };
-    let builder = SmtpTransport::builder_dangerous(&server.host).tls(tls);
-    Ok(configure(builder)
-        .port(server.port)
-        .credentials(Credentials::new(username.into(), password.into()))
-        .build())
+fn send_to(t: &Target, creds: Option<&Credentials>, envelope: &Envelope, raw: &[u8]) -> Result<()> {
+    let mut conn = session(t, creds)?;
+    let sent = conn.send(envelope, raw).map_err(anyhow::Error::new);
+    conn.abort();
+    sent.map(drop)
 }
 
 /// Check that the SMTP server takes this sign-in before an account is
-/// saved: connect (TLS or STARTTLS), EHLO, AUTH, NOOP and QUIT. No message
-/// is sent. `report` hears each step that passed; a failure names its step.
+/// saved: connect (TLS or STARTTLS), EHLO, AUTH (unless `sign_in` is false),
+/// NOOP and QUIT. No message is sent. `report` hears each step that passed;
+/// a failure names its step.
 pub fn verify_smtp(
     server: &Server,
     pin: Option<&[u8]>,
     username: &str,
     password: &str,
+    sign_in: bool,
     report: &mut dyn FnMut(Step),
 ) -> Result<(), StepError> {
     let fail = |special, source: anyhow::Error| StepError {
@@ -448,27 +504,32 @@ pub fn verify_smtp(
     if let Err(e) = found {
         return Err(fail(Special::SmtpResolve, e));
     }
-    let mailer = transport(server, pin, username, password).map_err(|e| StepError {
-        class: Class::Other,
-        ..fail(Special::None, e)
-    })?;
     check_steps(
-        &mailer,
+        &Target::of(server, pin),
         server,
-        super::pin::usable(pin).is_some(),
+        credentials(username, password, sign_in).as_ref(),
         username,
         report,
     )
 }
 
+/// Connect and NOOP: whether the server still answers.
+fn test_session(t: &Target, creds: Option<&Credentials>) -> Result<bool> {
+    let mut conn = session(t, creds)?;
+    let alive = conn.test_connected();
+    conn.abort();
+    Ok(alive)
+}
+
 fn check_steps(
-    mailer: &SmtpTransport,
+    t: &Target,
     server: &Server,
-    pinned: bool,
+    creds: Option<&Credentials>,
     username: &str,
     report: &mut dyn FnMut(Step),
 ) -> Result<(), StepError> {
-    let (step, class, special, source) = match mailer.test_connection() {
+    let pinned = super::pin::usable(t.pin).is_some();
+    let (step, class, special, source) = match test_session(t, creds) {
         Ok(true) => {
             report(Step::SmtpConnect);
             report(Step::SmtpSignIn);
@@ -480,8 +541,11 @@ fn check_steps(
             Special::None,
             anyhow!("SMTP sign-in failed: the server stopped answering"),
         ),
+        Err(e) if e.chain().any(|c| c.is::<super::pin::PinMismatch>()) => {
+            (Step::SmtpConnect, Class::TlsCert, Special::CertChanged, e)
+        }
         Err(e) => {
-            let source = anyhow::Error::new(e).context("SMTP sign-in failed");
+            let source = e.context("SMTP sign-in failed");
             let (step, class, special) =
                 step_of(&source).unwrap_or((Step::SmtpConnect, Class::Other, Special::None));
             // The server speaking plain text where TLS was expected.
@@ -581,13 +645,16 @@ pub(crate) fn verify_plain_steps(
         // Plain TCP: no TLS port to take for a plain answer.
         security: Security::StartTls,
     };
+    let target = Target {
+        host: "127.0.0.1",
+        port,
+        tls: None,
+        pin: None,
+    };
     check_steps(
-        &configure(SmtpTransport::builder_dangerous("127.0.0.1"))
-            .port(port)
-            .credentials(Credentials::new(username.into(), password.into()))
-            .build(),
+        &target,
         &server,
-        false,
+        Some(&Credentials::new(username.into(), password.into())),
         username,
         report,
     )
@@ -868,12 +935,13 @@ fn smtp_error(e: &anyhow::Error) -> Option<&lettre::transport::smtp::Error> {
 /// [`send_raw`] over plain TCP to a local fake server.
 #[cfg(test)]
 pub(crate) fn send_plain(port: u16, envelope: &Envelope, raw: &[u8]) -> Result<()> {
-    configure(SmtpTransport::builder_dangerous("127.0.0.1"))
-        .port(port)
-        .build()
-        .send_raw(envelope, raw)
-        .context("sending failed")?;
-    Ok(())
+    let target = Target {
+        host: "127.0.0.1",
+        port,
+        tls: None,
+        pin: None,
+    };
+    send_to(&target, None, envelope, raw).context("sending failed")
 }
 
 /// Split an address field on commas/semicolons, ignoring those inside quotes
@@ -1001,13 +1069,14 @@ mod tests {
     #[test]
     fn auth_offered_without_starttls_gets_no_sign_in() {
         let smtp = FakeSmtp::start(SmtpEnd::Accept);
-        let params = crate::mail::pin::smtp_tls_parameters("127.0.0.1", None).unwrap();
-        let transport = configure(SmtpTransport::builder_dangerous("127.0.0.1"))
-            .tls(Tls::Required(params))
-            .port(smtp.port)
-            .credentials(Credentials::new("alice".into(), "secret".into()))
-            .build();
-        assert!(transport.test_connection().is_err());
+        let target = Target {
+            host: "127.0.0.1",
+            port: smtp.port,
+            tls: Some(Security::StartTls),
+            pin: None,
+        };
+        let creds = Credentials::new("alice".into(), "secret".into());
+        assert!(test_session(&target, Some(&creds)).is_err());
         assert!(smtp.finish_with_auth().is_empty());
     }
 

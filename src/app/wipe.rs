@@ -35,6 +35,10 @@ fn data_paths(db_path: &Path) -> Vec<PathBuf> {
         with("-wal"),
         with("-shm"),
         with("-journal"),
+        // The encrypted cache's key and an interrupted encryption change.
+        with(".key"),
+        with(".migrate"),
+        with(".previous"),
         db::drafts_dir(db_path),
         super::files::open_dir(db_path),
         crash::seen_path(&crash_log),

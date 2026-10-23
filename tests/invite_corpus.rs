@@ -159,15 +159,23 @@ fn all_day() {
 }
 
 #[test]
-fn recurring_weekly_with_an_unknown_zone() {
+fn recurring_weekly_with_a_zone_from_windows() {
     let ev = invite("07-recurring-weekly");
     assert_eq!(ev.repeats(), "Repeats weekly on Mon, Wed until 2027-12-31");
-    // No VTIMEZONE: the wall time, labelled with the zone.
-    assert_eq!(ev.start.utc, None);
+    // No VTIMEZONE: Windows' rules for Europe/Lisbon (summer time, UTC+1).
+    let start = Utc.with_ymd_and_hms(2026, 10, 12, 8, 30, 0).unwrap();
+    assert_eq!(ev.start.utc, Some(start.timestamp()));
     let far = FixedOffset::east_opt(9 * 3600).unwrap();
+    assert_eq!(ev.when_text(&far), "Mon 2026-10-12 17:30-17:45");
+    // A zone neither the invite nor Windows knows keeps its wall time,
+    // labelled with the zone.
+    let odd = String::from_utf8_lossy(&raw("07-recurring-weekly"))
+        .replace("Europe/Lisbon", "Mars/Olympus");
+    let odd = mime::parse_body(odd.as_bytes()).invite.unwrap();
+    assert_eq!(odd.start.utc, None);
     assert_eq!(
-        ev.when_text(&far),
-        "Mon 2026-10-12 09:30-09:45 (Europe/Lisbon)"
+        odd.when_text(&far),
+        "Mon 2026-10-12 09:30-09:45 (Mars/Olympus)"
     );
     // Its first meeting is past, but the series goes on until its end.
     let later = Utc.with_ymd_and_hms(2027, 6, 1, 0, 0, 0).unwrap();

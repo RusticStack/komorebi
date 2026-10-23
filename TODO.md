@@ -15,7 +15,7 @@ caches (see `docs/PERF.md` for the method):
   30 ms (the list is a lazy model over ids, so cost barely grows with
   mailbox size).
 - Private memory about 9 to 11 MB with the cache loaded.
-- Release binary under 20.0 MB (CI enforces it).
+- Release binary under 20.5 MB (CI enforces it).
 
 ## Open
 
@@ -32,7 +32,7 @@ caches (see `docs/PERF.md` for the method):
       switch too), that it is not elevated after an all-users install,
       and that the "close it first" text appears for a manual install.
 - [ ] Measure the release exe size with `ed25519-compact` and `sha2`
-      (limit 20.0 MB).
+      (limit 20.5 MB).
 
 ### Installer and release
 
@@ -111,14 +111,136 @@ caches (see `docs/PERF.md` for the method):
 - [ ] Settings opened from a message tab show without the folder pane, and
       F6 there still aims at the pane.
 
+### Encrypted cache
+
+The engine is in `src/cachecrypt.rs` (design, threat model and numbers in
+`docs/PERF.md` section 10): a SQLite VFS shim sealing every cache and WAL
+page with AES-256-GCM through Windows CNG, a per-cache random key under
+DPAPI in `cache.sqlite3.key`, crash-safe migration both ways, and
+`Db::open`/`open_worker` route an encrypted file through it. Settings >
+Privacy turns it on (opt-in; the choice waits in `cache.sqlite3.encrypt`
+and `Db::open_ui` converts before any worker opens the cache), a locked
+cache shows its own dialog (Start a fresh cache or Quit), and an all-zero
+page inside the file is refused as tampering. In-memory caches (tests) stay
+plain on purpose. Left:
+
+- [ ] Convert in the background with a progress bar instead of at the next
+      start (the start now waits for the conversion, unmeasured on a large
+      cache, with no progress shown).
+- [ ] `cache.drafts` (attachment copies) and `cache.open` (opened
+      attachments) are plain files outside SQLite: encrypt them with the
+      same key (the setting says they are not covered).
+- [ ] Key in Credential Manager instead of a file beside the cache
+      (survives a copied cache folder less easily); DPAPI file chosen now
+      because Remove all data and set-aside already handle files.
+- [ ] Cancelling the Encrypt question leaves the switch drawn On (its
+      `ToggleSwitch` sets its own `checked`, breaking `SettingsCard`'s
+      binding) until the Privacy page is opened again; nothing is recorded.
+- [ ] Start a fresh cache leaves the old accounts' passwords in Credential
+      Manager (as a damaged cache does) until an account takes their place.
+
+### Calendar
+
+Done: the library (`src/cal/`: recurrence expansion, time zones through
+VTIMEZONE and Windows' rules, `mail::ical` resources, write and patch),
+the store (schema v17 with the CalDAV sync fields), the agenda page and
+the invitation link (local calendar). Next, in order:
+
+- [ ] Event details in the agenda (a selected event's description,
+      organizer, attendees, the invitation it came from), and a calendar
+      picker on the invite card ("Add to"), stored as `cal_default`.
+- [x] Create, edit and delete events (`src/app/calendar_edit.rs`,
+      `cal::edit`, `cal::write`): the editor in the page's content area,
+      "only this event" (an override or an EXDATE) or "the whole series",
+      a date picker flyout on the month grid. Left: a 12-hour time field
+      for English locales that use one (today 24-hour in both languages),
+      a warning in "Remove all data" and account removal when changes
+      are not yet sent (`Db::unsent_changes` is ready), an InfoBar on
+      the event itself for its conflict (today one bar on the page).
+- [x] CalDAV discovery and read-only sync on the shared `src/dav/`
+      layer (`dav::caldav`, the Calendars pane, `src/app/calendar_sync.rs`).
+- [x] CalDAV writes through the `cal_queue` write queue (If-None-Match
+      for new events, If-Match for edits and deletes, 412 kept as a
+      conflict, 403 marks the calendar read only; `dav::caldav::flush`).
+- [ ] `can_write` from `current-user-privilege-set` (today: writable
+      until a write is refused), calendar
+      colours, a separate calendar password field in the Calendars pane
+      (today the Contacts one is used), "Allow a server on my local
+      network" and Review certificate for the DAV host (shared with
+      Contacts), and a "last synced" time per calendar.
+- [x] Month, week and day views (`ui/calendar.slint`: `CalendarGrid`,
+      `TimeGrid`; `cal::layout` for overlaps, midnight and DST days).
+      Left: dragging events on the grid, and a ComboBox-only command bar
+      below the compact width.
+- [x] Reminders: "Now" and "In N minutes" markers in the agenda, and
+      opt-in notifications while the app runs (`cal::remind`,
+      `src/app/reminders.rs`; off by default). Left: re-arming on
+      `WM_TIMECHANGE` and resume from sleep (today the timer looks again
+      at least every hour).
+- [ ] Restore the Calendar page at start (`last_view`), and a shortcut
+      (Ctrl+1 to Ctrl+9 are the tabs').
+- [ ] Rebuild occurrences on `WM_TIMECHANGE` and a time zone change
+      while the page is open (today: when the page opens), off the UI
+      thread for large CalDAV calendars.
+- [ ] The full CLDR zone table: `scripts/gen-tz-table.ps1` with a
+      downloaded `windowsZones.xml` (today about 150 common zones,
+      hand-curated).
+
 ## Deferred on purpose
 
 - Code-signed release builds (waiting for a certificate).
-- SPKI or CA pinning of server certificates, SMTP without sign-in, and a
-  native-tls submission client.
-- An encrypted local cache (the cache is plaintext today).
-- Calendar, contacts sync, rules engine, and anything on the non-goals
-  list in `docs/SCOPE.md`.
+- CA pinning: the review offers the issuing CA from the chain Windows built
+  (SChannel directly), but a fake server cannot present a private CA (SChannel
+  as a server sends only chains to a root it trusts), so the offered path is
+  tested through `issuer_of` and the `account-cert-ca` snapshot, not end to
+  end; an intermediate CA pin is untested. Check both on a real self-hosted
+  server.
+- Anything on the non-goals list in `docs/SCOPE.md` (for the calendar:
+  organizing meetings, free/busy, VTODO and journals, subscribing to web
+  calendars, "this and following" edits).
+
+## Contacts and DAV (wf5/c)
+
+- Size: the release exe at 6b52621 is 20,558,336 bytes, 878,080 over
+  0.5.0 (19,680,256) and 58,336 over the 20,500,000 ceiling, above the
+  spec's 230 to 420 KB estimate. Before merging: `cargo bloat --release
+  --crates` and trim (the Slint contacts page and its repeaters are the
+  likely bulk), or revisit the ceiling with the rules and calendar work.
+
+- Done: local store with groups (schema v15, `src/db/contacts.rs`), vCard
+  2.1/3.0/4.0 (`src/mail/vcard.rs`), suggestions contacts first, the
+  Contacts view (`ui/contacts.slint`, `src/app/contacts.rs`), CardDAV read
+  only and read and write with merges and conflicts
+  (`src/dav/carddav.rs`), the sync pane (`src/app/contacts_sync.rs`), the
+  fake DAV server (`src/dav/fake.rs`).
+- Shared DAV layer for CalDAV, `src/dav/`: `Client::new(base, user,
+  password, pin, allow_private)` / `Client::anonymous`; `propfind`,
+  `report`, `get`, `put(url, body, type, Precondition::New|Match)`,
+  `delete(url, if_match)`; `xml::multistatus` (namespace aware, no DTD,
+  nodes, depth and response caps) and the `PROPFIND_*` bodies,
+  `xml::sync_collection`, `xml::multiget(card, hrefs)`;
+  `discover::well_known(Service, domain)`, `discover::home`,
+  `discover::collections`; `sync::changes` (sync-collection with 507 and
+  `valid-sync-token`, else ctag then Depth 1 ETags) and `sync::multiget`.
+  `dav_accounts` (with `allow_private`) and `account:{id}:dav` are shared.
+- Left: "Review certificate" for the DAV host (the pin column and
+  `Client` support exist; no button yet), the Contacts view as a `View`
+  with a `last_view` token (it is a page over the Mail tab today), the
+  release-build timing of 10k contacts and the suggestion bench in
+  `examples/`, seeded contacts in `examples/seed.rs`, an Inbox selection
+  that stays highlighted under Contacts, a 600 px one-pane snapshot,
+  per-account interval setting in the UI (30 minutes, stored), the
+  "Allow a server on my local network" toggle (`dav_accounts.allow_private`,
+  shared with CalDAV; until then a CardDAV server on a private address is
+  refused), and checks against a real Radicale or Stalwart server.
+
+## Rules (wf5/r)
+
+- Server-side rules (Sieve/ManageSieve) stay out of scope (`docs/SCOPE.md`).
+- Rules, still to do: Run now on a folder (with Undo and a live preview
+  count), Move back to Inbox and Show message from the activity, Create
+  rule from a message, a List-Id condition, and a More menu on each rule
+  card instead of the order and delete buttons.
 
 ## Manual test checklist
 

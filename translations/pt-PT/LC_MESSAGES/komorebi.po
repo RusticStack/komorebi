@@ -165,8 +165,11 @@ msgstr "Mesmo início de sessão que o de receção"
 msgid "SMTP username"
 msgstr "Nome de utilizador SMTP"
 
-msgid "Komorebi always signs in to the sending server."
-msgstr "O Komorebi inicia sempre sessão no servidor de envio."
+msgid "This server does not need a sign-in for sending"
+msgstr "Este servidor não precisa de início de sessão para enviar"
+
+msgid "Komorebi sends without a password, for a relay that trusts your network. The connection still has to be encrypted: a server without TLS is refused."
+msgstr "O Komorebi envia sem palavra-passe, para um servidor de reencaminhamento que confia na sua rede. A ligação continua a ter de ser cifrada: um servidor sem TLS é recusado."
 
 msgid "Save a copy of sent mail in the Sent folder"
 msgstr "Guardar uma cópia do correio enviado na pasta Itens enviados"
@@ -3274,3 +3277,760 @@ msgstr "Procurar atualizações automaticamente"
 
 msgid "Once a day, a few seconds after Komorebi starts. Updates are never installed without your press."
 msgstr "Uma vez por dia, alguns segundos depois de o Komorebi iniciar. As atualizações nunca são instaladas sem a sua confirmação."
+
+msgid "Certificate: server key pinned (SHA-256 {0})"
+msgstr "Certificado: chave do servidor fixada (SHA-256 {0})"
+
+msgid "Certificate: issued by the pinned authority {0}"
+msgstr "Certificado: emitido pela autoridade fixada {0}"
+
+msgid "This exact certificate"
+msgstr "Este certificado exato"
+
+msgid "Any other certificate is refused, including a renewal."
+msgstr "Qualquer outro certificado é recusado, incluindo uma renovação."
+
+msgid "This server key"
+msgstr "Esta chave do servidor"
+
+msgid "A renewed certificate with the same key is accepted. Key SHA-256: {0}"
+msgstr "Um certificado renovado com a mesma chave é aceite. SHA-256 da chave: {0}"
+
+msgid "The issuing CA: {0}"
+msgstr "A AC emissora: {0}"
+
+msgid "Certificates it issues for this server name are accepted. CA SHA-256: {0}"
+msgstr "Os certificados que emitir para este nome de servidor são aceites. SHA-256 da AC: {0}"
+
+msgid "What to trust"
+msgstr "Em que confiar"
+
+msgid "{0}, group of {1}"
+msgstr "{0}, grupo de {1}"
+
+msgid "{n} person"
+msgid_plural "{n} people"
+msgstr[0] "{n} pessoa"
+msgstr[1] "{n} pessoas"
+
+msgid "Contacts"
+msgstr "Contactos"
+
+msgid "Read only"
+msgstr "Só de leitura"
+
+msgid "This address book syncs read only. Turn on Read and write in address book sync to edit it."
+msgstr "Este livro de endereços sincroniza só de leitura. Para o editar, ative Leitura e escrita na sincronização de livros de endereços."
+
+msgid "This contact changed on the server while you were editing it"
+msgstr "Este contacto foi alterado no servidor enquanto o editava"
+
+msgid "The server's version is shown. Your version is kept until you choose."
+msgstr "É mostrada a versão do servidor. A sua versão fica guardada até escolher."
+
+msgid "Keep mine"
+msgstr "Manter a minha"
+
+msgid "Keep the server's"
+msgstr "Manter a do servidor"
+
+msgid "New message to {}"
+msgstr "Nova mensagem para {}"
+
+msgid "Phone"
+msgstr "Telefone"
+
+msgid "Groups"
+msgstr "Grupos"
+
+msgid "Notes"
+msgstr "Notas"
+
+msgid "Address book"
+msgstr "Livro de endereços"
+
+msgid "On this computer"
+msgstr "Neste computador"
+
+msgid "Edit contact"
+msgstr "Editar contacto"
+
+msgid "New contact"
+msgstr "Novo contacto"
+
+msgid "Given name"
+msgstr "Nome próprio"
+
+msgid "Family name"
+msgstr "Apelido"
+
+msgid "Organization"
+msgstr "Organização"
+
+msgid "Job title"
+msgstr "Cargo"
+
+msgid "Remove email"
+msgstr "Remover e-mail"
+
+msgid "Add email"
+msgstr "Adicionar e-mail"
+
+msgid "Remove phone"
+msgstr "Remover telefone"
+
+msgid "Add phone"
+msgstr "Adicionar telefone"
+
+msgid "Separate groups with commas."
+msgstr "Separe os grupos com vírgulas."
+
+msgid "Address book sync"
+msgstr "Sincronização de livros de endereços"
+
+msgid "Sync each account's CardDAV address books. Sync is off until you turn it on, and runs only while Komorebi is open."
+msgstr "Sincronize os livros de endereços CardDAV de cada conta. A sincronização está desligada até a ativar e só funciona com o Komorebi aberto."
+
+msgid "Add a mail account first."
+msgstr "Adicione primeiro uma conta de correio."
+
+msgid "Account"
+msgstr "Conta"
+
+msgid "Sync address books"
+msgstr "Sincronizar livros de endereços"
+
+msgctxt "sync"
+msgid "Off"
+msgstr "Desligada"
+
+msgid "Read and write"
+msgstr "Leitura e escrita"
+
+msgid "Server address"
+msgstr "Endereço do servidor"
+
+msgid "For Purelymail, copy it from purelymail.com/manage/cardDavUrl."
+msgstr "No Purelymail, copie-o de purelymail.com/manage/cardDavUrl."
+
+msgid "Find"
+msgstr "Procurar"
+
+msgid "User name"
+msgstr "Nome de utilizador"
+
+msgid "Same as the mail password"
+msgstr "Igual à palavra-passe do correio"
+
+msgid "Kept in Windows Credential Manager."
+msgstr "Guardada no Gestor de Credenciais do Windows."
+
+msgid "Find address books"
+msgstr "Procurar livros de endereços"
+
+msgid "Sync now"
+msgstr "Sincronizar agora"
+
+msgid "Search contacts"
+msgstr "Pesquisar contactos"
+
+msgid "No contacts match."
+msgstr "Nenhum contacto corresponde."
+
+msgid "No contacts yet. Add one with New contact, or turn on address book sync."
+msgstr "Ainda não há contactos. Adicione um com Novo contacto ou ative a sincronização de livros de endereços."
+
+msgid "{n} contact"
+msgid_plural "{n} contacts"
+msgstr[0] "{n} contacto"
+msgstr[1] "{n} contactos"
+
+msgid "Delete this contact?"
+msgstr "Eliminar este contacto?"
+
+msgid "It is removed from this computer."
+msgstr "É removido deste computador."
+
+msgid "It is removed from this computer and from the address book on the server."
+msgstr "É removido deste computador e do livro de endereços no servidor."
+
+msgid "Discard your changes?"
+msgstr "Descartar as alterações?"
+
+msgid "Remove the synced contacts from this computer?"
+msgstr "Remover deste computador os contactos sincronizados?"
+
+msgid "The address books on the server are not changed."
+msgstr "Os livros de endereços no servidor não são alterados."
+
+msgid "Keep"
+msgstr "Manter"
+
+msgid "All contacts"
+msgstr "Todos os contactos"
+
+msgctxt "contact label"
+msgid "Work"
+msgstr "Trabalho"
+
+msgctxt "contact label"
+msgid "Home"
+msgstr "Casa"
+
+msgctxt "contact label"
+msgid "Mobile"
+msgstr "Telemóvel"
+
+msgid "Rules"
+msgstr "Regras"
+
+msgid "Rules run while Komorebi is open. Mail that arrives while it is closed is sorted the next time it starts."
+msgstr "As regras são aplicadas enquanto o Komorebi está aberto. O e-mail que chega com a aplicação fechada é organizado da próxima vez que a abrir."
+
+msgid "No rules yet. A rule can file, delete or mark new mail in the Inbox."
+msgstr "Ainda não há regras. Uma regra pode mover, eliminar ou marcar o e-mail novo na Caixa de entrada."
+
+msgid "Folder not found. This rule is paused."
+msgstr "Pasta não encontrada. Esta regra está em pausa."
+
+msgid "Add rule"
+msgstr "Adicionar regra"
+
+msgid "Activity"
+msgstr "Atividade"
+
+msgid "Clear activity"
+msgstr "Limpar atividade"
+
+msgctxt "rule field"
+msgid "From"
+msgstr "Remetente"
+
+msgid "To or Cc"
+msgstr "Para ou Cc"
+
+msgctxt "rule field"
+msgid "Subject"
+msgstr "Assunto"
+
+msgid "contains"
+msgstr "contém"
+
+msgid "does not contain"
+msgstr "não contém"
+
+msgctxt "rule operator"
+msgid "is"
+msgstr "é"
+
+msgid "starts with"
+msgstr "começa por"
+
+msgid "ends with"
+msgstr "termina em"
+
+msgid "Value"
+msgstr "Valor"
+
+msgid "Remove condition"
+msgstr "Remover condição"
+
+msgid "Rule name"
+msgstr "Nome da regra"
+
+msgid "Conditions"
+msgstr "Condições"
+
+msgid "All must match"
+msgstr "Todas têm de corresponder"
+
+msgid "Any can match"
+msgstr "Basta uma corresponder"
+
+msgid "Add condition"
+msgstr "Adicionar condição"
+
+msgid "Do this"
+msgstr "Fazer o seguinte"
+
+msgid "Move to folder"
+msgstr "Mover para a pasta"
+
+msgid "Stop processing more rules"
+msgstr "Não aplicar mais regras"
+
+msgid "Has an attachment"
+msgstr "Tem um anexo"
+
+msgid "From contains {0}"
+msgstr "O remetente contém {0}"
+
+msgid "From does not contain {0}"
+msgstr "O remetente não contém {0}"
+
+msgid "From is {0}"
+msgstr "O remetente é {0}"
+
+msgid "From starts with {0}"
+msgstr "O remetente começa por {0}"
+
+msgid "From ends with {0}"
+msgstr "O remetente termina em {0}"
+
+msgid "To or Cc contains {0}"
+msgstr "Para ou Cc contém {0}"
+
+msgid "To or Cc does not contain {0}"
+msgstr "Para ou Cc não contém {0}"
+
+msgid "To or Cc is {0}"
+msgstr "Para ou Cc é {0}"
+
+msgid "To or Cc starts with {0}"
+msgstr "Para ou Cc começa por {0}"
+
+msgid "To or Cc ends with {0}"
+msgstr "Para ou Cc termina em {0}"
+
+msgid "Subject contains {0}"
+msgstr "O assunto contém {0}"
+
+msgid "Subject does not contain {0}"
+msgstr "O assunto não contém {0}"
+
+msgid "Subject is {0}"
+msgstr "O assunto é {0}"
+
+msgid "Subject starts with {0}"
+msgstr "O assunto começa por {0}"
+
+msgid "Subject ends with {0}"
+msgstr "O assunto termina em {0}"
+
+msgid "Any of these"
+msgstr "Qualquer uma destas"
+
+msgid "Move to {0}"
+msgstr "Mover para {0}"
+
+msgid "New rule"
+msgstr "Nova regra"
+
+msgid "Give the rule a name."
+msgstr "Dê um nome à regra."
+
+msgid "Each condition needs a value."
+msgstr "Cada condição precisa de um valor."
+
+msgid "Choose at least one action."
+msgstr "Escolha pelo menos uma ação."
+
+msgid "Add a condition."
+msgstr "Adicione uma condição."
+
+msgid "{0}, {1}"
+msgstr "{0}, {1}"
+
+msgid "Add a name, an email address or a phone number."
+msgstr "Adicione um nome, um endereço de e-mail ou um número de telefone."
+
+msgid "{0} is not an email address."
+msgstr "{0} não é um endereço de e-mail."
+
+msgid "Copied"
+msgstr "Copiado"
+
+msgid "Sync"
+msgstr "Sincronizar"
+
+msgid "Address book sync is off while Komorebi is offline."
+msgstr "A sincronização de livros de endereços está desligada enquanto o Komorebi está offline."
+
+msgid "The address book server refused the user name or password."
+msgstr "O servidor de livros de endereços recusou o nome de utilizador ou a palavra-passe."
+
+msgid "The server sent Komorebi to another server. Enter that server's address instead."
+msgstr "O servidor encaminhou o Komorebi para outro servidor. Introduza antes o endereço desse servidor."
+
+msgid "No address book was found at this address."
+msgstr "Não foi encontrado nenhum livro de endereços neste endereço."
+
+msgid "The address book server's certificate couldn't be checked."
+msgstr "Não foi possível verificar o certificado do servidor de livros de endereços."
+
+msgid "Address book sync failed ({0})."
+msgstr "A sincronização de livros de endereços falhou ({0})."
+
+msgid "No address books were found at this address."
+msgstr "Não foram encontrados livros de endereços neste endereço."
+
+msgid "{n} contact on this computer."
+msgid_plural "{n} contacts on this computer."
+msgstr[0] "{n} contacto neste computador."
+msgstr[1] "{n} contactos neste computador."
+
+msgid "Last synced {0}."
+msgstr "Última sincronização: {0}."
+
+msgid "Working with the address book server..."
+msgstr "A comunicar com o servidor de livros de endereços..."
+
+msgid "Moved “{0}” from {1} to {2}."
+msgstr "Mensagem “{0}” de {1} movida para {2}."
+
+msgid "Deleted “{0}” from {1}."
+msgstr "Mensagem “{0}” de {1} eliminada."
+
+msgid "Marked “{0}” from {1} as read."
+msgstr "Mensagem “{0}” de {1} marcada como lida."
+
+msgid "Marked “{0}” from {1} as important."
+msgstr "Mensagem “{0}” de {1} marcada como importante."
+
+msgid "Couldn’t act on “{0}” from {1}. It stayed in the Inbox."
+msgstr "Não foi possível aplicar a regra à mensagem “{0}” de {1}. Ficou na Caixa de entrada."
+
+msgid "Delete rule “{0}”?"
+msgstr "Eliminar a regra “{0}”?"
+
+msgid "Mail it already moved stays where it is."
+msgstr "As mensagens que já moveu ficam onde estão."
+
+msgid "Copy as Sieve"
+msgstr "Copiar como Sieve"
+
+msgid "Copy the rules as a script for your provider’s mail filters"
+msgstr "Copiar as regras como um script para os filtros de e-mail do seu fornecedor"
+
+msgid "Copied as a Sieve script. Paste it into your provider’s mail filters."
+msgstr "Copiado como script Sieve. Cole-o nos filtros de e-mail do seu fornecedor."
+
+msgid "Calendar"
+msgstr "Calendário"
+
+msgid "Today"
+msgstr "Hoje"
+
+msgid "No events in these 30 days. Invitations you accept are added here."
+msgstr "Sem eventos nestes 30 dias. Os convites que aceitar são adicionados aqui."
+
+msgid "Cancelled: {}"
+msgstr "Cancelado: {}"
+
+msgid "Repeats; has a reminder"
+msgstr "Repete-se; tem um lembrete"
+
+msgid "Repeats"
+msgstr "Repete-se"
+
+msgid "Has a reminder"
+msgstr "Tem um lembrete"
+
+msgid "In your calendar on this PC."
+msgstr "No seu calendário neste PC."
+
+msgid "{0} to {1}"
+msgstr "{0} a {1}"
+
+msgid "Today, {}"
+msgstr "Hoje, {}"
+
+msgid "Tomorrow, {}"
+msgstr "Amanhã, {}"
+
+msgid "All day"
+msgstr "Todo o dia"
+
+msgid "Remove from calendar"
+msgstr "Remover do calendário"
+
+msgctxt "shortcut key"
+msgid "Enter (in the contact editor's Name box)"
+msgstr "Enter (na caixa Nome do editor de contactos)"
+
+msgctxt "shortcut"
+msgid "Save the contact"
+msgstr "Guardar o contacto"
+
+msgid "Mail cache"
+msgstr "Cache de correio"
+
+msgid "Encrypt the mail cache on this computer"
+msgstr "Cifrar a cache de correio neste computador"
+
+msgid "Downloaded mail, drafts and the Outbox are encrypted with a key only your Windows user can unlock. If that key is lost, drafts and the Outbox, which exist only in the cache, are lost too. Attachment copies are not encrypted."
+msgstr "O correio transferido, os rascunhos e a Caixa de saída são cifrados com uma chave que só o seu utilizador do Windows consegue desbloquear. Se essa chave se perder, os rascunhos e a Caixa de saída, que só existem na cache, também se perdem. As cópias dos anexos não são cifradas."
+
+msgid "The cache is encrypted when Komorebi next starts."
+msgstr "A cache é cifrada quando o Komorebi voltar a iniciar."
+
+msgid "The cache is decrypted when Komorebi next starts."
+msgstr "A cache é decifrada quando o Komorebi voltar a iniciar."
+
+msgid "This can take a minute for a large cache."
+msgstr "Numa cache grande, isto pode demorar um minuto."
+
+msgid "Restart now"
+msgstr "Reiniciar agora"
+
+msgid "Encrypt the mail cache?"
+msgstr "Cifrar a cache de correio?"
+
+msgid "The key is kept for your Windows user on this computer. If it is lost (another Windows user, a reset Windows password, a copied data folder), the cache cannot be opened: mail can be downloaded again, but drafts and the Outbox exist only in the cache and are lost."
+msgstr "A chave fica guardada para o seu utilizador do Windows neste computador. Se se perder (outro utilizador do Windows, uma palavra-passe do Windows reposta, uma pasta de dados copiada), a cache não pode ser aberta: o correio pode ser transferido de novo, mas os rascunhos e a Caixa de saída só existem na cache e perdem-se."
+
+msgid "Encrypt at next start"
+msgstr "Cifrar no próximo início"
+
+msgid "The mail cache is locked"
+msgstr "A cache de correio está bloqueada"
+
+msgid "Komorebi cannot unlock its encrypted mail cache on this computer: its key is missing or belongs to another Windows user."
+msgstr "O Komorebi não consegue desbloquear a cache de correio cifrada neste computador: a chave está em falta ou pertence a outro utilizador do Windows."
+
+msgid "Start a fresh cache"
+msgstr "Começar uma cache nova"
+
+msgid "Start a fresh cache?"
+msgstr "Começar uma cache nova?"
+
+msgid "The locked cache is set aside, not deleted. Komorebi starts empty: add your accounts again and their mail is downloaded again. Drafts and the Outbox in the locked cache are not recovered."
+msgstr "A cache bloqueada é posta de parte, não é eliminada. O Komorebi começa vazio: adicione de novo as suas contas e o correio delas é transferido outra vez. Os rascunhos e a Caixa de saída da cache bloqueada não são recuperados."
+
+msgctxt "dialog button"
+msgid "Quit"
+msgstr "Sair"
+
+msgid "Show each account's CalDAV calendars here, read only. Komorebi looks for them only when you press Find calendars, and syncs them only while it is open. The user name and password are the ones set in Contacts > Sync, or your mail address and mail password."
+msgstr "Mostre aqui os calendários CalDAV de cada conta, só de leitura. O Komorebi só os procura quando premir Procurar calendários e só os sincroniza enquanto estiver aberto. O nome de utilizador e a palavra-passe são os definidos em Contactos > Sincronizar, ou o seu endereço e a palavra-passe do correio."
+
+msgid "Leave it empty to look it up from your mail address. For Purelymail, copy it from purelymail.com/manage/calDavUrl."
+msgstr "Deixe vazio para o procurar a partir do seu endereço de correio. No Purelymail, copie-o de purelymail.com/manage/calDavUrl."
+
+msgid "Find calendars"
+msgstr "Procurar calendários"
+
+msgid "Calendars"
+msgstr "Calendários"
+
+msgid "Choose which calendars to show and sync"
+msgstr "Escolher os calendários a mostrar e sincronizar"
+
+msgid "Calendar sync is off while Komorebi is offline."
+msgstr "A sincronização de calendários está desligada enquanto o Komorebi está offline."
+
+msgid "The calendar server refused the user name or password."
+msgstr "O servidor de calendários recusou o nome de utilizador ou a palavra-passe."
+
+msgid "No calendar was found at this address."
+msgstr "Não foi encontrado nenhum calendário neste endereço."
+
+msgid "The calendar server's certificate couldn't be checked."
+msgstr "Não foi possível verificar o certificado do servidor de calendários."
+
+msgid "Calendar sync failed ({0})."
+msgstr "A sincronização de calendários falhou ({0})."
+
+msgid "No calendars with events were found at this address."
+msgstr "Não foram encontrados calendários com eventos neste endereço."
+
+msgid "{n} event from this account on this computer."
+msgid_plural "{n} events from this account on this computer."
+msgstr[0] "{n} evento desta conta neste computador."
+msgstr[1] "{n} eventos desta conta neste computador."
+
+msgid "Found a calendar server at {0}. Check that it belongs to your mail provider, then press Find calendars again to sign in there."
+msgstr "Foi encontrado um servidor de calendários em {0}. Confirme que pertence ao seu fornecedor de correio e prima Procurar calendários de novo para iniciar sessão nele."
+
+msgid "Working with the calendar server..."
+msgstr "A comunicar com o servidor de calendários..."
+
+msgid "Notifications for event reminders"
+msgstr "Notificações dos lembretes de eventos"
+
+msgid "Windows shows a notification when an event's reminder is due, only while Komorebi is open or in the notification area. The agenda marks due events either way."
+msgstr "O Windows mostra uma notificação quando chega a hora do lembrete de um evento, só enquanto o Komorebi estiver aberto ou na área de notificação. A agenda assinala esses eventos de qualquer forma."
+
+msgid "In {n} minute"
+msgid_plural "In {n} minutes"
+msgstr[0] "Daqui a {n} minuto"
+msgstr[1] "Daqui a {n} minutos"
+
+msgid "Starts at {0}."
+msgstr "Início: {0}."
+
+msgid "Starts at {0}, {1}."
+msgstr "Início: {0}, {1}."
+
+msgctxt "event"
+msgid "Now"
+msgstr "Agora"
+
+msgid "{0}, {n} event"
+msgid_plural "{0}, {n} events"
+msgstr[0] "{0}, {n} evento"
+msgstr[1] "{0}, {n} eventos"
+
+msgid "+{n} more"
+msgid_plural "+{n} more"
+msgstr[0] "+{n} outro"
+msgstr[1] "+{n} outros"
+
+msgid "Choose a date"
+msgstr "Escolher uma data"
+
+msgid "Previous month"
+msgstr "Mês anterior"
+
+msgid "Next month"
+msgstr "Mês seguinte"
+
+msgid "Organized by {0}"
+msgstr "Organizado por {0}"
+
+msgid "Answer the invitation from its message. You can remove the event from your calendar here."
+msgstr "Responda ao convite a partir da mensagem. Aqui pode remover o evento do seu calendário."
+
+msgid "Only this event"
+msgstr "Só este evento"
+
+msgid "The whole series"
+msgstr "Toda a série"
+
+msgid "Title"
+msgstr "Título"
+
+msgid "Add a title"
+msgstr "Adicionar um título"
+
+msgid "Starts"
+msgstr "Início"
+
+msgid "Ends"
+msgstr "Fim"
+
+msgid "Repeat"
+msgstr "Repetir"
+
+msgid "Repeats by a rule set in another app ({0}). It is kept as it is."
+msgstr "Repete-se segundo uma regra definida noutra aplicação ({0}). A regra é mantida."
+
+msgid "Reminder"
+msgstr "Lembrete"
+
+msgid "None"
+msgstr "Nenhum"
+
+msgid "At the start"
+msgstr "No início"
+
+msgid "5 minutes before"
+msgstr "5 minutos antes"
+
+msgid "15 minutes before"
+msgstr "15 minutos antes"
+
+msgid "30 minutes before"
+msgstr "30 minutos antes"
+
+msgid "1 hour before"
+msgstr "1 hora antes"
+
+msgid "1 day before"
+msgstr "1 dia antes"
+
+msgid "Location"
+msgstr "Local"
+
+msgid "New event"
+msgstr "Novo evento"
+
+msgid "Event"
+msgstr "Evento"
+
+msgid "{n} change wasn't saved because the event changed on another device."
+msgid_plural "{n} changes weren't saved because the events changed on another device."
+msgstr[0] "{n} alteração não foi guardada porque o evento foi alterado noutro dispositivo."
+msgstr[1] "{n} alterações não foram guardadas porque os eventos foram alterados noutro dispositivo."
+
+msgid "Apply my changes again"
+msgstr "Aplicar novamente as minhas alterações"
+
+msgid "Previous (Page Up)"
+msgstr "Anterior (Page Up)"
+
+msgid "Next (Page Down)"
+msgstr "Seguinte (Page Down)"
+
+msgid "Agenda"
+msgstr "Agenda"
+
+msgctxt "calendar view"
+msgid "Day"
+msgstr "Dia"
+
+msgid "Week"
+msgstr "Semana"
+
+msgid "Month"
+msgstr "Mês"
+
+msgid "On this PC"
+msgstr "Neste PC"
+
+msgid "{0} ({1})"
+msgstr "{0} ({1})"
+
+msgid "Does not repeat"
+msgstr "Não se repete"
+
+msgid "Every day"
+msgstr "Todos os dias"
+
+msgid "Every week on {0}"
+msgstr "Todas as semanas: {0}"
+
+msgid "Every month on day {0}"
+msgstr "Todos os meses, no dia {0}"
+
+msgid "Every month on the first {0}"
+msgstr "Todos os meses, na primeira ocorrência de {0}"
+
+msgid "Every month on the second {0}"
+msgstr "Todos os meses, na segunda ocorrência de {0}"
+
+msgid "Every month on the third {0}"
+msgstr "Todos os meses, na terceira ocorrência de {0}"
+
+msgid "Every month on the fourth {0}"
+msgstr "Todos os meses, na quarta ocorrência de {0}"
+
+msgid "Every month on the last {0}"
+msgstr "Todos os meses, na última ocorrência de {0}"
+
+msgid "Every year on {0}"
+msgstr "Todos os anos, a {0}"
+
+msgid "dd/mm/yyyy"
+msgstr "dd/mm/aaaa"
+
+msgid "yyyy-mm-dd"
+msgstr "aaaa-mm-dd"
+
+msgid "Type the dates as {0}."
+msgstr "Escreva as datas no formato {0}."
+
+msgid "Type the times as 09:30."
+msgstr "Escreva as horas no formato 09:30."
+
+msgid "The event ends before it starts."
+msgstr "O evento termina antes de começar."
+
+msgid "That time doesn't exist here: the clocks change then."
+msgstr "Essa hora não existe aqui: é a hora da mudança dos relógios."
+
+msgid "This calendar is read only. Choose another one."
+msgstr "Este calendário é só de leitura. Escolha outro."
+
+msgid "The event couldn't be saved ({0})."
+msgstr "Não foi possível guardar o evento ({0})."

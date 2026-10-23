@@ -377,6 +377,7 @@ fn the_signature_menu_and_another_from_account_swap_the_signature() {
             imap: me.imap.clone(),
             smtp: me.smtp.clone(),
             save_sent: true,
+            smtp_no_auth: false,
         })
         .unwrap();
     db.set_account_signatures(work, Some(b), None).unwrap();

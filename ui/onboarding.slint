@@ -7,7 +7,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Icons, Motion } from "theme.slint";
 import { Focus, Icon, Button, IconButton, HyperlinkButton, TextField, ComposeBody, CheckBox, InfoBar, Severity, ProgressRing, ProgressBar, RadioButtons, ComboBox, BrandMark, StepIndicator, OnboardCard, ProviderChip, TipTimer } from "widgets.slint";
-import { ServerPorts, Discovery, ServerFields, AccountForm, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow } from "forms.slint";
+import { ServerPorts, Discovery, ServerFields, AccountForm, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow, SmtpNoAuth } from "forms.slint";
 
 // Rules that live in Rust, where they are tested.
 export global Onboard {
@@ -242,6 +242,7 @@ export component OnboardingPage inherits Rectangle {
     property <int> smtp-security: 0;
     property <string> smtp-user;
     property <bool> same-login: true;
+    property <bool> smtp-no-auth;
     property <string> password-err;
     property <string> provider-err;
     property <string> imap-err;
@@ -302,6 +303,7 @@ export component OnboardingPage inherits Rectangle {
             imap-user: root.imap-user,
             smtp-user: root.smtp-user,
             smtp-own-login: !root.same-login,
+            smtp-no-auth: root.manual && root.smtp-no-auth,
         };
     }
     // A lookup answered: fill the fields it found, unless they or the
@@ -403,6 +405,7 @@ export component OnboardingPage inherits Rectangle {
         root.smtp-security = 0;
         root.smtp-user = "";
         root.same-login = true;
+        root.smtp-no-auth = false;
         root.find-stale = false;
     }
     // "Add another account": the email step, empty.
@@ -419,6 +422,7 @@ export component OnboardingPage inherits Rectangle {
         root.smtp-security = 0;
         root.smtp-user = "";
         root.same-login = true;
+        root.smtp-no-auth = false;
         root.user-open = false;
         root.manual = false;
         root.provider = -1;
@@ -998,7 +1002,11 @@ export component OnboardingPage inherits Rectangle {
                                         pinned: root.pinned-smtp;
                                         forget => { root.forget-certificate(2); }
                                     }
-                                    CheckBox {
+                                    SmtpNoAuth {
+                                        checked <=> root.smtp-no-auth;
+                                        enabled: !root.busy;
+                                    }
+                                    if !root.smtp-no-auth: CheckBox {
                                         text: @tr("Same sign-in as incoming");
                                         checked <=> root.same-login;
                                     }
@@ -1012,7 +1020,7 @@ export component OnboardingPage inherits Rectangle {
                                             enabled: !root.busy;
                                         }
                                     }
-                                    if !root.same-login: VerticalLayout {
+                                    if !root.same-login && !root.smtp-no-auth: VerticalLayout {
                                         spacing: Theme.s2;
                                         FieldHeader { text: @tr("SMTP username"); }
                                         TextField {

@@ -638,7 +638,7 @@ pub(super) struct Suggest {
     field: ComposeField,
     /// Where the caret is taken to be (`caret_after_edit`).
     cursor: usize,
-    items: Vec<db::Recipient>,
+    items: Vec<db::contacts::Suggested>,
 }
 
 impl Drafts {
@@ -1885,7 +1885,7 @@ impl App {
                 .collect();
             let found = self
                 .db
-                .suggest_addresses(d.account_id, typed, SUGGESTIONS + taken.len())
+                .suggest_recipients(d.account_id, typed, SUGGESTIONS + taken.len())
                 .unwrap_or_default();
             found
                 .into_iter()
@@ -1911,6 +1911,15 @@ impl App {
             .map(|r| Suggestion {
                 name: r.name.as_str().into(),
                 addr: r.addr.as_str().into(),
+                kind: match &r.kind {
+                    db::contacts::SuggestKind::Seen => 0,
+                    db::contacts::SuggestKind::Person => 1,
+                    db::contacts::SuggestKind::Group(_) => 2,
+                },
+                count: match &r.kind {
+                    db::contacts::SuggestKind::Group(m) => m.len() as i32,
+                    _ => 0,
+                },
             })
             .collect();
         ui.set_c_suggest_index(0);
@@ -1938,7 +1947,23 @@ impl App {
         let Some(d) = self.drafts.active() else {
             return;
         };
-        let mailbox = mail::smtp::mailbox(&r.name, &r.addr);
+        let mailbox = match &r.kind {
+            // A group adds each member not already in the message.
+            db::contacts::SuggestKind::Group(members) => {
+                let taken: HashSet<String> = [&d.to, &d.cc, &d.bcc]
+                    .into_iter()
+                    .flat_map(|list| mail::smtp::split_addresses(list))
+                    .map(|entry| mail::smtp::mailbox_parts(&entry).1.to_lowercase())
+                    .collect();
+                members
+                    .iter()
+                    .filter(|m| !taken.contains(&m.addr))
+                    .map(|m| mail::smtp::mailbox(&m.name, &m.addr))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+            _ => mail::smtp::mailbox(&r.name, &r.addr),
+        };
         let (text, caret) = complete_address(d.field(s.field), s.cursor, &mailbox);
         self.show_field(s.field, &text);
         self.draft_edited(s.field, &text);
@@ -3127,6 +3152,7 @@ mod tests {
     use slint::platform::{Key, Platform, WindowAdapter, WindowEvent};
 
     mod rich_tests;
+    mod rules_tests;
     mod tabs_tests;
 
     fn message(from: &str, to: &str, cc: &str) -> db::Message {
@@ -3845,6 +3871,7 @@ mod tests {
                     imap: server("imap.example.invalid"),
                     smtp: server("smtp.example.invalid"),
                     save_sent: true,
+                    smtp_no_auth: false,
                 })
                 .unwrap();
             let folder = db
@@ -4658,6 +4685,7 @@ mod tests {
                     imap: server("imap.example.invalid"),
                     smtp: server("smtp.example.invalid"),
                     save_sent: true,
+                    smtp_no_auth: false,
                 })
                 .unwrap();
             Cache {
@@ -5880,7 +5908,7 @@ mod tests {
             a.store_password = Rc::new(|_, _| Ok(()));
             a.forget_password = Rc::new(|_| Ok(()));
             a.workers_on = false;
-            a.verifier = |_, _, _, _, _, report| {
+            a.verifier = |_, _, _, _, _, _, report| {
                 crate::mail::errors::Step::ALL.into_iter().for_each(report);
                 Ok(())
             };
@@ -5901,6 +5929,7 @@ mod tests {
             imap: server("imap.example.invalid"),
             smtp: server("smtp.example.invalid"),
             save_sent: true,
+            smtp_no_auth: false,
         }
     }
 
@@ -6239,7 +6268,7 @@ mod tests {
         let h = Harness::new("test-connection");
         // A check that passes every step, whatever the servers.
         h.app(|a| {
-            a.verifier = |_, _, _, _, _, report| {
+            a.verifier = |_, _, _, _, _, _, report| {
                 Step::ALL.into_iter().for_each(report);
                 Ok(())
             };
@@ -6347,10 +6376,10 @@ mod tests {
             a.check_seq
         });
         // An answer from an older check is dropped.
-        h.app(|a| a.finish_review(seq - 1, Kind::Imap, server.clone(), Ok(der.clone())));
+        h.app(|a| a.finish_review(seq - 1, Kind::Imap, server.clone(), Ok((der.clone(), None))));
         assert_eq!(h.ui().get_q_title(), "");
 
-        h.app(|a| a.finish_review(seq, Kind::Imap, server.clone(), Ok(der.clone())));
+        h.app(|a| a.finish_review(seq, Kind::Imap, server.clone(), Ok((der.clone(), None))));
         h.frame();
         assert_eq!(h.ui().get_q_title(), "Trust this certificate?");
         assert_eq!(
@@ -6378,7 +6407,7 @@ mod tests {
         assert!(!h.ui().get_a_pinned_imap());
 
         // Trust pins it in the form; nothing is saved.
-        h.app(|a| a.finish_review(seq, Kind::Imap, server.clone(), Ok(der.clone())));
+        h.app(|a| a.finish_review(seq, Kind::Imap, server.clone(), Ok((der.clone(), None))));
         h.ui().invoke_q_answer(true);
         h.frame();
         assert_eq!(h.app(|a| a.form_pins.blobs()), (Some(der.clone()), None));
@@ -6401,7 +6430,7 @@ mod tests {
         h.frame();
         assert_eq!(h.app(|a| a.form_pins.blobs()), (None, None));
         assert!(!h.ui().get_a_pinned_imap());
-        h.app(|a| a.finish_review(seq, Kind::Imap, server.clone(), Ok(der.clone())));
+        h.app(|a| a.finish_review(seq, Kind::Imap, server.clone(), Ok((der.clone(), None))));
         assert_eq!(
             h.ui().get_q_old(),
             crate::app::cert::group_fingerprint(fingerprint)
@@ -6637,6 +6666,7 @@ mod tests {
                 imap: me.imap.clone(),
                 smtp: me.smtp.clone(),
                 save_sent: true,
+                smtp_no_auth: false,
             })
             .unwrap();
         assert_eq!(db.accounts().unwrap()[1].id, work);
@@ -8339,6 +8369,7 @@ mod tests {
                     imap: server("imap.example.invalid"),
                     smtp: server("smtp.example.invalid"),
                     save_sent: true,
+                    smtp_no_auth: false,
                 })
                 .unwrap();
             let work_inbox = db
@@ -9092,10 +9123,11 @@ mod tests {
         ui.invoke_dismiss_status();
         ui.set_show_settings(true);
         h.frame();
-        // Accounts, Signatures, then General.
+        // Accounts, Signatures, Rules, then General.
         h.keys(&[], &key(Key::RightArrow));
         h.keys(&[], &key(Key::RightArrow));
-        assert_eq!(ui.get_settings_section(), 2);
+        h.keys(&[], &key(Key::RightArrow));
+        assert_eq!(ui.get_settings_section(), 3);
         assert!(!h.app(|a| a.flash));
         for _ in 0..5 {
             h.keys(&[], &key(Key::Tab));
@@ -9109,14 +9141,15 @@ mod tests {
         }
         // A prompt over Settings gives the focus back to the button that
         // asked: Privacy > Remove all data (tabs, diagnostics, logs
-        // folder, then it). A destructive question starts on Cancel.
-        ui.set_settings_section(3);
+        // folder, the cache encryption switch, then it). A destructive
+        // question starts on Cancel.
+        ui.set_settings_section(4);
         h.frame();
         ui.set_show_settings(false);
         h.frame();
         ui.set_show_settings(true);
         h.frame();
-        for _ in 0..3 {
+        for _ in 0..4 {
             h.keys(&[], &key(Key::Tab));
         }
         h.keys(&[], " ");

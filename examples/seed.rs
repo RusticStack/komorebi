@@ -126,6 +126,7 @@ fn main() -> Result<()> {
         imap: server(993),
         smtp: server(465),
         save_sent: true,
+        smtp_no_auth: false,
     })?;
     if signature {
         // Two named signatures: one for new mail, a short one for replies
@@ -519,6 +520,7 @@ fn add_accounts(db: &mut Db, seed: i64) -> Result<()> {
         imap: server("imap.mail.invalid", 993),
         smtp: server("smtp.mail.invalid", 465),
         save_sent: true,
+        smtp_no_auth: false,
     };
     let maria = db.add_account(&new(
         "maria.goncalves.long-address-for-testing@purelymail-example.invalid",

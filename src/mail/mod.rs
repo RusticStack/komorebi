@@ -49,10 +49,13 @@ pub mod pin;
 mod profiles;
 pub mod render;
 pub mod rich;
+mod rules;
 pub mod smtp;
 pub mod source;
 #[cfg(test)]
 mod tolerance;
+pub mod vcard;
+pub mod x509;
 
 use crate::db::{self, Account, Db, Folder, Fp};
 use crate::diag;
@@ -717,12 +720,19 @@ fn connect_account(account: &Account) -> Result<Imap> {
 type SmtpSend = Box<dyn Fn(&Account, &Envelope, &[u8]) -> Result<()> + Send>;
 
 fn smtp_account(account: &Account, envelope: &Envelope, raw: &[u8]) -> Result<()> {
-    let password = secrets::get_password(account.id)?;
+    // A server without sign-in gets no password (none is read).
+    let sign_in = !account.smtp_no_auth;
+    let password = if sign_in {
+        secrets::get_password(account.id)?
+    } else {
+        String::new()
+    };
     smtp::send_raw(
         &account.smtp,
         account.smtp_pin.as_deref(),
         account.smtp_login(),
         &password,
+        sign_in,
         envelope,
         raw,
     )
@@ -1133,7 +1143,17 @@ impl Worker {
 
         let mut errors = Vec::new();
         let pending = self.pending.clone();
+        // Folders the Inbox's rules just filled: their STATUS above is from
+        // before, so they sync with a fresh one.
+        let mut filled: HashSet<String> = HashSet::new();
         for f in &folders {
+            if filled.contains(&f.name) {
+                self.sync_one(db, f.id, false);
+                while let Some((folder_id, full)) = next_folder() {
+                    self.sync_one(db, folder_id, full);
+                }
+                continue;
+            }
             let st = statuses.get(&f.name);
             let result = skippable(db, f, st, &pending, full).and_then(|skip| {
                 if skip {
@@ -1148,6 +1168,7 @@ impl Worker {
                     if f.role == Role::Inbox && stats.delta {
                         self.idle_watch.observe(stats.new);
                     }
+                    filled.extend(stats.moved_into);
                 })
             });
             if result.is_ok()
@@ -1580,7 +1601,7 @@ fn can_skip(
 }
 
 /// What a folder sync did (for tools and measurements).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FolderSync {
     /// The changed-folder delta ran instead of the full path.
     pub delta: bool,
@@ -1588,6 +1609,8 @@ pub struct FolderSync {
     pub new: usize,
     /// Messages a CHANGEDSINCE fetch reported (delta only).
     pub flag_changes: usize,
+    /// Folders the Inbox's rules moved mail into (`mail::rules`).
+    pub moved_into: Vec<String>,
 }
 
 /// Bring the folder's cache in line with the server. `st` is the folder's
@@ -1614,8 +1637,9 @@ fn sync_folder(
         folder_changed(notify, f);
     }
     let mut stats = FolderSync::default();
+    let mut rules = rules::RulePass::start(db, f, &sel)?;
     let delta = match st {
-        Some(st) if !full => sync_delta(imap, db, f, pending, &sel, st, &mut stats)?,
+        Some(st) if !full => sync_delta(imap, db, f, pending, &sel, st, &mut stats, &mut rules)?,
         _ => None,
     };
     let hid_pending = match delta {
@@ -1626,8 +1650,14 @@ fn sync_folder(
             }
             d.hid_pending
         }
-        None => sync_full(imap, db, f, notify, pending, &sel, ramp, &mut stats)?,
+        None => sync_full(
+            imap, db, f, notify, pending, &sel, ramp, &mut stats, &mut rules,
+        )?,
     };
+    if let Some(r) = rules {
+        stats.moved_into = r.moved_into.iter().cloned().collect();
+        r.finish(db, f, &sel);
+    }
     if let Some(st) = st
         && !hid_pending
         && pending.uids(f.id).is_empty()
@@ -1669,6 +1699,7 @@ fn sync_full(
     sel: &imap::Selected,
     ramp: &mut usize,
     stats: &mut FolderSync,
+    rules: &mut Option<rules::RulePass>,
 ) -> Result<bool> {
     // Read the cache first: a row inserted after this point (e.g. by the
     // other worker) is then never mistaken for one the server dropped.
@@ -1718,6 +1749,9 @@ fn sync_full(
         let busy = pending.uids(f.id);
         hid_pending |= !busy.is_empty();
         headers.retain(|h| !busy.contains(&h.uid));
+        if let Some(r) = rules.as_mut() {
+            r.split(&mut headers);
+        }
         db.insert_headers(f.account_id, f.id, &headers)?;
         stats.new += headers.len();
         cached += chunk.len();
@@ -1730,6 +1764,15 @@ fn sync_full(
             });
         }
         folder_changed(notify, f);
+        if let Some(r) = rules.as_mut() {
+            let back = r.act(imap, f, sel.uidvalidity, Some(&mut remote));
+            r.flush_log(db);
+            if !back.is_empty() {
+                db.insert_headers(f.account_id, f.id, &back)?;
+                stats.new += back.len();
+                folder_changed(notify, f);
+            }
+        }
     }
     if !known.is_empty() && !remote.is_empty() {
         let busy = pending.uids(f.id);
@@ -1786,6 +1829,7 @@ fn can_delta(fp: Fp, st: &FolderStatus, sel: &imap::Selected, pending_empty: boo
 /// lasts until the forced pass. Deletions only mirror the server's UID list
 /// from the same SELECT snapshot. `None` means the full path must run
 /// instead, in the same pass.
+#[allow(clippy::too_many_arguments)]
 fn sync_delta(
     imap: &mut Imap,
     db: &mut Db,
@@ -1794,6 +1838,7 @@ fn sync_delta(
     sel: &imap::Selected,
     st: &FolderStatus,
     stats: &mut FolderSync,
+    rules: &mut Option<rules::RulePass>,
 ) -> Result<Option<Delta>> {
     let Some(fp) = db.fingerprint(f.id)? else {
         return Ok(None);
@@ -1807,10 +1852,25 @@ fn sync_delta(
         let busy = pending.uids(f.id);
         out.hid_pending |= !busy.is_empty();
         headers.retain(|h| !busy.contains(&h.uid));
+        let fetched = !headers.is_empty();
+        if let Some(r) = rules.as_mut() {
+            r.split(&mut headers);
+        }
         db.insert_headers(f.account_id, f.id, &headers)?;
         stats.new = headers.len();
-        out.changed |= !headers.is_empty();
+        out.changed |= fetched;
+        if let Some(r) = rules.as_mut() {
+            let back = r.act(imap, f, sel.uidvalidity, None);
+            r.flush_log(db);
+            if !back.is_empty() {
+                db.insert_headers(f.account_id, f.id, &back)?;
+                stats.new += back.len();
+            }
+        }
     }
+    // What the rules moved off the server's Inbox is gone from the
+    // SELECT's count too.
+    let exists = sel.exists - rules.as_ref().map_or(0, |r| r.removed).min(sel.exists);
     if st.hms != fp.hms {
         // Read the cache first, as on the full path; after the tail insert, so
         // a tail row flagged \Deleted since is hidden too.
@@ -1841,12 +1901,12 @@ fn sync_delta(
             out.changed = true;
         }
     }
-    if db.count_messages(f.id)? != sel.exists {
+    if db.count_messages(f.id)? != exists {
         let known = db.known_uids(f.id)?;
         let server = imap.uids()?;
         // The same snapshot as the SELECT only if the counts agree. This
         // also keeps an empty answer from emptying a non-empty folder.
-        if server.len() != sel.exists as usize {
+        if server.len() != exists as usize {
             return Ok(None);
         }
         let busy = pending.uids(f.id);
@@ -1908,11 +1968,14 @@ pub fn refresh_folders(
         keep.push(db.upsert_folder(account_id, &r.name, &r.display, r.depth, r.role)?);
     }
     db.retain_folders(account_id, &keep)?;
-    let folders = db
+    let folders: Vec<Folder> = db
         .folders()?
         .into_iter()
         .filter(|f| f.account_id == account_id)
         .collect();
+    // A rule whose folder is gone waits for the user (never re-targeted).
+    let names: HashSet<String> = folders.iter().map(|f| f.name.clone()).collect();
+    db.pause_rules_missing(account_id, &names)?;
     Ok((folders, statuses))
 }
 
@@ -2234,8 +2297,22 @@ pub fn verify_account(
     password: &str,
     report: &mut dyn FnMut(errors::Step),
 ) -> Result<(), errors::StepError> {
+    verify_account_with(imap, smtp, pins, logins, password, true, report)
+}
+
+/// [`verify_account`], signing in to SMTP only when `smtp_sign_in` (an
+/// account whose server takes mail without one; TLS is still required).
+pub fn verify_account_with(
+    imap: &Server,
+    smtp: &Server,
+    pins: Pins,
+    logins: (&str, &str),
+    password: &str,
+    smtp_sign_in: bool,
+    report: &mut dyn FnMut(errors::Step),
+) -> Result<(), errors::StepError> {
     let began = std::time::Instant::now();
-    let result = verify_steps(imap, smtp, pins, logins, password, report);
+    let result = verify_steps(imap, smtp, pins, logins, password, smtp_sign_in, report);
     if let Err(e) = &result {
         diag::record(
             0,
@@ -2253,6 +2330,7 @@ fn verify_steps(
     pins: Pins,
     logins: (&str, &str),
     password: &str,
+    smtp_sign_in: bool,
     report: &mut dyn FnMut(errors::Step),
 ) -> Result<(), errors::StepError> {
     run_steps(
@@ -2260,7 +2338,7 @@ fn verify_steps(
         pins.0.is_some(),
         logins.0,
         |report| Imap::connect_steps(imap, pins.0, logins.0, password, Some(report)),
-        |report| smtp::verify_smtp(smtp, pins.1, logins.1, password, report),
+        |report| smtp::verify_smtp(smtp, pins.1, logins.1, password, smtp_sign_in, report),
         report,
     )
 }
@@ -2355,6 +2433,7 @@ mod tests {
                 imap: server.clone(),
                 smtp: server,
                 save_sent: false,
+                smtp_no_auth: false,
             })
             .unwrap();
         let id = db
@@ -3402,6 +3481,7 @@ MIME-Version: 1.0
         delta: true,
         new: 0,
         flag_changes: 0,
+        moved_into: Vec::new(),
     };
 
     #[test]
@@ -5378,6 +5458,7 @@ MIME-Version: 1.0
             smtp_user: smtp_user.into(),
             imap_pin: None,
             smtp_pin: None,
+            smtp_no_auth: false,
         }
     }
 
@@ -5676,7 +5757,8 @@ MIME-Version: 1.0
 
     fn verify_server(server: &Server) -> StepError {
         let mut seen = Vec::new();
-        let e = smtp::verify_smtp(server, None, "relay", "pw", &mut |s| seen.push(s)).unwrap_err();
+        let e = smtp::verify_smtp(server, None, "relay", "pw", true, &mut |s| seen.push(s))
+            .unwrap_err();
         assert!(seen.is_empty(), "{seen:?}");
         e
     }

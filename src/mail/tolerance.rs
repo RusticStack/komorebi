@@ -432,6 +432,7 @@ mod roles {
                 imap: host.clone(),
                 smtp: host,
                 save_sent: true,
+                smtp_no_auth: false,
             })
             .unwrap();
         let (mut w, events) = worker_with(&db, None);

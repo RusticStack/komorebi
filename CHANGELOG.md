@@ -7,6 +7,110 @@ changes in the local data (the cache, its folders and Credential Manager).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-23
+
+### Added
+
+- Contacts: a local address book ("On this computer") with names, email
+  addresses, phone numbers, organization, job title, notes and groups, in a
+  Contacts view (list, search, group filter, details, inline editor, New
+  message to). Recipient suggestions list contacts first, then groups (a
+  group adds its members), then addresses seen in mail.
+- CardDAV sync per account (Contacts > Sync): off by default, read only or
+  read and write, with Find (SRV and `/.well-known/carddav`, no
+  credentials), Find address books, a separate password option kept in
+  Windows Credential Manager, sync-collection with ETags and a ctag and
+  ETag fallback, and edits pushed with If-Match. A field changed on both
+  sides takes the server's value and keeps yours until you choose.
+- Local rules (Settings > Rules, between Signatures and General): per
+  account, ordered, on new Inbox mail while Komorebi runs. Conditions on
+  sender, To or Cc, subject and attachment; actions move, delete to Trash,
+  mark read, mark important and stop. Filed mail never enters the Inbox
+  list and raises no notification; mail marked read raises none. An
+  activity list shows what automatic runs did, and Copy as Sieve puts the
+  rules on the clipboard as a Sieve script. No rule sends mail.
+- Calendar: a local calendar, "On this PC", with an agenda of 30 days
+  (the Calendar item above Settings). Accepting or tentatively accepting
+  a meeting invitation adds the event to it (a newer version replaces
+  it, a changed occurrence joins its series), declining removes it (or
+  just the one occurrence declined), the invitation card says when the
+  event is in the calendar, and a cancelled one offers Remove from
+  calendar. Repeating
+  events are expanded on this computer; time zones come from the
+  invitation or from Windows' own rules.
+- Calendar sync (CalDAV): Calendars on the Calendar page finds
+  an account's calendars on a press of Find calendars (looking the server
+  up from the mail address when no address is given), leaves task lists
+  out, and lets each calendar be turned off. Calendars sync when the page
+  opens, on Sync now and at most every 15 minutes while one is on, on a
+  short-lived thread per account, with sync-collection or the ctag and
+  ETags; an event too large or unreadable is skipped.
+- Calendar views and editing: Month (the default), Week and Day views
+  next to the agenda, with Page Up, Page Down and Home, and New event and
+  an editor for your own events (all day, start and end with a date
+  picker, simple repeats, reminder, place and notes; only this event or
+  the whole series for a repeating one). Changes to a CalDAV calendar are
+  sent on the next sync with If-Match, never over a newer version: a
+  conflict keeps the server's version and offers to apply your change
+  again or discard it. Someone else's event is read only apart from
+  Remove from calendar.
+- Event reminders: the agenda marks an event under way ("Now") and one
+  whose reminder is due ("In 10 minutes"), and Settings > General >
+  Notifications for event reminders (off by default) shows a Windows
+  notification for each reminder while Komorebi runs, from one timer in
+  the app; nothing is scheduled with Windows.
+- Certificate review offers the issuing CA from the chain the server
+  presented, so a private-CA server can be pinned to its CA instead of its
+  own certificate.
+- SMTP without sign-in: a per-account setting for a submission server that
+  takes mail without AUTH (TLS is still required), used by the connection
+  check and every send.
+- Settings > Privacy > Encrypt the mail cache on this computer (off by
+  default): the cache is encrypted or decrypted at the next start, with a
+  key only your Windows user can unlock. A cache that cannot be unlocked
+  opens a dialog that sets it aside and starts a fresh one, or quits.
+
+### Changed
+
+- Invitation times in a named time zone without its definition in the
+  invite are now converted with Windows' rules for that zone, and a time
+  in the hour skipped when clocks go forward uses the offset before the
+  change.
+
+Local data: the cache moves to schema v15 (contacts: contacts, groups,
+address books and the DAV settings shared with the calendar), v16 (rules: the
+`rules`, `rule_conditions` and `rule_log` tables and two watermark columns on
+`folders`), v17 (the calendar's tables, created empty with the local
+calendar) and v18 (`accounts.smtp_no_auth`, off for every account); nothing
+is removed or rewritten. Contacts and rules are user data and are kept like
+settings. Older Komorebi versions refuse a v18 cache. Cached mail and caches
+made by unreleased development builds are not upgraded: only caches from
+released versions (0.6.0 and earlier) migrate. With encryption on,
+the cache is rewritten once at the next start and `cache.sqlite3.key` is
+added beside it.
+
+## [0.6.0] - 2026-10-15
+
+### Added
+
+- Self-hosted servers: the certificate prompt can trust the server key
+  instead of the exact certificate, so a renewal that keeps the key does not
+  raise the changed-certificate alarm. CA pins are enforced on connect.
+- Encrypted cache engine (not switched on yet): a SQLite VFS shim
+  (`src/cachecrypt.rs`) that seals every page of the cache and its
+  write-ahead log with AES-256-GCM through Windows CNG, with a random key
+  per cache kept in `cache.sqlite3.key` under DPAPI, and a crash-safe
+  conversion in both directions (copy, check, swap). A cache in the
+  encrypted form opens through it; a missing or foreign key fails closed
+  and leaves the file untouched. Remove all data also deletes the key and
+  any interrupted conversion's files. Local data: none changes; every
+  existing cache stays plaintext until a setting to turn it on lands.
+
+### Changed
+
+- Sending checks the pinned certificate or key itself before signing in, on
+  STARTTLS and SSL/TLS alike.
+
 ## [0.5.0] - 2026-10-15
 
 ### Added

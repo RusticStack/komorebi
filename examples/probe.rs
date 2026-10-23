@@ -168,6 +168,7 @@ impl Probe {
             imap: server.clone(),
             smtp: self.preset.smtp_server(),
             save_sent: true,
+            smtp_no_auth: false,
         })?;
 
         // ---- connection

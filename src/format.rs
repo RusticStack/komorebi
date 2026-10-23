@@ -200,6 +200,133 @@ pub fn list_date(lang: Lang, ts: i64, now: DateTime<Local>) -> String {
     }
 }
 
+/// An agenda day: `Thu, Oct 15`, pt-PT `qui., 15 out.` (with the year
+/// when it is not `now`'s).
+pub fn agenda_day(lang: Lang, t: &DateTime<Local>, now: &DateTime<Local>) -> String {
+    let mut s = match lang {
+        Lang::En => format!("{}, {} {}", weekday(lang, t), month(lang, t), t.day()),
+        Lang::PtPt => format!("{}, {} {}", weekday(lang, t), t.day(), month(lang, t)),
+    };
+    if t.year() != now.year() {
+        s.push_str(&format!(" {}", t.year()));
+    }
+    s
+}
+
+const MONTHS_PT_FULL: [&str; 12] = [
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+];
+const WEEKDAYS_PT_FULL: [&str; 7] = [
+    "domingo",
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+];
+
+/// A weekday's name in full: `Tuesday`, pt-PT `terça-feira`.
+pub fn weekday_full(lang: Lang, d: chrono::Weekday) -> &'static str {
+    let i = d.num_days_from_sunday() as usize;
+    match lang {
+        Lang::En => WEEKDAYS_EN_FULL[i],
+        Lang::PtPt => WEEKDAYS_PT_FULL[i],
+    }
+}
+
+/// A weekday abbreviated: `Tue`, pt-PT `ter.`.
+pub fn weekday_short(lang: Lang, d: chrono::Weekday) -> &'static str {
+    let i = d.num_days_from_sunday() as usize;
+    match lang {
+        Lang::En => WEEKDAYS_EN[i],
+        Lang::PtPt => WEEKDAYS_PT[i],
+    }
+}
+
+/// A month view's title: `October 2026`, pt-PT `outubro de 2026`.
+pub fn month_title(lang: Lang, d: &impl Datelike) -> String {
+    let i = d.month0() as usize;
+    match lang {
+        Lang::En => format!("{} {}", MONTHS_EN_FULL[i], d.year()),
+        Lang::PtPt => format!("{} de {}", MONTHS_PT_FULL[i], d.year()),
+    }
+}
+
+/// A day view's title: `Friday, Oct 23, 2026`, pt-PT `sexta-feira, 23
+/// out. 2026`.
+pub fn day_title(lang: Lang, t: &DateTime<Local>) -> String {
+    format!(
+        "{}, {}",
+        weekday_full(lang, t.weekday()),
+        range_day(lang, t)
+    )
+}
+
+/// A week grid's column: `Mon 19`, pt-PT `seg. 19`.
+pub fn column_day(lang: Lang, t: &DateTime<Local>) -> String {
+    format!("{} {}", weekday(lang, t), t.day())
+}
+
+/// A day and month without the year: `Oct 13`, pt-PT `13 out.`.
+pub fn day_month(lang: Lang, t: &DateTime<Local>) -> String {
+    match lang {
+        Lang::En => format!("{} {}", month(lang, t), t.day()),
+        Lang::PtPt => format!("{} {}", t.day(), month(lang, t)),
+    }
+}
+
+/// The first day of the week Windows' regional format uses (Monday when
+/// it can't be read). Read when the calendar is shown, never at start.
+pub fn first_weekday() -> chrono::Weekday {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Globalization::{GetLocaleInfoEx, LOCALE_IFIRSTDAYOFWEEK};
+        let mut buf = [0u16; 4];
+        // SAFETY: a null locale name is LOCALE_NAME_USER_DEFAULT; the
+        // buffer and its length in UTF-16 units match.
+        let n = unsafe {
+            GetLocaleInfoEx(
+                std::ptr::null(),
+                LOCALE_IFIRSTDAYOFWEEK,
+                buf.as_mut_ptr(),
+                buf.len() as i32,
+            )
+        };
+        // "0" is Monday through "6", Sunday.
+        if n > 1
+            && let Some(d) = char::from_u32(u32::from(buf[0])).and_then(|c| c.to_digit(10))
+            && d < 7
+        {
+            let mut w = chrono::Weekday::Mon;
+            for _ in 0..d {
+                w = w.succ();
+            }
+            return w;
+        }
+    }
+    chrono::Weekday::Mon
+}
+
+/// A day of a range: `Oct 15, 2026`, pt-PT `15 out. 2026`.
+pub fn range_day(lang: Lang, t: &DateTime<Local>) -> String {
+    match lang {
+        Lang::En => format!("{} {}, {}", month(lang, t), t.day(), t.year()),
+        Lang::PtPt => format!("{} {} {}", t.day(), month(lang, t), t.year()),
+    }
+}
+
 /// The reader's date: as [`full_date`], with Windows' short date in
 /// English (`Wed 10/7/2026 15:05`). Quote headers in sent mail keep
 /// [`full_date`], so what is sent doesn't depend on this PC's settings.

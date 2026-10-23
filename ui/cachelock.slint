@@ -1,0 +1,64 @@
+// The encrypted mail cache (src/cachecrypt.rs): Settings > Privacy's
+// opt-in switch with its question, and the dialog a cache whose key is
+// missing or not this Windows user's shows at start instead of the
+// generic start-up error. The Rust side is src/app/cachelock.rs.
+import { ContentDialog } from "widgets.slint";
+
+export global CacheLock {
+    // The cache file is encrypted now; the user asked for this (both apply
+    // at the next start when they differ: `pending`).
+    in property <bool> encrypted;
+    in property <bool> wanted;
+    in property <bool> pending;
+    // 1: asking before encryption is turned on.
+    in-out property <int> ask;
+    callback set(/* encrypt */ bool);
+    callback restart();
+    // At start: 1 the locked-cache dialog, 2 its "Start a fresh cache?"
+    // question.
+    in-out property <int> locked;
+    callback fresh();
+    callback quit();
+}
+
+// The dialogs, drawn over the window.
+export component CacheLockDialogs inherits Rectangle {
+    if CacheLock.ask == 1: Rectangle {
+        ContentDialog {
+            title: @tr("Encrypt the mail cache?");
+            text: @tr("The key is kept for your Windows user on this computer. If it is lost (another Windows user, a reset Windows password, a copied data folder), the cache cannot be opened: mail can be downloaded again, but drafts and the Outbox exist only in the cache and are lost.");
+            primary-text: @tr("Encrypt at next start");
+            max-card-width: 480px;
+            primary => {
+                CacheLock.ask = 0;
+                CacheLock.set(true);
+            }
+            close => { CacheLock.ask = 0; }
+        }
+    }
+    if CacheLock.locked == 1: Rectangle {
+        ContentDialog {
+            title: @tr("The mail cache is locked");
+            text: @tr("Komorebi cannot unlock its encrypted mail cache on this computer: its key is missing or belongs to another Windows user.");
+            primary-text: @tr("Start a fresh cache");
+            close-text: @tr("dialog button" => "Quit");
+            destructive: true;
+            focus-close: true;
+            max-card-width: 480px;
+            primary => { CacheLock.locked = 2; }
+            close => { CacheLock.quit(); }
+        }
+    }
+    if CacheLock.locked == 2: Rectangle {
+        ContentDialog {
+            title: @tr("Start a fresh cache?");
+            text: @tr("The locked cache is set aside, not deleted. Komorebi starts empty: add your accounts again and their mail is downloaded again. Drafts and the Outbox in the locked cache are not recovered.");
+            primary-text: @tr("Start a fresh cache");
+            destructive: true;
+            focus-close: true;
+            max-card-width: 480px;
+            primary => { CacheLock.fresh(); }
+            close => { CacheLock.locked = 1; }
+        }
+    }
+}

@@ -145,6 +145,11 @@ impl App {
                 self.save_setting("notify_paused", if self.notes.paused { "1" } else { "0" });
             }
             ShellEvent::Quit => self.quit_now(),
+            // An event reminder (`reminders.rs`): the Calendar page.
+            ShellEvent::ToastClicked(target) if target.message_id < 0 => {
+                self.show_main_window();
+                self.ui().set_show_calendar(true);
+            }
             ShellEvent::ToastClicked(target) => {
                 self.show_main_window();
                 if matches!(self.db.message(target.message_id), Ok(Some(_))) {
@@ -335,6 +340,7 @@ impl App {
         let ui = self.ui();
         ui.set_g_notify(self.notes.enabled);
         ui.set_g_notify_detail(self.notes.detail);
+        ui.set_g_cal_remind(self.db.reminders_on());
         ui.set_g_close_to_tray(self.notes.close_to_tray);
         ui.set_g_autostart(autostart_enabled());
     }
@@ -403,6 +409,7 @@ mod tests {
                 save_sent: true,
                 imap_user: String::new(),
                 smtp_user: String::new(),
+                smtp_no_auth: false,
             })
             .unwrap();
         let inbox = db

@@ -153,11 +153,13 @@ struct Client {
 }
 
 /// A response head: the status and the headers this client reads.
-struct Head {
-    status: u16,
-    length: Option<usize>,
-    chunked: bool,
-    location: Option<String>,
+pub(crate) struct Head {
+    pub(crate) status: u16,
+    pub(crate) length: Option<usize>,
+    pub(crate) chunked: bool,
+    pub(crate) location: Option<String>,
+    /// For WebDAV (`crate::dav`).
+    pub(crate) etag: Option<String>,
 }
 
 impl Client {
@@ -267,7 +269,7 @@ fn https_url(url: &str) -> Result<Url, FetchError> {
     Ok(u)
 }
 
-fn time_left(end: Instant) -> io::Result<Duration> {
+pub(crate) fn time_left(end: Instant) -> io::Result<Duration> {
     let left = end.saturating_duration_since(Instant::now());
     if left.is_zero() {
         return Err(io::ErrorKind::TimedOut.into());
@@ -277,7 +279,7 @@ fn time_left(end: Instant) -> io::Result<Duration> {
 
 /// The addresses of `host`. The system resolver has no timeout of its own,
 /// so it runs on a thread this request stops waiting for at the deadline.
-fn resolve(host: &str, port: u16, end: Instant) -> Result<Vec<SocketAddr>, FetchError> {
+pub(crate) fn resolve(host: &str, port: u16, end: Instant) -> Result<Vec<SocketAddr>, FetchError> {
     let (tx, rx) = std::sync::mpsc::channel();
     let host = host.to_string();
     std::thread::Builder::new()
@@ -296,7 +298,7 @@ fn resolve(host: &str, port: u16, end: Instant) -> Result<Vec<SocketAddr>, Fetch
     }
 }
 
-fn connect(addrs: &[SocketAddr], end: Instant) -> Result<TcpStream, FetchError> {
+pub(crate) fn connect(addrs: &[SocketAddr], end: Instant) -> Result<TcpStream, FetchError> {
     let mut last = FetchError::TimedOut;
     for a in addrs {
         match TcpStream::connect_timeout(a, time_left(end)?.min(CONNECT_TIMEOUT)) {
@@ -361,7 +363,7 @@ fn read_line(r: &mut impl BufRead, limit: u64) -> Result<String, FetchError> {
     String::from_utf8(line).map_err(|_| FetchError::BadResponse)
 }
 
-fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> {
+pub(crate) fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> {
     let mut left = MAX_HEAD;
     let mut next = |r: &mut _| -> Result<String, FetchError> {
         let line = read_line(r, left)?;
@@ -381,6 +383,7 @@ fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> 
         length: None,
         chunked: false,
         location: None,
+        etag: None,
     };
     loop {
         let line = next(r)?;
@@ -411,6 +414,7 @@ fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> 
                 return Err(FetchError::BadResponse);
             }
             "location" => head.location = Some(value.to_string()),
+            "etag" => head.etag = Some(value.to_string()),
             _ => {}
         }
     }
@@ -419,7 +423,7 @@ fn read_head(r: &mut impl BufRead, max_body: usize) -> Result<Head, FetchError> 
 /// The block a body is read in, so progress can be reported.
 const BLOCK: usize = 64 * 1024;
 
-fn read_body(
+pub(crate) fn read_body(
     r: &mut impl BufRead,
     head: &Head,
     max_body: usize,
@@ -473,9 +477,9 @@ fn read_body(
 
 /// A TLS stream whose every read and write is bounded by the request's
 /// overall deadline.
-struct Timed {
-    tls: TlsStream<TcpStream>,
-    end: Instant,
+pub(crate) struct Timed {
+    pub(crate) tls: TlsStream<TcpStream>,
+    pub(crate) end: Instant,
 }
 
 impl Timed {

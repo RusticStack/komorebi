@@ -18,7 +18,7 @@ the test instead of committed.
 | `04-update` | REQUEST with SEQUENCE 2, a meeting link in LOCATION | Updated invitation, answers, Join |
 | `05-publish-ics-file` | `METHOD:PUBLISH` as an attached `.ics` file, DURATION, URL | no answers (nothing to answer), Join |
 | `06-all-day` | `VALUE=DATE` start and (exclusive) end | Sat - Sun, all day |
-| `07-recurring-weekly` | RRULE weekly on Mon and Wed until a date, TZID `Europe/Lisbon` with no VTIMEZONE | "Repeats weekly on Mon, Wed until 2027-12-31", the time labelled `(Europe/Lisbon)` |
+| `07-recurring-weekly` | RRULE weekly on Mon and Wed until a date, TZID `Europe/Lisbon` with no VTIMEZONE | "Repeats weekly on Mon, Wed until 2027-12-31", converted with Windows' rules for the zone (UTC+1 on 12 October); a zone Windows doesn't know keeps its wall time, labelled with the zone |
 | `08-malformed` | a calendar part whose DTSTART is not a date | no card: an ordinary message |
 
 Keep CRLF line endings when editing them (`.gitattributes`).

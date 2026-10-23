@@ -390,6 +390,11 @@ impl App {
                 self.notification_changed(which, value != 0);
                 return;
             }
+            // Settings > General: Notifications for event reminders.
+            13 => {
+                self.set_reminders(value != 0);
+                return;
+            }
             // Settings > About: Check for updates automatically.
             12 => {
                 self.set_update_auto(value != 0);
@@ -639,6 +644,16 @@ pub(super) fn form_logins(form: &AccountForm, email: &str) -> Result<(String, St
         imap.clone()
     };
     Ok((imap, smtp))
+}
+
+/// Whether the form's SMTP server takes mail without a sign-in: only a
+/// manual server can (a preset always signs in).
+pub(super) fn form_no_auth(form: &AccountForm) -> bool {
+    let preset = usize::try_from(form.provider)
+        .ok()
+        .and_then(|i| providers::PRESETS.get(i))
+        .is_some();
+    form.smtp_no_auth && !preset
 }
 
 #[cfg(test)]

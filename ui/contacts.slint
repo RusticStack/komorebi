@@ -1,0 +1,677 @@
+// The Contacts view: a list/details page over the content card, like
+// Settings (docs/WINUI3.md "Layout breakpoints", "List/details"): the
+// list with search and a group filter, the details of the chosen contact
+// with a command bar, the inline editor, and the address-book sync pane.
+// `src/app/contacts.rs` drives it through the `Contacts` global.
+
+import { ListView, ScrollView } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { FieldHeader } from "forms.slint";
+import { Icon, Button, IconButton, TextField, InfoBar, Severity, ContentDialog, SearchBox, ComboBox, ToggleSwitch } from "widgets.slint";
+
+export struct ContactItem {
+    id: int,
+    name: string,
+    email: string,
+    initials: string,
+    color: color,
+}
+
+export struct ContactLine {
+    text: string,
+    label: string,
+}
+
+export struct BookItem {
+    name: string,
+    enabled: bool,
+}
+
+export global Contacts {
+    // The list.
+    in property <[ContactItem]> rows;
+    in property <[string]> groups;
+    in-out property <int> group-index;
+    in-out property <string> query;
+    in-out property <int> current: -1;
+    in property <int> total;
+    // The details of `current`.
+    in property <string> name;
+    in property <string> org-line;
+    in property <string> initials;
+    in property <color> color;
+    in property <[ContactLine]> emails;
+    in property <[ContactLine]> phones;
+    in property <string> note;
+    in property <string> group-line;
+    in property <string> book;
+    in property <bool> read-only;
+    in property <bool> conflict;
+    // The editor.
+    in-out property <bool> editing;
+    in-out property <string> e-name;
+    in-out property <string> e-given;
+    in-out property <string> e-family;
+    in-out property <string> e-org;
+    in-out property <string> e-title;
+    in-out property <string> e-note;
+    in-out property <string> e-groups;
+    in-out property <[string]> e-emails;
+    in-out property <[string]> e-phones;
+    in property <string> e-error;
+    in-out property <bool> confirm-delete;
+    in-out property <bool> confirm-discard;
+    // The sync pane.
+    in-out property <bool> sync-open;
+    in property <[string]> s-accounts;
+    in-out property <int> s-account;
+    in-out property <int> s-mode;
+    in-out property <string> s-url;
+    in-out property <string> s-user;
+    in-out property <bool> s-same: true;
+    in-out property <string> s-password;
+    in property <[BookItem]> s-books;
+    in property <string> s-status;
+    in property <string> s-error;
+    in property <bool> s-busy;
+    in property <bool> s-confirm-off;
+
+    callback search(string);
+    callback group-chosen(int);
+    callback select(int);
+    callback new-contact();
+    callback edit();
+    callback delete();
+    callback delete-confirmed();
+    callback save();
+    callback cancel();
+    callback discard();
+    callback add-email();
+    callback remove-email(int);
+    callback email-edited(int, string);
+    callback add-phone();
+    callback remove-phone(int);
+    callback phone-edited(int, string);
+    callback write-to(string);
+    callback copy(string);
+    callback keep-mine();
+    callback keep-server();
+    callback open-sync();
+    callback close-sync();
+    callback s-account-chosen(int);
+    callback s-mode-chosen(int);
+    callback s-find();
+    callback s-find-books();
+    callback s-book-toggled(int, bool);
+    callback s-sync-now();
+    callback s-off-confirmed(bool);
+}
+
+component Avatar inherits Rectangle {
+    in property <string> initials;
+    in property <color> fill;
+    in property <length> size: 32px;
+    width: self.size;
+    height: self.size;
+    border-radius: self.size / 2;
+    background: Theme.contrast ? Theme.card : self.fill;
+    border-width: Theme.contrast ? 1px : 0;
+    border-color: Theme.text;
+    accessible-role: none;
+    Text {
+        text: root.initials;
+        color: Theme.on-avatar;
+        font-size: root.size >= 48px ? Theme.title : Theme.caption;
+        font-weight: 600;
+        accessible-role: none;
+    }
+}
+
+// A label above its text (the details pane).
+component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> text;
+    spacing: 2px;
+    Text { text: root.label; font-size: Theme.caption; color: Theme.text-2; }
+    Text { text: root.text; font-size: Theme.body; color: Theme.text; wrap: word-wrap; }
+}
+
+component Heading inherits Text {
+    font-size: Theme.subtitle;
+    font-weight: 600;
+    color: Theme.text;
+}
+
+// One repeatable line of the editor: a text box and a Remove button.
+component EditLine inherits HorizontalLayout {
+    in property <string> text;
+    in property <string> placeholder;
+    in property <string> remove-label;
+    callback edited(string);
+    callback remove();
+    spacing: Theme.s2;
+    TextField {
+        text: root.text;
+        placeholder-text: root.placeholder;
+        edited(t) => { root.edited(t); }
+    }
+    IconButton {
+        icon: Icons.delete;
+        tooltip: root.remove-label;
+        label: "";
+        clicked => { root.remove(); }
+    }
+}
+
+component DetailPane inherits VerticalLayout {
+    spacing: Theme.s4;
+    HorizontalLayout {
+        spacing: Theme.s4;
+        alignment: start;
+        Avatar {
+            size: 64px;
+            initials: Contacts.initials;
+            fill: Contacts.color;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: Contacts.name;
+                font-size: Theme.title;
+                font-weight: 600;
+                color: Theme.text;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+            Text { text: Contacts.org-line; font-size: Theme.body; color: Theme.text-2; wrap: word-wrap; visible: Contacts.org-line != ""; }
+        }
+    }
+    // The command bar.
+    HorizontalLayout {
+        spacing: Theme.s2;
+        alignment: start;
+        Button {
+            label: @tr("New message");
+            icon: Icons.compose;
+            enabled: Contacts.emails.length > 0;
+            clicked => { Contacts.write-to(""); }
+        }
+        Button {
+            label: @tr("Edit");
+            icon: Icons.page;
+            enabled: !Contacts.read-only;
+            clicked => { Contacts.edit(); }
+        }
+        Button {
+            label: @tr("Delete");
+            icon: Icons.delete;
+            enabled: !Contacts.read-only;
+            clicked => { Contacts.confirm-delete = true; }
+        }
+    }
+    if Contacts.read-only: InfoBar {
+        severity: Severity.info;
+        title: @tr("Read only");
+        message: @tr("This address book syncs read only. Turn on Read and write in address book sync to edit it.");
+        closable: false;
+    }
+    if Contacts.conflict: InfoBar {
+        severity: Severity.caution;
+        title: @tr("This contact changed on the server while you were editing it");
+        message: @tr("The server's version is shown. Your version is kept until you choose.");
+        closable: false;
+        button1: @tr("Keep mine");
+        button2: @tr("Keep the server's");
+        button-clicked(b) => {
+            if b == 1 { Contacts.keep-mine(); } else { Contacts.keep-server(); }
+        }
+    }
+    if Contacts.emails.length > 0: Heading { text: @tr("Email"); }
+    for e in Contacts.emails: HorizontalLayout {
+        spacing: Theme.s2;
+        Field {
+            label: e.label;
+            text: e.text;
+            horizontal-stretch: 1;
+        }
+        IconButton {
+            icon: Icons.compose;
+            tooltip: @tr("New message to {}", e.text);
+            label: "";
+            width: 40px;
+            clicked => { Contacts.write-to(e.text); }
+        }
+        IconButton {
+            icon: Icons.copy;
+            tooltip: @tr("Copy");
+            label: "";
+            width: 40px;
+            clicked => { Contacts.copy(e.text); }
+        }
+    }
+    if Contacts.phones.length > 0: Heading { text: @tr("Phone"); }
+    for p in Contacts.phones: HorizontalLayout {
+        spacing: Theme.s2;
+        Field {
+            label: p.label;
+            text: p.text;
+            horizontal-stretch: 1;
+        }
+        Rectangle { width: 40px; }
+        IconButton {
+            icon: Icons.copy;
+            tooltip: @tr("Copy");
+            label: "";
+            width: 40px;
+            clicked => { Contacts.copy(p.text); }
+        }
+    }
+    if Contacts.group-line != "": Field {
+        label: @tr("Groups");
+        text: Contacts.group-line;
+    }
+    if Contacts.note != "": Field {
+        label: @tr("Notes");
+        text: Contacts.note;
+    }
+    Field {
+        label: @tr("Address book");
+        text: Contacts.book != "" ? Contacts.book : @tr("On this computer");
+    }
+}
+
+component EditPane inherits VerticalLayout {
+    spacing: Theme.s3;
+    Text {
+        text: Contacts.current >= 0 ? @tr("Edit contact") : @tr("New contact");
+        font-size: Theme.title;
+        font-weight: 600;
+        color: Theme.text;
+    }
+    if Contacts.e-error != "": InfoBar {
+        severity: Severity.critical;
+        title: Contacts.e-error;
+        closable: false;
+    }
+    FieldHeader { text: @tr("Name"); }
+    name-field := TextField {
+        text <=> Contacts.e-name;
+        accepted => { Contacts.save(); }
+    }
+    FieldHeader { text: @tr("Given name"); }
+    TextField { text <=> Contacts.e-given; }
+    FieldHeader { text: @tr("Family name"); }
+    TextField { text <=> Contacts.e-family; }
+    FieldHeader { text: @tr("Organization"); }
+    TextField { text <=> Contacts.e-org; }
+    FieldHeader { text: @tr("Job title"); }
+    TextField { text <=> Contacts.e-title; }
+    FieldHeader { text: @tr("Email"); }
+    for e[i] in Contacts.e-emails: EditLine {
+        text: e;
+        placeholder: @tr("name@example.com");
+        remove-label: @tr("Remove email");
+        edited(t) => { Contacts.email-edited(i, t); }
+        remove => { Contacts.remove-email(i); }
+    }
+    HorizontalLayout {
+        alignment: start;
+        Button {
+            label: @tr("Add email");
+            icon: Icons.add;
+            clicked => { Contacts.add-email(); }
+        }
+    }
+    FieldHeader { text: @tr("Phone"); }
+    for p[i] in Contacts.e-phones: EditLine {
+        text: p;
+        remove-label: @tr("Remove phone");
+        edited(t) => { Contacts.phone-edited(i, t); }
+        remove => { Contacts.remove-phone(i); }
+    }
+    HorizontalLayout {
+        alignment: start;
+        Button {
+            label: @tr("Add phone");
+            icon: Icons.add;
+            clicked => { Contacts.add-phone(); }
+        }
+    }
+    FieldHeader { text: @tr("Groups"); }
+    TextField {
+        text <=> Contacts.e-groups;
+        description: @tr("Separate groups with commas.");
+    }
+    FieldHeader { text: @tr("Notes"); }
+    TextField { text <=> Contacts.e-note; }
+    HorizontalLayout {
+        spacing: Theme.s2;
+        alignment: end;
+        Button {
+            label: @tr("Save");
+            accent: true;
+            clicked => { Contacts.save(); }
+        }
+        Button {
+            label: @tr("Cancel");
+            clicked => { Contacts.cancel(); }
+        }
+    }
+}
+
+component SyncPane inherits VerticalLayout {
+    spacing: Theme.s3;
+    HorizontalLayout {
+        Text {
+            text: @tr("Address book sync");
+            font-size: Theme.title;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        IconButton {
+            icon: Icons.dismiss;
+            tooltip: @tr("Close");
+            label: "";
+            horizontal-stretch: 0;
+            clicked => { Contacts.close-sync(); }
+        }
+    }
+    Text {
+        text: @tr("Sync each account's CardDAV address books. Sync is off until you turn it on, and runs only while Komorebi is open.");
+        color: Theme.text-2;
+        font-size: Theme.body;
+        wrap: word-wrap;
+    }
+    if Contacts.s-accounts.length == 0: Text {
+        text: @tr("Add a mail account first.");
+        color: Theme.text-2;
+        font-size: Theme.body;
+    }
+    if Contacts.s-accounts.length > 0: VerticalLayout {
+        spacing: Theme.s3;
+        FieldHeader { text: @tr("Account"); }
+        ComboBox {
+            model: Contacts.s-accounts;
+            current-index <=> Contacts.s-account;
+            selected => { Contacts.s-account-chosen(self.current-index); }
+        }
+        FieldHeader { text: @tr("Sync address books"); }
+        ComboBox {
+            model: [@tr("sync" => "Off"), @tr("Read only"), @tr("Read and write")];
+            current-index <=> Contacts.s-mode;
+            selected => { Contacts.s-mode-chosen(self.current-index); }
+        }
+        FieldHeader { text: @tr("Server address"); }
+        HorizontalLayout {
+            spacing: Theme.s2;
+            TextField {
+                text <=> Contacts.s-url;
+                placeholder-text: "https://dav.example.com/";
+                description: @tr("For Purelymail, copy it from purelymail.com/manage/cardDavUrl.");
+            }
+            Button {
+                label: @tr("Find");
+                enabled: !Contacts.s-busy;
+                horizontal-stretch: 0;
+                clicked => { Contacts.s-find(); }
+            }
+        }
+        FieldHeader { text: @tr("User name"); }
+        TextField { text <=> Contacts.s-user; }
+        HorizontalLayout {
+            spacing: Theme.s3;
+            Text {
+                text: @tr("Same as the mail password");
+                font-size: Theme.body;
+                color: Theme.text;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+            ToggleSwitch {
+                label: @tr("Same as the mail password");
+                checked <=> Contacts.s-same;
+                horizontal-stretch: 0;
+            }
+        }
+        if !Contacts.s-same: VerticalLayout {
+            spacing: Theme.s1;
+            FieldHeader { text: @tr("Password"); }
+            TextField {
+                text <=> Contacts.s-password;
+                input-type: password;
+                description: @tr("Kept in Windows Credential Manager.");
+            }
+        }
+        if Contacts.s-error != "": InfoBar {
+            severity: Severity.critical;
+            title: Contacts.s-error;
+            closable: false;
+        }
+        HorizontalLayout {
+            spacing: Theme.s2;
+            alignment: start;
+            Button {
+                label: @tr("Find address books");
+                accent: true;
+                enabled: !Contacts.s-busy && Contacts.s-mode > 0 && Contacts.s-url != "";
+                clicked => { Contacts.s-find-books(); }
+            }
+            Button {
+                label: @tr("Sync now");
+                icon: Icons.refresh;
+                enabled: !Contacts.s-busy && Contacts.s-books.length > 0;
+                clicked => { Contacts.s-sync-now(); }
+            }
+        }
+        for b[i] in Contacts.s-books: HorizontalLayout {
+            spacing: Theme.s3;
+            Text {
+                text: b.name;
+                font-size: Theme.body;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+            ToggleSwitch {
+                label: b.name;
+                checked: b.enabled;
+                horizontal-stretch: 0;
+                toggled => { Contacts.s-book-toggled(i, self.checked); }
+            }
+        }
+        if Contacts.s-status != "": Text {
+            text: Contacts.s-status;
+            color: Theme.text-2;
+            font-size: Theme.caption;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component ContactsPage inherits Rectangle {
+    // The content card's own width decides the layout: two panes, or one
+    // with a Back button on the details below 600 px.
+    property <bool> one-pane: root.width < 600px;
+    property <bool> detail-shown: Contacts.current >= 0 || Contacts.editing || Contacts.sync-open;
+    property <length> list-width: root.width >= 860px ? 380px : 300px;
+    background: Theme.layer;
+    border-top-left-radius: Theme.radius-lg - 1px;
+    clip: true;
+    forward-focus: search;
+
+    // ---- The list
+    list-col := VerticalLayout {
+        x: 0;
+        width: root.one-pane ? root.width : root.list-width;
+        visible: !root.one-pane || !root.detail-shown;
+        padding: Theme.s4;
+        spacing: Theme.s3;
+        Text {
+            text: @tr("Contacts");
+            font-size: Theme.title;
+            font-weight: 600;
+            color: Theme.text;
+            overflow: elide;
+            accessible-role: none;
+        }
+        HorizontalLayout {
+            spacing: Theme.s2;
+            alignment: start;
+            Button {
+                label: @tr("New contact");
+                icon: Icons.add;
+                accent: true;
+                clicked => { Contacts.new-contact(); }
+            }
+            Button {
+                label: @tr("Sync");
+                icon: Icons.refresh;
+                tooltip: @tr("Address book sync");
+                clicked => { Contacts.open-sync(); }
+            }
+        }
+        search := SearchBox {
+            placeholder: @tr("Search contacts");
+            text <=> Contacts.query;
+            edited(t) => { Contacts.search(t); }
+        }
+        if Contacts.groups.length > 1: ComboBox {
+            model: Contacts.groups;
+            current-index <=> Contacts.group-index;
+            selected => { Contacts.group-chosen(self.current-index); }
+        }
+        if Contacts.rows.length == 0: Text {
+            text: Contacts.query != "" ? @tr("No contacts match.") : @tr("No contacts yet. Add one with New contact, or turn on address book sync.");
+            color: Theme.text-2;
+            font-size: Theme.body;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+            vertical-alignment: top;
+        }
+        if Contacts.rows.length > 0: ListView {
+            vertical-stretch: 1;
+            for c[i] in Contacts.rows: Rectangle {
+                height: 52px;
+                accessible-role: list-item;
+                accessible-label: c.email != "" ? @tr("suggestion" => "{0}, {1}", c.name, c.email) : c.name;
+                accessible-item-selected: i == Contacts.current;
+                accessible-action-default => { Contacts.select(i); }
+                Rectangle {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 4px;
+                    height: parent.height - 4px;
+                    border-radius: Theme.radius;
+                    background: ta.pressed ? Theme.pressed : i == Contacts.current ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+                    ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { Contacts.select(i); }
+                    }
+                    Rectangle {
+                        x: 0;
+                        width: 3px;
+                        height: 16px;
+                        border-radius: 1.5px;
+                        background: Theme.accent;
+                        visible: i == Contacts.current;
+                    }
+                    HorizontalLayout {
+                        padding-left: Theme.s3;
+                        padding-right: Theme.s3;
+                        spacing: Theme.s3;
+                        alignment: start;
+                        Avatar {
+                            y: (parent.height - self.height) / 2;
+                            initials: c.initials;
+                            fill: c.color;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: c.name; font-size: Theme.body; color: Theme.text; overflow: elide; }
+                            Text { text: c.email; font-size: Theme.caption; color: Theme.text-2; overflow: elide; visible: c.email != ""; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- The details, the editor or the sync pane
+    Rectangle {
+        x: root.one-pane ? 0 : root.list-width;
+        width: root.width - self.x;
+        visible: !root.one-pane || root.detail-shown;
+        Rectangle {
+            x: 0;
+            width: 1px;
+            background: Theme.stroke;
+            visible: !root.one-pane;
+        }
+        ScrollView {
+            x: root.one-pane ? 0 : 1px;
+            width: parent.width - self.x;
+            VerticalLayout {
+                padding: Theme.s6;
+                padding-top: Theme.s4;
+                spacing: Theme.s4;
+                alignment: start;
+                if root.one-pane: HorizontalLayout {
+                    alignment: start;
+                    IconButton {
+                        icon: Icons.back;
+                        tooltip: @tr("Back");
+                        label: "";
+                        clicked => {
+                            if Contacts.editing {
+                                Contacts.cancel();
+                            } else if Contacts.sync-open {
+                                Contacts.close-sync();
+                            } else {
+                                Contacts.select(-1);
+                            }
+                        }
+                    }
+                }
+                if Contacts.sync-open: SyncPane { }
+                if !Contacts.sync-open && Contacts.editing: EditPane { }
+                if !Contacts.sync-open && !Contacts.editing && Contacts.current >= 0: DetailPane { }
+                if !Contacts.sync-open && !Contacts.editing && Contacts.current < 0 && !root.one-pane: Text {
+                    text: @tr("{n} contact" | "{n} contacts" % Contacts.total);
+                    color: Theme.text-2;
+                    font-size: Theme.body;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+
+    if Contacts.confirm-delete: ContentDialog {
+        title: @tr("Delete this contact?");
+        text: Contacts.book == "" ? @tr("It is removed from this computer.") : @tr("It is removed from this computer and from the address book on the server.");
+        primary-text: @tr("Delete");
+        destructive: true;
+        primary => { Contacts.confirm-delete = false; Contacts.delete-confirmed(); }
+        close => { Contacts.confirm-delete = false; }
+    }
+    if Contacts.confirm-discard: ContentDialog {
+        title: @tr("Discard your changes?");
+        primary-text: @tr("Discard");
+        destructive: true;
+        primary => { Contacts.confirm-discard = false; Contacts.discard(); }
+        close => { Contacts.confirm-discard = false; }
+    }
+    if Contacts.s-confirm-off: ContentDialog {
+        title: @tr("Remove the synced contacts from this computer?");
+        text: @tr("The address books on the server are not changed.");
+        primary-text: @tr("Remove");
+        secondary-text: @tr("Keep");
+        primary => { Contacts.s-off-confirmed(true); }
+        secondary => { Contacts.s-off-confirmed(false); }
+        close => { Contacts.s-off-confirmed(false); }
+    }
+}
+

@@ -13,6 +13,7 @@ Purelymail
 Postale.io
 imap.example.com
 smtp.example.com
+https://dav.example.com/
 github.com/RusticStack/komorebi
 English
 Português (Portugal)

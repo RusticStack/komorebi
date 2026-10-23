@@ -1,0 +1,960 @@
+// The Calendar page (docs/WINUI3.md "Pages"): an agenda of the next 30
+// days from the local store (src/app/calendar.rs), over the content card
+// like Settings. Day headers, then each occurrence: its time or "All
+// day", title, location and markers.
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { FieldHeader } from "forms.slint";
+import { Button, IconButton, TextField, InfoBar, Severity, ComboBox, ToggleSwitch } from "widgets.slint";
+import { BookItem } from "contacts.slint";
+
+// The Calendars pane (src/app/calendar_sync.rs): each account's CalDAV
+// calendars, found only on the press of "Find calendars".
+export global CalSync {
+    in-out property <bool> open;
+    in property <[string]> accounts;
+    in-out property <int> account;
+    // The account's DAV server address, shared with Contacts.
+    in-out property <string> url;
+    in property <bool> busy;
+    in property <string> error;
+    in property <string> status;
+    in property <[BookItem]> calendars;
+    callback open-pane();
+    callback account-chosen(int);
+    callback find();
+    callback toggled(int, bool);
+    callback sync-now();
+}
+
+component CalSyncPane inherits VerticalLayout {
+    spacing: Theme.s3;
+    alignment: start;
+    Text {
+        text: @tr("Show each account's CalDAV calendars here, read only. Komorebi looks for them only when you press Find calendars, and syncs them only while it is open. The user name and password are the ones set in Contacts > Sync, or your mail address and mail password.");
+        color: Theme.text-2;
+        font-size: Theme.body;
+        wrap: word-wrap;
+    }
+    if CalSync.accounts.length == 0: Text {
+        text: @tr("Add a mail account first.");
+        color: Theme.text-2;
+        font-size: Theme.body;
+    }
+    if CalSync.accounts.length > 0: VerticalLayout {
+        spacing: Theme.s3;
+        FieldHeader { text: @tr("Account"); }
+        ComboBox {
+            model: CalSync.accounts;
+            current-index <=> CalSync.account;
+            selected => { CalSync.account-chosen(self.current-index); }
+        }
+        FieldHeader { text: @tr("Server address"); }
+        TextField {
+            text <=> CalSync.url;
+            placeholder-text: "https://dav.example.com/";
+            description: @tr("Leave it empty to look it up from your mail address. For Purelymail, copy it from purelymail.com/manage/calDavUrl.");
+        }
+        if CalSync.error != "": InfoBar {
+            severity: Severity.critical;
+            title: CalSync.error;
+            closable: false;
+        }
+        HorizontalLayout {
+            spacing: Theme.s2;
+            alignment: start;
+            Button {
+                label: @tr("Find calendars");
+                accent: true;
+                enabled: !CalSync.busy;
+                clicked => { CalSync.find(); }
+            }
+            Button {
+                label: @tr("Sync now");
+                icon: Icons.refresh;
+                enabled: !CalSync.busy && CalSync.calendars.length > 0;
+                clicked => { CalSync.sync-now(); }
+            }
+        }
+        for c[i] in CalSync.calendars: HorizontalLayout {
+            spacing: Theme.s3;
+            Text {
+                text: c.name;
+                font-size: Theme.body;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+            ToggleSwitch {
+                label: c.name;
+                checked: c.enabled;
+                horizontal-stretch: 0;
+                toggled => { CalSync.toggled(i, self.checked); }
+            }
+        }
+        if CalSync.status != "": Text {
+            text: CalSync.status;
+            color: Theme.text-2;
+            font-size: Theme.caption;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// One agenda line: a day header (`header`) or an occurrence.
+export struct AgendaLine {
+    header: bool,
+    // The day (header) or the time ("09:30-10:00", "All day").
+    when: string,
+    title: string,
+    location: string,
+    recurring: bool,
+    alarm: bool,
+    cancelled: bool,
+    // "Now" (under way) or "In 10 minutes" (its reminder is due).
+    badge: string,
+    // The occurrence, for opening it (src/app/calendar.rs keeps the list).
+    key: int,
+}
+
+// An event in a month cell or the all-day strip.
+export struct CalChip {
+    title: string,
+    // "09:30", empty for all day.
+    time: string,
+    key: int,
+    cancelled: bool,
+}
+
+// A day of the month grid (also the date picker's).
+export struct CalCell {
+    day: string,
+    // The full date, for the screen reader.
+    label: string,
+    in-month: bool,
+    today: bool,
+    selected: bool,
+    // Every event that day; `chips` holds the first few.
+    count: int,
+    chips: [CalChip],
+}
+
+// A timed event on the week or day grid: minutes from midnight, and its
+// column among the events it overlaps (src/cal/layout.rs).
+export struct CalBlock {
+    day: int,
+    top: float,
+    bottom: float,
+    col: int,
+    cols: int,
+    title: string,
+    time: string,
+    key: int,
+    cancelled: bool,
+}
+
+// An all-day (or longer) event in the strip over the time grid.
+export struct CalAllDay {
+    day: int,
+    span: int,
+    row: int,
+    title: string,
+    key: int,
+}
+
+// The Calendar page's views and the event editor (src/app/calendar.rs,
+// src/app/calendar_edit.rs).
+export global Cal {
+    // 0 agenda, 1 day, 2 week, 3 month.
+    in-out property <int> view: 3;
+    in property <string> title;
+    in property <[string]> weekdays;
+    in property <[CalCell]> cells;
+    in property <[AgendaLine]> day-lines;
+    in property <[string]> columns;
+    in property <int> today-col: -1;
+    in property <[CalBlock]> blocks;
+    in property <[CalAllDay]> all-day;
+    in property <int> all-day-rows;
+    // The current time on the grid, in minutes (-1: not shown).
+    in property <float> now-min: -1;
+    in property <int> scroll-min: 480;
+    in property <int> conflicts;
+    callback set-view(int);
+    callback step(/* -1, 0 today, 1 */ int);
+    callback pick(int);
+    callback move-day(int);
+    callback open(int);
+    callback new-event();
+    callback tick();
+    callback resolve(/* again */ bool);
+
+    in-out property <bool> editing;
+    in property <bool> ed-new;
+    in property <bool> ed-read-only;
+    // An occurrence of a series: ask which to change.
+    in property <bool> ed-series;
+    in-out property <int> ed-scope;
+    in-out property <string> ed-title;
+    in-out property <string> ed-location;
+    in-out property <string> ed-notes;
+    in-out property <bool> ed-all-day;
+    in-out property <string> ed-start-date;
+    in-out property <string> ed-start-time;
+    in-out property <string> ed-end-date;
+    in-out property <string> ed-end-time;
+    in property <[string]> ed-calendars;
+    in-out property <int> ed-calendar;
+    in property <[string]> ed-repeats;
+    in-out property <int> ed-repeat;
+    // A rule the editor can't change, shown as it is.
+    in property <string> ed-rule;
+    in-out property <int> ed-reminder;
+    in property <string> ed-error;
+    in property <string> ed-organizer;
+    // The date format to type ("dd/mm/yyyy").
+    in property <string> ed-date-hint;
+    callback ed-save();
+    callback ed-cancel();
+    callback ed-delete();
+    callback ed-date-changed();
+    // A typed time 15 minutes later or earlier (Up and Down).
+    pure callback step-time(string, int) -> string;
+
+    // The date picker: 1 for the start, 2 for the end.
+    in-out property <int> picker;
+    in property <string> picker-title;
+    in property <[CalCell]> picker-cells;
+    callback picker-open(int);
+    callback picker-step(int);
+    callback picker-pick(int);
+}
+
+// The month grid (WinUI CalendarView): six weeks of seven days from the
+// first day of the week Windows uses. In the month view each day shows
+// the events that fit and "+N more"; as the date picker it is small and
+// shows days only.
+component CalendarGrid inherits Rectangle {
+    in property <[CalCell]> cells;
+    in property <[string]> weekdays;
+    in property <bool> small;
+    callback pick(int);
+    callback open(int);
+    property <length> head: small ? 28px : 24px;
+    property <length> cell-w: self.width / 7;
+    property <length> cell-h: (self.height - head) / 6;
+    property <length> chip-h: 18px;
+    for w[i] in root.weekdays: Text {
+        x: i * root.cell-w;
+        y: 0;
+        width: root.cell-w;
+        height: root.head;
+        text: w;
+        font-size: Theme.caption;
+        color: Theme.text-2;
+        horizontal-alignment: root.small ? center : left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    for c[i] in root.cells: cell := Rectangle {
+        x: mod(i, 7) * root.cell-w;
+        y: root.head + floor(i / 7) * root.cell-h;
+        width: root.cell-w;
+        height: root.cell-h;
+        // How many chips fit under the day number ("+N more" takes one).
+        property <int> fit: max(0, floor((self.height - 24px) / root.chip-h));
+        property <int> shown: c.count > self.fit ? max(0, self.fit - 1) : c.count;
+        background: c.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+        border-width: root.small ? 0 : 1px;
+        border-color: Theme.card-stroke;
+        border-radius: root.small ? Theme.radius : 0;
+        accessible-role: button;
+        accessible-label: c.count > 0 ? @tr("{0}, {n} event" | "{0}, {n} events" % c.count, c.label) : c.label;
+        accessible-action-default => { root.pick(i); }
+        ta := TouchArea {
+            clicked => { root.pick(i); }
+        }
+        // The day number; today in an accent circle.
+        Rectangle {
+            x: root.small ? (parent.width - self.width) / 2 : Theme.s1;
+            y: root.small ? (parent.height - self.height) / 2 : Theme.s1;
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            background: c.today ? Theme.accent : transparent;
+            Text {
+                text: c.day;
+                font-size: Theme.caption;
+                font-weight: c.today ? 600 : 400;
+                color: c.today ? Theme.on-accent : c.in-month ? Theme.text : Theme.text-3;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        // The narrow (and picker) layout marks days with events.
+        if root.small && c.count > 0 && !c.today: Rectangle {
+            x: (parent.width - 4px) / 2;
+            y: parent.height - 6px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.accent;
+        }
+        if !root.small: VerticalLayout {
+            y: 24px;
+            height: parent.height - 24px;
+            padding-left: 2px;
+            padding-right: 2px;
+            alignment: start;
+            for e[j] in c.chips: Rectangle {
+                visible: j < cell.shown;
+                height: j < cell.shown ? root.chip-h : 0;
+                border-radius: Theme.radius;
+                background: cta.has-hover ? Theme.control-hover : transparent;
+                accessible-role: button;
+                accessible-label: e.time != "" ? @tr("{0}, {1}", e.time, e.title) : e.title;
+                accessible-action-default => { root.open(e.key); }
+                cta := TouchArea {
+                    clicked => { root.open(e.key); }
+                }
+                HorizontalLayout {
+                    padding-left: Theme.s1;
+                    spacing: Theme.s1;
+                    Rectangle {
+                        width: 3px;
+                        height: 12px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 1px;
+                        background: Theme.contrast ? Theme.text : Theme.accent;
+                    }
+                    Text {
+                        text: e.time != "" ? e.time + " " + e.title : e.title;
+                        font-size: Theme.caption;
+                        color: e.cancelled ? Theme.text-3 : Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+            if c.count > cell.shown: Text {
+                height: root.chip-h;
+                text: @tr("+{n} more" | "+{n} more" % (c.count - cell.shown));
+                font-size: Theme.caption;
+                color: Theme.text-2;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// The week and day time grid: the all-day strip, then 24 hours with the
+// events placed by src/cal/layout.rs and the current time in accent.
+component TimeGrid inherits Rectangle {
+    property <length> gutter: 48px;
+    property <length> hour-h: 44px;
+    property <length> strip-h: max(1, Cal.all-day-rows) * 22px + Theme.s1;
+    property <int> n: max(1, Cal.columns.length);
+    property <length> col-w: (self.width - self.gutter - Theme.s4) / self.n;
+    for h[i] in Cal.columns: Text {
+        x: root.gutter + i * root.col-w;
+        y: 0;
+        width: root.col-w;
+        height: 24px;
+        text: h;
+        font-size: Theme.body;
+        font-weight: i == Cal.today-col ? 600 : 400;
+        color: i == Cal.today-col ? Theme.accent-text : Theme.text;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+    // The all-day strip.
+    Rectangle {
+        y: 24px;
+        height: root.strip-h;
+        border-width: 1px;
+        border-color: Theme.card-stroke;
+        Text {
+            x: 0;
+            width: root.gutter - Theme.s1;
+            text: @tr("All day");
+            font-size: Theme.caption;
+            color: Theme.text-2;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        for a in Cal.all-day: Rectangle {
+            x: root.gutter + a.day * root.col-w + 2px;
+            y: 2px + a.row * 22px;
+            width: a.span * root.col-w - 4px;
+            height: 20px;
+            border-radius: Theme.radius;
+            background: Theme.contrast ? Theme.card-fill : Theme.selected;
+            border-width: Theme.contrast ? 1px : 0;
+            border-color: Theme.text;
+            accessible-role: button;
+            accessible-label: a.title;
+            accessible-action-default => { Cal.open(a.key); }
+            TouchArea {
+                clicked => { Cal.open(a.key); }
+            }
+            Text {
+                x: Theme.s1;
+                width: parent.width - Theme.s2;
+                text: a.title;
+                font-size: Theme.caption;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+    sv := ScrollView {
+        y: 24px + root.strip-h;
+        height: root.height - self.y;
+        content-height: 24 * root.hour-h;
+        init => {
+            self.content-y = -max(0, Cal.scroll-min - 30) / 60 * root.hour-h;
+        }
+        for i in 24: Rectangle {
+            y: i * root.hour-h;
+            height: root.hour-h;
+            Rectangle {
+                x: root.gutter;
+                y: 0;
+                height: 1px;
+                background: Theme.card-stroke;
+            }
+            Text {
+                x: 0;
+                y: -2px;
+                width: root.gutter - Theme.s2;
+                text: (i < 10 ? "0" : "") + i + ":00";
+                font-size: Theme.caption;
+                color: Theme.text-2;
+                horizontal-alignment: right;
+                accessible-role: none;
+            }
+        }
+        for d in root.n: Rectangle {
+            x: root.gutter + d * root.col-w;
+            width: 1px;
+            height: 24 * root.hour-h;
+            background: Theme.card-stroke;
+        }
+        for b in Cal.blocks: Rectangle {
+            x: root.gutter + b.day * root.col-w + b.col * (root.col-w / b.cols) + 2px;
+            y: b.top / 60 * root.hour-h + 1px;
+            width: root.col-w / b.cols - 4px;
+            height: max(18px, (b.bottom - b.top) / 60 * root.hour-h - 2px);
+            border-radius: Theme.radius;
+            background: Theme.contrast ? Theme.card-fill : Theme.selected;
+            border-width: Theme.contrast ? 1px : 0;
+            border-color: Theme.text;
+            clip: true;
+            accessible-role: button;
+            accessible-label: @tr("{0}, {1}", b.time, b.title);
+            accessible-action-default => { Cal.open(b.key); }
+            TouchArea {
+                clicked => { Cal.open(b.key); }
+            }
+            Rectangle {
+                x: 0;
+                width: 3px;
+                background: Theme.contrast ? Theme.text : Theme.accent;
+            }
+            VerticalLayout {
+                x: Theme.s2;
+                width: parent.width - Theme.s3;
+                alignment: start;
+                Text {
+                    text: b.title;
+                    font-size: Theme.caption;
+                    font-weight: 600;
+                    color: b.cancelled ? Theme.text-3 : Theme.text;
+                    overflow: elide;
+                }
+                Text {
+                    text: b.time;
+                    font-size: Theme.caption;
+                    color: Theme.text-2;
+                    overflow: elide;
+                }
+            }
+        }
+        if Cal.now-min >= 0 && Cal.today-col >= 0: Rectangle {
+            x: root.gutter + Cal.today-col * root.col-w;
+            y: Cal.now-min / 60 * root.hour-h - 1px;
+            width: root.col-w;
+            height: 2px;
+            background: Theme.contrast ? Theme.hc-highlight : Theme.accent;
+        }
+    }
+}
+
+// The agenda list (the agenda view, and a day of the month view).
+component AgendaList inherits ScrollView {
+    in property <[AgendaLine]> lines;
+    VerticalLayout {
+        alignment: start;
+        spacing: Theme.s1;
+        // Clear of the scroll bar.
+        padding-right: Theme.s4;
+        for l in root.lines: Rectangle {
+            height: l.header ? head.preferred-height + Theme.s3 : row.preferred-height + Theme.s3;
+            background: l.header ? transparent : ta.has-hover ? Theme.control-hover : Theme.card-fill;
+            border-radius: l.header ? 0 : Theme.radius-lg;
+            border-width: l.header ? 0 : 1px;
+            border-color: Theme.card-edge;
+            accessible-role: button;
+            accessible-label: l.header ? l.when : @tr("{0}, {1}", l.when, l.title);
+            accessible-action-default => { Cal.open(l.key); }
+            ta := TouchArea {
+                enabled: !l.header;
+                clicked => { Cal.open(l.key); }
+            }
+            head := Text {
+                visible: l.header;
+                x: 0;
+                y: Theme.s3;
+                width: parent.width;
+                text: l.when;
+                font-size: Theme.body;
+                font-weight: 600;
+                color: Theme.text;
+                overflow: elide;
+            }
+            row := HorizontalLayout {
+                visible: !l.header;
+                padding-left: Theme.s3;
+                padding-right: Theme.s3;
+                padding-top: Theme.s2;
+                padding-bottom: Theme.s2;
+                spacing: Theme.s3;
+                Text {
+                    width: 96px;
+                    text: l.when;
+                    font-size: Theme.body;
+                    color: Theme.text-2;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: l.cancelled ? @tr("Cancelled: {}", l.title) : l.title;
+                        font-size: Theme.body;
+                        color: l.cancelled ? Theme.text-2 : Theme.text;
+                        overflow: elide;
+                    }
+                    if l.location != "": Text {
+                        text: l.location;
+                        font-size: Theme.caption;
+                        color: Theme.text-2;
+                        overflow: elide;
+                    }
+                }
+                if l.badge != "": Text {
+                    text: l.badge;
+                    font-size: Theme.caption;
+                    font-weight: 600;
+                    color: Theme.accent-text;
+                    vertical-alignment: center;
+                }
+                // Repeats and reminder markers.
+                Text {
+                    text: (l.recurring ? "\u{E8EE}" : "") + (l.alarm ? " \u{EA8F}" : "");
+                    font-family: Theme.icon-font;
+                    font-size: 12px;
+                    color: Theme.text-2;
+                    vertical-alignment: center;
+                    accessible-role: text;
+                    accessible-label: l.recurring && l.alarm ? @tr("Repeats; has a reminder")
+                        : l.recurring ? @tr("Repeats") : l.alarm ? @tr("Has a reminder") : "";
+                }
+            }
+        }
+    }
+}
+
+// A date and time pair of the editor, with the picker under it.
+component WhenRow inherits VerticalLayout {
+    in property <string> header;
+    in property <int> which;
+    in-out property <string> date;
+    in-out property <string> time;
+    in property <bool> all-day;
+    in property <bool> read-only;
+    spacing: Theme.s1;
+    FieldHeader { text: root.header; }
+    HorizontalLayout {
+        spacing: Theme.s2;
+        TextField {
+            text <=> root.date;
+            read-only: root.read-only;
+            placeholder-text: Cal.ed-date-hint;
+            horizontal-stretch: 2;
+            edited => { Cal.ed-date-changed(); }
+        }
+        IconButton {
+            icon: Icons.calendar;
+            tooltip: @tr("Choose a date");
+            label: "";
+            enabled: !root.read-only;
+            horizontal-stretch: 0;
+            clicked => { Cal.picker-open(Cal.picker == root.which ? 0 : root.which); }
+        }
+        if !root.all-day: TextField {
+            text <=> root.time;
+            read-only: root.read-only;
+            placeholder-text: "09:30";
+            horizontal-stretch: 1;
+            // Up and Down step 15 minutes (docs/WINUI3.md "TimePicker").
+            key-pressed(e) => {
+                if e.text == Key.UpArrow || e.text == Key.DownArrow {
+                    root.time = Cal.step-time(self.text, e.text == Key.UpArrow ? 15 : -15);
+                    return accept;
+                }
+                return reject;
+            }
+        }
+    }
+    if Cal.picker == root.which: Rectangle {
+        height: 260px;
+        background: Theme.flyout;
+        border-radius: Theme.radius-lg;
+        border-width: 1px;
+        border-color: Theme.flyout-stroke;
+        VerticalLayout {
+            padding: Theme.s2;
+            spacing: Theme.s1;
+            HorizontalLayout {
+                spacing: Theme.s1;
+                Text {
+                    text: Cal.picker-title;
+                    font-size: Theme.body;
+                    font-weight: 600;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                IconButton {
+                    icon: "\u{E70E}";
+                    tooltip: @tr("Previous month");
+                    label: "";
+                    horizontal-stretch: 0;
+                    clicked => { Cal.picker-step(-1); }
+                }
+                IconButton {
+                    icon: "\u{E70D}";
+                    tooltip: @tr("Next month");
+                    label: "";
+                    horizontal-stretch: 0;
+                    clicked => { Cal.picker-step(1); }
+                }
+            }
+            CalendarGrid {
+                vertical-stretch: 1;
+                small: true;
+                cells: Cal.picker-cells;
+                weekdays: Cal.weekdays;
+                pick(i) => { Cal.picker-pick(i); }
+            }
+        }
+    }
+}
+
+// The event editor (list/details: it takes the page's content area).
+component EventEditor inherits ScrollView {
+    VerticalLayout {
+        alignment: start;
+        spacing: Theme.s3;
+        padding-right: Theme.s4;
+        padding-bottom: Theme.s4;
+        if Cal.ed-read-only: InfoBar {
+            severity: Severity.info;
+            title: @tr("Organized by {0}", Cal.ed-organizer);
+            message: @tr("Answer the invitation from its message. You can remove the event from your calendar here.");
+            closable: false;
+        }
+        if Cal.ed-error != "": InfoBar {
+            severity: Severity.critical;
+            title: Cal.ed-error;
+            closable: false;
+        }
+        if Cal.ed-series && !Cal.ed-read-only: VerticalLayout {
+            spacing: Theme.s1;
+            FieldHeader { text: @tr("Change"); }
+            ComboBox {
+                model: [@tr("Only this event"), @tr("The whole series")];
+                current-index <=> Cal.ed-scope;
+            }
+        }
+        FieldHeader { text: @tr("Title"); }
+        TextField {
+            text <=> Cal.ed-title;
+            read-only: Cal.ed-read-only;
+            placeholder-text: @tr("Add a title");
+        }
+        if !Cal.ed-read-only: VerticalLayout {
+            spacing: Theme.s1;
+            FieldHeader { text: @tr("Calendar"); }
+            ComboBox {
+                model: Cal.ed-calendars;
+                current-index <=> Cal.ed-calendar;
+            }
+        }
+        HorizontalLayout {
+            spacing: Theme.s3;
+            Text {
+                text: @tr("All day");
+                font-size: Theme.body;
+                color: Theme.text;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+            ToggleSwitch {
+                label: @tr("All day");
+                checked <=> Cal.ed-all-day;
+                enabled: !Cal.ed-read-only;
+                horizontal-stretch: 0;
+            }
+        }
+        WhenRow {
+            header: @tr("Starts");
+            which: 1;
+            date <=> Cal.ed-start-date;
+            time <=> Cal.ed-start-time;
+            all-day: Cal.ed-all-day;
+            read-only: Cal.ed-read-only;
+        }
+        WhenRow {
+            header: @tr("Ends");
+            which: 2;
+            date <=> Cal.ed-end-date;
+            time <=> Cal.ed-end-time;
+            all-day: Cal.ed-all-day;
+            read-only: Cal.ed-read-only;
+        }
+        if !Cal.ed-read-only && !(Cal.ed-series && Cal.ed-scope == 0): VerticalLayout {
+            spacing: Theme.s1;
+            FieldHeader { text: @tr("Repeat"); }
+            if Cal.ed-rule == "": ComboBox {
+                model: Cal.ed-repeats;
+                current-index <=> Cal.ed-repeat;
+            }
+            if Cal.ed-rule != "": Text {
+                text: @tr("Repeats by a rule set in another app ({0}). It is kept as it is.", Cal.ed-rule);
+                font-size: Theme.body;
+                color: Theme.text-2;
+                wrap: word-wrap;
+            }
+        }
+        if !Cal.ed-read-only: VerticalLayout {
+            spacing: Theme.s1;
+            FieldHeader { text: @tr("Reminder"); }
+            ComboBox {
+                model: [@tr("None"), @tr("At the start"), @tr("5 minutes before"), @tr("15 minutes before"), @tr("30 minutes before"), @tr("1 hour before"), @tr("1 day before")];
+                current-index <=> Cal.ed-reminder;
+            }
+        }
+        FieldHeader { text: @tr("Location"); }
+        TextField {
+            text <=> Cal.ed-location;
+            read-only: Cal.ed-read-only;
+        }
+        FieldHeader { text: @tr("Notes"); }
+        TextField {
+            text <=> Cal.ed-notes;
+            read-only: Cal.ed-read-only;
+        }
+        HorizontalLayout {
+            spacing: Theme.s2;
+            alignment: start;
+            if !Cal.ed-read-only: Button {
+                label: @tr("Save");
+                accent: true;
+                clicked => { Cal.ed-save(); }
+            }
+            Button {
+                label: Cal.ed-read-only ? @tr("Close") : @tr("Cancel");
+                clicked => { Cal.ed-cancel(); }
+            }
+            if !Cal.ed-new: Button {
+                label: Cal.ed-read-only ? @tr("Remove from calendar") : @tr("Delete");
+                icon: Icons.delete;
+                clicked => { Cal.ed-delete(); }
+            }
+        }
+    }
+}
+
+export component CalendarPage inherits Rectangle {
+    in property <[AgendaLine]> lines;
+    // "15 Oct - 13 Nov 2026".
+    in property <string> range;
+    // The first query has answered (the page shows empty until then).
+    in property <bool> loaded;
+    callback today();
+    callback move(/* days */ int);
+    background: Theme.layer;
+    clip: true;
+    // The day agenda goes beside the month on a page 900 px or wider.
+    property <bool> wide: self.width >= 900px;
+    init => { keys.focus(); }
+    // The current-time line moves once a minute.
+    Timer {
+        interval: 60s;
+        running: Cal.view == 1 || Cal.view == 2;
+        triggered => { Cal.tick(); }
+    }
+
+    keys := FocusScope {
+        key-pressed(e) => {
+            if CalSync.open || Cal.editing {
+                return reject;
+            }
+            if e.text == Key.PageUp { Cal.step(-1); return accept; }
+            if e.text == Key.PageDown { Cal.step(1); return accept; }
+            if e.text == Key.Home { Cal.step(0); return accept; }
+            if Cal.view == 3 {
+                if e.text == Key.LeftArrow { Cal.move-day(-1); return accept; }
+                if e.text == Key.RightArrow { Cal.move-day(1); return accept; }
+                if e.text == Key.UpArrow { Cal.move-day(-7); return accept; }
+                if e.text == Key.DownArrow { Cal.move-day(7); return accept; }
+            }
+            return reject;
+        }
+    VerticalLayout {
+        padding-left: Theme.s8;
+        padding-right: Theme.s8;
+        padding-top: Theme.s6;
+        padding-bottom: Theme.s4;
+        spacing: Theme.s4;
+        HorizontalLayout {
+            spacing: Theme.s2;
+            Text {
+                text: CalSync.open ? @tr("Calendars") : Cal.editing ? (Cal.ed-new ? @tr("New event") : @tr("Event")) : @tr("Calendar");
+                font-size: Theme.title-large;
+                font-weight: 600;
+                color: Theme.text;
+                wrap: word-wrap;
+                accessible-role: text;
+            }
+            if CalSync.open: IconButton {
+                icon: Icons.dismiss;
+                tooltip: @tr("Close");
+                label: "";
+                horizontal-stretch: 0;
+                clicked => { CalSync.open = false; }
+            }
+        }
+        if CalSync.open: ScrollView {
+            vertical-stretch: 1;
+            CalSyncPane {
+                width: parent.width - Theme.s4;
+            }
+        }
+        if !CalSync.open && Cal.editing: EventEditor {
+            vertical-stretch: 1;
+        }
+        if !CalSync.open && !Cal.editing && Cal.conflicts > 0: InfoBar {
+            severity: Severity.caution;
+            title: @tr("{n} change wasn't saved because the event changed on another device." | "{n} changes weren't saved because the events changed on another device." % Cal.conflicts);
+            closable: false;
+            button1: @tr("Apply my changes again");
+            button2: @tr("Discard");
+            button-clicked(b) => { Cal.resolve(b == 0); }
+        }
+        // The command bar: New event, Today, Previous and Next, the view,
+        // the calendars, and the period shown.
+        if !CalSync.open && !Cal.editing: HorizontalLayout {
+            spacing: Theme.s2;
+            alignment: start;
+            Button {
+                label: @tr("New event");
+                icon: Icons.add;
+                accent: true;
+                clicked => { Cal.new-event(); }
+            }
+            Button {
+                label: @tr("Today");
+                icon: Icons.calendar;
+                clicked => { Cal.step(0); }
+            }
+            IconButton {
+                icon: "\u{E70E}";
+                tooltip: @tr("Previous (Page Up)");
+                label: "";
+                horizontal-stretch: 0;
+                clicked => { Cal.step(-1); }
+            }
+            IconButton {
+                icon: "\u{E70D}";
+                tooltip: @tr("Next (Page Down)");
+                label: "";
+                horizontal-stretch: 0;
+                clicked => { Cal.step(1); }
+            }
+            ComboBox {
+                width: 120px;
+                model: [@tr("Agenda"), @tr("calendar view" => "Day"), @tr("Week"), @tr("Month")];
+                current-index: Cal.view;
+                selected => { Cal.set-view(self.current-index); }
+            }
+            IconButton {
+                icon: Icons.settings;
+                tooltip: @tr("Choose which calendars to show and sync");
+                label: "";
+                horizontal-stretch: 0;
+                clicked => { CalSync.open-pane(); }
+            }
+        }
+        if !CalSync.open && !Cal.editing: Text {
+            text: Cal.view == 0 ? root.range : Cal.title;
+            font-size: Theme.subtitle;
+            font-weight: 600;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if !CalSync.open && !Cal.editing && Cal.view == 0 && root.loaded && root.lines.length == 0: Text {
+            text: @tr("No events in these 30 days. Invitations you accept are added here.");
+            font-size: Theme.body;
+            color: Theme.text-2;
+            wrap: word-wrap;
+        }
+        if !CalSync.open && !Cal.editing && Cal.view == 0: AgendaList {
+            vertical-stretch: 1;
+            lines: root.lines;
+        }
+        if !CalSync.open && !Cal.editing && (Cal.view == 1 || Cal.view == 2): TimeGrid {
+            vertical-stretch: 1;
+        }
+        if !CalSync.open && !Cal.editing && Cal.view == 3: Rectangle {
+            vertical-stretch: 1;
+            min-height: 280px;
+            CalendarGrid {
+                x: 0;
+                y: 0;
+                width: root.wide ? parent.width - 300px - Theme.s4 : parent.width;
+                height: root.wide ? parent.height : parent.height - 160px - Theme.s3;
+                small: !root.wide && root.height < 640px;
+                cells: Cal.cells;
+                weekdays: Cal.weekdays;
+                pick(i) => { Cal.pick(i); keys.focus(); }
+                open(k) => { Cal.open(k); }
+            }
+            AgendaList {
+                x: root.wide ? parent.width - 300px : 0;
+                y: root.wide ? 0 : parent.height - 160px;
+                width: root.wide ? 300px : parent.width;
+                height: root.wide ? parent.height : 160px;
+                lines: Cal.day-lines;
+            }
+        }
+    }
+    }
+}

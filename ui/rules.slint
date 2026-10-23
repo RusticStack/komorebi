@@ -1,0 +1,389 @@
+// Settings > Rules (src/app/rules.rs, docs/WINUI3.md "SettingsCard"): an
+// account's rules as cards with a toggle, and one rule's page with its
+// condition rows (field, operator, value, remove) and its actions.
+
+import { Theme, Icons } from "theme.slint";
+import { Button, IconButton, CheckBox, ToggleSwitch, ComboBox, TextField, SettingsSurface, Severity, InfoBar } from "widgets.slint";
+import { GroupHeader, FieldHeader, FieldNote } from "forms.slint";
+
+export struct RuleRow {
+    name: string,
+    summary: string,
+    enabled: bool,
+    paused: bool,
+}
+
+export struct CondRow {
+    field: int,
+    op: int,
+    value: string,
+}
+
+export struct LogRow {
+    title: string,
+    text: string,
+    failed: bool,
+}
+
+export global RulesUi {
+    // The account picker (shown with two accounts or more).
+    in property <[string]> accounts;
+    in-out property <int> account;
+    in property <[RuleRow]> items;
+    in property <[LogRow]> activity;
+    // The rule page: open, its name, All (0) or Any (1), the conditions,
+    // the folders a rule can move to (no Inbox) and the actions.
+    in-out property <bool> editing;
+    in-out property <string> name;
+    in-out property <int> match-any;
+    in property <[CondRow]> conds;
+    in property <[string]> folders;
+    in-out property <bool> act-move;
+    in-out property <int> move-to;
+    in-out property <bool> act-delete;
+    in-out property <bool> act-read;
+    in-out property <bool> act-flag;
+    in-out property <bool> stop;
+    in property <string> error;
+    callback pick-account(int);
+    callback add();
+    callback edit(int);
+    callback delete(int);
+    callback toggle(int, bool);
+    callback move(int, /* up */ bool);
+    callback clear-activity();
+    // The enabled rules as a Sieve script on the clipboard.
+    callback copy-sieve();
+    callback add-cond();
+    callback remove-cond(int);
+    callback set-cond(int, /* field */ int, /* op */ int, string);
+    callback save();
+    callback cancel();
+}
+
+// The list: the "runs while open" note, a card per rule, Add rule, then
+// the activity of automatic runs.
+export component RulesList inherits VerticalLayout {
+    alignment: start;
+    spacing: Theme.s1;
+    if RulesUi.accounts.length > 1: HorizontalLayout {
+        padding-bottom: Theme.s3;
+        alignment: start;
+        ComboBox {
+            width: 320px;
+            model: RulesUi.accounts;
+            current-index <=> RulesUi.account;
+            selected => { RulesUi.pick-account(self.current-index); }
+        }
+    }
+    Text {
+        text: @tr("Rules run while Komorebi is open. Mail that arrives while it is closed is sorted the next time it starts.");
+        font-size: Theme.body;
+        color: Theme.text-2;
+        wrap: word-wrap;
+    }
+    Rectangle { height: Theme.s3; }
+    if RulesUi.items.length == 0: Text {
+        text: @tr("No rules yet. A rule can file, delete or mark new mail in the Inbox.");
+        font-size: Theme.body;
+        color: Theme.text-2;
+        wrap: word-wrap;
+    }
+    for r[i] in RulesUi.items: SettingsSurface {
+        height: max(68px, row.preferred-height);
+        accessible-role: groupbox;
+        accessible-label: r.name;
+        accessible-description: r.summary;
+        row := HorizontalLayout {
+            padding: Theme.s4;
+            spacing: Theme.s2;
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text {
+                    text: r.name;
+                    font-size: Theme.body;
+                    font-weight: 600;
+                    color: Theme.text;
+                    overflow: elide;
+                    accessible-role: none;
+                }
+                Text {
+                    text: r.summary;
+                    font-size: Theme.caption;
+                    color: Theme.text-2;
+                    wrap: word-wrap;
+                    accessible-role: none;
+                }
+                if r.paused: HorizontalLayout {
+                    spacing: Theme.s1;
+                    padding-top: Theme.s1;
+                    Text {
+                        text: Icons.warning;
+                        font-family: Theme.icon-font;
+                        font-size: 12px;
+                        color: Theme.warning;
+                        vertical-alignment: center;
+                        accessible-role: none;
+                    }
+                    Text {
+                        text: @tr("Folder not found. This rule is paused.");
+                        font-size: Theme.caption;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                ToggleSwitch {
+                    label: r.enabled ? @tr("On") : @tr("Off");
+                    checked: r.enabled;
+                    toggled => { RulesUi.toggle(i, self.checked); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    label: @tr("Edit");
+                    description: r.name;
+                    clicked => { RulesUi.edit(i); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: Icons.chevron-up;
+                    tooltip: @tr("Move up");
+                    enabled: i > 0;
+                    width: 32px;
+                    clicked => { RulesUi.move(i, true); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: Icons.chevron-down;
+                    tooltip: @tr("Move down");
+                    enabled: i < RulesUi.items.length - 1;
+                    width: 32px;
+                    clicked => { RulesUi.move(i, false); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: Icons.delete;
+                    tooltip: @tr("Delete {0}", r.name);
+                    width: 32px;
+                    clicked => { RulesUi.delete(i); }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-top: Theme.s3;
+        spacing: Theme.s2;
+        alignment: start;
+        Button {
+            icon: Icons.add;
+            label: @tr("Add rule");
+            accent: true;
+            clicked => { RulesUi.add(); }
+        }
+        if RulesUi.items.length > 0: Button {
+            label: @tr("Copy as Sieve");
+            tooltip: @tr("Copy the rules as a script for your provider\u{2019}s mail filters");
+            clicked => { RulesUi.copy-sieve(); }
+        }
+    }
+    if RulesUi.activity.length > 0: VerticalLayout {
+        padding-top: Theme.s6;
+        spacing: Theme.s1;
+        HorizontalLayout {
+            spacing: Theme.s2;
+            GroupHeader {
+                text: @tr("Activity");
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Button {
+                label: @tr("Clear activity");
+                clicked => { RulesUi.clear-activity(); }
+            }
+        }
+        for e in RulesUi.activity: Rectangle {
+            background: Theme.card-fill;
+            border-radius: Theme.radius;
+            border-width: 1px;
+            border-color: Theme.card-edge;
+            VerticalLayout {
+                padding: Theme.s3;
+                padding-left: Theme.s4;
+                Text {
+                    text: e.title;
+                    font-size: Theme.caption;
+                    color: Theme.text-2;
+                    overflow: elide;
+                }
+                Text {
+                    text: e.text;
+                    font-size: Theme.body;
+                    color: e.failed ? Theme.danger : Theme.text;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// One condition: field and operator, then the value (beside them when the
+// page is wide, under them when it is narrow, so nothing clips), and its
+// Remove button.
+component ConditionRow inherits VerticalLayout {
+    in property <int> index;
+    in property <CondRow> cond;
+    in property <bool> wide;
+    spacing: Theme.s2;
+    padding-bottom: Theme.s2;
+    HorizontalLayout {
+        spacing: Theme.s2;
+        field := ComboBox {
+            width: 180px;
+            model: [@tr("rule field" => "From"), @tr("To or Cc"), @tr("rule field" => "Subject"), @tr("Has attachment")];
+            current-index: root.cond.field;
+            selected => { RulesUi.set-cond(root.index, self.current-index, root.cond.op, root.cond.value); }
+        }
+        if root.cond.field != 3: ComboBox {
+            width: 170px;
+            model: [@tr("contains"), @tr("does not contain"), @tr("rule operator" => "is"), @tr("starts with"), @tr("ends with")];
+            current-index: root.cond.op;
+            selected => { RulesUi.set-cond(root.index, root.cond.field, self.current-index, root.cond.value); }
+        }
+        if root.wide && root.cond.field != 3: TextField {
+            horizontal-stretch: 1;
+            text: root.cond.value;
+            placeholder-text: @tr("Value");
+            edited(t) => { RulesUi.set-cond(root.index, root.cond.field, root.cond.op, t); }
+        }
+        if !root.wide || root.cond.field == 3: Rectangle { horizontal-stretch: 1; }
+        IconButton {
+            icon: Icons.delete;
+            tooltip: @tr("Remove condition");
+            width: 32px;
+            clicked => { RulesUi.remove-cond(root.index); }
+        }
+    }
+    if !root.wide && root.cond.field != 3: TextField {
+        text: root.cond.value;
+        placeholder-text: @tr("Value");
+        edited(t) => { RulesUi.set-cond(root.index, root.cond.field, root.cond.op, t); }
+    }
+}
+
+// A rule's page: name, conditions, actions, Stop, then Save and Cancel.
+export component RuleEditor inherits VerticalLayout {
+    in property <bool> wide: true;
+    alignment: start;
+    spacing: Theme.s3;
+    VerticalLayout {
+        spacing: Theme.s2;
+        FieldHeader { text: @tr("Rule name"); }
+        name := TextField {
+            text <=> RulesUi.name;
+            init => { self.focus(); }
+            accepted => { RulesUi.save(); }
+        }
+    }
+    VerticalLayout {
+        spacing: Theme.s2;
+        GroupHeader { text: @tr("Conditions"); }
+        HorizontalLayout {
+            alignment: start;
+            ComboBox {
+                width: 260px;
+                model: [@tr("All must match"), @tr("Any can match")];
+                current-index <=> RulesUi.match-any;
+            }
+        }
+    }
+    VerticalLayout {
+        for c[i] in RulesUi.conds: ConditionRow {
+            index: i;
+            cond: c;
+            wide: root.wide;
+        }
+        HorizontalLayout {
+            alignment: start;
+            Button {
+                icon: Icons.add;
+                label: @tr("Add condition");
+                enabled: RulesUi.conds.length < 20;
+                clicked => { RulesUi.add-cond(); }
+            }
+        }
+    }
+    VerticalLayout {
+        spacing: Theme.s2;
+        GroupHeader { text: @tr("Do this"); }
+        HorizontalLayout {
+            spacing: Theme.s3;
+            CheckBox {
+                text: @tr("Move to folder");
+                checked <=> RulesUi.act-move;
+                enabled: RulesUi.folders.length > 0;
+                toggled => {
+                    if self.checked {
+                        RulesUi.act-delete = false;
+                    }
+                }
+            }
+            if RulesUi.act-move: ComboBox {
+                width: 240px;
+                model: RulesUi.folders;
+                current-index <=> RulesUi.move-to;
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        CheckBox {
+            text: @tr("Delete");
+            checked <=> RulesUi.act-delete;
+            toggled => {
+                if self.checked {
+                    RulesUi.act-move = false;
+                }
+            }
+        }
+        CheckBox {
+            text: @tr("Mark as read");
+            checked <=> RulesUi.act-read;
+        }
+        CheckBox {
+            text: @tr("Mark as important");
+            checked <=> RulesUi.act-flag;
+        }
+        CheckBox {
+            text: @tr("Stop processing more rules");
+            checked <=> RulesUi.stop;
+        }
+    }
+    if RulesUi.error != "": FieldNote {
+        error: true;
+        text: RulesUi.error;
+    }
+    HorizontalLayout {
+        spacing: Theme.s2;
+        alignment: start;
+        Button {
+            label: @tr("Save");
+            accent: true;
+            enabled: RulesUi.conds.length > 0;
+            clicked => { RulesUi.save(); }
+        }
+        Button {
+            label: @tr("Cancel");
+            clicked => { RulesUi.cancel(); }
+        }
+    }
+}

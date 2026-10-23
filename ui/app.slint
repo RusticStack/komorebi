@@ -2,13 +2,17 @@ import { ListView, ScrollView, AboutSlint, Palette } from "std-widgets.slint";
 import { Theme, Icons, Tip } from "theme.slint";
 import { Tr } from "tr.slint";
 import { Shortcuts, ShortcutRow } from "shortcuts.slint";
-import { ServerPorts, Discovery, ServerFields, AccountForm, GroupHeader, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow } from "forms.slint";
+import { ServerPorts, Discovery, ServerFields, AccountForm, GroupHeader, FieldHeader, FieldNote, StepList, CertLine, FindSettingsRow, SmtpNoAuth } from "forms.slint";
 import { OnboardingPage, Onboard } from "onboarding.slint";
+import { ContactsPage, Contacts, ContactItem, ContactLine, BookItem } from "contacts.slint";
 import { Recipients, RecipientChip, RecipientField } from "chips.slint";
+import { CalendarPage, AgendaLine, CalSync, Cal, CalChip, CalCell, CalBlock, CalAllDay } from "calendar.slint";
 import { Rich, Sigs, SigRow, RichBody, RichToolbar, EdState, EdFormat, EdPiece, EdRect, EdAction, EdKey } from "editor.slint";
+import { RulesUi, RuleRow, CondRow, LogRow, RulesList, RuleEditor } from "rules.slint";
 import { NavItem, MenuCommand, MailRow, AttachmentRow, AccountRow, FolderOption, Focus, FocusRing, FocusTrap, Icon, Button, IconButton, HyperlinkButton, NavRow, MailItem, Chip, FieldLabel, ComposeBody, TextField, CheckBox, ToggleSwitch, Severity, InfoBar, ContentDialog, ProgressRing, ProgressBar, SelectorBar, SettingsCard, SettingsSurface, SearchBox, ScopeBox, CaptionButton, BarRect, TipTimer, Flyout, FlyoutItem, ComboBox, ScrollThumb, RadioButtons, RadioItem, Expander, TeachingTip, PressKeys, TabItem, TabStrip } from "widgets.slint";
 
-export { Recipients, RecipientChip, TabItem, Theme, Palette, Severity, Tr, ServerPorts, Discovery, ServerFields, AccountForm, Onboard, Rich, Sigs, SigRow, EdState, EdFormat, EdPiece, EdRect, EdAction, EdKey }
+import { CacheLock, CacheLockDialogs } from "cachelock.slint";
+export { AgendaLine, CacheLock, CalSync, Cal, CalChip, CalCell, CalBlock, CalAllDay, Contacts, ContactItem, ContactLine, BookItem, Recipients, RecipientChip, TabItem, Theme, Palette, Severity, Tr, ServerPorts, Discovery, ServerFields, AccountForm, Onboard, Rich, Sigs, SigRow, EdState, EdFormat, EdPiece, EdRect, EdAction, EdKey, RulesUi, RuleRow, CondRow, LogRow }
 
 // One folder role of the account form (Edit account > Folders): the folders
 // to choose from (the first is "Automatic": what the server marks) and the
@@ -21,10 +25,14 @@ export struct RoleChoice {
 // A composer field, for edits, focus and address checks.
 export enum ComposeField { to, cc, bcc, subject, body }
 
-// A recipient suggested from the address index (`name` may be empty).
+// A recipient suggested from the contacts or the address index (`name`
+// may be empty). `kind`: 0 seen in mail, 1 a contact, 2 a group of
+// `count` people (`addr` empty).
 export struct Suggestion {
     name: string,
     addr: string,
+    kind: int,
+    count: int,
 }
 
 // The formatting toolbar's actions on the composer body.
@@ -269,7 +277,7 @@ component SuggestList inherits Flyout {
     for s[i] in root.items: Rectangle {
         height: max(32px, name.preferred-height + 12px) + 4px;
         accessible-role: list-item;
-        accessible-label: s.name != "" ? @tr("suggestion" => "{0}, {1}", s.name, s.addr) : s.addr;
+        accessible-label: s.kind == 2 ? @tr("{0}, group of {1}", s.name, s.count) : s.name != "" ? @tr("suggestion" => "{0}, {1}", s.name, s.addr) : s.addr;
         accessible-item-selected: i == root.current;
         accessible-action-default => { root.picked(i); }
         // Item margin 5,2, radius 3; the current one selected, with the
@@ -300,6 +308,11 @@ component SuggestList inherits Flyout {
                 padding-top: 5px;
                 padding-bottom: 7px;
                 spacing: s.name != "" ? Theme.s2 : 0;
+                if s.kind != 0: Icon {
+                    text: s.kind == 2 ? Icons.people : Icons.person;
+                    color: Theme.on-fill(i == root.current || ta.has-hover || ta.pressed, Theme.text-2);
+                    vertical-stretch: 0;
+                }
                 name := Text {
                     text: s.name != "" ? s.name : s.addr;
                     font-size: Theme.body;
@@ -309,7 +322,7 @@ component SuggestList inherits Flyout {
                     horizontal-stretch: s.name != "" ? 0 : 1;
                 }
                 Text {
-                    text: s.name != "" ? s.addr : "";
+                    text: s.kind == 2 ? @tr("{n} person" | "{n} people" % s.count) : s.name != "" ? s.addr : "";
                     font-size: Theme.caption;
                     color: Theme.on-fill(i == root.current || ta.has-hover || ta.pressed, Theme.text-2);
                     vertical-alignment: center;
@@ -414,7 +427,7 @@ component SettingsPage inherits Rectangle {
     // The form opens for a new account.
     callback form-opened();
     in property <[string]> remote-senders;
-    // 0 Accounts, 1 General, 2 Privacy, 3 About.
+    // 0 Accounts, 1 Signatures, 2 Rules, 3 General, 4 Privacy, 5 About.
     in-out property <int> section;
     // The account being edited (0: the form adds one), and its settings
     // without the password, which the form never shows.
@@ -428,6 +441,8 @@ component SettingsPage inherits Rectangle {
     // the tray, 11 start with Windows).
     in property <bool> g-notify;
     in property <bool> g-notify-detail;
+    // Event reminders as notifications (reported as general-changed 13).
+    in property <bool> g-cal-remind;
     in property <bool> g-close-to-tray;
     in property <bool> g-autostart;
     // The display language: 0 System, 1 English, 2 Português (Portugal)
@@ -500,6 +515,7 @@ component SettingsPage inherits Rectangle {
     property <string> imap-user;
     property <string> smtp-user;
     property <bool> same-login: true;   // SMTP signs in as IMAP does
+    property <bool> smtp-no-auth;       // SMTP takes mail without a sign-in
     // "Set username" showed the sign-in name under the password (and the
     // field takes the focus as it appears).
     property <bool> user-open;
@@ -619,6 +635,7 @@ component SettingsPage inherits Rectangle {
             root.imap-user = "";
             root.smtp-user = "";
             root.same-login = true;
+            root.smtp-no-auth = false;
         } else {
             root.provider = 2;
             root.name = root.edit.name;
@@ -634,6 +651,7 @@ component SettingsPage inherits Rectangle {
             root.imap-user = root.edit.imap-user;
             root.smtp-user = root.edit.smtp-user;
             root.same-login = !root.edit.smtp-own-login;
+            root.smtp-no-auth = root.edit.smtp-no-auth;
         }
     }
     // The server fields as typed.
@@ -689,16 +707,18 @@ component SettingsPage inherits Rectangle {
             imap-user: root.imap-user,
             smtp-user: root.smtp-user,
             smtp-own-login: !root.same-login,
+            smtp-no-auth: root.smtp-no-auth,
         };
     }
     // Edit (or "Update password") opens the form on Accounts: the account
-    // page, its Server settings folded unless a certificate is saved.
+    // page, its Server settings folded unless a certificate is saved or
+    // the SMTP server needs no sign-in.
     function open-edit() {
         load-form();
         if root.edit-id != 0 {
             root.section = 0;
             root.form-open = true;
-            root.advanced-open = root.pinned-imap || root.pinned-smtp;
+            root.advanced-open = root.pinned-imap || root.pinned-smtp || root.smtp-no-auth;
         }
     }
     changed cert-wait => { if root.cert-wait { root.advanced-open = true; } }
@@ -866,7 +886,7 @@ component SettingsPage inherits Rectangle {
                             self.focus();
                         }
                     }
-                    items: [@tr("Accounts"), @tr("Signatures"), @tr("General"), @tr("Privacy"), @tr("About")];
+                    items: [@tr("Accounts"), @tr("Signatures"), @tr("Rules"), @tr("General"), @tr("Privacy"), @tr("About")];
                     selected <=> root.section;
                 }
             }
@@ -1359,11 +1379,14 @@ component SettingsPage inherits Rectangle {
                                                 pinned: root.pinned-smtp;
                                                 forget => { root.forget-certificate(2); }
                                             }
-                                            CheckBox {
+                                            SmtpNoAuth {
+                                                checked <=> root.smtp-no-auth;
+                                            }
+                                            if !root.smtp-no-auth: CheckBox {
                                                 text: @tr("Same sign-in as incoming");
                                                 checked <=> root.same-login;
                                             }
-                                            if !root.same-login: VerticalLayout {
+                                            if !root.same-login && !root.smtp-no-auth: VerticalLayout {
                                                 spacing: Theme.s2;
                                                 FieldHeader { text: @tr("SMTP username"); }
                                                 TextField {
@@ -1371,12 +1394,6 @@ component SettingsPage inherits Rectangle {
                                                     placeholder-text: @tr("Same as email address");
                                                     accessible-label: @tr("SMTP username");
                                                 }
-                                            }
-                                            Text {
-                                                text: @tr("Komorebi always signs in to the sending server.");
-                                                font-size: Theme.caption;
-                                                color: Theme.text-2;
-                                                wrap: word-wrap;
                                             }
                                         }
                                     }
@@ -1684,7 +1701,12 @@ component SettingsPage inherits Rectangle {
                             }
                         }
                     }
-                    if !root.form-open && root.section == 2: VerticalLayout {
+                    // Settings > Rules (ui/rules.slint).
+                    if !root.form-open && root.section == 2 && !RulesUi.editing: RulesList { }
+                    if !root.form-open && root.section == 2 && RulesUi.editing: RuleEditor {
+                        wide: settings-scroll.visible-width >= 760px;
+                    }
+                    if !root.form-open && root.section == 3: VerticalLayout {
                         alignment: start;
                         spacing: Theme.s1;
                         // One card per choice (one ComboBox for all four).
@@ -1734,6 +1756,14 @@ component SettingsPage inherits Rectangle {
                             toggle-label: @tr("Show the sender and subject in notifications");
                             checked: root.g-notify-detail;
                             toggled(on) => { root.general-changed(9, on ? 1 : 0); }
+                        }
+                        SettingsCard {
+                            header: @tr("Notifications for event reminders");
+                            description: @tr("Windows shows a notification when an event's reminder is due, only while Komorebi is open or in the notification area. The agenda marks due events either way.");
+                            toggle: true;
+                            toggle-label: @tr("Notifications for event reminders");
+                            checked: root.g-cal-remind;
+                            toggled(on) => { root.general-changed(13, on ? 1 : 0); }
                         }
                         SettingsCard {
                             header: @tr("Keep running in the notification area");
@@ -1878,7 +1908,7 @@ component SettingsPage inherits Rectangle {
 
                     // ---- Privacy: what loads, what is logged, and the
                     // one reset (Download again is on each account's page).
-                    if !root.form-open && root.section == 3: VerticalLayout {
+                    if !root.form-open && root.section == 4: VerticalLayout {
                         alignment: start;
                         spacing: Theme.s1;
                         GroupHeader { text: @tr("Remote images"); }
@@ -1919,6 +1949,31 @@ component SettingsPage inherits Rectangle {
                         }
 
                         Rectangle { height: Theme.s6 - 2 * Theme.s1; }
+                        GroupHeader { text: @tr("Mail cache"); }
+                        Rectangle { height: 0; }
+                        SettingsCard {
+                            icon: Icons.lock;
+                            header: @tr("Encrypt the mail cache on this computer");
+                            description: @tr("Downloaded mail, drafts and the Outbox are encrypted with a key only your Windows user can unlock. If that key is lost, drafts and the Outbox, which exist only in the cache, are lost too. Attachment copies are not encrypted.");
+                            toggle: true;
+                            toggle-label: @tr("Encrypt the mail cache on this computer");
+                            checked: CacheLock.wanted;
+                            toggled(on) => {
+                                if on {
+                                    CacheLock.ask = 1;
+                                } else {
+                                    CacheLock.set(false);
+                                }
+                            }
+                        }
+                        if CacheLock.pending: SettingsCard {
+                            header: CacheLock.wanted ? @tr("The cache is encrypted when Komorebi next starts.") : @tr("The cache is decrypted when Komorebi next starts.");
+                            description: @tr("This can take a minute for a large cache.");
+                            action: @tr("Restart now");
+                            action-clicked => { CacheLock.restart(); }
+                        }
+
+                        Rectangle { height: Theme.s6 - 2 * Theme.s1; }
                         GroupHeader { text: @tr("settings group" => "Reset"); }
                         Rectangle { height: 0; }
                         SettingsCard {
@@ -1938,7 +1993,7 @@ component SettingsPage inherits Rectangle {
 
                     // ---- About: the version, a Help group and an About
                     // group, every action at the cards' end.
-                    if !root.form-open && root.section == 4: VerticalLayout {
+                    if !root.form-open && root.section == 5: VerticalLayout {
                         alignment: start;
                         spacing: Theme.s1;
                         SettingsCard {
@@ -2482,7 +2537,7 @@ export component AppWindow inherits Window {
     callback close-window();
     // The tab keys work over the mail (no dialog, Settings or first-run
     // flow in the way).
-    property <bool> tab-keys-on: root.mail-shown && !root.ob-open && !root.show-settings && !root.shortcuts-show && !root.src-show
+    property <bool> tab-keys-on: root.mail-shown && !root.ob-open && !root.show-settings && !root.show-calendar && !root.shortcuts-show && !root.src-show
         && !root.l-show && root.q-title == "" && !root.c-confirm-discard && !Rich.plain-ask && !root.why-show;
     // The tab menu's place and the tab it is for.
     property <int> menu-tab;
@@ -2558,7 +2613,7 @@ export component AppWindow inherits Window {
     in property <bool> r-remote-allowed;
     callback r-remote-undo();
     function open-privacy() {
-        root.settings-section = 3;
+        root.settings-section = 4;
         root.return-pane = root.pane-of-focus();
         root.pane-open = false;
         root.show-settings = true;
@@ -2870,6 +2925,9 @@ export component AppWindow inherits Window {
     in property <string> q-old-label;
     in property <string> q-caution;
     in property <string> q-note;
+    // A certificate prompt's choice of what to trust (empty: none).
+    in property <[RadioItem]> q-choices;
+    in-out property <int> q-choice;
     // A destructive question (a removal, a discard, a second send): both
     // buttons standard, Cancel focused and no Enter default; otherwise the
     // answer is the accent default button, focused, and Enter gives it.
@@ -2881,6 +2939,34 @@ export component AppWindow inherits Window {
 
     // Settings
     in-out property <bool> show-settings;
+    // The Contacts view, over the Mail tab's content (`app::contacts`).
+    in-out property <bool> show-contacts;
+    callback contacts-toggled(bool);
+    // The Calendar page (src/app/calendar.rs), over the content card as
+    // Settings is; its agenda lines and range, filled once it opens.
+    in-out property <bool> show-calendar;
+    in property <[AgendaLine]> cal-lines;
+    in property <string> cal-range;
+    in property <bool> cal-loaded;
+    callback cal-opened();
+    callback cal-today();
+    callback cal-move(int);
+    changed show-calendar => {
+        if root.show-calendar {
+            // One page at a time: Calendar closes Contacts.
+            if root.show-contacts {
+                root.show-contacts = false;
+                root.contacts-toggled(false);
+            }
+            root.cal-opened();
+        }
+    }
+    // A composer or another tab coming forward closes the page.
+    changed composing => {
+        if root.composing {
+            root.show-calendar = false;
+        }
+    }
     // ---- the onboarding flow (docs/WINUI3.md "Onboarding";
     // src/app/onboarding.rs): open past the welcome (Your email, Sign in,
     // Make it yours, the finish), in Settings' content area when opened
@@ -2995,7 +3081,7 @@ export component AppWindow inherits Window {
     callback layout-changed(bool);
     // Shown only over the mail view, with its target on screen and no
     // dialog, Settings or composer in the way; tooltips wait meanwhile.
-    out property <bool> tip-visible: root.tip-kind > 0 && root.mail-shown && !root.show-settings
+    out property <bool> tip-visible: root.tip-kind > 0 && root.mail-shown && !root.show-settings && !root.show-calendar
         && !root.composing && !root.src-show && root.q-title == "" && !root.l-show && !root.c-confirm-discard
         && !root.shortcuts-show && !root.why-show && !root.pane-open && !root.popup-open && root.mail-tab && (root.tip-kind != 1 || root.rail);
     changed tip-visible => {
@@ -3039,7 +3125,8 @@ export component AppWindow inherits Window {
     callback settings-opened();
     callback forget-remote(string);
     callback forget-all-remote();
-    // The section shown: 0 Accounts, 1 General, 2 Privacy, 3 About.
+    // The section shown: 0 Accounts, 1 Signatures, 2 Rules, 3 General,
+    // 4 Privacy, 5 About.
     in-out property <int> settings-section;
     // Account housekeeping: Enabled, order, and Download again (asks first).
     callback account-enabled(int, bool);
@@ -3059,6 +3146,7 @@ export component AppWindow inherits Window {
     // and subject, 10 close to the tray, 11 start with Windows).
     in property <bool> g-notify;
     in property <bool> g-notify-detail;
+    in property <bool> g-cal-remind;
     in property <bool> g-close-to-tray;
     in property <bool> g-autostart;
     in property <bool> g-flash;
@@ -3125,7 +3213,7 @@ export component AppWindow inherits Window {
     // Set from a change handler (not a binding) because labels shown in
     // wide mode feed back into the window's layout constraints.
     out property <bool> compact: false;
-    property <bool> reading: !root.composing && !root.show-settings && !root.src-show && !root.ob-shown;
+    property <bool> reading: !root.composing && !root.show-settings && !root.show-calendar && !root.src-show && !root.ob-shown;
     // Rows that fit in the list: what PageUp/PageDown move by.
     property <int> page-rows: max(1, floor(list.visible-height / Theme.row-height));
     changed width => {
@@ -3145,8 +3233,8 @@ export component AppWindow inherits Window {
     property <bool> detail-open: root.composing || root.has-message || root.o-show;
     // Which column shows: below 1040 px the reader column only while it
     // holds something (the list stretches over its place otherwise).
-    out property <bool> show-list: !root.show-settings && root.mail-tab && !(root.one-pane && root.detail-open);
-    out property <bool> show-reader: !root.show-settings
+    out property <bool> show-list: !root.show-settings && !root.show-calendar && root.mail-tab && !(root.one-pane && root.detail-open);
+    out property <bool> show-reader: !root.show-settings && !root.show-calendar
         && (!root.mail-tab || (root.one-pane ? root.detail-open : (!root.compact || root.reader-target)));
     // A message or draft tab reads at most 1040 px wide, centred. Set from
     // change handlers (as `compact`): bound to the width, it would feed
@@ -3155,7 +3243,11 @@ export component AppWindow inherits Window {
     function place-gutter() {
         root.tab-gutter = root.mail-tab ? 0 : max(0px, (root.width - 1040px) / 2);
     }
-    changed mail-tab => { root.place-gutter(); }
+    changed mail-tab => {
+        root.place-gutter();
+        // Another tab coming forward closes the Calendar page.
+        root.show-calendar = false;
+    }
     // The list column's width beside the reader: 380 px, 300 px below
     // 1040 px; with the reader hidden it stretches over the content area
     // (min / max widths and stretch, not the window's width, which would
@@ -3233,13 +3325,20 @@ export component AppWindow inherits Window {
     property <length> rail-measure: max(64px, ceil(rail-words-col.preferred-width / 1px) * 1px + 12px);
     // The folder pane's own items (the repeater at its end): kind 6 the
     // pane toggle, 5 Settings; and which of them has the focus.
+    // 7 Contacts, above Settings; 8 Calendar, between them, once there is
+    // mail to show.
     property <[NavItem]> pane-chrome: root.rail || root.pane-open
-        ? [{ kind: 6, label: @tr("Folders"), icon: Icons.menu }, { kind: 5, label: @tr("Settings"), icon: Icons.settings }]
-        : [{ kind: 5, label: @tr("Settings"), icon: Icons.settings }];
+        ? (root.mail-shown
+            ? [{ kind: 6, label: @tr("Folders"), icon: Icons.menu }, { kind: 7, label: @tr("Contacts"), icon: Icons.people }, { kind: 8, label: @tr("Calendar"), icon: Icons.calendar }, { kind: 5, label: @tr("Settings"), icon: Icons.settings }]
+            : [{ kind: 6, label: @tr("Folders"), icon: Icons.menu }, { kind: 7, label: @tr("Contacts"), icon: Icons.people }, { kind: 5, label: @tr("Settings"), icon: Icons.settings }])
+        : (root.mail-shown
+            ? [{ kind: 7, label: @tr("Contacts"), icon: Icons.people }, { kind: 8, label: @tr("Calendar"), icon: Icons.calendar }, { kind: 5, label: @tr("Settings"), icon: Icons.settings }]
+            : [{ kind: 7, label: @tr("Contacts"), icon: Icons.people }, { kind: 5, label: @tr("Settings"), icon: Icons.settings }]);
     property <int> chrome-focus;
     // New mail, from the pane or the rail.
     function new-mail-chosen() {
         root.pane-open = false;
+        root.show-calendar = false;
         if root.show-settings {
             root.close-settings(2);
         }
@@ -3266,8 +3365,10 @@ export component AppWindow inherits Window {
     }
     // A folder chosen in the pane (account lines fold: `nav-toggle`).
     function nav-chosen(item: NavItem) {
+        root.show-contacts = false;
         root.nav-clicked(item);
         root.pane-open = false;
+        root.show-calendar = false;
         if root.show-settings {
             root.close-settings(2);
         }
@@ -3285,6 +3386,7 @@ export component AppWindow inherits Window {
             root.tab-activate(0);
         }
         root.pane-open = false;
+        root.show-calendar = false;
         if root.show-settings {
             root.close-settings(2);
         }
@@ -3496,6 +3598,7 @@ export component AppWindow inherits Window {
     // A sign-in that failed after the dialog closed must not greet the next open.
     changed show-settings => {
         if root.show-settings {
+            root.show-calendar = false;
             root.a-error = "";
             root.settings-opened();
         } else {
@@ -3598,7 +3701,7 @@ export component AppWindow inherits Window {
                 }
             }
         }
-        KeyBinding { keys: @keys(Control + "n"); enabled: !root.show-settings; activated => { root.compose(); } }
+        KeyBinding { keys: @keys(Control + "n"); enabled: !root.show-settings; activated => { root.show-calendar = false; root.compose(); } }
         // Show / hide the folders (WinUI's pane toggle).
         KeyBinding { keys: @keys(Control + Shift + "e"); enabled: root.mail-shown && !root.ob-open; activated => { root.toggle-pane(); } }
         // Search: Ctrl+E and F3 (Outlook), Ctrl+F (Windows Mail); from
@@ -3624,6 +3727,7 @@ export component AppWindow inherits Window {
                     root.tab-activate(0);
                 }
                 root.pane-open = false;
+                root.show-calendar = false;
                 if root.show-settings {
                     root.close-settings(2);
                 }
@@ -3653,13 +3757,20 @@ export component AppWindow inherits Window {
         // Esc closes the folder pane first, when it is open over the content.
         KeyBinding {
             keys: @keys(Escape);
-            enabled: !root.ob-open && ((root.reading && root.mail-tab) || root.pane-open || root.show-settings || root.detail-only);
+            enabled: !root.ob-open && ((root.reading && root.mail-tab) || root.pane-open || root.show-settings || root.show-calendar || root.detail-only);
             activated => {
                 if root.detail-only {
                     // A message window closes on Esc.
                     root.close-window();
                 } else if root.pane-open {
                     root.pane-open = false;
+                } else if root.show-calendar && (Cal.editing || Cal.picker > 0) {
+                    // The event editor (or its date picker) closes first.
+                    if Cal.picker > 0 { Cal.picker = 0; } else { Cal.ed-cancel(); }
+                } else if root.show-calendar {
+                    // The Calendar page closes back to the mail.
+                    root.show-calendar = false;
+                    root.focus-list();
                 } else if root.show-settings {
                     root.close-settings(root.settings-from);
                 } else {
@@ -5879,9 +5990,11 @@ export component AppWindow inherits Window {
                                         for a in root.i-tools: HorizontalLayout {
                                             IconButton {
                                                 icon: a == 5 ? Icons.compose : a == 0 ? Icons.link : a == 4 ? Icons.save
+                                                    : a == 7 ? Icons.delete
                                                     : invite-card.details ? Icons.chevron-up : Icons.chevron-down;
                                                 icon-size: a == 6 ? 12px : 16px;
-                                                label: a == 5 ? @tr("Change") : a == 0 ? @tr("Join") : a == 4 ? @tr("Save .ics") : @tr("Details");
+                                                label: a == 5 ? @tr("Change") : a == 0 ? @tr("Join") : a == 4 ? @tr("Save .ics")
+                                                    : a == 7 ? @tr("Remove from calendar") : @tr("Details");
                                                 clicked => {
                                                     if a == 6 {
                                                         invite-card.details = !invite-card.details;
@@ -6243,6 +6356,28 @@ export component AppWindow inherits Window {
             Rectangle { width: root.show-reader ? root.tab-gutter : 0; }
         }
 
+        // ---- Contacts, a page over the Mail tab's content card
+        if root.show-contacts && root.mail-tab && !root.show-settings && !root.ob-open: ContactsPage {
+            x: root.mail-shown ? root.nav-width + 1px : 0;
+            y: root.content-top + (root.mail-shown ? 1px : 0);
+            width: root.width - self.x;
+            height: root.height - self.y;
+        }
+
+        // ---- Calendar, a page over the content card (as Settings)
+        if root.show-calendar && !root.show-settings: CalendarPage {
+            x: root.mail-shown ? root.nav-width + 1px : 0;
+            y: root.content-top + (root.mail-shown ? 1px : 0);
+            width: root.width - self.x;
+            height: root.height - self.y;
+            border-top-left-radius: root.mail-shown ? Theme.radius-lg - 1px : 0;
+            lines: root.cal-lines;
+            range: root.cal-range;
+            loaded: root.cal-loaded;
+            today => { root.cal-today(); }
+            move(days) => { root.cal-move(days); }
+        }
+
         // ---- Settings, a page over the content card
         if root.show-settings: SettingsPage {
             x: root.mail-shown ? root.nav-width + 1px : 0;
@@ -6287,6 +6422,7 @@ export component AppWindow inherits Window {
             g-reopen-tabs: root.g-reopen-tabs;
             g-notify: root.g-notify;
             g-notify-detail: root.g-notify-detail;
+            g-cal-remind: root.g-cal-remind;
             g-close-to-tray: root.g-close-to-tray;
             g-autostart: root.g-autostart;
             g-language: root.g-language;
@@ -6394,7 +6530,7 @@ export component AppWindow inherits Window {
             link(which) => { root.welcome-link(which); }
             language-changed(i) => { root.general-changed(6, i); }
             open-settings => {
-                root.settings-section = 2;
+                root.settings-section = 3;
                 root.show-settings = true;
             }
         }
@@ -6444,7 +6580,8 @@ export component AppWindow inherits Window {
                 padding: Theme.s1;
                 // Room for the toggle above and the footer below.
                 padding-top: root.rail || root.pane-open ? 2 * Theme.s2 + Theme.rail-row : Theme.s2;
-                padding-bottom: Theme.s1 + Theme.s2 + (root.rail ? Theme.rail-row : Theme.nav-row);
+                padding-bottom: 2 * Theme.s1 + Theme.s2 + 2 * (root.rail ? Theme.rail-row : Theme.nav-row)
+                    + (root.mail-shown ? Theme.s1 + (root.rail ? Theme.rail-row : Theme.nav-row) : 0);
                 spacing: Theme.s2;
                 // In the rail: the accent button with its name under it, as
                 // the rail's other items have.
@@ -6610,7 +6747,7 @@ export component AppWindow inherits Window {
                                 // The rail's first account tile: 8 px of space above it.
                                 group-start: root.rail && item.initial != "" && i > 0 && root.shown-nav[i - 1].initial == "";
                                 // Settings, while shown, is the one selected item.
-                                selected: !root.show-settings && i == root.shown-pill;
+                                selected: !root.show-settings && !root.show-calendar && i == root.shown-pill;
                                 ring: nav.has-focus && Focus.keyboard && self.current;
                                 own-pill: false;
                                 changed current => { if self.current { nav.ensure-visible(self.y, self.height); } }
@@ -6663,7 +6800,7 @@ export component AppWindow inherits Window {
                             width: 3px;
                             height: 16px;
                             border-radius: 2px;
-                            visible: nav.pill-placed && !root.show-settings && root.shown-pill >= 0 && root.shown-pill < root.shown-nav.length;
+                            visible: nav.pill-placed && !root.show-settings && !root.show-calendar && root.shown-pill >= 0 && root.shown-pill < root.shown-nav.length;
                             background: Theme.on-fill(true, Theme.accent);
                             animate y { duration: nav.pill-slide ? Theme.normal : 0ms; easing: cubic-bezier(0, 0, 0, 1); }
                         }
@@ -6704,18 +6841,18 @@ export component AppWindow inherits Window {
             // repeater, so they share one copy of NavRow's code.
             for c in root.pane-chrome: NavRow {
                 x: Theme.s1;
-                y: c.kind == 6 ? Theme.s2 : parent.height - self.height - Theme.s1;
+                y: c.kind == 6 ? Theme.s2 : c.kind == 7 ? parent.height - (root.mail-shown ? 3 : 2) * (self.height + Theme.s1) : c.kind == 8 ? parent.height - 2 * (self.height + Theme.s1) : parent.height - self.height - Theme.s1;
                 width: c.kind == 6 ? Theme.rail-width - 2 * Theme.s1 : parent.width - 2 * Theme.s1;
                 item: c;
                 compact: c.kind == 6 || root.rail;
                 on-flyout: root.pane-open;
-                selected: c.kind == 5 && root.show-settings;
+                selected: (c.kind == 5 && root.show-settings) || (c.kind == 7 && root.show-contacts && !root.show-settings) || (c.kind == 8 && root.show-calendar && !root.show-settings);
                 tab-stop: true;
                 focus-seq: c.kind == 5 ? root.chrome-refocus : 0;
                 accessible-role: button;
                 accessible-label: self.tooltip;
                 // WinUI's own names (NavigationButtonOpenName / ClosedName).
-                tooltip: c.kind == 5 ? @tr("Settings (Ctrl+,)") : root.pane-open ? @tr("Folders (Close navigation)")
+                tooltip: c.kind == 5 ? @tr("Settings (Ctrl+,)") : c.kind == 7 ? @tr("Contacts") : c.kind == 8 ? @tr("Calendar") : root.pane-open ? @tr("Folders (Close navigation)")
                     : !root.compact ? @tr("Show folders (Ctrl+Shift+E)") : @tr("Folders (Open navigation)");
                 changed has-focus => {
                     if self.has-focus {
@@ -6725,7 +6862,29 @@ export component AppWindow inherits Window {
                     }
                 }
                 clicked => {
-                    if c.kind == 5 {
+                    if c.kind == 7 {
+                        root.pane-open = false;
+                        if root.show-settings {
+                            root.close-settings(2);
+                        }
+                        if !root.mail-tab {
+                            root.tab-activate(0);
+                        }
+                        root.show-calendar = false;
+                        root.show-contacts = !root.show-contacts;
+                        root.contacts-toggled(root.show-contacts);
+                    } else if c.kind == 8 {
+                        // Calendar opens over the content and closes again.
+                        root.pane-open = false;
+                        if root.show-settings {
+                            root.close-settings(2);
+                        }
+                        if root.show-contacts {
+                            root.show-contacts = false;
+                            root.contacts-toggled(false);
+                        }
+                        root.show-calendar = !root.show-calendar;
+                    } else if c.kind == 5 {
                         // The gear opens Settings and closes them again.
                         root.pane-open = false;
                         if root.show-settings {
@@ -6942,6 +7101,9 @@ export component AppWindow inherits Window {
     }
 
 
+    // ---- the encrypted cache's question, and the locked-cache dialog.
+    CacheLockDialogs {}
+
     // ---- confirm before a draft with content is discarded: a destructive
     // question (docs/WINUI3.md "ContentDialog"), so no accent default and
     // Cancel has the focus; Esc cancels.
@@ -7130,6 +7292,11 @@ export component AppWindow inherits Window {
             primary => { root.q-answer(true); }
             secondary => { root.q-alt-answer(); }
             close => { root.q-answer(false); }
+            if root.q-choices.length > 0: RadioButtons {
+                label: @tr("What to trust");
+                items: root.q-choices;
+                selected <=> root.q-choice;
+            }
         }
     }
 

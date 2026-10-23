@@ -3,7 +3,7 @@
 // Rust side fills, the field headers and notes, the check's step list,
 // the certificate line and "Find settings".
 import { Theme, Icons } from "theme.slint";
-import { Icon, Button, HyperlinkButton, ProgressRing } from "widgets.slint";
+import { Icon, Button, HyperlinkButton, ProgressRing, CheckBox } from "widgets.slint";
 
 // The port a server field should show once its security changed: the new
 // default if the field held the old one, else what the user typed (the
@@ -50,6 +50,27 @@ export struct AccountForm {
     imap-user: string,       // the IMAP sign-in name; empty = the email address
     smtp-user: string,       // the SMTP one, used when smtp-own-login is set
     smtp-own-login: bool,    // false: the SMTP sign-in is the IMAP one
+    smtp-no-auth: bool,      // the SMTP server takes mail without a sign-in
+}
+
+// The SMTP server needs no sign-in: the check box and, when set, the
+// warning that TLS stays required (Settings' account page and onboarding's
+// manual setup).
+export component SmtpNoAuth inherits VerticalLayout {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    spacing: Theme.s2;
+    CheckBox {
+        text: @tr("This server does not need a sign-in for sending");
+        checked <=> root.checked;
+        enabled: root.enabled;
+    }
+    if root.checked: Text {
+        text: @tr("Komorebi sends without a password, for a relay that trusts your network. The connection still has to be encrypted: a server without TLS is refused.");
+        font-size: Theme.caption;
+        color: Theme.text-2;
+        wrap: word-wrap;
+    }
 }
 
 // A group of settings cards: Body Strong; 24 above (but the first) and 8

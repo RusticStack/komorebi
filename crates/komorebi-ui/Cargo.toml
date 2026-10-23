@@ -1,0 +1,16 @@
+[package]
+name = "komorebi-ui"
+version = "0.7.0"
+edition = "2024"
+description = "The Slint user interface of Komorebi, compiled from ../../ui/*.slint"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/RusticStack/komorebi"
+publish = false
+build = "build.rs"
+
+[dependencies]
+# The same pin and features as the app: one copy of Slint.
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
+
+[build-dependencies]
+slint-build = "1.18"
