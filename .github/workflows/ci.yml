@@ -15,10 +15,11 @@ env:
 jobs:
   build:
     # Komorebi is a Windows app: rust-toolchain.toml pins the
-    # x86_64-pc-windows-msvc target, and windows-latest ships the MSVC
-    # toolchain + Windows SDK that Slint's winit backend and rusqlite's
-    # bundled SQLite build need.
-    runs-on: windows-latest
+    # x86_64-pc-windows-msvc target. Blacksmith's Windows Server 2025
+    # image follows GitHub's windows-2025 image and ships VS Build Tools
+    # 2022 (MSVC + Windows SDK), which Slint's winit backend and
+    # rusqlite's bundled SQLite build need. 8 vCPUs for the compile.
+    runs-on: blacksmith-8vcpu-windows-2025
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +31,8 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
 
+      # Blacksmith serves the actions/cache API (which rust-cache uses)
+      # from its co-located cache, with no workflow change.
       - uses: Swatinem/rust-cache@v2
 
       # Cheapest first. Clippy type-checks every target (it replaces a
@@ -84,8 +87,11 @@ jobs:
           Get-Content (Join-Path $env:RUNNER_TEMP 'boot.log')
           if ($p.ExitCode -ne 0) { throw "boot snapshot failed (exit $($p.ExitCode))" }
 
+      # A convenience copy only: a full artifact storage quota must not
+      # fail a build whose checks passed.
       - name: Upload the boot snapshot
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: boot-snapshot
@@ -93,8 +99,9 @@ jobs:
           if-no-files-found: ignore
 
   # Licenses (deny.toml) and RustSec advisories for the Windows graph.
+  # No compile here, so the smallest Blacksmith Windows runner.
   deny:
-    runs-on: windows-latest
+    runs-on: blacksmith-2vcpu-windows-2025
     steps:
       - uses: actions/checkout@v4
 

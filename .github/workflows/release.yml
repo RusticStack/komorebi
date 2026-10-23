@@ -19,7 +19,9 @@ env:
 
 jobs:
   release:
-    runs-on: windows-latest
+    # Blacksmith's Windows Server 2025 image (see ci.yml). Inno Setup is
+    # installed below when the image lacks it.
+    runs-on: blacksmith-8vcpu-windows-2025
     permissions:
       contents: read
     env:
