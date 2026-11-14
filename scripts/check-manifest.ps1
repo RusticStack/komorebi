@@ -82,3 +82,5 @@ foreach ($name in $checks.Keys) {
     if ($doc.SelectSingleNode($checks[$name], $ns)) { "ok   $name" } else { "FAIL $name"; $failed = $true }
 }
 if ($failed) { exit 1 }
+'manifest: passed'
+exit 0
