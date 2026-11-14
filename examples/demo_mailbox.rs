@@ -577,7 +577,17 @@ fn main() -> Result<()> {
 
     // Contacts, in the local address book.
     let book = db.local_book()?;
-    let people: &[(&str, &str, &str, &str, &str, &str, &[&str])] = &[
+    // First name, last name, email, phone, company, title, groups.
+    type Person<'a> = (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a [&'a str],
+    );
+    let people: &[Person] = &[
         (
             "Amara",
             "Nwosu",
