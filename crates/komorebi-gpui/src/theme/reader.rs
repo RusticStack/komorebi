@@ -18,11 +18,19 @@ pub const PAD_BOTTOM: f32 = space::SP_7;
 /// Under 560 px the sides take less (FLUENT2 "Layout and spacing").
 pub const PAD_X_NARROW: f32 = space::SP_5;
 pub const NARROW_BELOW: f32 = 560.;
-/// The header: 20 px under the subject, 24 px above the body, 14 px
+/// The margin the page renderer gives a message's body (HTML's default
+/// `body { margin: 8px }`, `komorebi::mail::render::style`): the page is
+/// drawn this much into the column's padding, so the message's text lines
+/// up with the subject and the header.
+pub const BODY_MARGIN: f32 = space::SP_2;
+/// The text view's own inset (the Kit field's medium padding, 10 px): the
+/// field is drawn this much into the column's padding, for the same reason.
+pub const TEXT_INSET: f32 = space::SP_2_5;
+/// The header: 20 px under the subject, 24 px above the body, 12 px
 /// between the sender spot and the names (`.hdr`).
 pub const HEADER_TOP: f32 = space::SP_5;
 pub const HEADER_BOTTOM: f32 = space::SP_6;
-pub const HEADER_GAP: f32 = space::SP_3_5;
+pub const HEADER_GAP: f32 = space::SP_3;
 /// The plain text's measure (`.msg { max-width: 640px }`).
 pub const TEXT_MAX_W: f32 = 640.;
 /// Between paragraphs of plain text (`.msg p + p { margin-top: 14px }`).

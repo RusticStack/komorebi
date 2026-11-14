@@ -26,12 +26,93 @@ use crate::widgets::tooltip::WithTooltip as _;
 use crate::widgets::{focus_ring, ring_style};
 use komorebi::role::Role as FolderRole;
 
-/// A line's text starts after its 24 px lead (the place spot sits in it).
+// A line of the full pane, left to right (docs/FLUENT2.md: 40 px lines,
+// 20 px icons beside 14 px text, 12 px from icon to text):
+//
+//   | 8 spot 6 | icon 20 | 12 | label ... | 8 count | 4 | fold 20 | 8 |
+//
+// The place spot sits 12 px clear of the icon's ink (Fluent's icons keep a
+// 2 px margin in their box). Every line keeps the fold slot, used or not,
+// so the counts make one column and the chevrons another, the account's
+// with them.
+
+/// Where a line's icon box starts: after the place spot's lane.
 const LINE_LEAD: f32 = space::SP_6;
-/// The place spot's left edge inside a line (mockup: 10 px).
-const SPOT_LEFT: f32 = space::SP_2_5;
-/// The account label's indent (mockup `.grp`: 22 px).
-const GROUP_LEAD: f32 = space::SP_5 + space::SP_0_5;
+/// The place spot's left edge inside a line.
+const SPOT_LEFT: f32 = space::SP_2;
+/// From the icon's box to the label.
+const ICON_GAP: f32 = space::SP_3;
+/// From the label to the count.
+const COUNT_GAP: f32 = space::SP_2;
+/// From the count to the fold slot.
+const FOLD_GAP: f32 = space::SP_1;
+/// The fold chevron's box (a 12 px glyph in it), at every line's end.
+const FOLD_SLOT: f32 = layout::ICON_LG;
+/// A line's right padding.
+const LINE_END: f32 = space::SP_2;
+/// The account label starts where the icons' ink does (the box's 2 px
+/// margin), so label and icons make one left edge.
+const GROUP_LEAD: f32 = LINE_LEAD + space::SP_0_5;
+/// The pane's padding left and right of its lines.
+const PANE_PAD: f32 = space::SP_2;
+
+/// The room a line leaves its label: the pane less the padding, the lead,
+/// the icon and its gap, the count and the fold slot.
+fn label_room(level: usize, count_w: f32) -> f32 {
+    let count = if count_w > 0. {
+        count_w + COUNT_GAP
+    } else {
+        0.
+    };
+    layout::NAV_W
+        - 2. * PANE_PAD
+        - LINE_LEAD
+        - scaled::indent(level)
+        - layout::ICON_LG
+        - ICON_GAP
+        - count
+        - FOLD_GAP
+        - FOLD_SLOT
+        - LINE_END
+}
+
+/// The count a line shows at its end, as drawn (unread, else a quiet
+/// total), with whether it is unread.
+fn count_text(item: &NavItem) -> Option<(String, bool)> {
+    let (n, unread) = if item.unread > 0 {
+        (item.unread, true)
+    } else if item.count > 0 {
+        (item.count, false)
+    } else {
+        return None;
+    };
+    Some((
+        komorebi::format::thousands(komorebi_i18n::current(), n as usize),
+        unread,
+    ))
+}
+
+/// Whether a line's label is cut short at the pane's width (it then shows
+/// the whole name in a tooltip). Folder lines and the unified lines only.
+fn label_cut(item: &NavItem, t: &Tokens, window: &mut Window) -> bool {
+    if matches!(item.kind, NavKind::Account(_)) {
+        return false;
+    }
+    let count_w = count_text(item).map_or(0., |(text, unread)| {
+        crate::widgets::text_width(&text, count_token(t, unread), window)
+    });
+    crate::widgets::text_width(&item.label, &t.text.body, window)
+        > label_room(item.level, count_w) + 0.5
+}
+
+/// The type of a count: unread mail in the caption's strong weight.
+fn count_token(t: &Tokens, unread: bool) -> &crate::theme::TextToken {
+    if unread {
+        &t.text.caption_strong
+    } else {
+        &t.text.caption
+    }
+}
 
 /// The icon of a line.
 pub fn icon(item: &NavItem) -> Icon {
@@ -139,26 +220,50 @@ fn caution(account: i64, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
         .into_any_element()
 }
 
-/// The count at a line's end: unread mail, else a quiet total.
+/// The count at a line's end: unread mail in ink and the caption's strong
+/// weight, else a quiet total in ink-3.
 fn count(item: &NavItem, t: &Tokens) -> Option<AnyElement> {
-    let (n, colour) = if item.unread > 0 {
-        (item.unread, t.color.ink_2)
-    } else if item.count > 0 {
-        (item.count, t.color.ink_3)
-    } else {
-        return None;
-    };
+    let (text, unread) = count_text(item)?;
+    let colour = if unread { t.color.ink } else { t.color.ink_3 };
     Some(
         div()
             .flex_none()
-            .typo(&t.text.caption)
+            .ml(px(COUNT_GAP))
+            .typo(count_token(t, unread))
             .text_color(colour)
-            .child(komorebi::format::thousands(
-                komorebi_i18n::current(),
-                n as usize,
-            ))
+            .child(text)
             .into_any_element(),
     )
+}
+
+/// The place spot of the open view's line, in its lead.
+fn place_spot(t: &Tokens) -> AnyElement {
+    div()
+        .absolute()
+        .left(px(SPOT_LEFT))
+        .top_0()
+        .bottom_0()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .size(px(layout::PLACE_SPOT))
+                .rounded(px(radius::FULL))
+                .bg(t.color.ink),
+        )
+        .into_any_element()
+}
+
+/// A line's 20 px icon in the label's ink: regular at rest, filled on the
+/// open view's line (Fluent: filled for the selected state).
+fn line_icon(icon: Icon, on: bool, t: &Tokens) -> AnyElement {
+    svg()
+        .path(icon.state(layout::ICON_LG, on))
+        .size(px(layout::ICON_LG))
+        .flex_none()
+        .mr(px(ICON_GAP))
+        .text_color(t.color.ink)
+        .into_any_element()
 }
 
 pub fn render(
@@ -175,6 +280,13 @@ pub fn render(
         keyboard_here && view.nav_focus.is_focused(window) && window.last_input_was_keyboard();
     let cursor = view.nav_cursor.min(nav.items.len().saturating_sub(1));
     let sets = tree_sets(&nav.items);
+    // Labels cut short at the pane's width show the whole name in a
+    // tooltip (the rail's tiles always have one).
+    let cut: Vec<bool> = nav
+        .items
+        .iter()
+        .map(|item| !rail && label_cut(item, &t, window))
+        .collect();
     let lines: Vec<AnyElement> = nav
         .items
         .iter()
@@ -186,6 +298,7 @@ pub fn render(
                 pill: nav.pill == Some(i),
                 cursor: keyboard_here && i == cursor,
                 ring: focused && i == cursor,
+                cut: cut[i],
             };
             // An account out of reach carries the caution badge until a
             // sync goes through (the hub's state).
@@ -210,7 +323,7 @@ pub fn render(
         .h_full()
         .flex()
         .flex_col()
-        .px(px(if rail { space::SP_1 } else { space::SP_2 }))
+        .px(px(if rail { space::SP_1 } else { PANE_PAD }))
         .py(px(space::SP_1))
         .when(rail, |el| el.child(pane_toggle(view.pane_open, cx)))
         .child(new_mail(rail, &t, cx))
@@ -314,8 +427,8 @@ fn new_mail(rail: bool, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
             .on_click(open)
             .child(
                 svg()
-                    .path(Icon::Compose.path())
-                    .size(px(layout::ICON))
+                    .path(Icon::Compose.at(layout::ICON_LG))
+                    .size(px(layout::ICON_LG))
                     .text_color(c.on_ink),
             );
         return div()
@@ -330,9 +443,9 @@ fn new_mail(rail: bool, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
             )
             .into_any_element();
     }
+    // The pill spans the lines' width, so its edges are theirs.
     div()
         .mt(px(space::SP_1))
-        .mx(px(space::SP_1))
         .mb(px(space::SP_5))
         .child(
             Button::new("new-mail")
@@ -364,25 +477,31 @@ fn footer(rail: bool, open: Option<Place>, t: &Tokens, cx: &mut Context<MailView
         .children(items.into_iter().map(|(place, icon, label)| {
             let id = ElementId::Name(format!("place-{place:?}").into());
             let c = t.color;
+            let on = open == Some(place);
             let el = div()
                 .id(id)
                 .role(Role::Button)
                 .aria_label(label.clone())
                 .tab_index(0)
+                .relative()
                 .h(px(scaled::nav_item(t)))
                 .flex()
                 .flex_none()
                 .items_center()
-                .gap(px(space::SP_3_5))
                 .when(rail, |el| {
                     el.w(px(layout::CONTROL_H_LG))
                         .mx_auto()
                         .justify_center()
                         .brand_tooltip(label.clone())
+                        .when(on, |el| el.child(tile_spot(t)))
                 })
-                .when(!rail, |el| el.pl(px(LINE_LEAD)).pr(px(space::SP_3_5)))
+                .when(!rail, |el| {
+                    el.pl(px(LINE_LEAD))
+                        .pr(px(LINE_END))
+                        .when(on, |el| el.child(place_spot(t)))
+                })
                 .rounded(px(radius::FULL))
-                .when(open == Some(place), |el| el.bg(c.wash))
+                .when(on, |el| el.bg(c.wash))
                 .hover(move |s| s.bg(c.wash))
                 .focus_visible(ring_style(t))
                 .typo(&t.text.body)
@@ -394,14 +513,16 @@ fn footer(rail: bool, open: Option<Place>, t: &Tokens, cx: &mut Context<MailView
                     gpui::Toggled::False
                 })
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(MailEvent::Show(place))))
-                .child(
-                    svg()
-                        .path(icon.path())
-                        .size(px(layout::ICON))
-                        .flex_none()
-                        .text_color(c.ink_2),
-                )
-                .when(!rail, |el| el.child(label));
+                .when(rail, |el| {
+                    el.child(
+                        svg()
+                            .path(icon.state(layout::ICON_LG, on))
+                            .size(px(layout::ICON_LG))
+                            .flex_none()
+                            .text_color(c.ink),
+                    )
+                })
+                .when(!rail, |el| el.child(line_icon(icon, on, t)).child(label));
             let el = match place {
                 Place::Settings => access::decorate(el, Key::Settings, cx),
                 _ => el,
@@ -466,6 +587,8 @@ struct Line {
     cursor: bool,
     /// The keyboard's line while the pane has keyboard focus: the ring.
     ring: bool,
+    /// Its label is cut short: the tooltip says the whole of it.
+    cut: bool,
 }
 
 /// A line of the full pane.
@@ -480,7 +603,11 @@ fn line(item: &NavItem, at: Line, t: &Tokens, cx: &mut Context<MailView>) -> Any
     let c = t.color;
     let kind = item.kind;
     let lead = LINE_LEAD + scaled::indent(item.level);
-    let fold = item.has_children.then(|| chevron(item, false, t, cx));
+    let fold = fold_slot(item, false, t, cx);
+    // The deep path says more than the name (and is its description);
+    // else the name itself, when cut short.
+    let path = (!item.sub.is_empty()).then(|| item.sub.clone());
+    let whole = (path.is_none() && at.cut).then(|| item.label.clone());
     let entity = cx.entity().downgrade();
     let element = div()
         .id(line_id(kind, false))
@@ -496,9 +623,8 @@ fn line(item: &NavItem, at: Line, t: &Tokens, cx: &mut Context<MailView>) -> Any
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(space::SP_3_5))
         .pl(px(lead))
-        .pr(px(space::SP_3_5))
+        .pr(px(LINE_END))
         .rounded(px(radius::FULL))
         .typo(&t.text.body)
         .text_color(c.ink)
@@ -514,30 +640,8 @@ fn line(item: &NavItem, at: Line, t: &Tokens, cx: &mut Context<MailView>) -> Any
         })
         .when(ring, |el| el.shadow(focus_ring(t)))
         .when(cursor, |el| el.aria_active_descendant())
-        .when(pill, |el| {
-            el.child(
-                div()
-                    .absolute()
-                    .left(px(SPOT_LEFT))
-                    .top_0()
-                    .bottom_0()
-                    .flex()
-                    .items_center()
-                    .child(
-                        div()
-                            .size(px(layout::PLACE_SPOT))
-                            .rounded(px(radius::FULL))
-                            .bg(c.ink),
-                    ),
-            )
-        })
-        .child(
-            svg()
-                .path(icon(item).path())
-                .size(px(layout::ICON))
-                .flex_none()
-                .text_color(c.ink_2),
-        )
+        .when(pill, |el| el.child(place_spot(t)))
+        .child(line_icon(icon(item), pill, t))
         .child(
             div()
                 .flex_1()
@@ -548,10 +652,9 @@ fn line(item: &NavItem, at: Line, t: &Tokens, cx: &mut Context<MailView>) -> Any
                 .child(item.label.clone()),
         )
         .children(count(item, t))
-        .children(fold)
-        .when(!item.sub.is_empty(), |el| {
-            el.brand_tooltip(item.sub.clone())
-        })
+        .child(fold)
+        .when_some(path, |el, tip| el.brand_tooltip(tip))
+        .when_some(whole, |el, tip| el.name_tooltip(tip))
         .on_click(cx.listener(move |this, _, window, cx| {
             this.nav_cursor = i;
             this.nav_clicked(kind, false, window, cx);
@@ -601,16 +704,17 @@ fn group(
         .aria_position_in_set(at.set.position)
         .aria_size_of_set(at.set.size)
         .aria_expanded(item.expanded)
+        // A section header (Fluent: space, not a divider, between groups):
+        // 8 px above it, its own 32 px line, then its folders.
+        .h(px(scaled::control(t, layout::CONTROL_H)))
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(space::SP_2))
-        .mt(px(space::SP_1))
-        .mb(px(space::SP_2))
+        .mt(px(space::SP_2))
         .pl(px(GROUP_LEAD))
-        .pr(px(space::SP_3_5))
+        .pr(px(LINE_END))
         .rounded(px(radius::FULL))
-        .typo(&t.text.caption)
+        .typo(&t.text.caption_strong)
         .text_color(c.ink_3)
         .when(item.off, |el| el.opacity(crate::theme::motion::DISABLED))
         .when(ring, |el| el.shadow(focus_ring(t)))
@@ -626,7 +730,7 @@ fn group(
         )
         .when(!item.expanded, |el| el.children(count(item, t)))
         .when(badge.is_some(), |el| el.child(caution(item.account, t, cx)))
-        .child(chevron(item, true, t, cx))
+        .child(fold_slot(item, true, t, cx))
         .when(item.sub != item.label, |el| {
             el.brand_tooltip(item.sub.clone())
         })
@@ -647,8 +751,21 @@ fn group(
         .into_any_element()
 }
 
-/// The fold glyph of a parent line (a click folds or opens it).
-fn chevron(item: &NavItem, quiet: bool, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
+/// A line's fold slot: the chevron of a parent line (a click folds or
+/// opens it), else the same room left empty, so every line's count and
+/// chevron sit in one column.
+fn fold_slot(item: &NavItem, quiet: bool, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
+    let slot = div()
+        .size(px(FOLD_SLOT))
+        .ml(px(FOLD_GAP))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(radius::FULL));
+    if !item.has_children {
+        return slot.into_any_element();
+    }
     let kind = item.kind;
     let glyph = if item.expanded {
         Icon::ChevronDown
@@ -657,18 +774,11 @@ fn chevron(item: &NavItem, quiet: bool, t: &Tokens, cx: &mut Context<MailView>) 
     };
     let id = ElementId::Name(format!("fold-{kind:?}").into());
     let paper = t.color.paper;
-    div()
-        .id(id)
-        .size(px(layout::ICON + space::SP_1))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded(px(radius::FULL))
+    slot.id(id)
         .hover(move |s| s.bg(paper))
         .child(
             svg()
-                .path(glyph.path())
+                .path(glyph.at(layout::ICON_SM))
                 .size(px(layout::ICON_SM))
                 .text_color(if quiet { t.color.ink_3 } else { t.color.ink_2 }),
         )
@@ -676,6 +786,26 @@ fn chevron(item: &NavItem, quiet: bool, t: &Tokens, cx: &mut Context<MailView>) 
             cx.stop_propagation();
             this.act(window, cx, |m| m.nav_toggle(kind));
         }))
+        .into_any_element()
+}
+
+/// The place spot of the rail's open tile: the 4 px spot under its glyph,
+/// inside the tile (as under a tab or a filter pill). Beside the tile it
+/// was clipped by the rail's edge.
+fn tile_spot(t: &Tokens) -> AnyElement {
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom(px(space::SP_1))
+        .flex()
+        .justify_center()
+        .child(
+            div()
+                .size(px(layout::TAB_SPOT))
+                .rounded(px(radius::FULL))
+                .bg(t.color.ink),
+        )
         .into_any_element()
 }
 
@@ -704,9 +834,9 @@ fn tile(
             .child(crate::widgets::spot::initials(&item.label))
             .into_any_element(),
         _ => svg()
-            .path(icon(item).path())
-            .size(px(layout::ICON))
-            .text_color(if pill { c.ink } else { c.ink_2 })
+            .path(icon(item).state(layout::ICON_LG, pill))
+            .size(px(layout::ICON_LG))
+            .text_color(c.ink)
             .into_any_element(),
     };
     let element = div()
@@ -735,23 +865,7 @@ fn tile(
         .when(!pill, |el| el.hover(move |s| s.bg(c.wash)))
         .when(ring, |el| el.shadow(focus_ring(t)))
         .when(cursor, |el| el.aria_active_descendant())
-        .when(pill, |el| {
-            el.child(
-                div()
-                    .absolute()
-                    .left(px(-(space::SP_1 + layout::PLACE_SPOT / 2.)))
-                    .top_0()
-                    .bottom_0()
-                    .flex()
-                    .items_center()
-                    .child(
-                        div()
-                            .size(px(layout::PLACE_SPOT))
-                            .rounded(px(radius::FULL))
-                            .bg(c.ink),
-                    ),
-            )
-        })
+        .when(pill, |el| el.child(tile_spot(t)))
         .child(glyph)
         .when(badge.is_some(), |el| {
             el.child(

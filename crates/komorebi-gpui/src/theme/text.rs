@@ -32,6 +32,8 @@ pub struct TextToken {
 pub struct Step(pub f32, pub f32, pub FontWeight);
 
 pub const CAPTION: Step = Step(12., 16., FontWeight::NORMAL);
+/// Fluent's Caption 1 Strong: a count of unread mail.
+pub const CAPTION_STRONG: Step = Step(12., 16., FontWeight::SEMIBOLD);
 pub const BODY: Step = Step(14., 20., FontWeight::NORMAL);
 pub const BODY_STRONG: Step = Step(14., 20., FontWeight::SEMIBOLD);
 pub const PREVIEW: Step = Step(13., 18., FontWeight::NORMAL);
@@ -45,6 +47,7 @@ pub const DISPLAY: Step = Step(40., 48., FontWeight::SEMIBOLD);
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeRamp {
     pub caption: TextToken,
+    pub caption_strong: TextToken,
     pub body: TextToken,
     pub body_strong: TextToken,
     pub preview: TextToken,
@@ -86,6 +89,7 @@ pub fn ramp(factor: f32, windows_build: u32) -> TypeRamp {
     let t = |step| token(step, factor, v);
     TypeRamp {
         caption: t(CAPTION),
+        caption_strong: t(CAPTION_STRONG),
         body: t(BODY),
         body_strong: t(BODY_STRONG),
         preview: t(PREVIEW),

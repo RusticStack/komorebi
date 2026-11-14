@@ -5,7 +5,7 @@
      manifest did, so per-monitor DPI awareness (PerMonitorV2) is declared
      here: GPUI sets none at run time. -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="Komorebi" version="1.0.1.0" processorArchitecture="amd64"/>
+  <assemblyIdentity type="win32" name="Komorebi" version="1.0.2.0" processorArchitecture="amd64"/>
   <!-- Themed message boxes (Common Controls 6). -->
   <dependency>
     <dependentAssembly>

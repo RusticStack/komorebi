@@ -99,10 +99,12 @@ pub fn render(r: &Row, look: RowLook, t: &Tokens, cx: &mut Context<MailView>) ->
     } else {
         t.text.body.weight
     };
+    // A row's marks: Fluent's 16 px glyphs at their own size (crisp 1 px
+    // strokes; at 12 px they were scaled down to faint ones).
     let mark = |icon: Icon| {
         svg()
-            .path(icon.path())
-            .size(px(layout::ICON_SM + space::SP_0_5))
+            .path(icon.at(layout::ICON))
+            .size(px(layout::ICON))
             .flex_none()
             .text_color(c.ink_3)
     };

@@ -115,6 +115,9 @@ pub fn note(text: impl Into<SharedString>, cx: &App) -> AnyElement {
 pub struct Card {
     id: ElementId,
     icon: Option<Icon>,
+    /// The icon's column: its own 20 px, or wider to line up with a
+    /// column of 32 px spots above it (the accounts' cards).
+    icon_w: f32,
     title: SharedString,
     note: Option<SharedString>,
     trailing: Vec<AnyElement>,
@@ -126,6 +129,7 @@ impl Card {
         Self {
             id: id.into(),
             icon: None,
+            icon_w: layout::ICON_LG,
             title: title.into(),
             note: None,
             trailing: Vec::new(),
@@ -135,6 +139,14 @@ impl Card {
 
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    /// The icon centred in a column as wide as a sender spot, so the title
+    /// lines up with cards that lead with a spot.
+    pub fn icon_as_spot(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self.icon_w = layout::SPOT;
         self
     }
 
@@ -181,11 +193,12 @@ impl RenderOnce for Card {
                     .gap(px(space::SP_4))
                     .when_some(self.icon, |el, icon| {
                         el.child(
-                            svg()
-                                .path(icon.path())
-                                .size(px(layout::ICON))
+                            div()
+                                .w(px(self.icon_w))
                                 .flex_none()
-                                .text_color(c.ink_2),
+                                .flex()
+                                .justify_center()
+                                .child(card_icon(icon, &t)),
                         )
                     })
                     .child(
@@ -214,6 +227,16 @@ impl RenderOnce for Card {
                     .into_any_element()
             }))
     }
+}
+
+/// A settings card's icon: Fluent's 20 px glyph beside the 14 px title (WinUI's
+/// SettingsCard header icon), in the title's ink.
+pub fn card_icon(icon: Icon, t: &crate::theme::Tokens) -> gpui::Svg {
+    svg()
+        .path(icon.at(layout::ICON_LG))
+        .size(px(layout::ICON_LG))
+        .flex_none()
+        .text_color(t.color.ink)
 }
 
 type OnPick = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;

@@ -68,6 +68,25 @@ impl Height {
             Height::Large => layout::CONTROL_H_LG,
         }
     }
+
+    /// The leading icon's size: 16 px in a 32 px button (Fluent's dense
+    /// size), 20 px in the 36 and 40 px ones, beside their 14 px label.
+    pub fn icon(self) -> f32 {
+        match self {
+            Height::Regular => layout::ICON,
+            Height::Medium | Height::Large => layout::ICON_LG,
+        }
+    }
+
+    /// The padding before a leading icon: the label's 16 px less the
+    /// glyph's own 2 px margin (Fluent's icons keep a 2 px margin inside
+    /// their box), so icon and text sit optically even in the pill.
+    pub fn icon_pad(self) -> f32 {
+        match self {
+            Height::Regular => space::SP_3,
+            Height::Medium | Height::Large => space::SP_3,
+        }
+    }
 }
 
 /// Fill, hover fill and text colour of a variant.
@@ -253,10 +272,11 @@ impl RenderOnce for Button {
             .or_else(|| self.label.clone())
             .unwrap_or_default();
         let pad_left = if self.icon.is_some() {
-            space::SP_3_5
+            self.height.icon_pad()
         } else {
             space::SP_4
         };
+        let icon_size = self.height.icon();
         let mut el = self
             .base
             // A select's trigger stays a Button node with an expanded state
@@ -273,7 +293,7 @@ impl RenderOnce for Button {
             .flex_none()
             .items_center()
             .justify_center()
-            .gap(px(space::SP_2_5))
+            .gap(px(space::SP_2))
             .rounded(px(radius::FULL))
             .bg(fill)
             .text_color(fg)
@@ -282,8 +302,8 @@ impl RenderOnce for Button {
             .when_some(self.icon, |el, icon| {
                 el.child(
                     svg()
-                        .path(icon.path())
-                        .size(px(layout::ICON))
+                        .path(icon.state(icon_size, self.selected))
+                        .size(px(icon_size))
                         .flex_none()
                         .text_color(fg),
                 )

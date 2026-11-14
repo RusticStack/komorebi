@@ -1272,7 +1272,7 @@ impl Render for AccountEditor {
             );
         let email_box = div()
             .h(px(layout::CONTROL_H_LG))
-            .px(px(space::SP_3_5))
+            .px(px(space::SP_3))
             .flex()
             .items_center()
             .rounded(px(radius::FULL))

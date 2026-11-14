@@ -1332,6 +1332,10 @@ msgid "All inboxes"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/mail/text.rs
+msgid "Drafts on this PC"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/text.rs
 msgid "Outbox"
 msgstr ""
 

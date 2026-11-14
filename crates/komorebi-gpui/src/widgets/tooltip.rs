@@ -49,6 +49,15 @@ pub trait WithTooltip: StatefulInteractiveElement + Sized {
             .tooltip(move |window, cx| view(shown.clone(), window, cx))
             .tooltip_show_delay(Duration::from_millis(motion::TOOLTIP_DELAY_MS))
     }
+
+    /// The brand tooltip for words the accessible name already holds (a
+    /// label cut short at the pane's width): no description, so a screen
+    /// reader does not say them twice.
+    fn name_tooltip(self, text: impl Into<SharedString>) -> Self {
+        let shown: SharedString = text.into();
+        self.tooltip(move |window, cx| view(shown.clone(), window, cx))
+            .tooltip_show_delay(Duration::from_millis(motion::TOOLTIP_DELAY_MS))
+    }
 }
 
 impl<T: StatefulInteractiveElement> WithTooltip for T {}

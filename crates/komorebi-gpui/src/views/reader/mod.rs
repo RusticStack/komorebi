@@ -1510,7 +1510,14 @@ impl ReaderView {
         )
         .absolute()
         .size_full();
-        let wrapper = div().id("reader-column").relative().w_full().child(measure);
+        // The page reaches into the column's padding by the body's own
+        // margin, so its text starts where the subject and the header do
+        // (a page with a colour of its own shows it 8 px wider each side).
+        let wrapper = div()
+            .id("reader-column")
+            .relative()
+            .mx(px(-reader::BODY_MARGIN))
+            .child(measure);
         let (Some(page), true) = (self.session.page().copied(), self.session.page_shown()) else {
             return wrapper;
         };
@@ -1581,7 +1588,10 @@ impl ReaderView {
                         .test_support()
                 })
             });
-        let page_x = if page.width > frame.column {
+        // A page that fills the column (its width only snapped down) starts
+        // at the column's left, so its text lines up with the subject; one
+        // held at the widest page is centred.
+        let page_x = if frame.column - page.width < komorebi::reader::WIDTH_STEP {
             0.0
         } else {
             ((frame.column - page.width) / (2. * reader::PAGE_GRID)).round() * reader::PAGE_GRID
@@ -1842,10 +1852,12 @@ impl Render for ReaderView {
                 // A read-only field, as the Slint app's: a Tab stop with a
                 // focus ring, selectable with the mouse and the keyboard.
                 let field = self.text_field(open.msg.id, text, window, cx);
+                // Drawn into the column's padding by the field's own inset,
+                // so the text starts where the subject does.
                 div()
                     .id("reader-text")
                     .max_w(px(reader::TEXT_MAX_W))
-                    .w_full()
+                    .mx(px(-reader::TEXT_INSET))
                     .child(
                         Textarea::new(&field)
                             .readonly(true)

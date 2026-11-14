@@ -1,4 +1,4 @@
-//! The round 36 px icon button (mockup `.ib`): a Fluent glyph in ink-2,
+//! The round 36 px icon button (mockup `.ib`): a 20 px Fluent glyph in ink-2,
 //! wash on hover and while toggled on, a tooltip and an accessible name
 //! (BRAND.md: every icon-only control has both). A plain GPUI div like
 //! `Button`, and a `DropdownMenu` trigger (the More menu).
@@ -138,6 +138,13 @@ impl RenderOnce for IconButton {
             layout::ICON_BTN
         };
         let glyph = if on { c.ink } else { c.ink_2 };
+        // Fluent: 20 px beside the standard 36 px target, 16 px in the dense
+        // 32 px one; the filled glyph while toggled on.
+        let icon = if self.small {
+            layout::ICON
+        } else {
+            layout::ICON_LG
+        };
         let mut el = self
             .base
             .role(Role::Button)
@@ -158,8 +165,8 @@ impl RenderOnce for IconButton {
             .when(on, |el| el.bg(c.wash))
             .child(
                 svg()
-                    .path(self.icon.path())
-                    .size(px(layout::ICON))
+                    .path(self.icon.state(icon, on))
+                    .size(px(icon))
                     .text_color(glyph),
             );
         if self.disabled {

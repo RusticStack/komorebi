@@ -129,7 +129,7 @@ impl SettingsView {
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::ShowTips))),
             );
         let keys = Card::new("about-keys", tr!("Keyboard shortcuts"))
-            .icon(Icon::TextSize)
+            .icon(Icon::Keyboard)
             .note(tr!("Every key, by group. Press F1 or Ctrl+/ anywhere."))
             .control(
                 Button::new("about-keys-button")

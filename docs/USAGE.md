@@ -70,8 +70,8 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-1.0.1-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-1.0.1-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-1.0.2-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-1.0.2-setup.exe .\SHA256SUMS
 ```
 
 How releases are made, signed and published is in

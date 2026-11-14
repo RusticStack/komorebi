@@ -43,8 +43,12 @@ pub fn rail_all_inboxes() -> String {
     tr!("rail" => "All inboxes")
 }
 
+/// The unified line of the drafts saved on this PC (every account's, the
+/// ones Komorebi edits): named apart from an account's server Drafts
+/// folder, which lists only the drafts saved elsewhere (FEATURES.md
+/// "Drafts"), so the pane never shows two lines called "Drafts".
 pub fn drafts() -> String {
-    tr!("Drafts")
+    tr!("Drafts on this PC")
 }
 
 pub fn outbox() -> String {

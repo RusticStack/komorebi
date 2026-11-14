@@ -45,6 +45,30 @@ pub fn focus_ring(t: &Tokens) -> Vec<BoxShadow> {
     ]
 }
 
+/// The width `text` takes on one line in a step of the type ramp: for
+/// deciding whether a label is cut short (it then gets a tooltip with the
+/// whole of it).
+pub fn text_width(text: &str, token: &crate::theme::TextToken, window: &mut gpui::Window) -> f32 {
+    let mut style = window.text_style();
+    style.font_family = token.family.clone();
+    style.font_weight = token.weight;
+    let run = gpui::TextRun {
+        len: text.len(),
+        font: style.font(),
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window.text_system().shape_line(
+        gpui::SharedString::from(text.to_string()),
+        token.size,
+        &[run],
+        None,
+    );
+    f32::from(line.width)
+}
+
 /// `focus_visible` style with the ring.
 pub fn ring_style(t: &Tokens) -> impl FnOnce(StyleRefinement) -> StyleRefinement {
     let ring = focus_ring(t);

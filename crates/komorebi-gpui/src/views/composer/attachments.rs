@@ -66,8 +66,8 @@ impl ComposerView {
                     .typo(&t.text.preview)
                     .child(
                         svg()
-                            .path(icon_for(&name).path())
-                            .size(px(layout::ICON))
+                            .path(icon_for(&name).at(layout::ICON_LG))
+                            .size(px(layout::ICON_LG))
                             .flex_none()
                             .text_color(c.ink_2),
                     )

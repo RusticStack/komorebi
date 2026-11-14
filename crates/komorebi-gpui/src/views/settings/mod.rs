@@ -517,12 +517,15 @@ impl SettingsView {
                 .aria_size_of_set(count)
                 .tab_index(0)
                 .relative()
-                .h(px(layout::CONTROL_H_MD))
+                .h(px(crate::theme::metrics::scaled::control(
+                    &t,
+                    layout::CONTROL_H_MD,
+                )))
                 .flex()
                 .flex_none()
                 .items_center()
                 .pl(px(space::SP_6))
-                .pr(px(space::SP_3_5))
+                .pr(px(space::SP_3))
                 .rounded(px(radius::FULL))
                 .typo(if selected {
                     &t.text.body_strong
@@ -532,13 +535,21 @@ impl SettingsView {
                 .text_color(c.ink)
                 .when(selected, |el| {
                     el.bg(c.wash).child(
+                        // The place spot, as the folder pane's (8 px in,
+                        // centred at any text size).
                         div()
                             .absolute()
-                            .left(px(space::SP_2_5))
-                            .top(px(layout::CONTROL_H_MD / 2. - layout::PLACE_SPOT / 2.))
-                            .size(px(layout::PLACE_SPOT))
-                            .rounded(px(radius::FULL))
-                            .bg(c.ink),
+                            .left(px(space::SP_2))
+                            .top_0()
+                            .bottom_0()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .size(px(layout::PLACE_SPOT))
+                                    .rounded(px(radius::FULL))
+                                    .bg(c.ink),
+                            ),
                     )
                 })
                 .hover(move |s| s.bg(c.wash))
@@ -569,8 +580,9 @@ impl SettingsView {
                     .py(px(space::SP_5))
                     .child(
                         div()
-                            .px(px(space::SP_3_5))
-                            .pb(px(space::SP_3_5))
+                            // The title starts where the pages' names do.
+                            .px(px(space::SP_6))
+                            .pb(px(space::SP_3))
                             .typo(&t.text.subtitle)
                             .text_color(c.ink)
                             .child(text::settings_title()),

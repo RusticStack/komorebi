@@ -96,8 +96,8 @@ impl RenderOnce for Attachments {
                 .on_click(move |_, window, cx| open(Press::Open(index), window, cx))
                 .child(
                     svg()
-                        .path(icon(format::file_kind(&a.name)).path())
-                        .size(px(layout::ICON))
+                        .path(icon(format::file_kind(&a.name)).at(layout::ICON_LG))
+                        .size(px(layout::ICON_LG))
                         .flex_none()
                         .text_color(c.ink_2),
                 )

@@ -101,7 +101,7 @@ pub fn render(tabs: &Tabs, t: &Tokens, on: Handlers) -> Option<AnyElement> {
             .items_center()
             .gap(px(space::SP_2))
             .pl(px(space::SP_3))
-            .pr(px(if mail { space::SP_3_5 } else { space::SP_1 }))
+            .pr(px(if mail { space::SP_3 } else { space::SP_1 }))
             .rounded(px(radius::FULL))
             .typo(if on_tab {
                 &t.text.body_strong

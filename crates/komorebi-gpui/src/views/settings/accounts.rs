@@ -283,7 +283,7 @@ impl SettingsView {
             .collect();
         let empty = cards.is_empty();
         let add = Card::new("settings-add-account", tr!("Add account"))
-            .icon(Icon::Add)
+            .icon_as_spot(Icon::Add)
             .note(tr!(
                 "Gmail, iCloud, Fastmail, Postale.io and more, or any IMAP and SMTP server."
             ))

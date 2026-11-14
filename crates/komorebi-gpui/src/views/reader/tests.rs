@@ -275,7 +275,11 @@ mod view {
             panic!("expected a relayout, got {layouts:?}");
         };
         assert!(g2 > generation);
-        assert_eq!(k2.width, page_width(920.0).unwrap());
+        // The column, and the body margin the page reaches into each side.
+        assert_eq!(
+            k2.width,
+            page_width(920.0 + 2. * crate::theme::reader::BODY_MARGIN).unwrap()
+        );
     }
 
     /// Row 210: a press, a drag and a release on the page reach the worker as

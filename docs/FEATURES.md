@@ -300,7 +300,8 @@ Features in more detail:
   the From account changes or the window closes; attachments are copied
   when added. Starting another message (a reply, a `mailto:` link, or New
   mail) keeps the draft in progress; New mail always starts a blank
-  message. "Drafts", always in the navigation with its count, lists the
+  message. "Drafts on this PC", always in the navigation with its count
+  (named apart from the account's own Drafts folder), lists the
   saved drafts ("No drafts. Select New mail to start one." when there are
   none); a click or Enter opens one, Delete discards it (asking first, as
   Discard does), and right-click or Shift+F10 offers Open and Discard.

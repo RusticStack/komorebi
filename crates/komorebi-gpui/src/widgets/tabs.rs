@@ -120,11 +120,11 @@ impl RenderOnce for TabStrip {
                 .flex_none()
                 .items_center()
                 .gap(px(space::SP_1))
-                .pl(px(space::SP_3_5))
+                .pl(px(space::SP_3))
                 .pr(px(if tab.closable {
                     space::SP_1
                 } else {
-                    space::SP_3_5
+                    space::SP_3
                 }))
                 .rounded(px(radius::FULL))
                 .typo(if on {
@@ -252,7 +252,7 @@ impl RenderOnce for Segmented {
                 .h(px(scaled::control(&t, layout::CONTROL_H)))
                 .flex()
                 .items_center()
-                .px(px(space::SP_3_5))
+                .px(px(space::SP_3))
                 .rounded(px(radius::FULL))
                 .typo(if on {
                     &t.text.body_strong

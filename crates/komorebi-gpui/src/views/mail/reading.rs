@@ -142,9 +142,10 @@ thread_local! {
     static BAR_LABELS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The labels the Slint bar kept first, strictly in this order: a later one
-/// only once those before it have theirs.
-const STRICT: &[&str] = &["cmd-archive", "cmd-delete", "cmd-reply"];
+/// The labels kept first, strictly in this order: a later one only once
+/// those before it have theirs. Reply, the reader's primary action, is the
+/// last label to go; Archive and Delete become icons before it.
+const STRICT: &[&str] = &["cmd-reply", "cmd-archive", "cmd-delete"];
 /// Then each of these while it still fits after the ones before it.
 const THEN: &[&str] = &[
     "cmd-read",
@@ -157,7 +158,7 @@ const THEN: &[&str] = &[
 /// The buttons that get their label (row 160, the Slint bar's labels by
 /// priority, each measured on its own): `extra` is what each shown button
 /// adds to the bar with its label, `room` what the bar has over its width
-/// with no label. Archive, Delete and Reply strictly in that order (one not
+/// with no label. Reply, Archive and Delete strictly in that order (one not
 /// shown is skipped: Reply on a server draft); then Mark as read, Mark as
 /// important, Move, Reply all and Forward, each while it fits, once those
 /// three have theirs.
@@ -201,14 +202,15 @@ enum Plain {
 /// text, the gap before it and, for an icon button, the pill's padding
 /// over the round button (`widgets::button`).
 fn label_extra(text_w: f32, plain: Plain, t: &Tokens) -> f32 {
-    let pill = space::SP_3_5 + layout::ICON + space::SP_4;
+    let h = Height::Medium;
+    let pill = h.icon_pad() + h.icon() + space::SP_4;
     match plain {
-        Plain::Icon => pill + space::SP_2_5 + text_w - layout::ICON_BTN,
+        Plain::Icon => pill + space::SP_2 + text_w - layout::ICON_BTN,
         Plain::Pill => {
             let without = pill.max(scaled::control(t, layout::CONTROL_H_MD));
-            pill + space::SP_2_5 + text_w - without
+            pill + space::SP_2 + text_w - without
         }
-        Plain::Menu => space::SP_2_5 + text_w,
+        Plain::Menu => space::SP_2 + text_w,
     }
 }
 
@@ -693,7 +695,7 @@ fn command_bar(
         .when(on_bar("cmd-archive"), |el| {
             let mut c = cmd("cmd-archive", Icon::Archive, Command::Archive);
             c.key = Some(Key::Archive);
-            el.child(div().w(px(space::SP_2_5))).child(measured(
+            el.child(div().w(px(space::SP_3))).child(measured(
                 "cmd-archive",
                 c.render(
                     &rove,
@@ -744,7 +746,7 @@ fn command_bar(
             } else {
                 Key::MarkUnread
             });
-            el.child(div().w(px(space::SP_2_5))).child(measured(
+            el.child(div().w(px(space::SP_3))).child(measured(
                 "cmd-read",
                 c.render(
                     &rove,
@@ -1124,11 +1126,10 @@ mod tests {
 
     /// Row 160, the Slint app's `reader_bar_labels_go_by_priority`: the
     /// labels go by priority, each measured on its own. A wide window
-    /// (1920 x 800) labels Archive, Delete and Reply in English and pt-PT;
-    /// 1280 x 800 at least Archive (the reading pane there is narrower than
-    /// the Slint app's, and its buttons larger); narrower, labels go
-    /// (Archive the last), then the buttons are icons (Reply still named
-    /// Reply) and the last of them leave for More, with nothing clipped.
+    /// (1920 x 800) labels Reply, Archive and Delete in English and pt-PT;
+    /// 1280 x 800 at least Reply, in both; narrower, labels go (Reply the
+    /// last), then the buttons are icons (Reply still named Reply) and the
+    /// last of them leave for More, with nothing clipped.
     #[gpui_kit::test]
     fn reader_bar_labels_go_by_priority(cx: &mut TestAppContext) {
         test_support::init_app(cx);
@@ -1177,17 +1178,17 @@ mod tests {
         };
         let ids = |shown: &[(&'static str, bool)]| shown.iter().map(|s| s.0).collect::<Vec<_>>();
         // The order holds: a label only with those before it in the strict
-        // three (Archive, Delete, Reply), the rest only after them.
+        // three (Reply, Archive, Delete), the rest only after them.
         let in_order = |got: &[&'static str], at: &str| {
             let has = |id: &str| got.contains(&id);
+            if has("cmd-archive") {
+                assert!(has("cmd-reply"), "{at}: {got:?}");
+            }
             if has("cmd-delete") {
                 assert!(has("cmd-archive"), "{at}: {got:?}");
             }
-            if has("cmd-reply") {
-                assert!(has("cmd-delete"), "{at}: {got:?}");
-            }
             if super::THEN.iter().any(|id| has(id)) {
-                assert!(has("cmd-reply"), "{at}: {got:?}");
+                assert!(has("cmd-delete"), "{at}: {got:?}");
             }
         };
         let icon = crate::theme::layout::ICON_BTN;
@@ -1205,7 +1206,7 @@ mod tests {
         let shown = on_bar(cx);
         assert_eq!(ids(&shown).len(), super::BAR_IDS.len() - 1, "all but Back");
         assert!(shown.iter().all(|s| s.1), "{shown:?}");
-        // Narrower: labels go, the last kept is always Archive.
+        // Narrower: labels go, the last kept is always Reply.
         let mut last = en.len();
         for px in [1600., 1440., 1280., 1180., 1100., 1000., 900., 800., 720.] {
             cx.simulate_window_resize(window, gpui::size(gpui::px(px), gpui::px(800.)));
@@ -1217,7 +1218,7 @@ mod tests {
             let shown = on_bar(cx);
             assert!(shown.iter().all(|s| s.1), "{px}: {shown:?}");
             if px == 1280. {
-                assert!(got.contains(&"cmd-archive"), "1280: {got:?}");
+                assert!(got.contains(&"cmd-reply"), "1280: {got:?}");
             }
         }
         cx.simulate_window_resize(window, gpui::size(gpui::px(420.), gpui::px(800.)));
@@ -1253,6 +1254,12 @@ mod tests {
         in_order(&pt, "pt-PT at 1920");
         assert!(pt.len() <= en.len(), "{pt:?} {en:?}");
         assert_eq!(width(cx, "cmd-reply").0.as_deref(), Some("Responder"));
+        // The default window keeps Reply's label in pt-PT too.
+        cx.simulate_window_resize(window, gpui::size(gpui::px(1280.), gpui::px(800.)));
+        settle(cx);
+        let pt_1280 = labels(cx);
+        assert!(pt_1280.contains(&"cmd-reply"), "pt-PT at 1280: {pt_1280:?}");
+        in_order(&pt_1280, "pt-PT at 1280");
         cx.simulate_window_resize(window, gpui::size(gpui::px(420.), gpui::px(800.)));
         settle(cx);
         assert!(labels(cx).is_empty(), "no label in pt-PT when narrow");
@@ -1262,7 +1269,7 @@ mod tests {
         test_support::set_lang(cx, komorebi::i18n::Lang::En);
     }
 
-    /// The priority itself: Archive, Delete and Reply strictly in that
+    /// The priority itself: Reply, Archive and Delete strictly in that
     /// order, then each of the rest that still fits; a button not shown is
     /// skipped.
     #[test]
@@ -1278,25 +1285,25 @@ mod tests {
             ("cmd-flag", 120.0),
         ];
         let by = |room: f32| super::labels_by_priority(room, &extra);
-        assert!(by(54.0).is_empty(), "Archive first or nothing");
-        assert_eq!(by(60.0), ["cmd-archive"]);
-        assert_eq!(by(105.0), ["cmd-archive", "cmd-delete"]);
-        // Room for Delete's 50 but not Reply's 40 after it: Reply and the
+        assert!(by(39.0).is_empty(), "Reply first or nothing");
+        assert_eq!(by(40.0), ["cmd-reply"]);
+        assert_eq!(by(95.0), ["cmd-reply", "cmd-archive"]);
+        // Room for Archive's 55 but not Delete's 50 after it: Delete and the
         // rest wait.
-        assert_eq!(by(144.0), ["cmd-archive", "cmd-delete"]);
-        assert_eq!(by(145.0), ["cmd-archive", "cmd-delete", "cmd-reply"]);
+        assert_eq!(by(144.0), ["cmd-reply", "cmd-archive"]);
+        assert_eq!(by(145.0), ["cmd-reply", "cmd-archive", "cmd-delete"]);
         // After the three, 110 left: Mark as read (90) fits, then Mark as
         // important (120) does not, Move (45) does not after it, Reply all
         // (70) neither, Forward (60) neither.
         assert_eq!(
             by(145.0 + 110.0),
-            ["cmd-archive", "cmd-delete", "cmd-reply", "cmd-read"]
+            ["cmd-reply", "cmd-archive", "cmd-delete", "cmd-read"]
         );
         // 85 left: Mark as read and Mark as important do not fit, Move
         // does, then Reply all and Forward do not.
         assert_eq!(
             by(145.0 + 85.0),
-            ["cmd-archive", "cmd-delete", "cmd-reply", "cmd-move"]
+            ["cmd-reply", "cmd-archive", "cmd-delete", "cmd-move"]
         );
         assert_eq!(by(10_000.0).len(), extra.len());
         // A server draft: no Reply, so Delete is enough for the rest.

@@ -47,7 +47,10 @@ pub mod layout {
     /// The ink mark in the title bar.
     pub const TITLE_MARK: f32 = 16.;
     pub const CMD_BAR_H: f32 = 56.;
-    pub const NAV_W: f32 = 240.;
+    /// The folder pane: 256 px, so a line keeps room for its label beside a 20 px
+    /// icon, a count and the fold column (pt-PT "Caixa de entrada", "Rascunhos
+    /// neste PC" whole).
+    pub const NAV_W: f32 = 256.;
     pub const RAIL_W: f32 = 56.;
     pub const LIST_W: f32 = 384.;
     pub const LIST_W_COMPACT: f32 = 320.;
@@ -73,9 +76,17 @@ pub mod layout {
     /// The selected row's marker: a 4 x 20 ink pill at its left edge.
     pub const MARKER_W: f32 = 4.;
     pub const MARKER_H: f32 = 20.;
+    /// Icons in dense places: menus, small (32 px) buttons, row marks,
+    /// notices (Fluent's 16 px set).
     pub const ICON: f32 = 16.;
-    /// The glyph inside a select's or pill's trailing chevron.
-    pub const ICON_SM: f32 = 10.;
+    /// The standard icon beside 14 px text: navigation lines, command bar
+    /// and icon buttons, 36 and 40 px buttons, settings cards (Fluent: "20 px
+    /// standard"; its 20 px set, regular at rest and filled when selected).
+    pub const ICON_LG: f32 = 20.;
+    /// The glyph inside a select's or pill's trailing chevron, a fold
+    /// chevron and a tab's close glyph (Fluent's 12 px set: information
+    /// only, never a target of its own).
+    pub const ICON_SM: f32 = 12.;
     /// Round icon buttons.
     pub const ICON_BTN: f32 = 36.;
     /// Icon buttons of the composer's format bar.

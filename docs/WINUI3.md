@@ -681,11 +681,12 @@ would go) and More.
 
 **Label priority, per button.** Each label is measured on its own at the
 current text size, and labels are dropped one at a time, first dropped
-first: Forward, Reply all, Move, Mark as important, Mark as read, then Reply, Delete,
-and Archive last. Archive, Delete and Reply keep theirs strictly in that
+first: Forward, Reply all, Move, Mark as important, Mark as read, then Delete,
+Archive, and Reply last (the GPUI app since 1.0.2: Reply is the primary
+action). Reply, Archive and Delete keep theirs strictly in that
 order; the others each show while they still fit after the ones before
 them (so a short Move label can show when Mark as read's long one does
-not, but never before Archive, Delete and Reply have theirs). The room is
+not, but never before Reply, Archive and Delete have theirs). The room is
 the bar less the icon-only bar (padding 16, eight 32 px buttons and Move
 52, separators 2, gaps 40); a label takes its text and 15 px (Move 8 px).
 So the commands people use most keep their words longest, whatever the

@@ -114,7 +114,7 @@ impl Render for Toast {
             .flex_none()
             .items_center()
             .gap(px(space::SP_3))
-            .pl(px(space::SP_3_5))
+            .pl(px(space::SP_3))
             .pr(px(space::SP_5))
             .rounded(px(radius::FULL))
             .bg(c.ink)

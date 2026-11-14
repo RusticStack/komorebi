@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn the_list_point_is_inside_the_list_pane() {
         let (x, y) = list_centre(1280., 800.);
-        assert!(x > crate::theme::layout::NAV_W && x < 240. + 384. + 16.);
+        assert!(x > crate::theme::layout::NAV_W && x < crate::theme::layout::NAV_W + 384. + 16.);
         assert_eq!(y, 400.);
     }
 }

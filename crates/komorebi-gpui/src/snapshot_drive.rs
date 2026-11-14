@@ -217,9 +217,9 @@ mod tests {
     /// the caption buttons sit at the right edge of the bar.
     #[test]
     fn the_points_are_in_the_right_panes() {
-        // Wide: folder pane 240, list 384, two 8 px gaps.
+        // Wide: folder pane, list 384, two 8 px gaps.
         let (x, y) = reading_pane_centre(1280., 800.);
-        assert_eq!((x, y), ((240. + 384. + 16. + 1280.) / 2., 400.));
+        assert_eq!((x, y), ((layout::NAV_W + 384. + 16. + 1280.) / 2., 400.));
         // Compact: the rail and the narrower list.
         let (x, _) = reading_pane_centre(900., 700.);
         assert!(x > layout::RAIL_W + layout::LIST_W_COMPACT && x < 900.);

@@ -248,26 +248,38 @@ impl SettingsView {
             .mb(px(space::SP_1))
             .p(px(space::SP_4))
             .flex()
-            .flex_col()
-            .gap(px(space::SP_2))
+            .flex_row()
+            .items_start()
+            .gap(px(space::SP_4))
             .rounded(px(radius::CARD))
             .bg(c.inset)
-            .child(div().typo(&t.text.body).child(tr!("Default font")))
+            // The card's icon, as every card of the page has one, so the
+            // titles make one left edge (`card::Card`).
+            .child(super::card::card_icon(Icon::TextSize, &t))
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
-                    .flex_wrap()
+                    .flex_col()
                     .gap(px(space::SP_2))
-                    .child(div().w(px(geo::FONT_BOX_W)).child(font_box))
-                    .child(div().w(px(geo::SIZE_BOX_W)).child(size_box))
-                    .child(div().w(px(geo::FONT_BOX_W)).child(colour_box)),
-            )
-            .child(
-                div()
-                    .font_family(font.label())
-                    .text_size(px(f32::from(size.get()) * geo::PT_PX))
-                    .text_color(sample)
-                    .child(tr!("The quick brown fox jumps over the lazy dog.")),
+                    .child(div().typo(&t.text.body).child(tr!("Default font")))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(space::SP_2))
+                            .child(div().w(px(geo::FONT_BOX_W)).child(font_box))
+                            .child(div().w(px(geo::SIZE_BOX_W)).child(size_box))
+                            .child(div().w(px(geo::FONT_BOX_W)).child(colour_box)),
+                    )
+                    .child(
+                        div()
+                            .font_family(font.label())
+                            .text_size(px(f32::from(size.get()) * geo::PT_PX))
+                            .text_color(sample)
+                            .child(tr!("The quick brown fox jumps over the lazy dog.")),
+                    ),
             )
             .test_support()
     }
@@ -406,7 +418,7 @@ impl SettingsView {
                 cx,
                 |this, on, cx| this.set_setting(Setting::FlashTaskbar(on), cx),
             )
-            .icon(Icon::Alert);
+            .icon(Icon::Flash);
         let notify = self.toggle_card(
             "settings-notify",
             tr!("Notifications for new mail"),
@@ -471,16 +483,16 @@ impl SettingsView {
             .child(theme.icon(Icon::Color))
             .child(language.icon(Icon::Language))
             .child(check.icon(Icon::Mail))
-            .child(undo)
+            .child(undo.icon(Icon::Undo))
             .child(read.icon(Icon::MailRead))
             .child(group_head(tr!("Notifications"), cx))
             .child(flash)
-            .child(notify)
-            .child(detail)
+            .child(notify.icon(Icon::Alert))
+            .child(detail.icon(Icon::Eye))
             .child(group_head(tr!("Startup"), cx))
-            .child(tray)
-            .child(autostart)
-            .child(tabs)
+            .child(tray.icon(Icon::ToTray))
+            .child(autostart.icon(Icon::Power))
+            .child(tabs.icon(Icon::Tabs))
             .child(group_head(tr!("Compose"), cx))
             .child(format.icon(Icon::Compose))
             .child(self.font_card(cx))

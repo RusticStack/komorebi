@@ -5,6 +5,30 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
+## [1.0.2] - 2026-11-14
+
+Komorebi 1.0.2 is a polish release: the same features, drawn more carefully.
+Your accounts, mail and settings carry over; nothing in your local data
+changes.
+
+### Changed
+
+- **Clearer icons.** The icons in the folder pane, the toolbars and Settings
+  are larger (20 px beside the text) and drawn in full ink, so they read as
+  clearly as their labels. The selected folder's icon is filled.
+- **Tidier layout.** Every screen was measured and aligned on the same
+  grid: folder names, counts and the unread dot line up, the message text
+  starts on the same edge as its subject, and the Settings cards share one
+  left edge.
+- **Longer folder names fit.** The folder pane is a little wider, so names
+  such as Newsletters are no longer cut short; a name that still does not
+  fit shows in full in its tooltip.
+- **"Drafts on this PC".** The drafts saved on this computer now have their
+  own name, so they are no longer confused with the account's Drafts
+  folder.
+- **Reply keeps its label** when the window is narrow; Delete and Archive
+  turn into icons first.
+
 ## [1.0.1] - 2026-11-14
 
 Komorebi 1.0.1 makes adding an account easier and gives Komorebi a calmer,

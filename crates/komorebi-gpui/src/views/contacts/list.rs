@@ -489,7 +489,7 @@ fn letter_look(l: char, height: f32, t: &Tokens) -> gpui::Div {
         .flex_none()
         .flex()
         .items_end()
-        .px(px(space::SP_2 + space::SP_3_5))
+        .px(px(space::SP_2 + space::SP_3))
         .pb(px(space::SP_1))
         .typo(&t.text.caption)
         .text_color(t.color.ink_3)

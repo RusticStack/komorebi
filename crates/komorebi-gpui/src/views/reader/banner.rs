@@ -104,7 +104,7 @@ impl RenderOnce for Bar {
             .items_start()
             .gap(px(space::SP_3))
             .px(px(space::SP_4))
-            .py(px(space::SP_3_5))
+            .py(px(space::SP_3))
             .rounded(px(radius::CARD))
             .bg(c.inset)
             .text_color(c.ink)

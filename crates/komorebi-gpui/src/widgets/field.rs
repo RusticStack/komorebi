@@ -157,13 +157,13 @@ impl RenderOnce for TextField {
             .typo(&t.text.body);
         row = match &self.look {
             FieldLook::Pill => row
-                .px(px(space::SP_3_5))
+                .px(px(space::SP_3))
                 .rounded(px(radius::FULL))
                 .bg(c.inset)
                 .when(ring, |el| el.shadow(focus_ring(&t))),
             FieldLook::Search => row
                 .w(px(layout::SEARCH_W))
-                .px(px(space::SP_3_5))
+                .px(px(space::SP_3))
                 .rounded(px(radius::FULL))
                 .bg(c.paper)
                 .when(ring, |el| el.shadow(focus_ring(&t))),

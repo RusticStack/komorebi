@@ -69,8 +69,9 @@ The interface (crates/komorebi-gpui) also includes:
       OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
       WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - Fluent System Icons (https://github.com/microsoft/fluentui-system-icons,
-  the @fluentui/svg-icons 1.1.292 package), 65 of them bundled in
-  komorebi.exe (crates/komorebi-gpui/assets/icons/fluent), under the
+  the @fluentui/svg-icons 1.1.292 package), 159 of them bundled in
+  komorebi.exe (crates/komorebi-gpui/assets/icons/fluent: 70 icons at 16
+  and 20 px, 14 of them also filled at 20 px, 5 also at 12 px), under the
   MIT License:
 
       MIT License
