@@ -5,7 +5,7 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-11-14
 
 Komorebi 1.0 is a new interface on the same mail engine. Your accounts,
 mail cache, rules, contacts and settings carry over; what changes for you is
