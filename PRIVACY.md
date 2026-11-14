@@ -14,7 +14,7 @@ when that development switch is set), except the passwords:
 
 | Where | What | Removed |
 |---|---|---|
-| `cache.sqlite3` (with `cache.sqlite3-wal` and `-shm`) | Accounts (no passwords), settings, folders, message headers and previews, downloaded messages, drafts, the Outbox, invitation answers, the address index, the image-sender list, the calendar (events of the local "On this PC" calendar, see below) | With the file; per account when it is removed |
+| `cache.sqlite3` (with `cache.sqlite3-wal` and `-shm`) | Accounts (no passwords), settings, folders, message headers and previews, downloaded messages, drafts, the Outbox, invitation answers, the address index, the image-sender list | With the file; per account when it is removed |
 | `cache.sqlite3`, rules tables | Your rules (names, conditions, actions) and the activity of automatic runs: time, rule name, the message's Message-ID, subject and sender, what was done and where to, at most 500 lines per account. Nothing of it leaves this computer; the diagnostics log gets counts only | With the file; per account when it is removed; Clear activity removes the activity |
 | `cache.drafts\<draft number>\` | Copies of a draft's attachments | With the draft |
 | `cache.sqlite3.key` (only for an encrypted cache) | The cache's key, protected by Windows (DPAPI) for your Windows user | With the cache, by Remove all data |
@@ -144,45 +144,20 @@ The cache lives at `%LOCALAPPDATA%\komorebi\cache.sqlite3` and holds:
   answer (accepted, tentative or declined) and when. Nothing else from the
   invite (title, attendees, description) is copied; it is deleted with
   the account.
-- The calendar: when you accept (or tentatively accept) an invitation,
-  its calendar part (title, time, place, description, organizer,
-  attendees, its repeat rule) is stored as written, in plain text, in the
-  local calendar "On this PC", with the times of its occurrences for
-  about a year back and two ahead; Decline removes it. This calendar
-  exists only in the cache: it is not synced anywhere, it is not removed
-  with an account, and "Remove all data" deletes it with the cache.
-- CalDAV calendars, when you press Find calendars on the Calendar page's
-  Calendars pane: their names and addresses, and each event as the
-  server sent it (title, time, place, description, organizer, attendees,
-  reminders, its repeat rule), in plain text in the cache, with the
-  server's version tags for the next sync. Events you create, change or
-  delete in them are written to the cache at once and kept in a queue of
-  changes not yet sent (the event as you saved it) until the next sync
-  sends them to that calendar's server (and to no other host); a change
-  the server refused because the event changed elsewhere stays in that
-  queue until you apply it again or discard it. Events in the local
-  calendar "On this PC" exist only in the cache. They are deleted with the account, when the
-  calendar is no longer found, and by "Remove all data". The sign-in is
-  the one Contacts uses: the mail password, or the separate
-  `account:{id}:dav` password, both in Windows Credential Manager, sent
-  only over TLS (HTTP Basic) and only to the calendar server address: the
-  one you typed, or one looked up for your mail domain (or a name under
-  it). A server found elsewhere is shown in the pane first, and Komorebi
-  signs in there only after you press Find calendars again; a redirect
-  to another server is refused, not followed with credentials. The
-  address that worked is kept for calendars, apart from the Contacts
-  one. Komorebi contacts that server only on Find calendars, when
-  the Calendar page opens, on Sync now and at most every 15 minutes while
-  a CalDAV calendar is on and Komorebi is open (never under
-  `KOMOREBI_OFFLINE`); with the address empty, Find calendars first asks
-  DNS (SRV `_caldavs._tcp`) and `https://<your domain>/.well-known/caldav`
-  without credentials.
-- Event reminders: which reminders were already shown (an event id and
-  the occurrence's start, no text) are kept in the cache for two days so
-  none shows twice. Reminder notifications are off unless you turn them
-  on; they are made on this computer by the running app (title, start
-  time and place; never the event's notes), and nothing is scheduled with
-  Windows.
+- No calendar. Komorebi 1.0 has no calendar, no CalDAV sync and no event
+  reminders, and accepting an invitation adds nothing to a calendar. A
+  cache made by Komorebi 0.7 may still hold what the 0.7 calendar kept
+  (events of the local "On this PC" calendar and of CalDAV calendars,
+  their server version tags and the queue of changes not yet sent, as
+  plain text in `cache.sqlite3`). Komorebi 1.0 does not read, show or
+  sync it and contacts no CalDAV server; it stays in the file until you
+  choose Remove all data, which deletes the cache, and removing an
+  account deletes its CalDAV calendars (the local "On this PC" calendar
+  is not removed with an account).
+- A cache made by Komorebi 0.7. Komorebi 1.0 opens it as it is (same
+  schema): your accounts, cached mail, rules, contacts and settings carry
+  over, and the mail is not downloaded again. The one thing it does not read
+  is 0.7's saved window place; the first start opens at the default place.
 
 Komorebi keeps an index of addresses from your cached mail to suggest
 recipients; it is rebuilt from messages and deleted with the account. Each
@@ -418,8 +393,8 @@ Encrypted mail is never decrypted, and no keys are stored.
 The meeting-invitation card is read on this computer from the calendar
 part already in the message; nothing is fetched or looked up (a named
 time zone is read from the invite, else from Windows' own time zone
-data on this computer). Accepting adds the event to the local calendar
-only; nothing about it leaves the computer except the reply you choose
+data on this computer). There is no calendar to add the event to;
+nothing about it leaves the computer except the reply you choose
 to send. Its Join button
 opens the meeting link only through the same confirm prompt as a link,
 and Save .ics saves the calendar file where you choose.

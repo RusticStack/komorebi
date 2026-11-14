@@ -5,7 +5,7 @@
 
 use super::dom::Id;
 use super::layout::{Item, Layouter, Rect, fin, shift};
-use super::style::{Display, Len, VAlign};
+use super::style::{Color, Display, Len, Radius, Style, VAlign};
 
 /// Cells laid out per message; later cells are dropped.
 pub const MAX_CELLS: usize = 20_000;
@@ -29,6 +29,38 @@ pub(super) struct CellInfo {
     spec: Len,
     hb: f32,
     vb: f32,
+    /// What the cell's edges take: its border, or with collapsed borders its
+    /// half of the shared line. Top, right, bottom, left.
+    ins: [f32; 4],
+}
+
+/// One segment of a collapsed border.
+#[derive(Clone, Copy, Default)]
+struct Line {
+    w: f32,
+    color: Color,
+    /// Who set it: table, row group, row, cell. On equal widths the higher
+    /// rank wins, and among cells the one above or to the left.
+    rank: u8,
+}
+
+impl Line {
+    fn offer(&mut self, w: f32, color: Color, rank: u8) {
+        if w > 0.0 && (w > self.w || (w == self.w && rank > self.rank)) {
+            *self = Line { w, color, rank };
+        }
+    }
+}
+
+/// The grid of a table's collapsed borders.
+struct Collapsed {
+    /// Above row `r` at column `c`: `r * ncols + c`, `nrows + 1` rows of them.
+    above: Vec<Line>,
+    /// Left of column `c` in row `r`: `r * (ncols + 1) + c`.
+    left: Vec<Line>,
+    /// The half of the outer lines the table adds to its columns. Top, right,
+    /// bottom, left.
+    edge: [f32; 4],
 }
 
 pub(super) struct TableInfo {
@@ -40,8 +72,8 @@ pub(super) struct TableInfo {
     col_min: Vec<f32>,
     col_max: Vec<f32>,
     col_spec: Vec<Len>,
-    /// Grid occupancy per row.
-    occ: Vec<Vec<bool>>,
+    /// With `border-collapse: collapse`, unless the grid is absurdly large.
+    collapsed: Option<Collapsed>,
 }
 
 fn span_attr(v: Option<&str>) -> usize {
@@ -142,21 +174,34 @@ impl Layouter<'_> {
                 let (cell, mn, mx) = if anon.is_empty() {
                     let s = self.style(node).clone();
                     let (mn, mx) = self.content_widths(node);
-                    let hb = s.padding[1] + s.padding[3] + s.border[1] + s.border[3];
-                    let vb = s.padding[0] + s.padding[2] + s.border[0] + s.border[2];
+                    // A collapsed border is added once the lines are known.
+                    let own = if self.style(id).collapse {
+                        [0.0; 4]
+                    } else {
+                        s.border
+                    };
+                    let hb = s.padding[1] + s.padding[3] + own[1] + own[3];
+                    let vb = s.padding[0] + s.padding[2] + own[0] + own[2];
                     let (mn, mx) = match s.width {
                         Len::Px(w) => {
+                            let w = if s.border_box { fin(w - hb) } else { w };
                             let w = w.min(self.maxw);
                             (mn.min(w.max(mn)), w.max(mn))
                         }
                         _ => (mn, mx),
                     };
-                    ((s.width, hb, vb), mn, mx)
+                    // A width is the content box's unless `box-sizing` says
+                    // otherwise; the column holds the padding and border too.
+                    let spec = match s.width {
+                        Len::Px(w) if !s.border_box => Len::Px(w + hb),
+                        w => w,
+                    };
+                    ((spec, hb, vb, own), mn, mx)
                 } else {
                     let (mn, mx) = self.list_widths(node, &anon);
-                    ((Len::Auto, 0.0, 0.0), mn, mx)
+                    ((Len::Auto, 0.0, 0.0, [0.0; 4]), mn, mx)
                 };
-                let (spec, hb, vb) = cell;
+                let (spec, hb, vb, ins) = cell;
                 cells.push(CellInfo {
                     node,
                     anon,
@@ -169,11 +214,14 @@ impl Layouter<'_> {
                     spec,
                     hb,
                     vb,
+                    ins,
                 });
                 col = end;
             }
         }
         let ncols = occ.iter().map(Vec::len).max().unwrap_or(0);
+        let collapsed = (self.style(id).collapse && nrows.saturating_mul(ncols) <= MAX_SLOTS)
+            .then(|| self.collapse_borders(id, &rows, &groups, &mut cells, ncols));
         let mut col_min = vec![0.0f32; ncols];
         let mut col_max = vec![0.0f32; ncols];
         let mut col_spec = vec![Len::Auto; ncols];
@@ -207,6 +255,20 @@ impl Layouter<'_> {
                 }
             }
         }
+        for (k, w) in self.col_widths(id, ncols).into_iter().enumerate() {
+            if w == Len::Auto {
+                continue;
+            }
+            if let Some(sp) = col_spec.get_mut(k) {
+                *sp = match (w, *sp) {
+                    (Len::Px(a), Len::Px(b)) => Len::Px(a.max(b)),
+                    (w, _) => w,
+                };
+            }
+            if let (Len::Px(a), Some(mx)) = (w, col_max.get_mut(k)) {
+                *mx = mx.max(a);
+            }
+        }
         for (mx, mn) in col_max.iter_mut().zip(&col_min) {
             *mx = mx.max(*mn);
         }
@@ -218,7 +280,316 @@ impl Layouter<'_> {
             col_min,
             col_max,
             col_spec,
-            occ,
+            collapsed,
+        }
+    }
+
+    /// The widths `<col>` elements (or a `<colgroup>` without any) declare,
+    /// by column; `Auto` for the rest.
+    fn col_widths(&self, id: Id, ncols: usize) -> Vec<Len> {
+        let mut out = vec![];
+        let span = |c: Id| span_attr(self.dom.attr(c, "span"));
+        let mut add = |w: Len, n: usize| {
+            let room = ncols.saturating_sub(out.len());
+            out.extend(std::iter::repeat_n(w, n.min(room)));
+        };
+        for &g in self.dom.children(id) {
+            match self.dom.tag(g) {
+                "col" => add(self.style(g).width, span(g)),
+                "colgroup" => {
+                    let mut any = false;
+                    for &c in self.dom.children(g) {
+                        if self.dom.tag(c) == "col" {
+                            any = true;
+                            let w = self.style(c).width;
+                            add(
+                                if w == Len::Auto {
+                                    self.style(g).width
+                                } else {
+                                    w
+                                },
+                                span(c),
+                            );
+                        }
+                    }
+                    if !any {
+                        add(self.style(g).width, span(g));
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The column widths of a `table-layout: fixed` table: those declared by
+    /// `<col>` and the first row, the rest sharing what is left. Content does
+    /// not count; it overflows.
+    fn fixed_columns(&self, id: Id, ti: &TableInfo, avail: f32) -> Vec<f32> {
+        let ncols = ti.ncols;
+        let mut spec = self.col_widths(id, ncols);
+        spec.resize(ncols, Len::Auto);
+        for c in ti.cells.iter().filter(|c| c.row == 0) {
+            let n = c.cs.max(1) as f32;
+            for k in c.col..c.col.saturating_add(c.cs).min(ncols) {
+                if let Some(sp @ Len::Auto) = spec.get_mut(k) {
+                    *sp = match c.spec {
+                        Len::Px(w) => Len::Px(w / n),
+                        Len::Pct(p) => Len::Pct(p / n),
+                        Len::Auto => Len::Auto,
+                    };
+                }
+            }
+        }
+        let mut colw: Vec<f32> = spec
+            .iter()
+            .map(|l| match *l {
+                Len::Px(p) => p,
+                Len::Pct(p) => avail * p / 100.0,
+                Len::Auto => 0.0,
+            })
+            .collect();
+        let taken: f32 = colw.iter().sum();
+        let autos = spec.iter().filter(|l| **l == Len::Auto).count();
+        let left = fin(avail - taken);
+        if autos > 0 {
+            let share = left / autos as f32;
+            for (w, l) in colw.iter_mut().zip(&spec) {
+                if *l == Len::Auto {
+                    *w = share;
+                }
+            }
+        } else if taken > 0.0 {
+            // All declared: they keep their proportions in the table's width.
+            let k = avail / taken;
+            colw.iter_mut().for_each(|w| *w *= k);
+        }
+        colw
+    }
+
+    /// Resolve the collapsed borders of a table (CSS 2 17.6.2.1: the wider
+    /// wins, then cell over row over row group over table) and give each cell
+    /// its half of the lines around it.
+    fn collapse_borders(
+        &self,
+        id: Id,
+        rows: &[Id],
+        groups: &[Option<Id>],
+        cells: &mut [CellInfo],
+        ncols: usize,
+    ) -> Collapsed {
+        let nrows = rows.len();
+        let (nabove, nleft) = (
+            nrows.saturating_add(1).saturating_mul(ncols),
+            nrows.saturating_mul(ncols.saturating_add(1)),
+        );
+        let mut above = vec![Line::default(); nabove];
+        let mut left = vec![Line::default(); nleft];
+        let at_above = |r: usize, c: usize| r.saturating_mul(ncols).saturating_add(c);
+        let at_left =
+            |r: usize, c: usize| r.saturating_mul(ncols.saturating_add(1)).saturating_add(c);
+        // The box from row r0 to r1 and column c0 to c1 (excluded) offers its
+        // border to the lines around it.
+        let mut offer = |s: &Style, r0: usize, r1: usize, c0: usize, c1: usize, rank: u8| {
+            for c in c0..c1 {
+                if let Some(l) = above.get_mut(at_above(r0, c)) {
+                    l.offer(s.border[0], s.border_color[0], rank);
+                }
+                if let Some(l) = above.get_mut(at_above(r1, c)) {
+                    l.offer(s.border[2], s.border_color[2], rank);
+                }
+            }
+            for r in r0..r1 {
+                if let Some(l) = left.get_mut(at_left(r, c0)) {
+                    l.offer(s.border[3], s.border_color[3], rank);
+                }
+                if let Some(l) = left.get_mut(at_left(r, c1)) {
+                    l.offer(s.border[1], s.border_color[1], rank);
+                }
+            }
+        };
+        offer(self.style(id), 0, nrows, 0, ncols, 0);
+        let mut ri = 0;
+        while let Some(&g) = groups.get(ri) {
+            let n = groups
+                .iter()
+                .skip(ri)
+                .take_while(|&&x| x == g)
+                .count()
+                .max(1);
+            if let Some(g) = g {
+                offer(self.style(g), ri, ri.saturating_add(n), 0, ncols, 1);
+            }
+            ri = ri.saturating_add(n);
+        }
+        for (r, &row) in rows.iter().enumerate() {
+            offer(self.style(row), r, r.saturating_add(1), 0, ncols, 2);
+        }
+        for c in cells.iter().filter(|c| c.anon.is_empty()) {
+            offer(
+                self.style(c.node),
+                c.row,
+                c.row.saturating_add(c.rs),
+                c.col,
+                c.col.saturating_add(c.cs).min(ncols),
+                3,
+            );
+        }
+        // A row's border does not cross a cell that spans it.
+        for c in cells.iter() {
+            let (r1, c1) = (
+                c.row.saturating_add(c.rs),
+                c.col.saturating_add(c.cs).min(ncols),
+            );
+            for r in c.row.saturating_add(1)..r1 {
+                for k in c.col..c1 {
+                    if let Some(l) = above.get_mut(at_above(r, k)) {
+                        *l = Line::default();
+                    }
+                }
+            }
+            for r in c.row..r1 {
+                for k in c.col.saturating_add(1)..c1 {
+                    if let Some(l) = left.get_mut(at_left(r, k)) {
+                        *l = Line::default();
+                    }
+                }
+            }
+        }
+        for c in cells.iter_mut().filter(|c| c.anon.is_empty()) {
+            let (r1, c1) = (
+                c.row.saturating_add(c.rs),
+                c.col.saturating_add(c.cs).min(ncols),
+            );
+            let w_above = |r: usize| {
+                (c.col..c1)
+                    .filter_map(|k| above.get(at_above(r, k)))
+                    .fold(0.0f32, |a, l| a.max(l.w))
+            };
+            let w_left = |k: usize| {
+                (c.row..r1)
+                    .filter_map(|r| left.get(at_left(r, k)))
+                    .fold(0.0f32, |a, l| a.max(l.w))
+            };
+            c.ins = [
+                w_above(c.row) / 2.0,
+                w_left(c1) / 2.0,
+                w_above(r1) / 2.0,
+                w_left(c.col) / 2.0,
+            ];
+            let (h, v) = (c.ins[1] + c.ins[3], c.ins[0] + c.ins[2]);
+            c.hb += h;
+            c.vb += v;
+            c.min += h;
+            c.max += h;
+            if let Len::Px(w) = &mut c.spec {
+                *w += h;
+            }
+        }
+        let widest = |it: &mut dyn Iterator<Item = &Line>| it.fold(0.0f32, |a, l| a.max(l.w)) / 2.0;
+        let edge = [
+            widest(&mut above.iter().take(ncols)),
+            widest(&mut left.iter().skip(ncols).step_by(ncols.saturating_add(1))),
+            widest(&mut above.iter().skip(nrows.saturating_mul(ncols)).take(ncols)),
+            widest(&mut left.iter().step_by(ncols.saturating_add(1))),
+        ];
+        Collapsed { above, left, edge }
+    }
+
+    /// Paint the collapsed lines of a table whose grid starts at (`x`, `y`).
+    fn collapsed_lines(&mut self, co: &Collapsed, x: f32, y: f32, colx: &[f32], rowy: &[f32]) {
+        let ncols = colx.len().saturating_sub(1);
+        let nrows = rowy.len().saturating_sub(1);
+        let pos = |v: &[f32], k: usize| v.get(k).copied().unwrap_or(0.0);
+        // Up the lines that meet at a corner, so the other direction joins them.
+        let vert = |r: usize, c: usize| {
+            co.left
+                .get(r.saturating_mul(ncols.saturating_add(1)).saturating_add(c))
+                .map_or(0.0, |l| l.w)
+        };
+        let horiz = |r: usize, c: usize| {
+            co.above
+                .get(r.saturating_mul(ncols).saturating_add(c))
+                .map_or(0.0, |l| l.w)
+        };
+        for r in 0..=nrows {
+            let row = r.saturating_mul(ncols);
+            let mut c = 0;
+            while c < ncols {
+                let Some(&l) = co.above.get(row.saturating_add(c)) else {
+                    break;
+                };
+                let mut end = c.saturating_add(1);
+                while end < ncols
+                    && co
+                        .above
+                        .get(row.saturating_add(end))
+                        .is_some_and(|m| m.w == l.w && m.color == l.color)
+                {
+                    end = end.saturating_add(1);
+                }
+                if l.w > 0.0 && l.color[3] > 0 {
+                    let joint = |k: usize| {
+                        let up = r.checked_sub(1).map_or(0.0, |u| vert(u, k));
+                        up.max(vert(r, k)) / 2.0
+                    };
+                    let x0 = pos(colx, c) - joint(c);
+                    let x1 = pos(colx, end) + joint(end);
+                    self.out.push(Item::Rect {
+                        r: Rect {
+                            x: x + x0,
+                            y: y + pos(rowy, r) - l.w / 2.0,
+                            w: fin(x1 - x0),
+                            h: l.w,
+                        },
+                        color: l.color,
+                        radius: Radius::NONE,
+                    });
+                }
+                c = end;
+            }
+        }
+        for c in 0..=ncols {
+            let mut r = 0;
+            while r < nrows {
+                let Some(&l) = co
+                    .left
+                    .get(r.saturating_mul(ncols.saturating_add(1)).saturating_add(c))
+                else {
+                    break;
+                };
+                let mut end = r.saturating_add(1);
+                while end < nrows
+                    && co
+                        .left
+                        .get(
+                            end.saturating_mul(ncols.saturating_add(1))
+                                .saturating_add(c),
+                        )
+                        .is_some_and(|m| m.w == l.w && m.color == l.color)
+                {
+                    end = end.saturating_add(1);
+                }
+                if l.w > 0.0 && l.color[3] > 0 {
+                    let joint = |k: usize| {
+                        let before = c.checked_sub(1).map_or(0.0, |u| horiz(k, u));
+                        before.max(if c < ncols { horiz(k, c) } else { 0.0 }) / 2.0
+                    };
+                    let y0 = pos(rowy, r) - joint(r);
+                    let y1 = pos(rowy, end) + joint(end);
+                    self.out.push(Item::Rect {
+                        r: Rect {
+                            x: x + pos(colx, c) - l.w / 2.0,
+                            y: y + y0,
+                            w: l.w,
+                            h: fin(y1 - y0),
+                        },
+                        color: l.color,
+                        radius: Radius::NONE,
+                    });
+                }
+                r = end;
+            }
         }
     }
 
@@ -227,9 +598,24 @@ impl Layouter<'_> {
         if s.collapse { 0.0 } else { s.spacing }
     }
 
-    fn table_extra(&self, id: Id, ncols: usize) -> f32 {
+    /// What the table's own box takes around its grid: top, right, bottom,
+    /// left. Padding does not apply to a collapsed table, whose border is
+    /// half of the outer lines.
+    fn table_edges(&self, id: Id, ti: &TableInfo) -> [f32; 4] {
         let s = self.style(id);
-        self.spacing(id) * (ncols as f32 + 1.0) + s.border[1] + s.border[3]
+        if s.collapse {
+            return ti.collapsed.as_ref().map_or([0.0; 4], |c| c.edge);
+        }
+        let mut e = s.border;
+        for (e, p) in e.iter_mut().zip(s.padding) {
+            *e += p;
+        }
+        e
+    }
+
+    fn table_extra(&self, id: Id, ti: &TableInfo) -> f32 {
+        let e = self.table_edges(id, ti);
+        self.spacing(id) * (ti.ncols as f32 + 1.0) + e[1] + e[3]
     }
 
     pub fn table_intrinsic(&mut self, id: Id) -> (f32, f32) {
@@ -237,13 +623,12 @@ impl Layouter<'_> {
             return r;
         }
         let ti = self.table_info(id);
-        let (ncols, smin, smax) = (
-            ti.ncols,
+        let (smin, smax) = (
             ti.col_min.iter().sum::<f32>(),
             ti.col_max.iter().sum::<f32>(),
         );
+        let extra = self.table_extra(id, &ti);
         self.tables.insert(id, ti);
-        let extra = self.table_extra(id, ncols);
         let mut r = (fin(smin + extra), fin(smax + extra));
         if let Len::Px(w) = self.style(id).width {
             r.1 = w.min(self.maxw).max(r.0);
@@ -264,16 +649,43 @@ impl Layouter<'_> {
         if let Len::Px(m) = s.max_width {
             w = w.min(m);
         }
+        // A fixed table takes its width whatever is inside.
+        if s.fixed_layout && s.width != Len::Auto {
+            return fin(w).min(self.maxw);
+        }
         fin(w.max(mn)).min(self.maxw)
     }
 
+    /// The `<caption>`s of table `id`, stacked over the width `tw` at `y`.
+    /// Returns their height.
+    fn captions(&mut self, id: Id, x: f32, y: f32, tw: f32) -> f32 {
+        let caps: Vec<Id> = self
+            .dom
+            .children(id)
+            .iter()
+            .copied()
+            .filter(|&c| self.dom.tag(c) == "caption" && self.style(c).display != Display::None)
+            .collect();
+        let mut h = 0.0;
+        for c in caps {
+            h += self.box_at(c, x, y + h, tw, false).h;
+        }
+        h
+    }
+
     pub fn table_layout(&mut self, id: Id, x: f32, y: f32, tw: f32) -> f32 {
+        let cap = self.captions(id, x, y, tw);
+        cap + self.table_grid(id, x, y + cap, tw)
+    }
+
+    fn table_grid(&mut self, id: Id, x: f32, y: f32, tw: f32) -> f32 {
         let s = self.style(id).clone();
         let sp = self.spacing(id);
         let ti = self.table_info(id);
         let ncols = ti.ncols;
-        let bx = s.border[3] + sp;
-        let avail = fin(tw - self.table_extra(id, ncols));
+        let edges = self.table_edges(id, &ti);
+        let bx = edges[3] + sp;
+        let avail = fin(tw - self.table_extra(id, &ti));
         // Column widths: preferred, then shrunk towards min or grown.
         let mut colw: Vec<f32> = (0..ncols)
             .map(|k| {
@@ -285,6 +697,9 @@ impl Layouter<'_> {
                 }
             })
             .collect();
+        if s.fixed_layout && s.width != Len::Auto {
+            colw = self.fixed_columns(id, &ti, avail);
+        }
         let total: f32 = colw.iter().sum();
         if total > avail {
             let shrinkable: f32 = colw.iter().zip(&ti.col_min).map(|(p, m)| p - m).sum();
@@ -322,7 +737,7 @@ impl Layouter<'_> {
         // Lay cells out into captured item lists at their final widths.
         let nrows = ti.rows.len();
         let mut row_h = vec![0.0f32; nrows];
-        let mut placed: Vec<(Vec<Item>, f32)> = Vec::with_capacity(ti.cells.len());
+        let mut placed: Vec<(Vec<Item>, f32, f32)> = Vec::with_capacity(ti.cells.len());
         for c in &ti.cells {
             if self.expired() {
                 break;
@@ -338,22 +753,30 @@ impl Layouter<'_> {
             };
             let items = std::mem::replace(&mut self.out, saved);
             let mut h = ch + c.vb;
-            if let (true, Len::Px(hh)) = (c.anon.is_empty(), self.style(c.node).height) {
-                h = h.max(hh);
+            if c.anon.is_empty() {
+                let s = self.style(c.node);
+                let extra = if s.border_box { 0.0 } else { c.vb };
+                // A cell's height is a minimum, and its content box's unless
+                // `box-sizing` says otherwise.
+                for spec in [s.height, s.min_height] {
+                    if let Len::Px(hh) = spec {
+                        h = h.max(hh + extra);
+                    }
+                }
             }
             if c.rs == 1
                 && let Some(rh) = row_h.get_mut(c.row)
             {
                 *rh = rh.max(h);
             }
-            placed.push((items, h));
+            placed.push((items, ch, h));
         }
         for (rh, &r) in row_h.iter_mut().zip(&ti.rows) {
             if let Len::Px(hh) = self.style(r).height {
                 *rh = rh.max(hh);
             }
         }
-        for (c, (_, h)) in ti.cells.iter().zip(&placed) {
+        for (c, (_, _, h)) in ti.cells.iter().zip(&placed) {
             if c.rs > 1 {
                 let last = c.row.saturating_add(c.rs).min(nrows).saturating_sub(1);
                 let rows = row_h.get(c.row..=last).unwrap_or(&[]);
@@ -370,11 +793,11 @@ impl Layouter<'_> {
             *ry = acc;
         }
         let rowy_at = |k: usize| rowy.get(k).copied().unwrap_or(acc);
-        let by = s.border[0] + sp;
+        let by = edges[0] + sp;
         let th = if nrows == 0 {
-            s.border[0] + s.border[2] + sp
+            edges[0] + edges[2] + sp
         } else {
-            by + acc + s.border[2]
+            by + acc + edges[2]
         };
         // Backgrounds: table, row groups, rows.
         let table_r = Rect { x, y, w: tw, h: th };
@@ -382,16 +805,11 @@ impl Layouter<'_> {
             self.out.push(Item::Rect {
                 r: table_r,
                 color: s.bg,
-                radius: s.radius,
+                radius: s.radius_on(tw),
             });
         }
-        if let Some(ix) = self.load_bg(&s) {
-            self.out.push(Item::Image {
-                r: table_r,
-                img: ix,
-                clip: Some(table_r),
-                radius: 0.0,
-            });
+        if let Some(back) = self.background(&s, table_r) {
+            self.out.push(back);
         }
         let row_w = avail + sp * (ncols as f32 - 1.0).max(0.0);
         let mut seen_group: Vec<Id> = vec![];
@@ -412,7 +830,7 @@ impl Layouter<'_> {
                 self.out.push(Item::Rect {
                     r,
                     color: self.style(*g).bg,
-                    radius: 0.0,
+                    radius: Radius::NONE,
                 });
             }
             let color = self.style(r).bg;
@@ -426,12 +844,12 @@ impl Layouter<'_> {
                 self.out.push(Item::Rect {
                     r,
                     color,
-                    radius: 0.0,
+                    radius: Radius::NONE,
                 });
             }
         }
-        for (c, (mut items, h)) in ti.cells.iter().zip(placed) {
-            let mut cs = if c.anon.is_empty() {
+        for (c, (mut items, content_h, _)) in ti.cells.iter().zip(placed) {
+            let cs = if c.anon.is_empty() {
                 self.style(c.node).clone()
             } else {
                 let mut d = self.default.clone();
@@ -441,7 +859,11 @@ impl Layouter<'_> {
             let last = c.row.saturating_add(c.rs).min(nrows).saturating_sub(1);
             let cell_h = rowy_at(last.saturating_add(1)) - rowy_at(c.row) - sp;
             let cell_w = colx_at(c.col.saturating_add(c.cs)) - colx_at(c.col) - sp;
-            let cx = x + bx + colx_at(c.col);
+            let cx = if s.rtl {
+                x + tw - bx - cell_w - colx_at(c.col)
+            } else {
+                x + bx + colx_at(c.col)
+            };
             let cy = y + by + rowy_at(c.row);
             let r = Rect {
                 x: cx,
@@ -453,39 +875,16 @@ impl Layouter<'_> {
                 self.out.push(Item::Rect {
                     r,
                     color: cs.bg,
-                    radius: cs.radius,
+                    radius: cs.radius_on(cell_w),
                 });
             }
-            if let Some(ix) = self.load_bg(&cs) {
-                self.out.push(Item::Image {
-                    r,
-                    img: ix,
-                    clip: Some(r),
-                    radius: 0.0,
-                });
+            if let Some(back) = self.background(&cs, r) {
+                self.out.push(back);
             }
-            if s.collapse {
-                // The neighbour on the left / above owns the shared border.
-                let taken = |row: Option<usize>, col: Option<usize>| -> bool {
-                    match (row, col) {
-                        (Some(row), Some(col)) => ti
-                            .occ
-                            .get(row)
-                            .and_then(|o| o.get(col))
-                            .copied()
-                            .unwrap_or(false),
-                        _ => false,
-                    }
-                };
-                if taken(Some(c.row), c.col.checked_sub(1)) {
-                    cs.border[3] = 0.0;
-                }
-                if taken(c.row.checked_sub(1), Some(c.col)) {
-                    cs.border[0] = 0.0;
-                }
+            if !s.collapse {
+                self.borders(cx, cy, cell_w, cell_h, &cs);
             }
-            self.borders(cx, cy, cell_w, cell_h, &cs);
-            let content_h = h - c.vb;
+            // The content, not a declared height, moves within the cell.
             let inner_h = cell_h - c.vb;
             let dy = match cs.valign {
                 VAlign::Top | VAlign::Baseline => 0.0,
@@ -493,14 +892,20 @@ impl Layouter<'_> {
                 VAlign::Bottom => fin(inner_h - content_h),
             };
             let (ox, oy) = if c.anon.is_empty() {
-                (cs.border[3] + cs.padding[3], cs.border[0] + cs.padding[0])
+                (c.ins[3] + cs.padding[3], c.ins[0] + cs.padding[0])
             } else {
                 (0.0, 0.0)
             };
             shift(&mut items, cx + ox, cy + oy + dy);
             self.out.append(&mut items);
         }
-        self.borders(x, y, tw, th, &s);
+        if s.collapse {
+            if let Some(co) = &ti.collapsed {
+                self.collapsed_lines(co, x + bx, y + by, &colx, &rowy);
+            }
+        } else {
+            self.borders(x, y, tw, th, &s);
+        }
         self.tables.insert(id, ti);
         th
     }

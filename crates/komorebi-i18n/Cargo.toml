@@ -1,0 +1,13 @@
+[package]
+name = "komorebi-i18n"
+version = "1.0.0"
+edition = "2024"
+description = "Komorebi's message catalog for Rust code: tr!/trn! over the gettext .po files, built into a static table"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/RusticStack/komorebi"
+publish = false
+build = "build.rs"
+
+# No dependencies: the build script parses ../../translations/<tag>/
+# LC_MESSAGES/komorebi.po with po.rs (shared with tests/i18n_catalog.rs).
+[dependencies]

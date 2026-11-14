@@ -9,6 +9,7 @@ use super::css::{self, Ctx, Decl, Sheet};
 use super::dom::{Dom, Id, Kind};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub type Color = [u8; 4];
 
@@ -46,6 +47,128 @@ pub enum VAlign {
     Middle,
     Bottom,
     Baseline,
+}
+
+/// `list-style-type`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Marker {
+    Disc,
+    Circle,
+    Square,
+    Decimal,
+    LowerAlpha,
+    UpperAlpha,
+    LowerRoman,
+    UpperRoman,
+}
+
+impl Marker {
+    fn parse(v: &str) -> Option<Marker> {
+        Some(match v {
+            "disc" => Marker::Disc,
+            "circle" => Marker::Circle,
+            "square" => Marker::Square,
+            "decimal" | "decimal-leading-zero" => Marker::Decimal,
+            "lower-alpha" | "lower-latin" => Marker::LowerAlpha,
+            "upper-alpha" | "upper-latin" => Marker::UpperAlpha,
+            "lower-roman" => Marker::LowerRoman,
+            "upper-roman" => Marker::UpperRoman,
+            _ => return None,
+        })
+    }
+
+    /// The `type` attribute of a list or item: case tells `a` from `A`.
+    fn from_attr(v: &str) -> Option<Marker> {
+        match v.trim() {
+            "1" => Some(Marker::Decimal),
+            "a" => Some(Marker::LowerAlpha),
+            "A" => Some(Marker::UpperAlpha),
+            "i" => Some(Marker::LowerRoman),
+            "I" => Some(Marker::UpperRoman),
+            v => Marker::parse(&v.to_ascii_lowercase()),
+        }
+    }
+
+    /// What the item numbered `n` shows.
+    pub fn text(self, n: i64) -> String {
+        let alpha = |base: u8| {
+            let mut left = n;
+            let mut out = Vec::new();
+            while left > 0 {
+                let d = left.saturating_sub(1).rem_euclid(26);
+                out.push(char::from(base.saturating_add(d as u8)));
+                left = left.saturating_sub(1) / 26;
+            }
+            out.iter().rev().collect::<String>()
+        };
+        let roman = || {
+            const STEPS: [(i64, &str); 13] = [
+                (1000, "m"),
+                (900, "cm"),
+                (500, "d"),
+                (400, "cd"),
+                (100, "c"),
+                (90, "xc"),
+                (50, "l"),
+                (40, "xl"),
+                (10, "x"),
+                (9, "ix"),
+                (5, "v"),
+                (4, "iv"),
+                (1, "i"),
+            ];
+            let mut left = n;
+            let mut out = String::new();
+            for (v, t) in STEPS {
+                while left >= v {
+                    out.push_str(t);
+                    left = left.saturating_sub(v);
+                }
+            }
+            out
+        };
+        // As a browser falls back: what has no form of its own is a number.
+        let num = |s: String| {
+            if s.is_empty() || n >= 4000 {
+                format!("{n}.")
+            } else {
+                format!("{s}.")
+            }
+        };
+        match self {
+            Marker::Disc => "\u{2022}".into(),
+            Marker::Circle => "\u{25E6}".into(),
+            Marker::Square => "\u{25AA}".into(),
+            Marker::Decimal => format!("{n}."),
+            Marker::LowerAlpha => num(alpha(b'a')),
+            Marker::UpperAlpha => num(alpha(b'A')),
+            Marker::LowerRoman => num(roman()),
+            Marker::UpperRoman => num(roman().to_ascii_uppercase()),
+        }
+    }
+}
+
+/// `border-style`; `groove`, `ridge`, `inset` and `outset` draw solid.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LineStyle {
+    None,
+    Solid,
+    Dashed,
+    Dotted,
+    Double,
+}
+
+impl LineStyle {
+    fn parse(v: &str) -> Option<LineStyle> {
+        Some(match v {
+            "none" | "hidden" => LineStyle::None,
+            "solid" | "groove" | "ridge" | "inset" | "outset" => LineStyle::Solid,
+            "dashed" => LineStyle::Dashed,
+            "dotted" => LineStyle::Dotted,
+            "double" => LineStyle::Double,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -96,15 +219,83 @@ pub enum Float {
     Right,
 }
 
+/// `background-size`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum BgSize {
+    Cover,
+    Contain,
+    /// Width and height; `Auto` keeps the image's own or its aspect ratio.
+    Is(Len, Len),
+}
+
+/// How a background image is placed in its box.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BgPlace {
+    pub repeat_x: bool,
+    pub repeat_y: bool,
+    pub size: BgSize,
+    pub x: Len,
+    pub y: Len,
+}
+
+impl BgPlace {
+    const INITIAL: BgPlace = BgPlace {
+        repeat_x: true,
+        repeat_y: true,
+        size: BgSize::Is(Len::Auto, Len::Auto),
+        x: Len::Pct(0.0),
+        y: Len::Pct(0.0),
+    };
+}
+
+/// `linear-gradient()`: its direction and colour stops.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Gradient {
+    /// Clockwise from "to top".
+    pub degrees: f32,
+    /// Position along the line, 0 to 1, in order.
+    pub stops: Vec<(f32, Color)>,
+}
+
+/// Rounded corners: one radius and the corners that have it, as bits from the
+/// top left clockwise. Unequal corners of one box take the largest.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Radius {
+    pub px: f32,
+    pub corners: u8,
+}
+
+impl Radius {
+    pub const NONE: Radius = Radius {
+        px: 0.0,
+        corners: 0,
+    };
+
+    pub fn all(px: f32) -> Radius {
+        Radius { px, corners: 15 }
+    }
+
+    pub fn scaled(self, scale: f32) -> Radius {
+        Radius {
+            px: self.px * scale,
+            ..self
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Style {
     pub display: Display,
     pub color: Color,
     pub bg: Color,
     pub bg_image: Option<Rc<str>>,
+    pub bg_place: BgPlace,
+    pub gradient: Option<Arc<Gradient>>,
     pub font_family: Rc<str>,
     pub font_size: f32,
     pub bold: bool,
+    /// `font-weight` as a number, when it is not plain 400 or 700.
+    pub weight: Option<u16>,
     pub italic: bool,
     pub underline: bool,
     pub strike: bool,
@@ -117,27 +308,53 @@ pub struct Style {
     pub height: Len,
     pub min_width: Len,
     pub max_width: Len,
+    pub min_height: Len,
+    /// `box-sizing: border-box`.
+    pub border_box: bool,
     /// Top, right, bottom, left.
     pub margin: [Len; 4],
     pub padding: [f32; 4],
     pub border: [f32; 4],
     pub border_color: [Color; 4],
+    pub border_style: [LineStyle; 4],
     pub radius: f32,
+    /// `border-radius` when it is not one length in px for all corners: top
+    /// left, top right, bottom right, bottom left.
+    pub corners: Option<[Len; 4]>,
     pub valign: VAlign,
     pub collapse: bool,
+    /// `table-layout: fixed`.
+    pub fixed_layout: bool,
     pub spacing: f32,
     /// `visibility: hidden`: takes space, never painted.
     pub hidden: bool,
     pub letter_spacing: f32,
+    pub word_spacing: f32,
+    /// `text-indent`; negative for Word's hanging lists.
+    pub indent: Len,
     pub list_none: bool,
+    pub marker: Marker,
     pub float: Float,
+    /// `clear`: left, right.
+    pub clear: (bool, bool),
     pub overflow_hidden: bool,
     pub max_height: Len,
     pub opacity_zero: bool,
+    /// `opacity`, 0 to 1: this element's own until [`apply_opacity`] has
+    /// multiplied it down the tree.
+    pub opacity: f32,
+    /// `object-fit`: fill, or else `cover`.
+    pub cover: bool,
     pub link_color: Option<Color>,
-    /// Legacy `align=center` / `<center>`: also centres child tables and
-    /// fixed-width blocks.
-    pub center_blocks: bool,
+    /// Legacy `align=` / `<center>` (`-webkit-center` and `-webkit-right` in
+    /// a browser): besides the text it also moves child tables and
+    /// fixed-width blocks. A table does not pass it on; `Left` is none.
+    pub block_align: Align,
+    /// The parent's [`Style::block_align`]: what moves this box.
+    pub moved_by: Align,
+    /// `dir=rtl` / `direction: rtl`: table columns and inline boxes run from
+    /// the right (the trick that swaps two columns of a newsletter).
+    pub rtl: bool,
     /// `word-break: break-all`.
     pub break_all: bool,
     /// `overflow-wrap` / `word-wrap`: anywhere | break-word.
@@ -148,15 +365,43 @@ pub struct Style {
 }
 
 impl Style {
+    /// The rounded corners of a box `w` wide.
+    pub fn radius_on(&self, w: f32) -> Radius {
+        let Some(c) = self.corners else {
+            return Radius::all(self.radius);
+        };
+        let mut r = Radius::NONE;
+        for (l, bit) in c.iter().zip([1u8, 2, 4, 8]) {
+            let v = match *l {
+                Len::Px(p) => p,
+                Len::Pct(p) => w * p / 100.0,
+                Len::Auto => 0.0,
+            };
+            if v > 0.5 {
+                r.px = r.px.max(v);
+                r.corners |= bit;
+            }
+        }
+        r
+    }
+
+    /// Whether, as an inline element, it paints a box behind its text.
+    pub fn has_inline_box(&self) -> bool {
+        self.bg[3] > 0 || self.border.iter().any(|&b| b > 0.0)
+    }
+
     pub fn root() -> Style {
         Style {
             display: Display::Block,
             color: [0, 0, 0, 255],
             bg: [0; 4],
             bg_image: None,
+            bg_place: BgPlace::INITIAL,
+            gradient: None,
             font_family: "Segoe UI, Arial, sans-serif".into(),
             font_size: 16.0,
             bold: false,
+            weight: None,
             italic: false,
             underline: false,
             strike: false,
@@ -169,23 +414,36 @@ impl Style {
             height: Len::Auto,
             min_width: Len::Auto,
             max_width: Len::Auto,
+            min_height: Len::Auto,
+            border_box: false,
             margin: [Len::Px(0.0); 4],
             padding: [0.0; 4],
             border: [0.0; 4],
             border_color: [[0, 0, 0, 255]; 4],
+            border_style: [LineStyle::None; 4],
             radius: 0.0,
+            corners: None,
             valign: VAlign::Baseline,
             collapse: false,
+            fixed_layout: false,
             spacing: 2.0,
             hidden: false,
             letter_spacing: 0.0,
+            word_spacing: 0.0,
+            indent: Len::Px(0.0),
             list_none: false,
+            marker: Marker::Disc,
             float: Float::None,
+            clear: (false, false),
             overflow_hidden: false,
             max_height: Len::Auto,
             opacity_zero: false,
+            opacity: 1.0,
+            cover: false,
             link_color: None,
-            center_blocks: false,
+            block_align: Align::Left,
+            moved_by: Align::Left,
+            rtl: false,
             break_all: false,
             wrap_anywhere: false,
             fixed: false,
@@ -201,6 +459,7 @@ impl Style {
             font_family: p.font_family.clone(),
             font_size: p.font_size,
             bold: p.bold,
+            weight: p.weight,
             italic: p.italic,
             underline: p.underline,
             strike: p.strike,
@@ -211,9 +470,14 @@ impl Style {
             transform: p.transform,
             hidden: p.hidden,
             letter_spacing: p.letter_spacing,
+            word_spacing: p.word_spacing,
+            indent: p.indent,
             list_none: p.list_none,
+            marker: p.marker,
             link_color: p.link_color,
-            center_blocks: p.center_blocks,
+            block_align: p.block_align,
+            moved_by: p.block_align,
+            rtl: p.rtl,
             break_all: p.break_all,
             wrap_anywhere: p.wrap_anywhere,
             ..Style::root()
@@ -234,6 +498,258 @@ pub struct Styles {
 }
 
 pub const MAX_FONT_PX: f32 = 200.0;
+/// `repeat`, `no-repeat`, `repeat-x`, `repeat-y` (and the rest as `repeat`);
+/// returns whether `v` is one of them.
+fn set_bg_repeat(p: &mut BgPlace, v: &str) -> bool {
+    let (x, y) = match v {
+        "no-repeat" => (false, false),
+        "repeat-x" => (true, false),
+        "repeat-y" => (false, true),
+        "repeat" | "space" | "round" => (true, true),
+        _ => return false,
+    };
+    p.repeat_x = x;
+    p.repeat_y = y;
+    true
+}
+
+fn parse_bg_size(toks: &[&str], fs: f32) -> Option<BgSize> {
+    Some(match *toks {
+        ["cover"] => BgSize::Cover,
+        ["contain"] => BgSize::Contain,
+        [w] => BgSize::Is(parse_len(w, fs)?, Len::Auto),
+        [w, h, ..] => BgSize::Is(parse_len(w, fs)?, parse_len(h, fs)?),
+        _ => return None,
+    })
+}
+
+/// `background-position` with one or two values, keywords in either order.
+fn set_bg_position(p: &mut BgPlace, toks: &[&str], fs: f32) {
+    let (mut x, mut y) = (None, None);
+    let mut rest = vec![];
+    for &t in toks {
+        match t {
+            "left" => x = Some(Len::Pct(0.0)),
+            "right" => x = Some(Len::Pct(100.0)),
+            "top" => y = Some(Len::Pct(0.0)),
+            "bottom" => y = Some(Len::Pct(100.0)),
+            "center" => rest.push(Len::Pct(50.0)),
+            t => rest.extend(parse_len(t, fs)),
+        }
+    }
+    let mut rest = rest.into_iter();
+    let x = x.or_else(|| rest.next());
+    let y = y.or_else(|| rest.next());
+    if x.is_none() && y.is_none() {
+        return;
+    }
+    p.x = x.unwrap_or(Len::Pct(50.0));
+    p.y = y.unwrap_or(Len::Pct(50.0));
+}
+
+/// What is left of the `background` shorthand once the colour and the image
+/// are out: repeat, position, `/` and size.
+fn parse_bg_shorthand(p: &mut BgPlace, toks: &[&str], fs: f32) {
+    let mut pos: Vec<&str> = vec![];
+    let mut size: Vec<&str> = vec![];
+    let mut after_slash = false;
+    for tok in toks {
+        // `center/cover`, `center / cover`, `center /cover`.
+        for (k, part) in tok.split('/').enumerate() {
+            if k > 0 {
+                after_slash = true;
+            }
+            if part.is_empty() || matches!(part, "scroll" | "fixed" | "local") {
+                continue;
+            }
+            if part.ends_with("-box") || set_bg_repeat(p, part) {
+                continue;
+            }
+            if after_slash {
+                size.push(part);
+            } else {
+                pos.push(part);
+            }
+        }
+    }
+    set_bg_position(p, &pos, fs);
+    if let Some(sz) = parse_bg_size(&size, fs) {
+        p.size = sz;
+    }
+}
+
+/// Split on commas outside parentheses.
+fn split_commas(v: &str) -> Vec<&str> {
+    let mut out = vec![];
+    let mut depth = 0u32;
+    let mut start = 0;
+    for (i, ch) in v.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(v.get(start..i).unwrap_or(""));
+                start = i.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    out.push(v.get(start..).unwrap_or(""));
+    out
+}
+
+/// The inside of the parentheses of the gradient function in `value`.
+fn gradient_args(value: &str) -> Option<&str> {
+    let (_, inner) = value.split_once("gradient(")?;
+    let mut depth = 1u32;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth = depth.saturating_add(1),
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return inner.get(..i);
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(inner)
+}
+
+/// The first colour of any gradient in `value`.
+fn first_stop(value: &str) -> Option<Color> {
+    split_commas(gradient_args(value)?)
+        .iter()
+        .find_map(|p| split_top(p.trim()).first().and_then(|t| parse_color(t)))
+}
+
+/// `linear-gradient(...)` with an angle or `to` a side or corner, and stops
+/// at percentages or evenly spaced. The older `-webkit-` form counts angles
+/// the other way and names the side it starts from.
+fn parse_gradient(value: &str) -> Option<Gradient> {
+    if !value.contains("linear-gradient(") {
+        return None;
+    }
+    let legacy = value.contains("-linear-gradient(");
+    let args = split_commas(gradient_args(value)?);
+    let mut iter = args.iter().map(|a| a.trim()).peekable();
+    let head = *iter.peek()?;
+    let side = |w: &str| match w {
+        "top" => Some(0.0f32),
+        "right" => Some(90.0),
+        "bottom" => Some(180.0),
+        "left" => Some(270.0),
+        _ => None,
+    };
+    let direction: Option<f32> = if let Some(a) = head.strip_suffix("deg").and_then(num) {
+        Some(if legacy { 90.0 - a } else { a })
+    } else if let Some(a) = head.strip_suffix("turn").and_then(num) {
+        Some(a * 360.0)
+    } else if let Some(to) = head.strip_prefix("to ") {
+        match *split_top(to).as_slice() {
+            [w] => side(w),
+            [a, b] => {
+                let (a, b) = (side(a)?, side(b)?);
+                // A corner: near enough, as boxes in mail are wide bands.
+                let (lo, hi) = (a.min(b), a.max(b));
+                Some(if hi - lo > 180.0 {
+                    (lo + 360.0 + hi) / 2.0
+                } else {
+                    (lo + hi) / 2.0
+                })
+            }
+            _ => None,
+        }
+    } else if legacy {
+        match *split_top(head).as_slice() {
+            [w] => side(w).map(|d| d + 180.0),
+            [a, b] => {
+                let (a, b) = (side(a)? + 180.0, side(b)? + 180.0);
+                Some((a + b) / 2.0)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if direction.is_some() {
+        iter.next();
+    }
+    let mut stops: Vec<(Option<f32>, Color)> = vec![];
+    for part in iter {
+        let toks = split_top(part);
+        let c = parse_color(toks.first()?)?;
+        let at = toks
+            .get(1)
+            .and_then(|t| t.strip_suffix('%'))
+            .and_then(num)
+            .map(|p| p / 100.0);
+        stops.push((at, c));
+    }
+    if stops.len() < 2 || stops.len() > 32 {
+        return None;
+    }
+    // The ends default to 0 and 100%, what lies between shares the room, and
+    // positions never go back.
+    let last = stops.len().saturating_sub(1);
+    if let Some(s) = stops.first_mut() {
+        s.0 = s.0.or(Some(0.0));
+    }
+    if let Some(s) = stops.last_mut() {
+        s.0 = s.0.or(Some(1.0));
+    }
+    let mut out: Vec<(f32, Color)> = Vec::with_capacity(stops.len());
+    let mut i = 0;
+    let mut prev = 0.0f32;
+    while let Some(&(at, c)) = stops.get(i) {
+        if let Some(at) = at {
+            prev = at.clamp(prev, 1.0);
+            out.push((prev, c));
+            i = i.saturating_add(1);
+            continue;
+        }
+        let next = (i..=last).find(|&k| stops.get(k).is_some_and(|s| s.0.is_some()));
+        let Some(next) = next else {
+            break;
+        };
+        let end = stops
+            .get(next)
+            .and_then(|s| s.0)
+            .unwrap_or(1.0)
+            .clamp(prev, 1.0);
+        let count = next.saturating_sub(i).saturating_add(1) as f32;
+        for (k, stop) in stops.get(i..next).unwrap_or(&[]).iter().enumerate() {
+            out.push((prev + (end - prev) * (k as f32 + 1.0) / count, stop.1));
+        }
+        i = next;
+    }
+    Some(Gradient {
+        degrees: direction.unwrap_or(180.0).rem_euclid(360.0),
+        stops: out,
+    })
+}
+
+/// `font-weight`. A number other than 400 or 700 asks for that weight of the
+/// family (Segoe UI Semibold at 600, Arial Black at 900), so far as the family
+/// has it; `bold` stays the question of whether it counts as bold.
+fn set_weight(s: &mut Style, v: &str) {
+    let (bold, weight) = match v {
+        "bold" | "bolder" => (true, None),
+        "normal" | "lighter" => (false, None),
+        v => match v.parse::<u16>() {
+            Ok(n @ 1..=1000) => (n >= 600, Some(n).filter(|n| !matches!(n, 400 | 700))),
+            _ => return,
+        },
+    };
+    s.bold = bold;
+    s.weight = weight;
+}
+
+/// A border width nothing has declared.
+const UNSET_BORDER: f32 = -1.0;
+/// `medium`, the initial border width.
+const MEDIUM_BORDER: f32 = 3.0;
 
 /// Compute every node's style; `None` when the deadline passes.
 pub fn compute(dom: &Dom, ctx: &Ctx, deadline: &Deadline) -> Option<Styles> {
@@ -290,6 +806,7 @@ pub fn compute(dom: &Dom, ctx: &Ctx, deadline: &Deadline) -> Option<Styles> {
         };
         v.push(st);
     }
+    apply_opacity(dom, &mut v);
     let has_dark_rules = sheet.has_dark_rules || dark_meta;
     let dimmed = ctx.dim && !has_dark_rules;
     if dimmed {
@@ -301,6 +818,40 @@ pub fn compute(dom: &Dom, ctx: &Ctx, deadline: &Deadline) -> Option<Styles> {
         has_dark_rules,
         dimmed,
     })
+}
+
+/// Fade every colour by the `opacity` of its element and its ancestors. An
+/// approximation of a group's opacity: where an element's own boxes overlap,
+/// they show through each other.
+fn apply_opacity(dom: &Dom, v: &mut [Style]) {
+    if v.iter().all(|s| s.opacity >= 1.0) {
+        return;
+    }
+    let fade = |c: &mut Color, by: f32| c[3] = (f32::from(c[3]) * by).round() as u8;
+    for i in 0..v.len() {
+        let Some(node) = dom.nodes.get(i).filter(|_| i > 0) else {
+            continue;
+        };
+        let parent = v.get(node.parent as usize).map_or(1.0, |p| p.opacity);
+        let Some(s) = v.get_mut(i) else {
+            continue;
+        };
+        // A text node's style is a copy of its parent's, not a further step.
+        s.opacity = if matches!(node.kind, Kind::Text(_)) {
+            parent
+        } else {
+            parent * s.opacity
+        };
+        let by = s.opacity;
+        if by < 1.0 {
+            fade(&mut s.color, by);
+            fade(&mut s.bg, by);
+            s.border_color.iter_mut().for_each(|c| fade(c, by));
+            if let Some(c) = &mut s.link_color {
+                fade(c, by);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- dark dimming
@@ -347,6 +898,13 @@ fn dim(dom: &Dom, v: &mut [Style], deadline: &Deadline) -> Option<()> {
             .unwrap_or(canvas);
         let orig = s.bg;
         s.bg = dim_bg(orig);
+        if let Some(g) = &mut s.gradient {
+            let stops = g.stops.iter().map(|&(at, c)| (at, dim_bg(c))).collect();
+            *g = Arc::new(Gradient {
+                degrees: g.degrees,
+                stops,
+            });
+        }
         let here = if s.bg_image.is_some() {
             (orig, s.bg, true)
         } else if orig[3] > 0 {
@@ -501,6 +1059,8 @@ fn style_for(
 ) -> Style {
     let tag = dom.tag(id);
     let mut s = Style::inherit(ps);
+    // Negative until something sets it: a style alone means `medium`.
+    s.border = [UNSET_BORDER; 4];
     ua_defaults(dom, id, tag, &mut s, ps);
     presentational(dom, id, tag, &mut s);
     let order = normal
@@ -521,9 +1081,14 @@ fn style_for(
         }
     }
     s.font_size = s.font_size.clamp(0.0, MAX_FONT_PX);
-    // Adversarial sizes (border=9999, height=99999, cellpadding=-5).
-    for b in s.border.iter_mut() {
-        *b = b.clamp(0.0, 50.0);
+    // Adversarial sizes (border=9999, height=99999, cellpadding=-5). A side
+    // with no style has no width, whatever `border-width` says.
+    for (b, st) in s.border.iter_mut().zip(s.border_style) {
+        *b = match st {
+            LineStyle::None => 0.0,
+            _ if *b == UNSET_BORDER => MEDIUM_BORDER,
+            _ => b.clamp(0.0, 50.0),
+        };
     }
     for p in s.padding.iter_mut() {
         *p = p.clamp(0.0, 500.0);
@@ -533,6 +1098,9 @@ fn style_for(
         && tag != "img"
     {
         s.height = Len::Px(h.clamp(0.0, 5000.0));
+    }
+    if let Len::Px(h) = s.min_height {
+        s.min_height = Len::Px(h.clamp(0.0, 5000.0));
     }
     s.radius = s.radius.clamp(0.0, 500.0);
     s.letter_spacing = s.letter_spacing.clamp(-10.0, 100.0);
@@ -586,6 +1154,9 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
         | "aside" | "form" | "fieldset" | "figure" | "figcaption" | "address" | "details"
         | "summary" | "legend" | "caption" => {
             s.display = Block;
+            if tag == "caption" {
+                s.align = Align::Center;
+            }
             if tag == "body" {
                 s.margin = [Len::Px(8.0); 4];
             }
@@ -595,7 +1166,7 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
         }
         "center" => {
             s.display = Block;
-            s.center_blocks = true;
+            s.block_align = Align::Center;
             s.align = Align::Center;
         }
         "p" => {
@@ -615,6 +1186,7 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
             };
             s.font_size = ps.font_size * sz;
             s.bold = true;
+            s.weight = Option::None;
             s.margin[0] = em(m, s.font_size);
             s.margin[2] = em(m, s.font_size);
         }
@@ -625,6 +1197,23 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
             if tag != "dl" {
                 s.padding[3] = 40.0;
             }
+            s.marker = if tag == "ol" {
+                Marker::Decimal
+            } else {
+                // Inside other lists: circles, then squares.
+                let mut up = dom.parent(id);
+                let mut depth = 0u32;
+                while up != 0 && depth < 2 {
+                    if matches!(dom.tag(up), "ul" | "ol" | "menu" | "dir") {
+                        depth = depth.saturating_add(1);
+                    }
+                    up = dom.parent(up);
+                }
+                [Marker::Disc, Marker::Circle, Marker::Square]
+                    .get(depth as usize)
+                    .copied()
+                    .unwrap_or(Marker::Square)
+            };
             // Nested lists have no vertical margin.
             if matches!(dom.tag(dom.parent(id)), "ul" | "ol" | "li") {
                 s.margin[0] = Len::Px(0.0);
@@ -657,16 +1246,24 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
             s.display = Block;
             s.margin[0] = Len::Px(8.0);
             s.margin[2] = Len::Px(8.0);
+            s.margin[1] = Len::Auto;
+            s.margin[3] = Len::Auto;
             s.border = [1.0; 4];
+            s.border_style = [LineStyle::Solid; 4];
             s.border_color = [[154, 154, 154, 255]; 4];
         }
         "table" => {
             s.display = Table;
             s.spacing = 2.0;
-            // As in quirks mode (and litehtml), text alignment does not
-            // reach into tables; centring of the table itself still does.
-            s.align = Align::Left;
+            // A browser's tables drop the legacy `-webkit-` alignments, also
+            // in standards mode (webmail's), while a `text-align` from CSS
+            // goes on into the cells.
+            if s.block_align != Align::Left {
+                s.align = Align::Left;
+                s.block_align = Align::Left;
+            }
         }
+        "col" | "colgroup" => s.display = None,
         "thead" | "tbody" | "tfoot" => s.display = RowGroup,
         "tr" => s.display = Row,
         "td" | "th" => {
@@ -675,6 +1272,7 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
             s.valign = VAlign::Middle;
             if tag == "th" {
                 s.bold = true;
+                s.weight = Option::None;
                 s.align = Align::Center;
             }
             // Cell defaults from the table's attributes.
@@ -687,12 +1285,20 @@ fn ua_defaults(dom: &Dom, id: Id, tag: &str, s: &mut Style, ps: &Style) {
                 }
                 if dom.attr(t, "border").and_then(num).is_some_and(|b| b > 0.0) {
                     s.border = [1.0; 4];
+                    s.border_style = [LineStyle::Solid; 4];
                     s.border_color = [[128, 128, 128, 255]; 4];
                 }
             }
         }
         "img" => s.display = InlineBlock,
-        "b" | "strong" => s.bold = true,
+        "mark" => {
+            s.bg = [255, 255, 0, 255];
+            s.color = [0, 0, 0, 255];
+        }
+        "b" | "strong" => {
+            s.bold = true;
+            s.weight = Option::None;
+        }
         "i" | "em" | "cite" | "var" | "dfn" => s.italic = true,
         "u" | "ins" => s.underline = true,
         "s" | "strike" | "del" => s.strike = true,
@@ -723,6 +1329,9 @@ pub fn ancestor(dom: &Dom, mut id: Id, tag: &str) -> Option<Id> {
 }
 
 fn presentational(dom: &Dom, id: Id, tag: &str, s: &mut Style) {
+    if let Some(d) = dom.attr(id, "dir") {
+        set_direction(s, &d.trim().to_ascii_lowercase());
+    }
     if let Some(c) = dom.attr(id, "bgcolor").and_then(parse_color_legacy) {
         s.bg = c;
     }
@@ -753,15 +1362,15 @@ fn presentational(dom: &Dom, id: Id, tag: &str, s: &mut Style) {
             match a.as_str() {
                 "left" => {
                     s.align = Align::Left;
-                    s.center_blocks = false;
+                    s.block_align = Align::Left;
                 }
                 "right" => {
                     s.align = Align::Right;
-                    s.center_blocks = false;
+                    s.block_align = Align::Right;
                 }
                 "center" | "middle" => {
                     s.align = Align::Center;
-                    s.center_blocks = true;
+                    s.block_align = Align::Center;
                 }
                 "justify" => s.align = Align::Justify,
                 _ => {}
@@ -782,9 +1391,64 @@ fn presentational(dom: &Dom, id: Id, tag: &str, s: &mut Style) {
     if let Some(h) = dom.attr(id, "height").and_then(parse_dim) {
         s.height = h;
     }
+    if tag == "img" {
+        let gap = |name| dom.attr(id, name).and_then(num).map(Len::Px);
+        if let Some(h) = gap("hspace") {
+            s.margin[1] = h;
+            s.margin[3] = h;
+        }
+        if let Some(v) = gap("vspace") {
+            s.margin[0] = v;
+            s.margin[2] = v;
+        }
+        if let Some(b) = dom.attr(id, "border").and_then(num).filter(|&b| b > 0.0) {
+            s.border = [b; 4];
+            s.border_style = [LineStyle::Solid; 4];
+            // Inherited: inside a link, the link's colour.
+            s.border_color = [s.color; 4];
+        }
+    }
+    if tag == "br"
+        && let Some(c) = dom.attr(id, "clear")
+    {
+        s.clear = parse_clear(&c.trim().to_ascii_lowercase());
+    }
+    if matches!(tag, "ul" | "ol" | "li")
+        && let Some(m) = dom.attr(id, "type").and_then(Marker::from_attr)
+    {
+        s.marker = m;
+    }
+    if matches!(tag, "td" | "th") && dom.attr(id, "nowrap").is_some() {
+        s.nowrap = true;
+    }
+    if tag == "hr" {
+        let size = dom.attr(id, "size").and_then(num).filter(|&v| v >= 1.0);
+        let color = dom.attr(id, "color").and_then(parse_color_legacy);
+        if dom.attr(id, "noshade").is_some() || color.is_some() {
+            let c = color.unwrap_or([128, 128, 128, 255]);
+            s.border_color = [c; 4];
+            s.bg = c;
+        }
+        if let Some(h) = size {
+            // A box of this height in all, as a browser draws it.
+            s.height = Len::Px((h - 2.0).max(0.0));
+        }
+        match dom.attr(id, "align").map(str::trim) {
+            Some(a) if a.eq_ignore_ascii_case("left") => {
+                s.margin[3] = Len::Px(0.0);
+                s.margin[1] = Len::Auto;
+            }
+            Some(a) if a.eq_ignore_ascii_case("right") => {
+                s.margin[3] = Len::Auto;
+                s.margin[1] = Len::Px(0.0);
+            }
+            _ => {}
+        }
+    }
     if tag == "table" {
         if let Some(b) = dom.attr(id, "border").and_then(num).filter(|&b| b > 0.0) {
             s.border = [b; 4];
+            s.border_style = [LineStyle::Solid; 4];
             s.border_color = [[128, 128, 128, 255]; 4];
         }
         if let Some(cs) = dom.attr(id, "cellspacing").and_then(num) {
@@ -815,6 +1479,16 @@ fn presentational(dom: &Dom, id: Id, tag: &str, s: &mut Style) {
                 s.font_size = *px;
             }
         }
+    }
+}
+
+/// `clear` and `<br clear>`: left, right.
+fn parse_clear(v: &str) -> (bool, bool) {
+    match v {
+        "left" => (true, false),
+        "right" => (false, true),
+        "both" | "all" => (true, true),
+        _ => (false, false),
     }
 }
 
@@ -873,30 +1547,50 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
             }
         }
         "background" | "background-image" => {
+            if name == "background" {
+                s.bg = [0; 4];
+                s.bg_image = None;
+                s.gradient = None;
+                s.bg_place = BgPlace::INITIAL;
+            } else if value == "none" {
+                s.bg_image = None;
+                s.gradient = None;
+            }
             if let Some(u) = url_of(value) {
                 s.bg_image = Some(u.into());
             }
-            if let Some((_, inner)) = value.split_once("gradient(") {
-                // No gradients: the first colour stop (bgcolor fallbacks usually exist too).
-                let stop = inner
-                    .split(',')
-                    .filter_map(|p| split_top(p.trim()).first().and_then(|t| parse_color(t)))
-                    .next();
-                if let Some(c) = stop {
+            if let Some(g) = parse_gradient(value) {
+                // Under it, for what looks at the background's colour.
+                if let Some(&(_, c)) = g.stops.first() {
                     s.bg = c;
                 }
+                s.gradient = Some(Arc::new(g));
+            } else if let Some(c) = first_stop(value) {
+                // Radial and conic ones: their first colour, as for a client
+                // with no gradients (a `bgcolor` usually says the same).
+                s.bg = c;
             }
             if name == "background" {
+                let mut place = Vec::new();
                 for tok in split_top(value) {
                     if let Some(c) = parse_color(tok) {
                         s.bg = c;
+                    } else if !tok.contains('(') {
+                        place.push(tok);
                     }
                 }
-                if value == "none" || value == "transparent" {
-                    s.bg = [0; 4];
-                }
+                parse_bg_shorthand(&mut s.bg_place, &place, fs);
             }
         }
+        "background-repeat" => {
+            set_bg_repeat(&mut s.bg_place, value);
+        }
+        "background-size" => {
+            if let Some(size) = parse_bg_size(&split_top(value), fs) {
+                s.bg_place.size = size;
+            }
+        }
+        "background-position" => set_bg_position(&mut s.bg_place, &split_top(value), fs),
         "font-family" => s.font_family = clean_family(value).into(),
         "font-size" => {
             s.font_size = match value {
@@ -916,13 +1610,7 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
                 },
             }
         }
-        "font-weight" => {
-            s.bold = match value {
-                "bold" | "bolder" => true,
-                "normal" | "lighter" => false,
-                v => v.parse::<u32>().map(|n| n >= 600).unwrap_or(s.bold),
-            }
-        }
+        "font-weight" => set_weight(s, value),
         "font-style" => s.italic = value == "italic" || value == "oblique",
         "font" => {
             // [style] [weight] size[/line-height] family
@@ -933,9 +1621,7 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
                     "italic" | "oblique" => s.italic = true,
                     "bold" | "bolder" => s.bold = true,
                     "normal" | "small-caps" | "lighter" => {}
-                    t if t.len() == 3 && t.parse::<u32>().is_ok() => {
-                        s.bold = t.parse::<u32>().is_ok_and(|n| n >= 600)
-                    }
+                    t if t.len() == 3 && t.parse::<u16>().is_ok() => set_weight(s, t),
                     t => {
                         let (sz, lh) = t.split_once('/').unwrap_or((t, ""));
                         if let Some(l) = parse_len(sz, ps.font_size) {
@@ -966,9 +1652,16 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
                 "center" | "-webkit-center" => Align::Center,
                 "right" | "end" | "-webkit-right" => Align::Right,
                 "justify" => Align::Justify,
+                "start" if s.rtl => Align::Right,
                 _ => Align::Left,
-            }
+            };
+            s.block_align = match value {
+                "-webkit-center" => Align::Center,
+                "-webkit-right" => Align::Right,
+                _ => Align::Left,
+            };
         }
+        "direction" => set_direction(s, value),
         "text-decoration" | "text-decoration-line" => {
             s.underline = value.contains("underline");
             s.strike = value.contains("line-through");
@@ -986,6 +1679,16 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
                 s.letter_spacing = p;
             }
         }
+        "word-spacing" => {
+            if let Some(Len::Px(p)) = parse_len(value, fs) {
+                s.word_spacing = p.clamp(-10.0, 100.0);
+            }
+        }
+        "text-indent" => {
+            if let Some(l) = parse_len(value, fs) {
+                s.indent = l;
+            }
+        }
         "white-space" => {
             s.pre = matches!(value, "pre" | "pre-wrap" | "pre-line");
             s.nowrap = matches!(value, "nowrap" | "pre");
@@ -994,6 +1697,8 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
         "height" => s.height = parse_len(value, fs).unwrap_or(Len::Auto),
         "min-width" => s.min_width = parse_len(value, fs).unwrap_or(Len::Auto),
         "max-width" => s.max_width = parse_len(value, fs).unwrap_or(Len::Auto),
+        "min-height" => s.min_height = parse_len(value, fs).unwrap_or(Len::Auto),
+        "box-sizing" => s.border_box = value == "border-box",
         "margin" => {
             if let Some(v) = four(value, |x| parse_len(x, fs)) {
                 s.margin = v;
@@ -1013,7 +1718,7 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
         "padding-bottom" => set_px(&mut s.padding[2], value, fs),
         "padding-left" => set_px(&mut s.padding[3], value, fs),
         "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
-            let (w, c, none) = parse_border(value, fs);
+            let (w, c, st) = parse_border(value, fs);
             let sides: &[usize] = match name {
                 "border" => &[0, 1, 2, 3],
                 "border-top" => &[0],
@@ -1023,7 +1728,10 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
             };
             for &i in sides {
                 if let Some(b) = s.border.get_mut(i) {
-                    *b = if none { 0.0 } else { w };
+                    *b = w;
+                }
+                if let Some(bs) = s.border_style.get_mut(i) {
+                    *bs = st;
                 }
                 if let Some(bc) = s.border_color.get_mut(i) {
                     *bc = c.unwrap_or(s.color);
@@ -1031,7 +1739,7 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
             }
         }
         "border-width" => {
-            if let Some(v) = four(value, |x| px(x, fs)) {
+            if let Some(v) = four(value, |x| border_width(x, fs)) {
                 s.border = v;
             }
         }
@@ -1048,11 +1756,33 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
                 _ => {}
             }
         }
-        "border-style" if value == "none" || value == "hidden" => s.border = [0.0; 4],
-        "border-top-width" => set_px(&mut s.border[0], value, fs),
-        "border-right-width" => set_px(&mut s.border[1], value, fs),
-        "border-bottom-width" => set_px(&mut s.border[2], value, fs),
-        "border-left-width" => set_px(&mut s.border[3], value, fs),
+        "border-style" => {
+            if let Some(v) = four(value, LineStyle::parse) {
+                s.border_style = v;
+            }
+        }
+        "border-top-style" | "border-right-style" | "border-bottom-style" | "border-left-style" => {
+            let i = match name {
+                "border-top-style" => 0,
+                "border-right-style" => 1,
+                "border-bottom-style" => 2,
+                _ => 3,
+            };
+            if let (Some(st), Some(bs)) = (LineStyle::parse(value), s.border_style.get_mut(i)) {
+                *bs = st;
+            }
+        }
+        "border-top-width" | "border-right-width" | "border-bottom-width" | "border-left-width" => {
+            let i = match name {
+                "border-top-width" => 0,
+                "border-right-width" => 1,
+                "border-bottom-width" => 2,
+                _ => 3,
+            };
+            if let (Some(w), Some(b)) = (border_width(value, fs), s.border.get_mut(i)) {
+                *b = w;
+            }
+        }
         "border-top-color" | "border-right-color" | "border-bottom-color" | "border-left-color" => {
             let i = match name {
                 "border-top-color" => 0,
@@ -1065,11 +1795,38 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
             }
         }
         "border-radius" => {
-            if let Some(Len::Px(p)) = split_top(value).first().and_then(|v| parse_len(v, fs)) {
-                s.radius = p;
+            // Elliptical corners (`a / b`) keep their horizontal radii.
+            let round = value.split('/').next().unwrap_or(value);
+            if let Some(v) = four(round, |x| parse_len(x, fs)) {
+                match v[0] {
+                    Len::Px(p) if v.iter().all(|l| *l == v[0]) => {
+                        s.radius = p;
+                        s.corners = None;
+                    }
+                    _ => s.corners = Some(v),
+                }
+            }
+        }
+        "border-top-left-radius"
+        | "border-top-right-radius"
+        | "border-bottom-right-radius"
+        | "border-bottom-left-radius" => {
+            let i = match name {
+                "border-top-left-radius" => 0,
+                "border-top-right-radius" => 1,
+                "border-bottom-right-radius" => 2,
+                _ => 3,
+            };
+            if let Some(l) = split_top(value).first().and_then(|v| parse_len(v, fs)) {
+                let mut c = s.corners.unwrap_or([Len::Px(s.radius); 4]);
+                if let Some(x) = c.get_mut(i) {
+                    *x = l;
+                }
+                s.corners = Some(c);
             }
         }
         "border-collapse" => s.collapse = value == "collapse",
+        "table-layout" => s.fixed_layout = value == "fixed",
         "border-spacing" => {
             if let Some(Len::Px(p)) = split_top(value).first().and_then(|v| parse_len(v, fs)) {
                 s.spacing = p;
@@ -1090,6 +1847,7 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
                 _ => Float::None,
             }
         }
+        "clear" => s.clear = parse_clear(value),
         "position" => {
             s.fixed = value == "fixed";
             s.absolute = value == "absolute";
@@ -1111,8 +1869,47 @@ fn apply(s: &mut Style, name: &str, value: &str, ps: &Style) {
         }
         "overflow" | "overflow-y" => s.overflow_hidden = value == "hidden",
         "max-height" => s.max_height = parse_len(value, fs).unwrap_or(Len::Auto),
-        "opacity" => s.opacity_zero = num(value).is_some_and(|o| o <= 0.01),
-        "list-style" | "list-style-type" => s.list_none = value.starts_with("none"),
+        "opacity" => {
+            let o = value
+                .strip_suffix('%')
+                .and_then(num)
+                .map(|p| p / 100.0)
+                .or_else(|| num(value));
+            if let Some(o) = o {
+                s.opacity = o.clamp(0.0, 1.0);
+                s.opacity_zero = o <= 0.01;
+            }
+        }
+        "object-fit" => s.cover = value == "cover",
+        "list-style" | "list-style-type" => {
+            let toks = split_top(value);
+            // `list-style: none` and `list-style: inside none` alike; an
+            // image (never fetched) leaves the type alone.
+            s.list_none = toks.contains(&"none");
+            if let Some(m) = toks.iter().find_map(|t| Marker::parse(t)) {
+                s.marker = m;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `direction`, which also starts the text from that side (`text-align:
+/// start`) until something says otherwise.
+fn set_direction(s: &mut Style, v: &str) {
+    match v {
+        "rtl" => {
+            s.rtl = true;
+            if s.align == Align::Left {
+                s.align = Align::Right;
+            }
+        }
+        "ltr" => {
+            s.rtl = false;
+            if s.align == Align::Right && s.block_align != Align::Right {
+                s.align = Align::Left;
+            }
+        }
         _ => {}
     }
 }
@@ -1161,27 +1958,32 @@ fn four<T: Copy>(v: &str, f: impl Fn(&str) -> Option<T>) -> Option<[T; 4]> {
     })
 }
 
-fn parse_border(v: &str, fs: f32) -> (f32, Option<Color>, bool) {
-    let mut w = 3.0;
+/// A `border-width` value.
+fn border_width(v: &str, fs: f32) -> Option<f32> {
+    match v {
+        "thin" => Some(1.0),
+        "medium" => Some(MEDIUM_BORDER),
+        "thick" => Some(5.0),
+        v => px(v, fs),
+    }
+}
+
+/// The `border` shorthand: width, colour and style, each with its initial
+/// value when left out (so `border: 1px #ccc` draws nothing).
+fn parse_border(v: &str, fs: f32) -> (f32, Option<Color>, LineStyle) {
+    let mut w = MEDIUM_BORDER;
     let mut c = None;
-    let mut none = false;
+    let mut st = LineStyle::None;
     for t in split_top(v) {
-        match t {
-            "none" | "hidden" => none = true,
-            "thin" => w = 1.0,
-            "medium" => w = 3.0,
-            "thick" => w = 5.0,
-            "solid" | "dashed" | "dotted" | "double" | "groove" | "ridge" | "inset" | "outset" => {}
-            t => {
-                if let Some(p) = px(t, fs) {
-                    w = p;
-                } else if let Some(col) = parse_color(t) {
-                    c = Some(col);
-                }
-            }
+        if let Some(l) = LineStyle::parse(t) {
+            st = l;
+        } else if let Some(b) = border_width(t, fs) {
+            w = b;
+        } else if let Some(col) = parse_color(t) {
+            c = Some(col);
         }
     }
-    (w, c, none)
+    (w, c, st)
 }
 
 /// Split on whitespace outside parentheses.
@@ -1349,55 +2151,154 @@ pub fn parse_color(v: &str) -> Option<Color> {
 fn named_color(n: &str) -> Option<Color> {
     let (r, g, b) = match n {
         "transparent" => return Some([0; 4]),
-        "black" => (0, 0, 0),
-        "white" => (255, 255, 255),
-        "red" => (255, 0, 0),
-        "green" => (0, 128, 0),
-        "blue" => (0, 0, 255),
-        "yellow" => (255, 255, 0),
-        "gray" | "grey" => (128, 128, 128),
-        "silver" => (192, 192, 192),
-        "maroon" => (128, 0, 0),
-        "purple" => (128, 0, 128),
-        "fuchsia" | "magenta" => (255, 0, 255),
-        "lime" => (0, 255, 0),
-        "olive" => (128, 128, 0),
-        "navy" => (0, 0, 128),
-        "teal" => (0, 128, 128),
-        "aqua" | "cyan" => (0, 255, 255),
-        "orange" => (255, 165, 0),
-        "pink" => (255, 192, 203),
-        "brown" => (165, 42, 42),
-        "gold" => (255, 215, 0),
-        "darkgray" | "darkgrey" => (169, 169, 169),
-        "lightgray" | "lightgrey" => (211, 211, 211),
-        "whitesmoke" => (245, 245, 245),
-        "gainsboro" => (220, 220, 220),
-        "dimgray" | "dimgrey" => (105, 105, 105),
-        "darkred" => (139, 0, 0),
-        "darkgreen" => (0, 100, 0),
-        "darkblue" => (0, 0, 139),
-        "lightblue" => (173, 216, 230),
-        "lightgreen" => (144, 238, 144),
-        "royalblue" => (65, 105, 225),
-        "steelblue" => (70, 130, 180),
-        "crimson" => (220, 20, 60),
-        "coral" => (255, 127, 80),
-        "tomato" => (255, 99, 71),
-        "salmon" => (250, 128, 114),
-        "indigo" => (75, 0, 130),
-        "violet" => (238, 130, 238),
+        "aliceblue" => (240, 248, 255),
+        "antiquewhite" => (250, 235, 215),
+        "aqua" => (0, 255, 255),
+        "aquamarine" => (127, 255, 212),
+        "azure" => (240, 255, 255),
         "beige" => (245, 245, 220),
+        "bisque" => (255, 228, 196),
+        "black" => (0, 0, 0),
+        "blanchedalmond" => (255, 235, 205),
+        "blue" => (0, 0, 255),
+        "blueviolet" => (138, 43, 226),
+        "brown" => (165, 42, 42),
+        "burlywood" => (222, 184, 135),
+        "cadetblue" => (95, 158, 160),
+        "chartreuse" => (127, 255, 0),
+        "chocolate" => (210, 105, 30),
+        "coral" => (255, 127, 80),
+        "cornflowerblue" => (100, 149, 237),
+        "cornsilk" => (255, 248, 220),
+        "crimson" => (220, 20, 60),
+        "cyan" => (0, 255, 255),
+        "darkblue" => (0, 0, 139),
+        "darkcyan" => (0, 139, 139),
+        "darkgoldenrod" => (184, 134, 11),
+        "darkgray" => (169, 169, 169),
+        "darkgreen" => (0, 100, 0),
+        "darkgrey" => (169, 169, 169),
+        "darkkhaki" => (189, 183, 107),
+        "darkmagenta" => (139, 0, 139),
+        "darkolivegreen" => (85, 107, 47),
+        "darkorange" => (255, 140, 0),
+        "darkorchid" => (153, 50, 204),
+        "darkred" => (139, 0, 0),
+        "darksalmon" => (233, 150, 122),
+        "darkseagreen" => (143, 188, 143),
+        "darkslateblue" => (72, 61, 139),
+        "darkslategray" => (47, 79, 79),
+        "darkslategrey" => (47, 79, 79),
+        "darkturquoise" => (0, 206, 209),
+        "darkviolet" => (148, 0, 211),
+        "deeppink" => (255, 20, 147),
+        "deepskyblue" => (0, 191, 255),
+        "dimgray" => (105, 105, 105),
+        "dimgrey" => (105, 105, 105),
+        "dodgerblue" => (30, 144, 255),
+        "firebrick" => (178, 34, 34),
+        "floralwhite" => (255, 250, 240),
+        "forestgreen" => (34, 139, 34),
+        "fuchsia" => (255, 0, 255),
+        "gainsboro" => (220, 220, 220),
+        "ghostwhite" => (248, 248, 255),
+        "gold" => (255, 215, 0),
+        "goldenrod" => (218, 165, 32),
+        "gray" => (128, 128, 128),
+        "green" => (0, 128, 0),
+        "greenyellow" => (173, 255, 47),
+        "grey" => (128, 128, 128),
+        "honeydew" => (240, 255, 240),
+        "hotpink" => (255, 105, 180),
+        "indianred" => (205, 92, 92),
+        "indigo" => (75, 0, 130),
         "ivory" => (255, 255, 240),
         "khaki" => (240, 230, 140),
-        "tan" => (210, 180, 140),
-        "snow" => (255, 250, 250),
+        "lavender" => (230, 230, 250),
+        "lavenderblush" => (255, 240, 245),
+        "lawngreen" => (124, 252, 0),
+        "lemonchiffon" => (255, 250, 205),
+        "lightblue" => (173, 216, 230),
+        "lightcoral" => (240, 128, 128),
+        "lightcyan" => (224, 255, 255),
+        "lightgoldenrodyellow" => (250, 250, 210),
+        "lightgray" => (211, 211, 211),
+        "lightgreen" => (144, 238, 144),
+        "lightgrey" => (211, 211, 211),
+        "lightpink" => (255, 182, 193),
+        "lightsalmon" => (255, 160, 122),
+        "lightseagreen" => (32, 178, 170),
+        "lightskyblue" => (135, 206, 250),
+        "lightslategray" => (119, 136, 153),
+        "lightslategrey" => (119, 136, 153),
+        "lightsteelblue" => (176, 196, 222),
+        "lightyellow" => (255, 255, 224),
+        "lime" => (0, 255, 0),
+        "limegreen" => (50, 205, 50),
         "linen" => (250, 240, 230),
-        "aliceblue" => (240, 248, 255),
-        "ghostwhite" => (248, 248, 255),
-        "darkorange" => (255, 140, 0),
-        "dodgerblue" => (30, 144, 255),
-        "slategray" | "slategrey" => (112, 128, 144),
+        "magenta" => (255, 0, 255),
+        "maroon" => (128, 0, 0),
+        "mediumaquamarine" => (102, 205, 170),
+        "mediumblue" => (0, 0, 205),
+        "mediumorchid" => (186, 85, 211),
+        "mediumpurple" => (147, 112, 219),
+        "mediumseagreen" => (60, 179, 113),
+        "mediumslateblue" => (123, 104, 238),
+        "mediumspringgreen" => (0, 250, 154),
+        "mediumturquoise" => (72, 209, 204),
+        "mediumvioletred" => (199, 21, 133),
+        "midnightblue" => (25, 25, 112),
+        "mintcream" => (245, 255, 250),
+        "mistyrose" => (255, 228, 225),
+        "moccasin" => (255, 228, 181),
+        "navajowhite" => (255, 222, 173),
+        "navy" => (0, 0, 128),
+        "oldlace" => (253, 245, 230),
+        "olive" => (128, 128, 0),
+        "olivedrab" => (107, 142, 35),
+        "orange" => (255, 165, 0),
+        "orangered" => (255, 69, 0),
+        "orchid" => (218, 112, 214),
+        "palegoldenrod" => (238, 232, 170),
+        "palegreen" => (152, 251, 152),
+        "paleturquoise" => (175, 238, 238),
+        "palevioletred" => (219, 112, 147),
+        "papayawhip" => (255, 239, 213),
+        "peachpuff" => (255, 218, 185),
+        "peru" => (205, 133, 63),
+        "pink" => (255, 192, 203),
+        "plum" => (221, 160, 221),
+        "powderblue" => (176, 224, 230),
+        "purple" => (128, 0, 128),
+        "rebeccapurple" => (102, 51, 153),
+        "red" => (255, 0, 0),
+        "rosybrown" => (188, 143, 143),
+        "royalblue" => (65, 105, 225),
+        "saddlebrown" => (139, 69, 19),
+        "salmon" => (250, 128, 114),
+        "sandybrown" => (244, 164, 96),
+        "seagreen" => (46, 139, 87),
+        "seashell" => (255, 245, 238),
+        "sienna" => (160, 82, 45),
+        "silver" => (192, 192, 192),
+        "skyblue" => (135, 206, 235),
+        "slateblue" => (106, 90, 205),
+        "slategray" => (112, 128, 144),
+        "slategrey" => (112, 128, 144),
+        "snow" => (255, 250, 250),
+        "springgreen" => (0, 255, 127),
+        "steelblue" => (70, 130, 180),
+        "tan" => (210, 180, 140),
+        "teal" => (0, 128, 128),
+        "thistle" => (216, 191, 216),
+        "tomato" => (255, 99, 71),
+        "turquoise" => (64, 224, 208),
+        "violet" => (238, 130, 238),
+        "wheat" => (245, 222, 179),
+        "white" => (255, 255, 255),
+        "whitesmoke" => (245, 245, 245),
+        "yellow" => (255, 255, 0),
+        "yellowgreen" => (154, 205, 50),
         _ => return None,
     };
     Some([r, g, b, 255])

@@ -210,3 +210,37 @@ fn fixed_width_page_selects_inside_its_width() {
             .all(|r| r.x >= 0.0 && r.x + r.w <= d.width + 0.5)
     );
 }
+
+/// Screen readers' boxes: every character of a line has a left edge and a
+/// width, in order and inside the line, and the hit test at a character's
+/// middle lands on that character. A wrapped paragraph's lines go on to
+/// the next one; its last line ends the paragraph.
+#[test]
+fn lines_carry_their_characters_and_paragraph_ends() {
+    let d = doc("12-personal-applemail", 320.0);
+    let lines = d.text_lines();
+    for l in &lines {
+        assert_eq!(l.chars.len(), l.text.chars().count(), "{l:?}");
+        assert!(l.chars.windows(2).all(|w| w[0].0 <= w[1].0 + 0.01), "{l:?}");
+        assert!(
+            l.chars
+                .iter()
+                .all(|&(x, w)| x >= -0.5 && w >= 0.0 && x + w <= l.w + 0.5),
+            "{l:?}"
+        );
+    }
+    let first = line(&d, |t| t.starts_with("Olá Ana"));
+    assert!(first.ends_paragraph);
+    let wraps = lines
+        .iter()
+        .position(|l| l.text.starts_with("Obrigada"))
+        .expect("the long paragraph");
+    assert!(!lines[wraps].ends_paragraph, "{:?}", lines[wraps]);
+    // The character under a character's middle is that character.
+    let l = &lines[wraps];
+    let (cx, cw) = l.chars[3];
+    let (a, b) = d
+        .word_at(l.x + cx + cw / 2.0, l.y + l.h / 2.0)
+        .expect("a word");
+    assert_eq!(d.selection_text(a, b), "Obrigada");
+}

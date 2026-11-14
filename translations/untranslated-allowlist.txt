@@ -1,30 +1,7 @@
-# String literals in ui/*.slint that are not translated text: ids compared in
-# the UI, product and provider names, example hosts, language names (each shown
-# in its own language) and font families. One unescaped literal per line;
-# the guard test (tests/i18n_catalog.rs) fails for any other literal outside
-# @tr() and for an entry here that no .slint file has any more.
-edit
-remove
-add
-download
-remove-all
-Komorebi
-Purelymail
-Postale.io
-imap.example.com
-smtp.example.com
-https://dav.example.com/
-github.com/RusticStack/komorebi
-English
-Português (Portugal)
-Segoe UI
-Segoe MDL2 Assets
-Consolas
-Arial
-Calibri
-Verdana
-Tahoma
-Trebuchet MS
-Georgia
-Times New Roman
-Courier New
+# String literals in the GPUI app's sources (crates/komorebi-gpui/src) that
+# are shown but not translated text: product and provider names, example
+# hosts, language names (each shown in its own language) and font families.
+# One unescaped literal per line; the guard test (tests/i18n_catalog.rs)
+# fails for any shown literal outside tr! that is not listed here, and for an
+# entry here that no source has any more. Empty now: every shown string of
+# the app is a message.

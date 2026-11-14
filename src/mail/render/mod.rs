@@ -34,7 +34,7 @@ mod select;
 mod style;
 mod table;
 
-pub use layout::{Brush, Doc, Item, Link, MAX_DOC_H, MAX_GROUP_TEXT, Rect, TextLine};
+pub use layout::{Brush, Doc, Item, LineMap, Link, MAX_DOC_H, MAX_GROUP_TEXT, Rect, TextLine};
 pub use paint::{GlyphCache, MAX_CACHE_BYTES as MAX_GLYPH_CACHE_BYTES};
 pub use select::TextPos;
 
@@ -48,6 +48,21 @@ pub const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_REMOTE_IMAGES: usize = 1000;
 /// The layout budget per message.
 pub const LAYOUT_BUDGET: Duration = Duration::from_millis(250);
+/// The most [`layout_budget`] gives a long message.
+pub const MAX_LAYOUT_BUDGET: Duration = Duration::from_millis(900);
+
+/// The layout budget for `input`: [`LAYOUT_BUDGET`], plus a millisecond for
+/// every 2 KB of HTML past 64 KB, up to [`MAX_LAYOUT_BUDGET`]. Layout takes
+/// time in proportion to the text, so a long reply chain (several hundred
+/// KB) would otherwise run out of time on a slower machine and show as
+/// plain text.
+pub fn layout_budget(input: &RenderInput) -> Duration {
+    let bytes = input.html.as_ref().map_or(0, String::len);
+    let extra = (bytes.saturating_sub(64 * 1024) / 2048) as u64;
+    LAYOUT_BUDGET
+        .saturating_add(Duration::from_millis(extra))
+        .min(MAX_LAYOUT_BUDGET)
+}
 
 /// What a message offers for rendering.
 #[derive(Debug, Clone, Default)]
@@ -93,6 +108,10 @@ pub struct Opts {
     /// Dim the colours for a dark theme, unless the message has dark rules
     /// of its own (see [`Doc::dimmed`]).
     pub dim: bool,
+    /// Stop laying out past this height (CSS px), for a quick first look at
+    /// a long message; the page is then [`Doc::truncated`] there. `None`
+    /// lays out up to [`MAX_DOC_H`].
+    pub stop_at: Option<f32>,
 }
 
 impl Default for Opts {
@@ -103,6 +122,7 @@ impl Default for Opts {
             remote: RemotePolicy::Block,
             dark: false,
             dim: false,
+            stop_at: None,
         }
     }
 }
@@ -133,6 +153,10 @@ impl Deadline {
     }
     pub fn expired(&self) -> bool {
         self.0.is_some_and(|end| Instant::now() >= end)
+    }
+    /// The same limit, `by` later.
+    fn later(self, by: Duration) -> Self {
+        Deadline(self.0.and_then(|end| end.checked_add(by)))
     }
 }
 
@@ -181,7 +205,9 @@ pub(crate) struct Sources<'a> {
 }
 
 impl Sources<'_> {
-    fn load(&mut self, src: &str) -> Option<Arc<[u8]>> {
+    /// The bytes behind `src`, if the message has them or the policy allows
+    /// them; asking says nothing about what the layout goes on to want.
+    fn peek(&mut self, src: &str) -> Option<Arc<[u8]>> {
         let s = src.trim();
         let scheme = |p: &str| s.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
         let bytes = if scheme("cid:") {
@@ -193,21 +219,34 @@ impl Sources<'_> {
         } else if scheme("data:") {
             data_url(s.get(5..)?).map(Arc::from)
         } else if css::is_remote(s) {
-            let got = match self.remote {
+            match self.remote {
                 RemotePolicy::Allow => self.resolver.remote(s),
                 RemotePolicy::Block => None,
-            };
-            if got.is_none()
-                && self.missing.len() < MAX_REMOTE_IMAGES
-                && !self.missing.iter().any(|m| m == s)
-            {
-                self.missing.push(s.to_string());
             }
-            got
         } else {
             None
         };
         bytes.filter(|b| b.len() <= img::MAX_ENCODED)
+    }
+
+    /// [`Self::peek`] for an image the layout wants: a remote one it does not
+    /// get counts as missing.
+    fn load(&mut self, src: &str) -> Option<Arc<[u8]>> {
+        let got = self.peek(src);
+        self.note_missing(src, got.is_some());
+        got
+    }
+
+    /// The layout wants `src`, which is there or not.
+    fn note_missing(&mut self, src: &str, there: bool) {
+        let s = src.trim();
+        if !there
+            && css::is_remote(s)
+            && self.missing.len() < MAX_REMOTE_IMAGES
+            && !self.missing.iter().any(|m| m == s)
+        {
+            self.missing.push(s.to_string());
+        }
     }
 }
 
@@ -245,6 +284,25 @@ pub fn layout(
     layout_with(input, opts, cx, deadline, &mut NoRemote)
 }
 
+/// What several layouts of one message (at other widths or colours) share:
+/// its parsed document. Made for one [`RenderInput`] and used with it only.
+pub struct Reuse<'i> {
+    input: &'i RenderInput,
+    dom: Option<dom::Dom>,
+    /// The images decoded so far.
+    decoded: img::Decoded,
+}
+
+impl<'i> Reuse<'i> {
+    pub fn new(input: &'i RenderInput) -> Self {
+        Reuse {
+            input,
+            dom: None,
+            decoded: img::Decoded::default(),
+        }
+    }
+}
+
 /// Lay out a message, asking `resolver` for remote images when
 /// `opts.remote` allows them.
 pub fn layout_with(
@@ -254,6 +312,23 @@ pub fn layout_with(
     deadline: &Deadline,
     resolver: &mut dyn Resolver,
 ) -> Result<Doc, RenderError> {
+    layout_reusing(&mut Reuse::new(input), opts, cx, deadline, resolver, None)
+}
+
+/// [`layout_with`] for the same message again. The parsed document is
+/// kept in `reuse`, and `prev` (an earlier layout of it) hands over the
+/// text it shaped, for every inline group that does not depend on the
+/// width and whose styles and text are unchanged. The result is the same
+/// as without `prev`; only the shaping is skipped.
+pub fn layout_reusing(
+    reuse: &mut Reuse<'_>,
+    opts: &Opts,
+    cx: &mut Engine,
+    deadline: &Deadline,
+    resolver: &mut dyn Resolver,
+    prev: Option<&Doc>,
+) -> Result<Doc, RenderError> {
+    let input = reuse.input;
     let html = input
         .html
         .as_deref()
@@ -267,7 +342,8 @@ pub fn layout_with(
     } else {
         600.0
     };
-    let dom = dom::parse(html);
+    let dom = &*reuse.dom.get_or_insert_with(|| dom::parse(html));
+    let decoded = &mut reuse.decoded;
     if deadline.expired() {
         return Err(RenderError::Deadline);
     }
@@ -276,7 +352,7 @@ pub fn layout_with(
         dark: opts.dark,
         dim: opts.dim,
     };
-    let styles = style::compute(&dom, &ctx, deadline).ok_or(RenderError::Deadline)?;
+    let styles = style::compute(dom, &ctx, deadline).ok_or(RenderError::Deadline)?;
     let mut sources = Sources {
         inline: &input.inline,
         remote: opts.remote,
@@ -284,15 +360,28 @@ pub fn layout_with(
         missing: Vec::new(),
     };
     let scale = clamp_scale(opts.scale);
+    // The images first, all at once and on their own budget: the time they
+    // take is no reason to give up on the message's layout.
+    let started = Instant::now();
+    let wanted = layout::wanted_images(dom, &styles, &mut sources, width, scale, decoded);
+    if !wanted.is_empty() {
+        let (got, left) = img::decode_all(wanted, decoded.pixels);
+        decoded.pixels = left;
+        decoded.images.extend(got);
+    }
+    let deadline = deadline.later(started.elapsed());
     let doc = layout::layout(
-        &dom,
+        dom,
         styles,
         &mut cx.fcx,
         &mut cx.lcx,
         &mut sources,
+        decoded,
         width,
         scale,
-        deadline,
+        &deadline,
+        prev,
+        opts.stop_at.filter(|h| h.is_finite()).unwrap_or(MAX_DOC_H),
     )
     .ok_or(RenderError::Deadline)?;
     if doc.items.is_empty() {

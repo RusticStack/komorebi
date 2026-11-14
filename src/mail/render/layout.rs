@@ -10,21 +10,29 @@
 use super::Sources;
 use super::dom::{Dom, Id, Kind, ROOT};
 use super::img::{self, ImageData};
-use super::style::{Align, Color, Display, Float, Len, LineH, Style, Styles, VAlign};
+use super::select::TextPos;
+use super::style::{
+    Align, BgSize, Color, Display, Float, Gradient, Len, LineH, LineStyle, Radius, Style, Styles,
+    VAlign,
+};
 use super::{Deadline, links};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontWeight, InlineBox,
-    InlineBoxKind, Layout, LayoutContext, LineHeight, OverflowWrap, PositionedLayoutItem,
-    TextStyle, TextWrapMode, WhiteSpaceCollapse, WordBreak,
+    Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontStyle, FontWeight,
+    InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, OverflowWrap,
+    PositionedLayoutItem, TextStyle, TextWrapMode, WhiteSpaceCollapse, WordBreak,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Brush {
     pub color: Color,
     /// Index into [`Doc::links`]; 0 for none.
     pub link: u32,
+    /// The inline element whose background and border this text sits on
+    /// (its node id); 0 for none.
+    pub deco: u32,
 }
 
 impl Default for Brush {
@@ -32,6 +40,7 @@ impl Default for Brush {
         Brush {
             color: [0, 0, 0, 255],
             link: 0,
+            deco: 0,
         }
     }
 }
@@ -48,13 +57,16 @@ pub enum Item {
     Rect {
         r: Rect,
         color: Color,
-        radius: f32,
+        radius: Radius,
     },
+    /// A rounded box's border, or a dashed or dotted one or one side of it (a
+    /// rectangle as thin as `width`: the line along its length).
     Stroke {
         r: Rect,
         width: f32,
         color: Color,
-        radius: f32,
+        radius: Radius,
+        style: LineStyle,
     },
     /// `clip_h`: paint only lines whose bottom is within this height (alt
     /// text in placeholders). `selectable`: message text, as opposed to a
@@ -66,11 +78,29 @@ pub enum Item {
         clip_h: f32,
         selectable: bool,
     },
+    /// Stretched to fill `r`, shown only within `clip`, with `alpha`.
     Image {
         r: Rect,
         img: usize,
         clip: Option<Rect>,
-        radius: f32,
+        radius: Radius,
+        alpha: f32,
+    },
+    /// A background image over box `r`: `tile` is the first tile, relative to
+    /// the page; it repeats along the axes that say so.
+    Tiled {
+        r: Rect,
+        img: usize,
+        tile: Rect,
+        repeat: (bool, bool),
+        radius: Radius,
+    },
+    /// A linear gradient from (`x0`, `y0`) to (`x1`, `y1`) on the page over `r`.
+    Gradient {
+        r: Rect,
+        radius: Radius,
+        line: [f32; 4],
+        stops: std::sync::Arc<Gradient>,
     },
     Link {
         r: Rect,
@@ -133,24 +163,171 @@ pub struct Doc {
     /// or not supplied by the resolver. Tracking pixels and remote CSS and
     /// fonts are never among them. Consent loads exactly these.
     pub remote_images: Vec<String>,
+    /// For each inline group whose layout does not depend on the width: a
+    /// digest of everything the shaper was given, and the index of its
+    /// layout in [`Doc::layouts`]. A second layout of the same message
+    /// (another width) reuses these instead of shaping the text again.
+    pub(super) shaped: Vec<(GroupKey, u32)>,
+    /// Inline groups taken from the earlier layout instead of shaped.
+    pub reused: usize,
+}
+
+/// Where a line of [`Doc::text_lines`] came from: what maps a text
+/// position onto it.
+#[derive(Debug, Clone)]
+struct LineSource {
+    item: usize,
+    range: std::ops::Range<usize>,
+    /// The visible byte ranges of the item's text the line was built from,
+    /// in text order.
+    parts: Vec<std::ops::Range<usize>>,
+    /// Characters trimmed off the start of the line's text.
+    lead: usize,
+    /// Characters of the line's (trimmed) text.
+    chars: usize,
+}
+
+impl LineSource {
+    /// Characters of the line's (trimmed) text before byte `index` of its
+    /// item's `text`.
+    fn chars_before(&self, text: &str, index: usize) -> usize {
+        let raw: usize = self
+            .parts
+            .iter()
+            .filter(|p| p.start < index)
+            .map(|p| {
+                let end = p.end.min(index);
+                text.get(p.start..end).map_or(0, |s| s.chars().count())
+            })
+            .sum();
+        raw.saturating_sub(self.lead).min(self.chars)
+    }
+}
+
+/// What maps a selection onto the lines of [`Doc::text_lines_upto`]
+/// without walking the layout again: built with the lines, kept with the
+/// page, asked once per selection change.
+#[derive(Debug, Clone, Default)]
+pub struct LineMap {
+    lines: Vec<LineSource>,
+    /// Whether lines were left out past the cap.
+    capped: bool,
+}
+
+impl LineMap {
+    /// Where the selection from `a` to `b` (either order) of `doc` starts
+    /// and ends in the mapped lines, as (line, character in its text): what
+    /// screen readers get as the page's text selection. A position in
+    /// hidden text or between lines goes to the start of the next line; an
+    /// end past the last mapped line goes to that line's end. `None` with
+    /// no lines, or when the selection starts past the cap.
+    pub fn positions(
+        &self,
+        doc: &Doc,
+        a: TextPos,
+        b: TextPos,
+    ) -> Option<((usize, usize), (usize, usize))> {
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        let last = self.lines.len().checked_sub(1)?;
+        let end_of_last = (last, self.lines.last()?.chars);
+        let at = |p: TextPos| -> Option<(usize, usize)> {
+            let i = self.lines.partition_point(|l| {
+                l.item < p.item || (l.item == p.item && l.range.end < p.index)
+            });
+            let l = self.lines.get(i)?;
+            Some(if l.item == p.item && p.index >= l.range.start {
+                (i, l.chars_before(doc.text_of(l.item), p.index))
+            } else {
+                (i, 0)
+            })
+        };
+        let start = match at(a) {
+            Some(s) => s,
+            None if self.capped => return None,
+            None => end_of_last,
+        };
+        Some((start, at(b).unwrap_or(end_of_last)))
+    }
 }
 
 /// One visual line of text (see [`Doc::text_lines`]).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TextLine {
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
     pub text: String,
+    /// Each character of `text`: its left edge from `x`, and its width.
+    pub chars: Vec<(f32, f32)>,
+    /// Whether a paragraph (or a forced line break) ends with this line;
+    /// otherwise its text wraps on to the next line.
+    pub ends_paragraph: bool,
+}
+
+/// A visible cluster of a line: its text and where it is drawn.
+struct LineCluster {
+    range: std::ops::Range<usize>,
+    /// Left edge from the line's start.
+    x: f32,
+    advance: f32,
+}
+
+/// The visible clusters of `line` within its text range `line_r`, in text
+/// order, each with its left edge from the line's start (`offset`, the
+/// line's own offset in its layout). A run split by style comes as several
+/// glyph runs: each run's clusters are walked once, from where its first
+/// glyph run starts.
+fn line_clusters(
+    line: &parley::Line<'_, Brush>,
+    line_r: &std::ops::Range<usize>,
+    offset: f32,
+) -> Vec<LineCluster> {
+    let mut out = Vec::new();
+    let mut last_run = None;
+    for item in line.items() {
+        let PositionedLayoutItem::GlyphRun(gr) = item else {
+            continue;
+        };
+        let run = gr.run();
+        let run_r = run.text_range();
+        if last_run.as_ref() == Some(&run_r) {
+            continue;
+        }
+        last_run = Some(run_r);
+        let mut x = gr.offset() - offset;
+        for c in run.visual_clusters() {
+            let advance = c.advance();
+            let shown = c.first_style().brush.color[3] != 0 && run.font_size() >= 0.5;
+            let r = c.text_range();
+            // A run can span lines: keep this line's part.
+            if shown && r.start >= line_r.start && r.end <= line_r.end {
+                out.push(LineCluster {
+                    range: r,
+                    x,
+                    advance,
+                });
+            }
+            x += advance;
+        }
+    }
+    out.sort_by_key(|c| c.range.start);
+    out
 }
 
 impl Doc {
     /// Visible text, one entry per laid-out line in display-list order.
     /// Transparent (hidden) and zero-size text is left out.
     pub fn text_lines(&self) -> Vec<TextLine> {
+        self.text_lines_upto(usize::MAX).0
+    }
+
+    /// The first `max_lines` of [`Doc::text_lines`], and what maps a
+    /// selection onto them ([`LineMap::positions`]).
+    pub fn text_lines_upto(&self, max_lines: usize) -> (Vec<TextLine>, LineMap) {
         let mut out = vec![];
-        for it in &self.items {
+        let mut map = LineMap::default();
+        for (index, it) in self.items.iter().enumerate() {
             let Item::Text { layout, x, y, .. } = it else {
                 continue;
             };
@@ -158,32 +335,82 @@ impl Doc {
                 continue;
             };
             for line in l.lines() {
+                if out.len() >= max_lines {
+                    map.capped = true;
+                    return (out, map);
+                }
                 let m = line.metrics();
+                let line_r = line.text_range();
+                let clusters = line_clusters(&line, &line_r, m.offset);
                 let mut s = String::new();
-                for item in line.items() {
-                    let PositionedLayoutItem::GlyphRun(gr) = item else {
-                        continue;
-                    };
-                    if gr.style().brush.color[3] == 0 || gr.run().font_size() < 0.5 {
-                        continue;
+                let mut chars = Vec::new();
+                let mut parts: Vec<std::ops::Range<usize>> = Vec::new();
+                for c in &clusters {
+                    let t = text.get(c.range.clone()).unwrap_or("");
+                    // A ligature's characters share its advance.
+                    let n = t.chars().count().max(1) as f32;
+                    let w = c.advance / n;
+                    for (k, _) in t.chars().enumerate() {
+                        chars.push((c.x + w * k as f32, w));
                     }
-                    // A run can span lines: keep this line's part.
-                    let (run, line_r) = (gr.run().text_range(), line.text_range());
-                    let part = run.start.max(line_r.start)..run.end.min(line_r.end);
-                    s.push_str(text.get(part).unwrap_or(""));
+                    s.push_str(t);
+                    match parts.last_mut() {
+                        Some(p) if p.end == c.range.start => p.end = c.range.end,
+                        _ => parts.push(c.range.clone()),
+                    }
                 }
-                if !s.trim().is_empty() {
-                    out.push(TextLine {
-                        x: *x + m.offset,
-                        y: *y + m.block_min_coord,
-                        w: m.advance,
-                        h: m.block_max_coord - m.block_min_coord,
-                        text: s.trim().to_string(),
-                    });
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    continue;
                 }
+                let lead = s
+                    .chars()
+                    .count()
+                    .saturating_sub(s.trim_start().chars().count());
+                let count = trimmed.chars().count();
+                chars = chars.into_iter().skip(lead).take(count).collect();
+                map.lines.push(LineSource {
+                    item: index,
+                    range: line_r,
+                    parts,
+                    lead,
+                    chars: count,
+                });
+                out.push(TextLine {
+                    x: *x + m.offset,
+                    y: *y + m.block_min_coord,
+                    w: m.advance,
+                    h: m.block_max_coord - m.block_min_coord,
+                    text: trimmed.to_string(),
+                    chars,
+                    ends_paragraph: !matches!(
+                        line.break_reason(),
+                        BreakReason::Regular | BreakReason::Emergency
+                    ),
+                });
             }
         }
-        out
+        (out, map)
+    }
+
+    /// [`LineMap::positions`] over the first `max_lines` lines. It builds
+    /// the map: a caller asking more than once keeps the one from
+    /// [`Doc::text_lines_upto`].
+    pub fn line_positions(
+        &self,
+        a: TextPos,
+        b: TextPos,
+        max_lines: usize,
+    ) -> Option<((usize, usize), (usize, usize))> {
+        self.text_lines_upto(max_lines).1.positions(self, a, b)
+    }
+
+    /// The text of text item `item` (empty for any other item).
+    fn text_of(&self, item: usize) -> &str {
+        match self.items.get(item) {
+            Some(Item::Text { layout, .. }) => self.texts.get(*layout).map_or("", |t| t.as_str()),
+            _ => "",
+        }
     }
 
     /// Link hit areas with their index into [`Doc::links`], in display
@@ -217,7 +444,10 @@ const MAX_LINKS: usize = 10_000;
 const MAX_LINK_TEXT: usize = 256;
 
 /// Document height cap (CSS px), enforced before any pixel allocation.
-pub const MAX_DOC_H: f32 = 30_000.0;
+pub const MAX_DOC_H: f32 = 200_000.0;
+/// The narrowest column deep quotes indent their text to (CSS px), or half
+/// the page if that is less.
+const MIN_COLUMN: f32 = 320.0;
 /// Block nesting past this is flattened.
 pub const MAX_LAYOUT_DEPTH: u32 = 48;
 /// The widest inline margin or padding honoured.
@@ -226,13 +456,16 @@ const MAX_INLINE_SPACE: f32 = 200.0;
 /// cut at a white-space boundary and replaced by [`CAPPED_MARKER`], so one
 /// pathological paragraph cannot stall shaping and line breaking.
 pub const MAX_GROUP_TEXT: usize = 64 * 1024;
+/// A digest of the shaper's input for an inline group (two SipHash states).
+pub(super) type GroupKey = (u64, u64);
 const CAPPED_MARKER: &str = "[Message too long: View as plain text shows the rest]";
 /// Inline content wider than its line by less than this still fits
 /// (side-by-side columns whose widths add up to the container's exactly).
 const FIT_TOLERANCE: f32 = 2.0;
 
 pub(super) enum Op {
-    Open(Id, u32),
+    /// An inline element: its node, link id and decorating element.
+    Open(Id, u32, Id),
     Close,
     Text(String, bool),
     Br,
@@ -244,10 +477,13 @@ pub(super) struct BoxInfo {
     pub h: f32,
     pub items: Vec<Item>,
     pub va: VAlign,
+    /// The inline element whose background this box extends (its padding
+    /// and border); 0 for none.
+    pub deco: Id,
 }
 
 /// An empty inline box `w` wide (inline margins and padding), if visible.
-fn spacer(w: f32, ops: &mut Vec<Op>, boxes: &mut Vec<BoxInfo>) {
+fn spacer(w: f32, deco: Id, ops: &mut Vec<Op>, boxes: &mut Vec<BoxInfo>) {
     if w >= 0.5 && w.is_finite() {
         ops.push(Op::Box(boxes.len()));
         boxes.push(BoxInfo {
@@ -255,6 +491,7 @@ fn spacer(w: f32, ops: &mut Vec<Op>, boxes: &mut Vec<BoxInfo>) {
             h: 0.0,
             items: vec![],
             va: VAlign::Baseline,
+            deco,
         });
     }
 }
@@ -267,11 +504,16 @@ struct Group {
     built_avail: f32,
     /// Contents depend on the available width (inline boxes, %-sized images).
     dep: bool,
+    /// The digest of the shaper's input (see [`Layouter::group_key`]); only
+    /// for groups that do not depend on the width.
+    key: Option<GroupKey>,
 }
 
 pub(super) struct BoxOut {
     pub w: f32,
     pub h: f32,
+    /// The bottom margin of its last child, collapsed through it.
+    pub trail: f32,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -298,6 +540,10 @@ pub(super) struct Layouter<'a> {
     pub src: &'a mut Sources<'a>,
     pub out: Vec<Item>,
     pub doc: Doc,
+    /// The first layout of this message, whose shaped groups this one may
+    /// reuse, and its groups by digest.
+    prev: Option<&'a Doc>,
+    donors: HashMap<GroupKey, u32>,
     groups: HashMap<(Id, Id), Group>,
     group_min: HashMap<(Id, Id), f32>,
     pub widths: HashMap<Id, (f32, f32)>,
@@ -315,6 +561,10 @@ pub(super) struct Layouter<'a> {
     /// Percentage-sized images met while building groups.
     pct_seen: u32,
     deadline: &'a Deadline,
+    /// The images decoded ahead of the layout, by source.
+    decoded: &'a img::Decoded,
+    /// Device pixels per CSS px.
+    scale: f32,
     pub timed_out: bool,
     /// Pixels left for decoding and resampling images.
     pub budget: u64,
@@ -322,6 +572,13 @@ pub(super) struct Layouter<'a> {
     pub cells: usize,
     /// Some inline group was cut at [`MAX_GROUP_TEXT`].
     text_capped: bool,
+    /// The collapsed top margin of a block by element, and whether its whole
+    /// box collapses through (see [`Layouter::top_margin`]).
+    margins: HashMap<Id, (f32, bool)>,
+    /// The bottom margin the block list just laid out left to its parent.
+    trail: f32,
+    /// Where layout stops (CSS px): [`MAX_DOC_H`], or less for a preview.
+    cap: f32,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -331,9 +588,12 @@ pub(super) fn layout<'a>(
     fcx: &'a mut FontContext,
     lcx: &'a mut LayoutContext<Brush>,
     src: &'a mut Sources<'a>,
+    decoded: &'a img::Decoded,
     width: f32,
     scale: f32,
     deadline: &'a Deadline,
+    prev: Option<&'a Doc>,
+    cap: f32,
 ) -> Option<Doc> {
     let st = styles.v;
     let default = Style::root();
@@ -412,7 +672,13 @@ pub(super) fn layout<'a>(
             dimmed: styles.dimmed,
             loaded: vec![],
             remote_images: vec![],
+            shaped: vec![],
+            reused: 0,
         },
+        prev,
+        donors: prev
+            .map(|p| p.shaped.iter().copied().collect())
+            .unwrap_or_default(),
         groups: HashMap::new(),
         group_min: HashMap::new(),
         widths: HashMap::new(),
@@ -425,10 +691,15 @@ pub(super) fn layout<'a>(
         measuring: 0,
         pct_seen: 0,
         deadline,
+        decoded,
+        scale,
         timed_out: false,
-        budget: img::MAX_TOTAL_PIXELS,
+        budget: decoded.pixels,
         cells: 0,
         text_capped: false,
+        margins: HashMap::new(),
+        trail: 0.0,
+        cap: cap.clamp(1.0, MAX_DOC_H),
     };
     let kids = dom.children(ROOT).to_vec();
     let h = e.block_list(ROOT, &kids, 0.0, 0.0, width);
@@ -436,13 +707,94 @@ pub(super) fn layout<'a>(
         return None;
     }
     e.doc.full_height = h;
-    e.doc.truncated = h > MAX_DOC_H || e.text_capped;
-    e.doc.height = h.clamp(1.0, MAX_DOC_H);
+    e.doc.truncated = h > e.cap || e.text_capped;
+    e.doc.height = h.clamp(1.0, e.cap);
     e.doc.items = std::mem::take(&mut e.out);
     e.doc.natural_width = content_right(&e.doc);
     e.doc.remote_images = std::mem::take(&mut e.src.missing);
     prescale_images(&mut e.doc, scale, &mut e.budget);
     Some(e.doc)
+}
+
+/// The images a layout of `dom` is going to draw and has not got yet, each
+/// with the widest it can be shown: its declared width, or the page's (an
+/// image never exceeds its line); a background may be cut from a larger one.
+pub(super) fn wanted_images(
+    dom: &Dom,
+    styles: &Styles,
+    src: &mut Sources<'_>,
+    width: f32,
+    scale: f32,
+    have: &mut img::Decoded,
+) -> Vec<img::Wanted> {
+    let mut out: Vec<img::Wanted> = vec![];
+    let mut at: HashMap<String, usize> = HashMap::new();
+    let mut hidden = vec![false; dom.nodes.len()];
+    let device = |css: f32| (css * scale).round().max(1.0) as u32;
+    for (i, n) in dom.nodes.iter().enumerate() {
+        let Some(s) = styles.v.get(i) else {
+            break;
+        };
+        let gone =
+            s.display == Display::None || hidden.get(n.parent as usize).copied().unwrap_or(false);
+        if let Some(h) = hidden.get_mut(i) {
+            *h = gone;
+        }
+        let Kind::Elem { tag, attrs } = &n.kind else {
+            continue;
+        };
+        if gone {
+            continue;
+        }
+        let mut ask = |source: &str, cap_w: u32| {
+            let source = source.trim();
+            // Decoded already, at the width a decode from scratch would give
+            // for this pass (a picture is shrunk once, from its original,
+            // when it is bigger than 1.5 times its display width): a second
+            // pass at another width gets the pixels of a layout from
+            // scratch, not a shrunk picture grown or shrunk again.
+            let enough = have.absent.contains(source)
+                || match have.images.get(source) {
+                    None => false,
+                    Some(None) => true,
+                    Some(Some(d)) => {
+                        let shrunk = u64::from(cap_w).saturating_mul(3) / 2 < u64::from(d.nat_w);
+                        d.pix.width() == if shrunk { cap_w } else { d.nat_w }
+                    }
+                };
+            if source.is_empty() || enough || (super::css::is_remote(source) && is_tracker(s)) {
+                return;
+            }
+            if let Some(&k) = at.get(source) {
+                if let Some(w) = out.get_mut(k) {
+                    w.cap_w = w.cap_w.max(cap_w);
+                }
+            } else if let Some(bytes) = src.peek(source) {
+                at.insert(source.to_string(), out.len());
+                out.push(img::Wanted {
+                    src: source.to_string(),
+                    bytes,
+                    cap_w,
+                });
+            } else {
+                // Asked once: the layout does not ask the resolver again.
+                have.absent.insert(source.to_string());
+            }
+        };
+        if &**tag == "img"
+            && let Some((_, v)) = attrs.iter().find(|(k, _)| &**k == "src")
+        {
+            let shown = match s.width {
+                Len::Px(p) => fin(p).min(width * 4.0),
+                _ => width,
+            };
+            ask(v, device(shown.max(1.0)));
+        }
+        if let Some(b) = &s.bg_image {
+            ask(b, device(width * 2.0));
+        }
+    }
+    out
 }
 
 /// The right edge of what `doc` paints: boxes, images (as clipped) and
@@ -454,6 +806,7 @@ fn content_right(doc: &Doc) -> f32 {
         let edge = match it {
             Item::Rect { r, .. } | Item::Stroke { r, .. } => r.x + r.w,
             Item::Image { r, clip, .. } => clip.map_or(r.x + r.w, |c| (c.x + c.w).min(r.x + r.w)),
+            Item::Tiled { r, .. } | Item::Gradient { r, .. } => r.x + r.w,
             Item::Text { layout, x, .. } => {
                 let Some(l) = doc.layouts.get(*layout) else {
                     continue;
@@ -536,6 +889,20 @@ pub(super) fn shift(items: &mut [Item], dx: f32, dy: f32) {
                 r.x += dx;
                 r.y += dy;
             }
+            Item::Tiled { r, tile, .. } => {
+                r.x += dx;
+                r.y += dy;
+                tile.x += dx;
+                tile.y += dy;
+            }
+            Item::Gradient { r, line, .. } => {
+                r.x += dx;
+                r.y += dy;
+                line[0] += dx;
+                line[1] += dy;
+                line[2] += dx;
+                line[3] += dy;
+            }
             Item::Image { r, clip, .. } => {
                 r.x += dx;
                 r.y += dy;
@@ -553,11 +920,88 @@ pub(super) fn shift(items: &mut [Item], dx: f32, dy: f32) {
     }
 }
 
+/// Cut `items` at the page height `bottom`: boxes are shortened, images
+/// clipped and text loses the lines that end below it.
+fn clip_below(items: &mut [Item], bottom: f32) {
+    let cut = |r: &mut Rect| r.h = fin(r.h.min(bottom - r.y));
+    for it in items {
+        match it {
+            Item::Rect { r, .. }
+            | Item::Stroke { r, .. }
+            | Item::Link { r, .. }
+            | Item::Tiled { r, .. }
+            | Item::Gradient { r, .. } => cut(r),
+            Item::Image { r, clip, .. } => {
+                let mut c = clip.unwrap_or(*r);
+                cut(&mut c);
+                *clip = Some(c);
+            }
+            Item::Text { y, clip_h, .. } => *clip_h = clip_h.min(bottom - *y),
+            Item::Anchor { .. } => {}
+        }
+    }
+}
+
 pub(super) fn px_of(l: Len) -> f32 {
     match l {
         Len::Px(p) => p,
         _ => 0.0,
     }
+}
+
+/// The first tile of the background image of `s` on box `r`, for an image of
+/// its natural size (`nw`, `nh`).
+fn bg_tile(s: &Style, r: Rect, nw: f32, nh: f32) -> Rect {
+    let place = s.bg_place;
+    let (nw, nh) = (nw.max(1.0), nh.max(1.0));
+    let of = |l: Len, whole: f32| match l {
+        Len::Px(p) => Some(p),
+        Len::Pct(p) => Some(whole * p / 100.0),
+        Len::Auto => None,
+    };
+    let (w, h) = match place.size {
+        BgSize::Cover => {
+            let k = (r.w / nw).max(r.h / nh);
+            (nw * k, nh * k)
+        }
+        BgSize::Contain => {
+            let k = (r.w / nw).min(r.h / nh);
+            (nw * k, nh * k)
+        }
+        BgSize::Is(w, h) => match (of(w, r.w), of(h, r.h)) {
+            (Some(w), Some(h)) => (w, h),
+            (Some(w), None) => (w, nh * w / nw),
+            (None, Some(h)) => (nw * h / nh, h),
+            (None, None) => (nw, nh),
+        },
+    };
+    let (w, h) = (fin(w).max(1.0), fin(h).max(1.0));
+    // A percentage lines up that point of the tile with that point of the box.
+    let at = |l: Len, whole: f32, size: f32| match l {
+        Len::Pct(p) => (whole - size) * p / 100.0,
+        Len::Px(p) => p,
+        Len::Auto => 0.0,
+    };
+    Rect {
+        x: r.x + at(place.x, r.w, w),
+        y: r.y + at(place.y, r.h, h),
+        w,
+        h,
+    }
+}
+
+/// The gradient line for an angle (clockwise from up) on box `r`: through its
+/// centre, as long as the corners need (CSS Images 3.1.1).
+fn gradient_line(r: Rect, degrees: f32) -> [f32; 4] {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let half = (r.w * sin.abs() + r.h * cos.abs()) / 2.0;
+    let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    [
+        cx - sin * half,
+        cy + cos * half,
+        cx + sin * half,
+        cy - cos * half,
+    ]
 }
 
 /// Finite and non-negative.
@@ -608,13 +1052,108 @@ impl<'a> Layouter<'a> {
     /// Lay out `kids` (children of `parent`) into the content box (x, y, w);
     /// returns the content height.
     pub fn block_list(&mut self, parent: Id, kids: &[Id], x: f32, y: f32, w: f32) -> f32 {
+        self.block_list_lifting(parent, kids, x, y, w, (false, false))
+    }
+
+    /// [`Self::block_list`] for a box whose top and bottom margins collapse
+    /// with those of its first and last children (`lift`): those margins are
+    /// its parent's to apply.
+    fn block_list_lifting(
+        &mut self,
+        parent: Id,
+        kids: &[Id],
+        x: f32,
+        y: f32,
+        w: f32,
+        lift: (bool, bool),
+    ) -> f32 {
         let flat = self.depth >= MAX_LAYOUT_DEPTH;
         self.depth = self.depth.saturating_add(1);
-        let h = self.block_list_inner(parent, kids, x, y, fin(w), flat);
+        let h = self.block_list_inner(parent, kids, x, y, fin(w), flat, lift);
         self.depth = self.depth.saturating_sub(1);
         h
     }
 
+    /// Whether inline node `n` makes no line of its own: white space, or an
+    /// element with nothing else in it (`<a name=top></a>`).
+    fn blank_inline(&self, n: Id, depth: u32) -> bool {
+        let Some(node) = self.dom.node(n) else {
+            return true;
+        };
+        let s = self.style(n);
+        match &node.kind {
+            // A no-break space is content.
+            Kind::Text(t) => !s.pre && t.trim_matches(|c: char| c.is_ascii_whitespace()).is_empty(),
+            Kind::Elem { tag, .. } => {
+                s.display == Display::None
+                    || (s.display == Display::Inline
+                        && !matches!(&**tag, "br" | "img")
+                        && depth < MAX_LAYOUT_DEPTH
+                        && self
+                            .dom
+                            .children(n)
+                            .iter()
+                            .all(|&k| self.blank_inline(k, depth.saturating_add(1))))
+            }
+        }
+    }
+
+    /// The margin that a block `c` brings to its top once collapsed with the
+    /// first children it does not separate from it (CSS 2 8.3.1), and whether
+    /// the block is empty, so that its margins collapse through it.
+    fn top_margin(&mut self, c: Id, depth: u32) -> (f32, bool) {
+        if let Some(&m) = self.margins.get(&c) {
+            return m;
+        }
+        let s = self.style(c);
+        let own = px_of(s.margin[0]);
+        let bottom = px_of(s.margin[2]);
+        let solid_top = s.padding[0] + s.border[0] > 0.0;
+        let solid = solid_top
+            || s.padding[2] + s.border[2] > 0.0
+            || s.overflow_hidden
+            || s.bg_image.is_some()
+            || matches!(s.height, Len::Px(h) if h > 0.0)
+            || matches!(s.min_height, Len::Px(h) if h > 0.0)
+            || s.display != Display::Block;
+        let opens = !solid_top && !s.overflow_hidden && s.display != Display::Table;
+        let mut top = own;
+        let mut empty = !solid;
+        if depth < MAX_LAYOUT_DEPTH {
+            let dom = self.dom;
+            let mut lifting = opens;
+            for &k in dom.children(c) {
+                let (kid_top, kid_empty) = match self.classify(k) {
+                    Cls::Skip => continue,
+                    // Laid out here, a float counts towards the box's height.
+                    Cls::Float => {
+                        empty = false;
+                        continue;
+                    }
+                    Cls::Inline if self.blank_inline(k, depth) => continue,
+                    Cls::Inline => (0.0, false),
+                    Cls::Block => self.top_margin(k, depth.saturating_add(1)),
+                };
+                if lifting {
+                    top = top.max(kid_top);
+                }
+                empty = empty && kid_empty;
+                lifting = lifting && kid_empty;
+                if !lifting && !empty {
+                    break;
+                }
+            }
+        } else {
+            empty = false;
+        }
+        if empty {
+            top = top.max(bottom);
+        }
+        self.margins.insert(c, (top, empty));
+        (top, empty)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn block_list_inner(
         &mut self,
         parent: Id,
@@ -623,9 +1162,12 @@ impl<'a> Layouter<'a> {
         y: f32,
         w: f32,
         flat: bool,
+        (lift_top, lift_bottom): (bool, bool),
     ) -> f32 {
         let mut cy = 0.0f32;
         let mut pend = 0.0f32;
+        // Nothing yet separates the top of this box from its next child.
+        let mut at_top = lift_top;
         let mut run: Vec<Id> = vec![];
         let mut floats = super::float::Floats::default();
         let mut work: Vec<Work> = kids.iter().rev().map(|&k| Work::Node(k)).collect();
@@ -634,17 +1176,18 @@ impl<'a> Layouter<'a> {
             () => {
                 if !run.is_empty() {
                     let r = std::mem::take(&mut run);
-                    let (l, rr) = floats.band(cy + pend, w);
-                    let h = self.layout_group(parent, &r, x + l, y + cy + pend, w - l - rr);
+                    let (at, l, rr) = floats.band(cy + pend, w);
+                    let h = self.layout_group(parent, &r, x + l, y + at, w - l - rr);
                     if h > 0.0 {
-                        cy += pend + h;
+                        cy = at + h;
                         pend = 0.0;
+                        at_top = false;
                     }
                 }
             };
         }
         while let Some(job) = work.pop() {
-            if y + cy > MAX_DOC_H + 64.0 || self.expired() {
+            if y + cy > self.cap + 64.0 || self.expired() {
                 break; // beyond the document cap: stop laying out
             }
             let c = match job {
@@ -662,6 +1205,33 @@ impl<'a> Layouter<'a> {
                 work.extend(self.dom.children(c).iter().rev().map(|&k| Work::Node(k)));
                 continue;
             }
+            // A block image is laid out as one, on a line of its own.
+            if cls == Cls::Inline
+                && self.style(c).display == Display::Block
+                && self.dom.tag(c) == "img"
+            {
+                flush!();
+                run.push(c);
+                flush!();
+                continue;
+            }
+            let clear = self.style(c).clear;
+            if clear != (false, false) && cls != Cls::Skip {
+                if cls == Cls::Inline {
+                    // `<br clear=all>`: the line it ends goes first.
+                    run.push(c);
+                }
+                flush!();
+                let to = floats.cleared(clear);
+                if to > cy + pend {
+                    cy = to;
+                    pend = 0.0;
+                    at_top = false;
+                }
+                if cls == Cls::Inline {
+                    continue;
+                }
+            }
             match cls {
                 Cls::Skip => {}
                 Cls::Inline => run.push(c),
@@ -671,31 +1241,55 @@ impl<'a> Layouter<'a> {
                 }
                 Cls::Block => {
                     flush!();
-                    let s = self.style(c);
-                    let (mt, mb) = (px_of(s.margin[0]), px_of(s.margin[2]));
-                    let gap = pend.max(mt);
-                    let (l, rr) = floats.band(cy + gap, w);
-                    let out = self.box_at(c, x + l, y + cy + gap, w - l - rr, false);
-                    cy += gap + out.h;
-                    pend = mb;
+                    let mb = px_of(self.style(c).margin[2]);
+                    let (mt, empty) = self.top_margin(c, self.depth);
+                    // A margin this box lifts is outside it already.
+                    let gap = if at_top { 0.0 } else { pend.max(mt) };
+                    if empty {
+                        // Its margins collapse through it; it may still hold
+                        // anchors or floats, at no height.
+                        let (at, l, rr) = floats.band(cy + gap, w);
+                        self.box_at(c, x + l, y + at, w - l - rr, false);
+                        pend = if at_top { 0.0 } else { pend.max(mt) };
+                        continue;
+                    }
+                    let (at, l, rr) = floats.band(cy + gap, w);
+                    let out = self.box_at(c, x + l, y + at, w - l - rr, false);
+                    cy = at + out.h;
+                    pend = mb.max(out.trail);
+                    at_top = false;
                 }
             }
         }
         flush!();
+        self.trail = 0.0;
+        if lift_bottom && !at_top {
+            // The last child's margin goes on past the end of this box.
+            self.trail = pend;
+            return cy.max(floats.bottom());
+        }
+        // A box with nothing in it: the margins went with the lift at the top.
+        if lift_bottom {
+            return floats.bottom();
+        }
         (cy + pend).max(floats.bottom())
     }
 
     /// Lay out `id` with its margins zeroed (the caller applies them).
     pub fn box_at_nomargin(&mut self, id: Id, x: f32, y: f32, avail: f32) -> BoxOut {
         let Some(s) = self.st.get_mut(id as usize) else {
-            return BoxOut { w: 0.0, h: 0.0 };
+            return BoxOut {
+                w: 0.0,
+                h: 0.0,
+                trail: 0.0,
+            };
         };
-        let saved = (s.margin, s.center_blocks);
+        let saved = (s.margin, s.moved_by);
         s.margin = [Len::Px(0.0); 4];
-        s.center_blocks = false;
+        s.moved_by = Align::Left;
         let r = self.box_at(id, x, y, avail, true);
         if let Some(s) = self.st.get_mut(id as usize) {
-            (s.margin, s.center_blocks) = saved;
+            (s.margin, s.moved_by) = saved;
         }
         r
     }
@@ -706,13 +1300,26 @@ impl<'a> Layouter<'a> {
         if let Len::Px(p) = s.width {
             s.width = Len::Px(p.min(self.maxw));
         }
-        let (pad, bd) = (s.padding, s.border);
+        let (mut pad, bd) = (s.padding, s.border);
         let (ml_s, mr_s) = (s.margin[3], s.margin[1]);
-        let (ml_px, mr_px) = (px_of(ml_s), px_of(mr_s));
+        let (mut ml_px, mut mr_px) = (px_of(ml_s), px_of(mr_s));
+        // Deep quotes stop indenting once the text would get narrower than
+        // a readable column: forty levels of Gmail's or Apple Mail's quote
+        // indent leave a sliver of a word per line (and a page hundreds of
+        // thousands of pixels tall) at a window's width.
+        let floor = (self.doc.width * 0.5).min(MIN_COLUMN);
+        let indent = ml_px + mr_px + pad[1] + pad[3] + bd[1] + bd[3];
+        if s.width == Len::Auto && !shrink && indent > 0.0 && cb_w - indent < floor {
+            (ml_px, mr_px, pad[1], pad[3]) = (0.0, 0.0, 0.0, 0.0);
+        }
         let auto_margin = |free: f32, own_width: bool| match (ml_s, mr_s) {
             (Len::Auto, Len::Auto) => free / 2.0,
             (Len::Auto, _) => free,
-            _ if s.center_blocks && own_width && ml_px == 0.0 && mr_px == 0.0 => free / 2.0,
+            _ if own_width && ml_px == 0.0 && mr_px == 0.0 => match s.moved_by {
+                Align::Center => free / 2.0,
+                Align::Right => free,
+                _ => 0.0,
+            },
             _ => ml_px,
         };
         if s.display == Display::Table {
@@ -720,14 +1327,20 @@ impl<'a> Layouter<'a> {
             let tw = self.table_width(id, avail);
             let ml = auto_margin(fin(cb_w - tw - ml_px - mr_px), true);
             let h = self.table_layout(id, x + ml, y, tw);
-            return BoxOut { w: tw, h };
+            return BoxOut {
+                w: tw,
+                h,
+                trail: 0.0,
+            };
         }
         let hb = pad[1] + pad[3] + bd[1] + bd[3];
         let (vb_top, vb_bot) = (pad[0] + bd[0], pad[2] + bd[2]);
         let avail = fin(cb_w - ml_px - mr_px - hb);
+        // What a declared size leaves for the content.
+        let content = |v: f32, sides: f32| if s.border_box { fin(v - sides) } else { v };
         let mut cw = match s.width {
-            Len::Px(p) => p,
-            Len::Pct(p) => (cb_w - ml_px - mr_px) * p / 100.0,
+            Len::Px(p) => content(p, hb),
+            Len::Pct(p) => content((cb_w - ml_px - mr_px) * p / 100.0, hb),
             Len::Auto if shrink => {
                 let (_, mx) = self.content_widths(id);
                 mx.min(avail)
@@ -735,12 +1348,12 @@ impl<'a> Layouter<'a> {
             Len::Auto => avail,
         };
         match s.max_width {
-            Len::Px(m) => cw = cw.min(m),
-            Len::Pct(p) => cw = cw.min(cb_w * p / 100.0),
+            Len::Px(m) => cw = cw.min(content(m, hb)),
+            Len::Pct(p) => cw = cw.min(content(cb_w * p / 100.0, hb)),
             Len::Auto => {}
         }
         if let Len::Px(m) = s.min_width {
-            cw = cw.max(m);
+            cw = cw.max(content(m, hb));
         }
         let cw = fin(cw).min(self.maxw);
         let outer = cw + hb;
@@ -757,28 +1370,43 @@ impl<'a> Layouter<'a> {
                     h: 0.0,
                 },
                 color: s.bg,
-                radius: s.radius,
+                radius: s.radius_on(outer),
             });
         }
+        // Holds the place of the background, known once the height is.
         let img_idx = self.out.len();
-        if let Some(ix) = self.load_bg(&s) {
-            let r = Rect {
-                x: bx,
-                y,
-                w: outer,
-                h: 0.0,
-            };
-            self.out.push(Item::Image {
-                r,
-                img: ix,
-                clip: Some(r),
-                radius: s.radius,
-            });
+        let has_back = s.gradient.is_some() || s.bg_image.is_some();
+        if has_back {
+            self.out.push(Item::Anchor { y, anchor: 0 });
         }
         let kids = self.dom.children(id).to_vec();
-        let mut ch = self.block_list(id, &kids, bx + bd[3] + pad[3], y + vb_top, cw);
+        let kids_at = self.out.len();
+        // Only a block in flow lets its children's margins through.
+        let opens = !shrink && !s.overflow_hidden && s.display != Display::Table;
+        let lift = (
+            opens && vb_top <= 0.0,
+            opens
+                && vb_bot <= 0.0
+                && s.height == Len::Auto
+                && matches!(s.min_height, Len::Auto | Len::Pct(_)),
+        );
+        let mut ch = self.block_list_lifting(id, &kids, bx + bd[3] + pad[3], y + vb_top, cw, lift);
+        let trail = self.trail;
+        // A declared height is the box's, whatever the content does: more
+        // content overflows it, as in a browser.
         if let Len::Px(hh) = s.height {
-            ch = ch.max(hh);
+            ch = content(hh, vb_top + vb_bot);
+        }
+        if let Len::Px(m) = s.max_height {
+            ch = ch.min(content(m, vb_top + vb_bot));
+        }
+        if let Len::Px(m) = s.min_height {
+            ch = ch.max(content(m, vb_top + vb_bot));
+        }
+        // What overflows a clipping box is not painted (or linked).
+        if s.overflow_hidden {
+            let bottom = y + vb_top + ch + vb_bot;
+            clip_below(self.out.get_mut(kids_at..).unwrap_or_default(), bottom);
         }
         if s.display == Display::ListItem {
             self.marker(id, bx + bd[3] + pad[3], y + vb_top);
@@ -787,15 +1415,24 @@ impl<'a> Layouter<'a> {
         if let Some(Item::Rect { r, .. }) = self.out.get_mut(bg_idx).filter(|_| s.bg[3] > 0) {
             r.h = h;
         }
-        if let Some(Item::Image {
-            r, clip: Some(c), ..
-        }) = self.out.get_mut(img_idx)
-        {
-            r.h = h;
-            c.h = h;
+        if has_back {
+            let r = Rect {
+                x: bx,
+                y,
+                w: outer,
+                h,
+            };
+            let back = self.background(&s, r);
+            if let Some(slot) = self.out.get_mut(img_idx) {
+                *slot = back.unwrap_or(Item::Rect {
+                    r,
+                    color: [0; 4],
+                    radius: Radius::NONE,
+                });
+            }
         }
         self.borders(bx, y, outer, h, &s);
-        BoxOut { w: outer, h }
+        BoxOut { w: outer, h, trail }
     }
 
     pub fn borders(&mut self, x: f32, y: f32, w: f32, h: f32, s: &Style) {
@@ -803,18 +1440,20 @@ impl<'a> Layouter<'a> {
         if b.iter().all(|&v| v <= 0.0) {
             return;
         }
-        let c = s.border_color;
-        if s.radius > 0.0 && b[0] > 0.0 && b.iter().all(|&v| v == b[0]) {
+        let (c, st) = (s.border_color, s.border_style);
+        let radius = s.radius_on(w);
+        if radius.px > 0.0 && b[0] > 0.0 && b.iter().all(|&v| v == b[0]) {
             self.out.push(Item::Stroke {
                 r: Rect { x, y, w, h },
                 width: b[0],
                 color: c[0],
-                radius: s.radius,
+                radius,
+                style: st[0],
             });
             return;
         }
         let sides = [
-            (Rect { x, y, w, h: b[0] }, c[0]),
+            (Rect { x, y, w, h: b[0] }, c[0], st[0]),
             (
                 Rect {
                     x,
@@ -823,8 +1462,9 @@ impl<'a> Layouter<'a> {
                     h: b[2],
                 },
                 c[2],
+                st[2],
             ),
-            (Rect { x, y, w: b[3], h }, c[3]),
+            (Rect { x, y, w: b[3], h }, c[3], st[3]),
             (
                 Rect {
                     x: x + w - b[1],
@@ -833,15 +1473,46 @@ impl<'a> Layouter<'a> {
                     h,
                 },
                 c[1],
+                st[1],
             ),
         ];
-        for (r, color) in sides {
-            if r.w > 0.0 && r.h > 0.0 && color[3] > 0 {
-                self.out.push(Item::Rect {
+        for (r, color, style) in sides {
+            if r.w <= 0.0 || r.h <= 0.0 || color[3] == 0 {
+                continue;
+            }
+            let rect = |r: Rect| Item::Rect {
+                r,
+                color,
+                radius: Radius::NONE,
+            };
+            match style {
+                LineStyle::Dashed | LineStyle::Dotted => self.out.push(Item::Stroke {
                     r,
+                    width: r.w.min(r.h),
                     color,
-                    radius: 0.0,
-                });
+                    radius: Radius::NONE,
+                    style,
+                }),
+                // Two lines a third of the width each, when that makes pixels.
+                LineStyle::Double if r.w.min(r.h) >= 3.0 => {
+                    let third = r.w.min(r.h) / 3.0;
+                    if r.h <= r.w {
+                        let edge = Rect { h: third, ..r };
+                        self.out.push(rect(edge));
+                        self.out.push(rect(Rect {
+                            y: r.y + 2.0 * third,
+                            ..edge
+                        }));
+                    } else {
+                        let edge = Rect { w: third, ..r };
+                        self.out.push(rect(edge));
+                        self.out.push(rect(Rect {
+                            x: r.x + 2.0 * third,
+                            ..edge
+                        }));
+                    }
+                }
+                _ => self.out.push(rect(r)),
             }
         }
     }
@@ -852,18 +1523,7 @@ impl<'a> Layouter<'a> {
         if s.list_none || self.style(parent).list_none {
             return;
         }
-        let text = if self.dom.tag(parent) == "ol" {
-            let n = self
-                .dom
-                .children(parent)
-                .iter()
-                .take_while(|&&c| c != li)
-                .filter(|&&c| self.dom.tag(c) == "li")
-                .count();
-            format!("{}.", n.saturating_add(1))
-        } else {
-            "\u{2022}".to_string()
-        };
+        let text = s.marker.text(self.item_number(parent, li));
         let mut b =
             self.lcx
                 .tree_builder(self.fcx, 1.0, true, &text_style(&s, brush(&s, 0), false));
@@ -881,6 +1541,30 @@ impl<'a> Layouter<'a> {
         });
     }
 
+    /// The number of item `li` of a list: from the list's `start`, each item
+    /// one up, except those with a `value`.
+    fn item_number(&self, list: Id, li: Id) -> i64 {
+        let int = |id: Id, name: &str| {
+            self.dom
+                .attr(id, name)
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .map(|v| v.clamp(-1_000_000, 1_000_000))
+        };
+        let mut n = int(list, "start").unwrap_or(1);
+        for &c in self.dom.children(list) {
+            if self.dom.tag(c) == "li" {
+                if let Some(v) = int(c, "value") {
+                    n = v;
+                }
+                if c == li {
+                    return n;
+                }
+                n = n.saturating_add(1);
+            }
+        }
+        n
+    }
+
     fn push_layout(&mut self, l: Layout<Brush>, text: String) -> usize {
         self.doc.layouts.push(l);
         self.doc.texts.push(text);
@@ -891,10 +1575,12 @@ impl<'a> Layouter<'a> {
 
     /// Collect inline ops for `nodes`. Inline-block contents are laid out
     /// here, into boxes.
+    #[allow(clippy::too_many_arguments)]
     fn collect(
         &mut self,
         nodes: &[Id],
         link: u32,
+        deco: Id,
         avail: f32,
         ops: &mut Vec<Op>,
         boxes: &mut Vec<BoxInfo>,
@@ -912,7 +1598,11 @@ impl<'a> Layouter<'a> {
                 Kind::Text(t) => {
                     let s = self.style(n);
                     let txt = tame_clusters(s.transform.apply(t));
-                    if s.pre || !txt.trim().is_empty() {
+                    if s.pre
+                        || !txt
+                            .trim_matches(|c: char| c.is_ascii_whitespace())
+                            .is_empty()
+                    {
                         *visible = true;
                     }
                     ops.push(Op::Text(txt, s.pre));
@@ -930,7 +1620,7 @@ impl<'a> Layouter<'a> {
                 continue;
             }
             if tag == "img" {
-                self.image_box(n, link, avail, ops, boxes, visible);
+                self.image_box(n, link, deco, avail, ops, boxes, visible);
                 continue;
             }
             let mut l = link;
@@ -942,17 +1632,21 @@ impl<'a> Layouter<'a> {
             let deep = self.depth >= MAX_LAYOUT_DEPTH;
             if s.display == Display::Inline || deep {
                 // Horizontal margin, border and padding of an inline
-                // element: empty boxes at its two ends.
-                let side = |i: usize| {
-                    let m = s.margin.get(i).map_or(0.0, |&m| px_of(m));
+                // element: empty boxes at its two ends. Those of the border
+                // and padding are part of its painted box.
+                let margin = |i: usize| s.margin.get(i).map_or(0.0, |&m| px_of(m)).max(0.0);
+                let inner = |i: usize| {
                     let b = s.border.get(i).copied().unwrap_or(0.0);
                     let p = s.padding.get(i).copied().unwrap_or(0.0);
-                    (m + b + p).max(0.0)
+                    (b + p).max(0.0)
                 };
-                ops.push(Op::Open(n, l));
-                spacer(side(3), ops, boxes);
-                self.collect(dom.children(n), l, avail, ops, boxes, visible);
-                spacer(side(1), ops, boxes);
+                let own = if s.has_inline_box() { n } else { deco };
+                ops.push(Op::Open(n, l, own));
+                spacer(margin(3), deco, ops, boxes);
+                spacer(inner(3), own, ops, boxes);
+                self.collect(dom.children(n), l, own, avail, ops, boxes, visible);
+                spacer(inner(1), own, ops, boxes);
+                spacer(margin(1), deco, ops, boxes);
                 ops.push(Op::Close);
                 continue;
             }
@@ -967,6 +1661,7 @@ impl<'a> Layouter<'a> {
                     h: 1.0,
                     items: vec![],
                     va: VAlign::Baseline,
+                    deco,
                 });
                 continue;
             }
@@ -996,14 +1691,17 @@ impl<'a> Layouter<'a> {
                 h: mt + r.h + mb,
                 items,
                 va: s.valign,
+                deco,
             });
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn image_box(
         &mut self,
         n: Id,
         link: u32,
+        deco: Id,
         avail: f32,
         ops: &mut Vec<Op>,
         boxes: &mut Vec<BoxInfo>,
@@ -1011,7 +1709,13 @@ impl<'a> Layouter<'a> {
     ) {
         let s = self.style(n).clone();
         let src = self.dom.attr(n, "src").unwrap_or("").trim().to_string();
-        let avail = avail.min(self.doc.width.max(1.0) * 4.0);
+        // Around the content box of an image: padding and border.
+        let (ox, oy) = (s.border[3] + s.padding[3], s.border[0] + s.padding[0]);
+        let (hb, vb) = (
+            ox + s.border[1] + s.padding[1],
+            oy + s.border[2] + s.padding[2],
+        );
+        let avail = fin(avail.min(self.doc.width.max(1.0) * 4.0) - hb);
         let wa = match s.width {
             Len::Px(p) => Some(fin(p)),
             // Percentage-sized images add nothing to intrinsic widths.
@@ -1066,18 +1770,37 @@ impl<'a> Layouter<'a> {
                     w,
                     h,
                 };
+                let radius = s.radius_on(w);
                 if s.bg[3] > 0 {
                     items.push(Item::Rect {
                         r,
                         color: s.bg,
-                        radius: s.radius,
+                        radius,
                     });
                 }
+                // `object-fit: cover`: as large as it takes, centred, cut to
+                // the box.
+                let (shown, clip) = if s.cover && nw > 0.0 && nh > 0.0 {
+                    let k = (w / nw).max(h / nh);
+                    let (sw, sh) = (nw * k, nh * k);
+                    (
+                        Rect {
+                            x: (w - sw) / 2.0,
+                            y: (h - sh) / 2.0,
+                            w: sw,
+                            h: sh,
+                        },
+                        Some(r),
+                    )
+                } else {
+                    (r, None)
+                };
                 items.push(Item::Image {
-                    r,
+                    r: shown,
                     img: ix,
-                    clip: None,
-                    radius: s.radius,
+                    clip,
+                    radius,
+                    alpha: s.opacity,
                 });
                 (w, h)
             }
@@ -1116,7 +1839,7 @@ impl<'a> Layouter<'a> {
                 let (w, h) = (fin(w), fin(h).min(MAX_DOC_H));
                 if w < 3.0 || h < 3.0 {
                     if !alt.is_empty() && wa.is_none() && ha.is_none() {
-                        ops.push(Op::Open(n, link));
+                        ops.push(Op::Open(n, link, deco));
                         ops.push(Op::Text(alt, false));
                         ops.push(Op::Close);
                         *visible = true;
@@ -1134,7 +1857,7 @@ impl<'a> Layouter<'a> {
                 } else {
                     [128, 128, 128, 24]
                 };
-                let radius = s.radius.max(4.0).min(w.min(h) / 2.0);
+                let radius = Radius::all(s.radius_on(w).px.max(4.0).min(w.min(h) / 2.0));
                 items.push(Item::Rect {
                     r,
                     color: fill,
@@ -1145,6 +1868,7 @@ impl<'a> Layouter<'a> {
                     width: 1.0,
                     color: [128, 128, 128, 80],
                     radius,
+                    style: LineStyle::Solid,
                 });
                 if !alt.is_empty() {
                     self.alt_text(&s, &alt, link, w, h, &mut items);
@@ -1152,11 +1876,24 @@ impl<'a> Layouter<'a> {
                 (w, h)
             }
         };
+        let (w, h) = (w + hb, h + vb);
+        // Margins (and `hspace`, `vspace`) keep their room around the box.
+        let m = s.margin.map(|l| match l {
+            Len::Px(p) => fin(p),
+            _ => 0.0,
+        });
+        if hb > 0.0 || vb > 0.0 || m.iter().any(|&v| v > 0.0) {
+            shift(&mut items, ox + m[3], oy + m[0]);
+            let saved = std::mem::take(&mut self.out);
+            self.borders(m[3], m[0], w, h, &s);
+            items.append(&mut self.out);
+            self.out = saved;
+        }
         if link != 0 {
             items.push(Item::Link {
                 r: Rect {
-                    x: 0.0,
-                    y: 0.0,
+                    x: m[3],
+                    y: m[0],
                     w,
                     h,
                 },
@@ -1165,10 +1902,11 @@ impl<'a> Layouter<'a> {
         }
         ops.push(Op::Box(boxes.len()));
         boxes.push(BoxInfo {
-            w,
-            h,
+            w: w + m[1] + m[3],
+            h: h + m[0] + m[2],
             items,
             va: s.valign,
+            deco,
         });
         *visible = true;
     }
@@ -1284,29 +2022,56 @@ impl<'a> Layouter<'a> {
         }
     }
 
-    /// The background image of `s`; a remote one on a tracking-sized or
-    /// hidden box is never loaded, as for `<img>`.
-    pub fn load_bg(&mut self, s: &Style) -> Option<usize> {
-        let src = s.bg_image.clone()?;
-        if super::css::is_remote(&src) && is_tracker(s) {
-            return None;
+    /// The background of `s` on box `r`, beyond its plain colour: the image
+    /// (a remote one on a tracking-sized or hidden box is never loaded, as
+    /// for `<img>`), or else the gradient.
+    pub fn background(&mut self, s: &Style, r: Rect) -> Option<Item> {
+        if let Some(src) = s.bg_image.clone()
+            && !(super::css::is_remote(&src) && is_tracker(s))
+            && let Some(img) = self.load_image(&src, 0)
+            && let Some(im) = self.doc.images.get(img)
+        {
+            let tile = bg_tile(s, r, im.nat_w as f32, im.nat_h as f32);
+            return Some(Item::Tiled {
+                r,
+                img,
+                tile,
+                repeat: (s.bg_place.repeat_x, s.bg_place.repeat_y),
+                radius: s.radius_on(r.w),
+            });
         }
-        self.load_image(&src, 0)
+        let g = s.gradient.clone()?;
+        Some(Item::Gradient {
+            r,
+            radius: s.radius_on(r.w),
+            line: gradient_line(r, g.degrees),
+            stops: g,
+        })
     }
 
     pub fn load_image(&mut self, src: &str, target_w: u32) -> Option<usize> {
         if let Some(r) = self.img_cache.get(src) {
             return *r;
         }
-        let r = self
-            .src
-            .load(src)
-            .and_then(|bytes| img::decode(&bytes, target_w, &mut self.budget))
-            .map(|d| {
-                self.doc.images.push(d);
-                self.doc.loaded.push(src.to_string());
-                self.doc.images.len().saturating_sub(1)
-            });
+        let key = src.trim();
+        let image = match self.decoded.images.get(key) {
+            _ if self.decoded.absent.contains(key) => {
+                self.src.note_missing(src, false);
+                None
+            }
+            Some(d) => d.clone(),
+            None => {
+                let device = (target_w as f32 * self.scale).round() as u32;
+                self.src
+                    .load(src)
+                    .and_then(|bytes| img::decode(&bytes, device, &mut self.budget))
+            }
+        };
+        let r = image.map(|d| {
+            self.doc.images.push(d);
+            self.doc.loaded.push(src.to_string());
+            self.doc.images.len().saturating_sub(1)
+        });
         self.img_cache.insert(src.to_string(), r);
         r
     }
@@ -1316,46 +2081,63 @@ impl<'a> Layouter<'a> {
         let mut ops = vec![];
         let mut boxes = vec![];
         let mut visible = false;
-        self.collect(nodes, 0, avail, &mut ops, &mut boxes, &mut visible);
+        self.collect(nodes, 0, 0, avail, &mut ops, &mut boxes, &mut visible);
         let ps = self.style(parent).clone();
+        let key = self.group_key(
+            &ps,
+            &ops,
+            boxes.is_empty() && self.pct_seen == pct0,
+            emergency,
+        );
+        if let Some((layout, text)) = key.and_then(|k| self.donor(k)) {
+            self.doc.reused = self.doc.reused.saturating_add(1);
+            return Group {
+                layout,
+                text,
+                boxes,
+                visible,
+                built_avail: avail,
+                dep: false,
+                key,
+            };
+        }
         let root = text_style(&ps, brush(&ps, 0), emergency);
         let mut b = self.lcx.tree_builder(self.fcx, 1.0, true, &root);
-        b.set_white_space_mode(WhiteSpaceCollapse::Collapse);
+        // White space is collapsed here, over the whole group: parley's own
+        // collapsing trims it at the edge of every inline element, which
+        // joins "<b>From:</b> Ana" into "From:Ana".
+        b.set_white_space_mode(WhiteSpaceCollapse::Preserve);
+        let texts = collapse_white_space(&ops);
         let mut room = MAX_GROUP_TEXT;
         let mut capped = false;
-        for op in &ops {
+        for (k, op) in ops.iter().enumerate() {
+            let text = match op {
+                Op::Text(t, pre) => match texts.get(k) {
+                    Some(Some(c)) if !*pre => c.as_str(),
+                    _ => t.as_str(),
+                },
+                _ => "",
+            };
             match op {
                 // Past the cap only the spans are still opened and closed.
                 Op::Text(..) | Op::Br | Op::Box(_) if capped => {}
-                Op::Text(t, pre) if t.len() > room => {
-                    let kept = cut_text(t, room);
-                    if *pre {
-                        preserved(&mut b, kept);
-                    } else {
-                        collapsible(&mut b, kept);
-                    }
-                    preserved(&mut b, "\n");
+                Op::Text(..) if text.len() > room => {
+                    b.push_text(cut_text(text, room));
+                    b.push_text("\n");
                     b.push_text(CAPPED_MARKER);
                     capped = true;
                     self.text_capped = true;
                 }
-                Op::Open(id, link) => {
+                Op::Open(id, link, deco) => {
                     let s = self.st.get(*id as usize).unwrap_or(&self.default);
-                    b.push_style_span(text_style(s, brush(s, *link), emergency));
+                    b.push_style_span(text_style(s, deco_brush(s, *link, *deco), emergency));
                 }
                 Op::Close => b.pop_style_span(),
-                Op::Text(t, false) => {
-                    room = room.saturating_sub(t.len());
-                    collapsible(&mut b, t);
+                Op::Text(..) => {
+                    room = room.saturating_sub(text.len());
+                    b.push_text(text);
                 }
-                // parley applies the white-space mode when text is
-                // committed (at the next span boundary), so preserved text
-                // gets its own span, committed while Preserve is set.
-                Op::Text(t, true) => {
-                    room = room.saturating_sub(t.len());
-                    preserved(&mut b, t);
-                }
-                Op::Br => preserved(&mut b, "\n"),
+                Op::Br => b.push_text("\n"),
                 Op::Box(i) => {
                     let (w, h) = boxes.get(*i).map_or((0.0, 0.0), |bi| (bi.w, bi.h));
                     b.push_inline_box(InlineBox {
@@ -1377,7 +2159,123 @@ impl<'a> Layouter<'a> {
             visible,
             built_avail: avail,
             dep,
+            key: key.filter(|_| !dep),
         }
+    }
+
+    /// The backgrounds and borders of the inline elements of `g`, one box per
+    /// line each: over the element's text and its padding and border spacers,
+    /// from its font's ascent to its descent plus the vertical padding and
+    /// border, which do not move the lines (CSS 2 10.6.1).
+    fn inline_boxes(&mut self, g: &Group, x: f32, y: f32) {
+        let mut boxes: Vec<(Id, f32, f32, f32, f32)> = vec![];
+        for line in g.layout.lines() {
+            boxes.clear();
+            let mut extend = |deco: Id, x0: f32, x1: f32, top: f32, bottom: f32| {
+                if let Some(b) = boxes.iter_mut().find(|b| b.0 == deco) {
+                    b.1 = b.1.min(x0);
+                    b.2 = b.2.max(x1);
+                    b.3 = b.3.min(top);
+                    b.4 = b.4.max(bottom);
+                } else {
+                    boxes.push((deco, x0, x1, top, bottom));
+                }
+            };
+            for item in line.items() {
+                match item {
+                    PositionedLayoutItem::InlineBox(pb) => {
+                        let spacer = g.boxes.get(pb.id as usize).filter(|b| b.h <= 0.0);
+                        // Only a spacer widens the box; its height comes
+                        // from the text next to it.
+                        if let Some(deco) = spacer.map(|b| b.deco).filter(|&d| d != 0) {
+                            extend(deco, pb.x, pb.x + pb.width, f32::MAX, f32::MIN);
+                        }
+                    }
+                    PositionedLayoutItem::GlyphRun(gr) => {
+                        let deco = gr.style().brush.deco;
+                        if deco != 0 {
+                            let m = gr.run().metrics();
+                            extend(
+                                deco,
+                                gr.offset(),
+                                gr.offset() + gr.advance(),
+                                gr.baseline() - m.ascent,
+                                gr.baseline() + m.descent,
+                            );
+                        }
+                    }
+                }
+            }
+            for &(deco, x0, x1, top, bottom) in &boxes {
+                // Only spacers on this line: nothing to sit on.
+                if top > bottom {
+                    continue;
+                }
+                let s = self.style(deco).clone();
+                let (t, b) = (s.padding[0] + s.border[0], s.padding[2] + s.border[2]);
+                let (bx, by) = (x + x0, y + top - t);
+                let (w, h) = (x1 - x0, bottom - top + t + b);
+                if !s.hidden {
+                    if s.bg[3] > 0 {
+                        self.out.push(Item::Rect {
+                            r: Rect { x: bx, y: by, w, h },
+                            color: s.bg,
+                            radius: s.radius_on(w),
+                        });
+                    }
+                    self.borders(bx, by, w, h, &s);
+                }
+            }
+        }
+    }
+
+    /// A digest of everything the shaper is given for a group: the root and
+    /// span text styles and the text, as [`text_style`] reads them. `None`
+    /// when the group depends on the width (inline boxes, %-sized images) or
+    /// is long enough to be cut: those are always built.
+    fn group_key(&self, ps: &Style, ops: &[Op], plain: bool, emergency: bool) -> Option<GroupKey> {
+        if !plain {
+            return None;
+        }
+        let mut len = 0usize;
+        let mut lo = DefaultHasher::new();
+        let mut hi = DefaultHasher::new();
+        // Two independent SipHash states make a collision negligible.
+        hi.write_u8(0x5a);
+        for h in [&mut lo, &mut hi] {
+            hash_text_style(h, ps, brush(ps, 0), emergency);
+        }
+        for op in ops {
+            for h in [&mut lo, &mut hi] {
+                match op {
+                    Op::Open(id, link, deco) => {
+                        let s = self.st.get(*id as usize).unwrap_or(&self.default);
+                        h.write_u8(1);
+                        hash_text_style(h, s, deco_brush(s, *link, *deco), emergency);
+                    }
+                    Op::Close => h.write_u8(2),
+                    Op::Text(t, pre) => {
+                        h.write_u8(3);
+                        h.write_u8(u8::from(*pre));
+                        t.hash(h);
+                    }
+                    Op::Br => h.write_u8(4),
+                    Op::Box(_) => {}
+                }
+            }
+            if let Op::Text(t, _) = op {
+                len = len.saturating_add(t.len());
+            }
+        }
+        (len <= MAX_GROUP_TEXT).then(|| (hi.finish(), lo.finish()))
+    }
+
+    /// The layout and text a previous layout of this message shaped for
+    /// the group with this digest.
+    fn donor(&self, key: GroupKey) -> Option<(Layout<Brush>, String)> {
+        let i = *self.donors.get(&key)? as usize;
+        let prev = self.prev?;
+        Some((prev.layouts.get(i)?.clone(), prev.texts.get(i)?.clone()))
     }
 
     pub fn group_widths(&mut self, parent: Id, nodes: &[Id]) -> (f32, f32) {
@@ -1423,6 +2321,16 @@ impl<'a> Layouter<'a> {
             return 0.0;
         }
         let align = align_of(self.style(parent).align);
+        let indent = match self.style(parent).indent {
+            Len::Px(p) => p,
+            Len::Pct(p) => w * p / 100.0,
+            Len::Auto => 0.0,
+        };
+        if indent != 0.0 {
+            g.layout
+                .set_text_indent(indent, parley::IndentOptions::default());
+        }
+        let rtl = self.style(parent).rtl;
         let wrap = if g.dep { w + FIT_TOLERANCE } else { w };
         g.layout.break_all_lines(Some(wrap));
         // Emergency break-word: a word wider than the line is split rather
@@ -1433,7 +2341,22 @@ impl<'a> Layouter<'a> {
             g = e;
         }
         g.layout.align(align, AlignmentOptions::default());
-        let h = g.layout.height();
+        // A line break that ends the text ends its last line; the empty one
+        // after it is no line of the page. A box after the break (a block
+        // inside an inline, `<span><p>..</p><br><p>..</p></span>`) has no
+        // text, but its line is one.
+        let mut h = g.layout.height();
+        if g.text.ends_with('\n')
+            && g.layout.len() > 1
+            && let Some(last) = g.layout.get(g.layout.len().saturating_sub(1))
+            && last.text_range().is_empty()
+            && !last
+                .items()
+                .any(|i| matches!(i, PositionedLayoutItem::InlineBox(_)))
+        {
+            h = fin(h - last.metrics().line_height);
+        }
+        self.inline_boxes(&g, x, y);
         for line in g.layout.lines() {
             let lm = *line.metrics();
             for item in line.items() {
@@ -1450,7 +2373,13 @@ impl<'a> Layouter<'a> {
                             VAlign::Bottom => lm.block_max_coord - bi.h,
                             VAlign::Baseline => pb.y,
                         };
-                        shift(&mut items, x + pb.x, y + by);
+                        // Right to left: the line's boxes run from the other end.
+                        let bx = if rtl {
+                            fin(wrap - pb.x - pb.width)
+                        } else {
+                            pb.x
+                        };
+                        shift(&mut items, x + bx, y + by);
                         self.out.append(&mut items);
                     }
                     PositionedLayoutItem::GlyphRun(gr) => {
@@ -1470,7 +2399,15 @@ impl<'a> Layouter<'a> {
                 }
             }
         }
+        let key = g.key;
         let layout = self.push_layout(g.layout, g.text);
+        // A justified layout has had its advances adjusted, which breaking
+        // again undoes only approximately: it is never handed on.
+        if let (Some(k), false) = (key, align == Alignment::Justify) {
+            self.doc
+                .shaped
+                .push((k, u32::try_from(layout).unwrap_or(u32::MAX)));
+        }
         self.out.push(Item::Text {
             layout,
             x,
@@ -1553,6 +2490,7 @@ impl<'a> Layouter<'a> {
         let s = self.style(c).clone();
         let extra = s.padding[1] + s.padding[3] + s.border[1] + s.border[3];
         let marg = px_of(s.margin[1]) + px_of(s.margin[3]);
+        let content = |v: f32| if s.border_box { fin(v - extra) } else { v };
         if s.display == Display::Table {
             let (mn, mx) = self.table_intrinsic(c);
             return (mn + marg, mx + marg);
@@ -1560,7 +2498,7 @@ impl<'a> Layouter<'a> {
         let (mut mn, mut mx) = self.content_widths(c);
         match s.width {
             Len::Px(w) => {
-                mn = w.min(self.maxw);
+                mn = content(w).min(self.maxw);
                 mx = mn;
             }
             // Percentage widths contribute min-content only.
@@ -1568,52 +2506,75 @@ impl<'a> Layouter<'a> {
             Len::Auto => {}
         }
         if let Len::Px(m) = s.max_width {
-            mx = mx.min(m);
-            mn = mn.min(m);
+            mx = mx.min(content(m));
+            mn = mn.min(content(m));
         }
         if let Len::Px(m) = s.min_width {
-            mn = mn.max(m);
-            mx = mx.max(m);
+            mn = mn.max(content(m));
+            mx = mx.max(content(m));
         }
         (fin(mn + extra + marg), fin(mx + extra + marg))
     }
 }
 
-/// Push collapsible text `t`. parley trims each span's edges with
-/// `str::trim`, which also drops no-break and other non-ASCII spaces that
-/// CSS never collapses: Word's pseudo-bullets end in a span holding only
-/// `&nbsp;`s, so the bullet touched its text ("•Ship"). A leading or
-/// trailing white-space run holding such a space is committed preserved
-/// instead, with other white-space runs squeezed to one space as collapsing
-/// would leave them.
-fn collapsible(b: &mut parley::TreeBuilder<'_, Brush>, t: &str) {
-    let rest = t.trim_start();
-    let mid = rest.trim_end();
-    let lead = t.strip_suffix(rest).unwrap_or_default();
-    let tail = rest.strip_prefix(mid).unwrap_or_default();
-    // Line and paragraph separators would become hard breaks when
-    // preserved; they collapse like ASCII white space instead.
+/// The text of each collapsible `Op::Text` of a group once white space is
+/// collapsed as CSS does it (`white-space: normal`): runs of it become one
+/// space across inline elements, and none is left at the start, at the end
+/// or around a line break. ASCII white space, controls and line separators
+/// collapse; other spaces (no-break, em) are kept. `None` for other ops.
+fn collapse_white_space(ops: &[Op]) -> Vec<Option<String>> {
     let collapses =
         |c: char| c.is_ascii_whitespace() || c.is_control() || matches!(c, '\u{2028}' | '\u{2029}');
-    let kept = |run: &str| run.chars().any(|c| c.is_whitespace() && !collapses(c));
-    for (run, edge) in [(lead, true), (mid, false), (tail, true)] {
-        if run.is_empty() {
-            continue;
+    let mut out: Vec<Option<String>> = Vec::with_capacity(ops.len());
+    // After a space (or at the start of a line): the next one goes.
+    let mut at_space = true;
+    // The op whose text ends with a space nothing has followed yet.
+    let mut trailing: Option<usize> = None;
+    let trim = |out: &mut Vec<Option<String>>, at: Option<usize>| {
+        if let Some(Some(s)) = at.and_then(|i| out.get_mut(i)) {
+            s.pop();
         }
-        if edge && kept(run) {
-            let mut squeezed = String::with_capacity(run.len());
-            for c in run.chars() {
-                if !collapses(c) {
-                    squeezed.push(c);
-                } else if !squeezed.ends_with(' ') {
-                    squeezed.push(' ');
+    };
+    for op in ops {
+        let collapsed = match op {
+            Op::Text(t, false) => {
+                let mut s = String::with_capacity(t.len());
+                for c in t.chars() {
+                    if !collapses(c) {
+                        s.push(c);
+                        at_space = false;
+                        trailing = None;
+                    } else if !at_space {
+                        s.push(' ');
+                        at_space = true;
+                        trailing = Some(out.len());
+                    }
                 }
+                Some(s)
             }
-            preserved(b, &squeezed);
-        } else {
-            b.push_text(run);
-        }
+            Op::Text(t, true) => {
+                if !t.is_empty() {
+                    at_space = t.ends_with('\n');
+                    trailing = None;
+                }
+                None
+            }
+            Op::Br => {
+                trim(&mut out, trailing.take());
+                at_space = true;
+                None
+            }
+            Op::Box(_) => {
+                at_space = false;
+                trailing = None;
+                None
+            }
+            Op::Open(..) | Op::Close => None,
+        };
+        out.push(collapsed);
     }
+    trim(&mut out, trailing);
+    out
 }
 
 /// Characters of `alt` text laid out: it only has to fit a placeholder.
@@ -1658,15 +2619,6 @@ fn cut_text(t: &str, max: usize) -> &str {
     }
 }
 
-/// Commit `t` with white space preserved.
-fn preserved(b: &mut parley::TreeBuilder<'_, Brush>, t: &str) {
-    b.push_style_modification_span(&[]);
-    b.set_white_space_mode(WhiteSpaceCollapse::Preserve);
-    b.push_text(t);
-    b.pop_style_span();
-    b.set_white_space_mode(WhiteSpaceCollapse::Collapse);
-}
-
 fn align_of(a: Align) -> Alignment {
     match a {
         Align::Left => Alignment::Start,
@@ -1678,20 +2630,67 @@ fn align_of(a: Align) -> Alignment {
 
 /// The brush for text in style `s`; hidden text is transparent.
 pub(super) fn brush(s: &Style, link: u32) -> Brush {
+    deco_brush(s, link, 0)
+}
+
+/// [`brush`] for text on the background of inline element `deco`.
+fn deco_brush(s: &Style, link: u32, deco: Id) -> Brush {
     Brush {
         color: if s.hidden { [0; 4] } else { s.color },
         link,
+        deco,
     }
+}
+
+/// Feeds `h` every input of [`text_style`]: keep the two in step.
+fn hash_text_style(h: &mut DefaultHasher, s: &Style, brush: Brush, emergency: bool) {
+    s.font_family.hash(h);
+    h.write_u32(s.font_size.max(0.0).to_bits());
+    h.write_u32(s.letter_spacing.to_bits());
+    h.write_u32(s.word_spacing.to_bits());
+    h.write_u16(s.weight.unwrap_or(0));
+    // Not the shaper's, but kept in the layout that a later one takes over.
+    match s.indent {
+        Len::Px(p) => h.write_u32(p.to_bits()),
+        Len::Pct(p) => h.write_u32(!p.to_bits()),
+        Len::Auto => {}
+    }
+    match s.line_height {
+        LineH::Normal => h.write_u8(0),
+        LineH::Mult(m) => {
+            h.write_u8(1);
+            h.write_u32(m.to_bits());
+        }
+        LineH::Px(p) => {
+            h.write_u8(2);
+            h.write_u32(p.to_bits());
+        }
+    }
+    for flag in [
+        s.bold,
+        s.italic,
+        s.underline,
+        s.strike,
+        s.nowrap,
+        s.break_all,
+        s.wrap_anywhere,
+        emergency,
+    ] {
+        h.write_u8(u8::from(flag));
+    }
+    h.write(&brush.color);
+    h.write_u32(brush.link);
+    h.write_u32(brush.deco);
 }
 
 fn text_style(s: &Style, brush: Brush, emergency: bool) -> TextStyle<'static, 'static, Brush> {
     TextStyle {
         font_family: FontFamily::Source(Cow::Owned(s.font_family.to_string())),
         font_size: s.font_size.max(0.0),
-        font_weight: if s.bold {
-            FontWeight::BOLD
-        } else {
-            FontWeight::NORMAL
+        font_weight: match (s.weight, s.bold) {
+            (Some(n), _) => FontWeight::new(f32::from(n)),
+            (None, true) => FontWeight::BOLD,
+            (None, false) => FontWeight::NORMAL,
         },
         font_style: if s.italic {
             FontStyle::Italic
@@ -1702,6 +2701,7 @@ fn text_style(s: &Style, brush: Brush, emergency: bool) -> TextStyle<'static, 's
         has_underline: s.underline,
         has_strikethrough: s.strike,
         letter_spacing: s.letter_spacing,
+        word_spacing: s.word_spacing,
         line_height: match s.line_height {
             LineH::Normal => LineHeight::MetricsRelative(1.0),
             LineH::Mult(m) => LineHeight::FontSizeRelative(m),
@@ -1736,23 +2736,18 @@ fn text_style(s: &Style, brush: Brush, emergency: bool) -> TextStyle<'static, 's
 fn prescale_images(doc: &mut Doc, scale: f32, budget: &mut u64) {
     let mut done: HashMap<(usize, u32, u32), usize> = HashMap::new();
     for i in 0..doc.items.len() {
-        let Some(Item::Image { r, img, clip, .. }) = doc.items.get(i) else {
-            continue;
+        let (r, img) = match doc.items.get(i) {
+            Some(Item::Image { r, img, .. }) => (r, img),
+            Some(Item::Tiled { tile, img, .. }) => (tile, img),
+            _ => continue,
         };
         let Some(im) = doc.images.get(*img) else {
             continue;
         };
         let (iw, ih) = (im.pix.width() as f32, im.pix.height() as f32);
-        let (rw, rh) = (r.w * scale, r.h * scale);
-        let (w, h) = if clip.is_some() {
-            let s = (rw / iw).max(rh / ih);
-            (iw * s, ih * s)
-        } else {
-            (rw, rh)
-        };
         let (tw, th) = (
-            fin(w).round().max(1.0) as u32,
-            fin(h).round().max(1.0) as u32,
+            fin(r.w * scale).round().max(1.0) as u32,
+            fin(r.h * scale).round().max(1.0) as u32,
         );
         if (tw as f32 - iw).abs() < 1.0 && (th as f32 - ih).abs() < 1.0 {
             continue;
@@ -1771,7 +2766,7 @@ fn prescale_images(doc: &mut Doc, scale: f32, budget: &mut u64) {
                 *budget = budget.saturating_sub(px);
                 let (nat_w, nat_h, dark_on_clear) = (im.nat_w, im.nat_h, im.dark_on_clear);
                 doc.images.push(ImageData {
-                    pix,
+                    pix: std::sync::Arc::new(pix),
                     nat_w,
                     nat_h,
                     dark_on_clear,
@@ -1781,14 +2776,14 @@ fn prescale_images(doc: &mut Doc, scale: f32, budget: &mut u64) {
                 k
             }
         };
-        if let Some(Item::Image { img, .. }) = doc.items.get_mut(i) {
+        if let Some(Item::Image { img, .. } | Item::Tiled { img, .. }) = doc.items.get_mut(i) {
             *img = ni;
         }
     }
     // Drop originals no longer referenced.
     let mut used = vec![false; doc.images.len()];
     for it in &doc.items {
-        if let Item::Image { img, .. } = it
+        if let Item::Image { img, .. } | Item::Tiled { img, .. } = it
             && let Some(u) = used.get_mut(*img)
         {
             *u = true;
@@ -1796,7 +2791,7 @@ fn prescale_images(doc: &mut Doc, scale: f32, budget: &mut u64) {
     }
     for (im, used) in doc.images.iter_mut().zip(used) {
         if !used && let Some(p) = tiny_skia::Pixmap::new(1, 1) {
-            im.pix = p;
+            im.pix = std::sync::Arc::new(p);
         }
     }
 }

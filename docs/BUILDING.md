@@ -7,57 +7,59 @@ To build Komorebi yourself on Windows 10/11 (x64):
 1. Install [Rust](https://rustup.rs) (rustup picks the toolchain pinned in
    `rust-toolchain.toml`) and the Visual Studio Build Tools with the
    "Desktop development with C++" workload (the MSVC linker, the Windows
-   SDK and its `rc.exe`, which embeds the icon, version information and
-   manifest).
+   SDK, its `rc.exe`, which embeds the icon, version information and
+   manifest, and its `fxc.exe`, which compiles GPUI's shaders in release
+   builds; [GPUI-BUILD.md](GPUI-BUILD.md)).
 2. Build and run:
 
    ```powershell
    git clone https://github.com/RusticStack/komorebi
    cd komorebi
-   cargo build --release --locked   # target\release\komorebi.exe
+   cargo build --release --locked -p komorebi-gpui   # target\release\komorebi.exe
    .\target\release\komorebi.exe
    ```
 
 `komorebi.exe` is a single file (the C runtime is linked in); copy it
 anywhere. Its data lives in `%LOCALAPPDATA%\komorebi` (see PRIVACY.md).
 
-Stack: Rust + [Slint](https://slint.dev) (Fluent style, software renderer),
-`rusqlite`, `imap`, `lettre`, `mail-parser`, `keyring-core` (with the Windows Credential Manager store), `rfd`.
+Stack: Rust + [GPUI](https://gpui.rs) with GPUI Kit (vendored, `third_party/`),
+`rusqlite`, `imap`, `lettre`, `mail-parser`, `keyring-core` (with the Windows Credential Manager store).
+The package `komorebi` (the repository root) is the library; the package
+`komorebi-gpui` (`crates/komorebi-gpui`) is the app and builds `komorebi.exe`.
 
 
 ## Checks
 
 ```powershell
-cargo fmt --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
+cargo xtask check                  # fmt, clippy, tests, lints, size of an existing release exe
+cargo test --locked --workspace    # every test, the library's integration tests included
 pwsh scripts/check-pins.ps1        # exact-pinned crates linked once
-cargo deny --locked check licenses advisories   # cargo install cargo-deny
+cargo deny --workspace --locked check licenses advisories   # cargo install cargo-deny
 ```
 
 CI (`.github/workflows/ci.yml`) runs these, then the release build, its
-size check and the boot snapshot below.
+size check and the boot checks below.
 
 ## Verifying a build
 
 After `cargo build --release --locked`:
 
-- **Size:** `target\release\komorebi.exe` must be at most 20,500,000
-  bytes (`(Get-Item target\release\komorebi.exe).Length`).
+- **Size:** `cargo xtask size` checks `komorebi.exe` (Komorebi 1.0, the
+  release exe, docs/GPUI-BUILD.md) against 21,500,000 bytes.
+- **Manifest:** `pwsh scripts/check-manifest.ps1 target\release\komorebi.exe`
+  (one RT_MANIFEST with PerMonitorV2, Common Controls 6 and the rest).
 - **Version:** `(Get-Item target\release\komorebi.exe).VersionInfo`
   shows the Cargo version, and Explorer shows the icon.
-- **Boot:** run it offline against a new seeded cache; it renders the
-  window to a file, checks that the list and the reader are not blank and
-  exits non-zero if either is (this touches no mail and no network):
+- **Boot:** run it offline against a new seeded cache on WARP; it draws the
+  first frame, captures the window to a file, checks that the folder pane,
+  the list and the reader are not blank and exits non-zero if any is (this
+  touches no mail and no network):
 
   ```powershell
   cargo run --release --locked --example seed -- $env:TEMP\seed.sqlite3 2000
-  $env:KOMOREBI_OFFLINE = 1; $env:KOMOREBI_DB = "$env:TEMP\seed.sqlite3"
-  $env:KOMOREBI_SNAPSHOT = "$env:TEMP\boot.bmp"; $env:KOMOREBI_SNAPSHOT_SELECT = 0
-  $env:KOMOREBI_SNAPSHOT_CHECK = 1; $env:KOMOREBI_TIMING = 1
-  (Start-Process target\release\komorebi.exe -NoNewWindow -Wait -PassThru).ExitCode   # 0
+  pwsh scripts/gpui-boot-check.ps1 -Exe target\release\komorebi.exe `
+    -Cache $env:TEMP\seed.sqlite3 -Out $env:TEMP\boot.png -Warp -Select 0   # exit 0
   ```
 
-  `KOMOREBI_TIMING` prints the launch timings (the budget is 200 ms to the
+  `KOMOREBI_TIMING=1` prints the launch timings (the budget is 200 ms to the
   first frame).
-

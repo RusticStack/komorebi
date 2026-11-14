@@ -1,14 +1,16 @@
 # Compiles the Windows installer around a built komorebi.exe and prints the
 # installer's SHA-256.
 #
-#   pwsh scripts/build-installer.ps1 [-Exe target\release\komorebi.exe] [-Version 0.3.0]
+#   pwsh scripts/build-installer.ps1 [-Exe target\release\komorebi.exe] [-Version 1.0.0] [-OutDir dist]
 #
 # Needs Inno Setup 6.3 or later (ISCC.exe on PATH or in its usual folders;
 # winget install JRSoftware.InnoSetup). The version defaults to the one
-# inside the exe. Output: dist\komorebi-<version>-setup.exe
+# inside the exe. Output: dist\komorebi-<version>-setup.exe. -OutDir puts the
+# setup in another folder than dist.
 param(
     [string]$Exe = 'target\release\komorebi.exe',
-    [string]$Version
+    [string]$Version,
+    [string]$OutDir
 )
 $ErrorActionPreference = 'Stop'
 
@@ -36,13 +38,19 @@ try {
         $info = (Get-Item -LiteralPath (Join-Path $stage 'komorebi.exe')).VersionInfo
         $Version = '{0}.{1}.{2}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart
     }
-    & $iscc "/DAppVersion=$Version" "/DBinDir=$stage" (Join-Path $root 'installer\komorebi.iss')
+    $defines = @("/DAppVersion=$Version", "/DBinDir=$stage")
+    if ($OutDir) {
+        New-Item -ItemType Directory -Force $OutDir | Out-Null
+        $defines += "/O$((Resolve-Path -LiteralPath $OutDir).Path)"
+    }
+    & $iscc @defines (Join-Path $root 'installer\komorebi.iss')
     if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
 } finally {
     Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 }
 
-$setup = Join-Path $root "dist\komorebi-$Version-setup.exe"
+$setupDir = if ($OutDir) { (Resolve-Path -LiteralPath $OutDir).Path } else { Join-Path $root 'dist' }
+$setup = Join-Path $setupDir "komorebi-$Version-setup.exe"
 if (-not (Test-Path $setup)) { throw "expected $setup was not written" }
 $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
 "$setup"

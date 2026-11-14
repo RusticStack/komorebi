@@ -158,6 +158,9 @@ pub struct ContactRow {
     pub id: i64,
     pub name: String,
     pub email: String,
+    /// The letter the row is listed under ([`contacts::key_letter`] of the
+    /// stored sort key; [`Db::contact_ids`] keeps each letter together).
+    pub letter: char,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -339,7 +342,7 @@ impl Db {
         let q = fold(query.trim()).into_owned();
         let words: Vec<&str> = q.split_whitespace().take(4).collect();
         let mut sql = String::from(
-            "SELECT c.id FROM contacts c JOIN address_books b ON b.id = c.book_id
+            "SELECT c.id, c.sort_key FROM contacts c JOIN address_books b ON b.id = c.book_id
              WHERE c.dirty <> 3 AND b.enabled = 1 AND (?1 IS NULL OR c.book_id = ?1)
                AND (?2 IS NULL OR c.id IN (SELECT contact_id FROM contact_group_members WHERE group_id = ?2))",
         );
@@ -354,21 +357,25 @@ impl Db {
             args.push((*w).to_string());
             args.push(format!("{w}{}", char::MAX));
         }
-        sql.push_str(" ORDER BY c.sort_key, c.id");
         let mut stmt = self.conn.prepare(&sql)?;
         let mut all: Vec<&dyn rusqlite::ToSql> = vec![&book, &group];
         for a in &args {
             all.push(a);
         }
-        let rows = stmt.query_map(all.as_slice(), |r| r.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let rows = stmt.query_map(all.as_slice(), |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let mut rows: Vec<(i64, String)> = rows.collect::<rusqlite::Result<_>>()?;
+        // The order the list's letter headers follow (a raw `ORDER BY
+        // sort_key` put every contact with no family name first).
+        contacts::list_order(&mut rows);
+        Ok(rows.into_iter().map(|(id, _)| id).collect())
     }
 
     /// The list rows for `ids` (in that order; missing ones left out).
     pub fn contact_rows(&self, ids: &[i64]) -> Result<Vec<ContactRow>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT c.fn, c.given, c.family, c.org,
-                (SELECT addr FROM contact_emails e WHERE e.contact_id = c.id ORDER BY pref DESC, pos LIMIT 1)
+                (SELECT addr FROM contact_emails e WHERE e.contact_id = c.id ORDER BY pref DESC, pos LIMIT 1),
+                c.sort_key
              FROM contacts c WHERE c.id = ?1",
         )?;
         let mut out = Vec::with_capacity(ids.len());
@@ -388,7 +395,15 @@ impl Db {
                     if name.is_empty() {
                         name.clone_from(&email);
                     }
-                    Ok(ContactRow { id, name, email })
+                    // The stored key, the one `contact_ids` orders by.
+                    let key: String = r.get(5)?;
+                    let letter = contacts::key_letter(&key);
+                    Ok(ContactRow {
+                        id,
+                        name,
+                        email,
+                        letter,
+                    })
                 })
                 .optional()?;
             out.extend(row);
@@ -1225,6 +1240,41 @@ mod tests {
 
         db.delete_contact(a_id).unwrap();
         assert!(db.contact(a_id).unwrap().is_none());
+    }
+
+    /// The list keeps each letter's rows together when contacts with and
+    /// without a family name mix (review: Bruno, Ze To, Almeida, Borges
+    /// listed as B, Z, A, B).
+    #[test]
+    fn list_rows_keep_each_letter_together() {
+        let db = Db::in_memory().unwrap();
+        let local = db.local_book().unwrap();
+        for (name, family, addr) in [
+            ("Bruno", "", "bruno@example.pt"),
+            ("Ze To", "", "ze@example.pt"),
+            ("Rui Almeida", "Almeida", "rui@example.pt"),
+            ("Ana Borges", "Borges", "ana@example.pt"),
+            ("42 Studio", "", "studio@example.pt"),
+            ("~ Bot", "", "bot@example.pt"),
+        ] {
+            let mut c = person(local, name, addr);
+            c.family = family.into();
+            db.save_contact(&mut c).unwrap();
+        }
+        let ids = db.contact_ids(None, None, "").unwrap();
+        let rows = db.contact_rows(&ids).unwrap();
+        let got: Vec<(char, &str)> = rows.iter().map(|r| (r.letter, r.name.as_str())).collect();
+        assert_eq!(
+            got,
+            [
+                ('#', "42 Studio"),
+                ('#', "~ Bot"),
+                ('A', "Rui Almeida"),
+                ('B', "Ana Borges"),
+                ('B', "Bruno"),
+                ('Z', "Ze To"),
+            ]
+        );
     }
 
     #[test]

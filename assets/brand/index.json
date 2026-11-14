@@ -1,0 +1,103 @@
+{
+  "note": "Komorebi 1.0 brand assets for the GPUI app. Sources: assets/brand-src; generator: scripts/brand-assets.js; guide: docs/BRANDING.md.",
+  "colours": {
+    "seal": "#B3503A",
+    "ink": "#171717",
+    "ink_dark": "#F2F2F0",
+    "fall": "#F1F1EE",
+    "fall_dark": "#202020"
+  },
+  "svg": {
+    "mark": {
+      "file": "mark.svg",
+      "fill": "seal",
+      "use": "The seal: welcome, About, the Sent notice. Persimmon, never in text."
+    },
+    "mark_mono": {
+      "file": "mark-mono.svg",
+      "fill": "currentColor",
+      "use": "The ink mark in the title bar (recoloured with the text colour)."
+    },
+    "fall": {
+      "file": "fall.svg",
+      "fill": "currentColor",
+      "use": "The large light shape on the welcome screen only, in the fall tone; never persimmon or ink."
+    },
+    "wordmark": {
+      "file": "wordmark.svg",
+      "fill": "ink",
+      "use": "The drawn wordmark on light grounds."
+    },
+    "wordmark_dark": {
+      "file": "wordmark-dark.svg",
+      "fill": "ink_dark",
+      "use": "The drawn wordmark on dark grounds."
+    },
+    "logo": {
+      "file": "logo.svg",
+      "fill": "seal + ink",
+      "use": "Seal and wordmark lockup on light grounds (About)."
+    },
+    "logo_dark": {
+      "file": "logo-dark.svg",
+      "fill": "seal + ink_dark",
+      "use": "Seal and wordmark lockup on dark grounds (About)."
+    }
+  },
+  "png": {
+    "mark-18": {
+      "w": 18,
+      "h": 18,
+      "x1": "png/mark-18.png",
+      "x2": "png/mark-18@2x.png"
+    },
+    "mark-40": {
+      "w": 40,
+      "h": 40,
+      "x1": "png/mark-40.png",
+      "x2": "png/mark-40@2x.png"
+    },
+    "mark-72": {
+      "w": 72,
+      "h": 72,
+      "x1": "png/mark-72.png",
+      "x2": "png/mark-72@2x.png"
+    },
+    "wordmark-24": {
+      "w": 114,
+      "h": 24,
+      "x1": "png/wordmark-24.png",
+      "x2": "png/wordmark-24@2x.png"
+    },
+    "wordmark-dark-24": {
+      "w": 114,
+      "h": 24,
+      "x1": "png/wordmark-dark-24.png",
+      "x2": "png/wordmark-dark-24@2x.png"
+    },
+    "logo-40": {
+      "w": 189,
+      "h": 40,
+      "x1": "png/logo-40.png",
+      "x2": "png/logo-40@2x.png"
+    },
+    "logo-dark-40": {
+      "w": 189,
+      "h": 40,
+      "x1": "png/logo-dark-40.png",
+      "x2": "png/logo-dark-40@2x.png"
+    },
+    "fall-light": {
+      "w": 325,
+      "h": 360,
+      "x1": "png/fall-light.png",
+      "x2": "png/fall-light@2x.png"
+    },
+    "fall-dark": {
+      "w": 325,
+      "h": 360,
+      "x1": "png/fall-dark.png",
+      "x2": "png/fall-dark@2x.png"
+    }
+  }
+}

@@ -7,6 +7,7 @@
 //! least-recently-used within [`MAX_CACHE_BYTES`].
 
 use super::layout::{Brush, Doc, Item, Rect};
+use super::style::{LineStyle, Radius};
 use parley::PositionedLayoutItem;
 use skrifa::{
     GlyphId, MetadataProvider,
@@ -157,26 +158,74 @@ fn paint_of(c: [u8; 4]) -> Paint<'static> {
     p
 }
 
-fn rrect(r: Rect, rad: f32) -> Option<Path> {
-    let rad = rad.min(r.w / 2.0).min(r.h / 2.0);
+fn rrect(r: Rect, rad: Radius) -> Option<Path> {
+    let px = rad.px.min(r.w / 2.0).min(r.h / 2.0);
     let mut pb = PathBuilder::new();
-    if rad.is_nan() || rad <= 0.5 {
+    if px.is_nan() || px <= 0.5 || rad.corners == 0 {
         pb.push_rect(tiny_skia::Rect::from_xywh(r.x, r.y, r.w, r.h)?);
         return pb.finish();
     }
-    let k = 0.5523 * rad;
+    // Each corner's radius; a square corner has none.
+    let on = |bit: u8| if rad.corners & bit != 0 { px } else { 0.0 };
+    let (tl, tr, br, bl) = (on(1), on(2), on(4), on(8));
     let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.w, r.y + r.h);
-    pb.move_to(x0 + rad, y0);
-    pb.line_to(x1 - rad, y0);
-    pb.cubic_to(x1 - rad + k, y0, x1, y0 + rad - k, x1, y0 + rad);
-    pb.line_to(x1, y1 - rad);
-    pb.cubic_to(x1, y1 - rad + k, x1 - rad + k, y1, x1 - rad, y1);
-    pb.line_to(x0 + rad, y1);
-    pb.cubic_to(x0 + rad - k, y1, x0, y1 - rad + k, x0, y1 - rad);
-    pb.line_to(x0, y0 + rad);
-    pb.cubic_to(x0, y0 + rad - k, x0 + rad - k, y0, x0 + rad, y0);
+    const K: f32 = 0.5523;
+    pb.move_to(x0 + tl, y0);
+    pb.line_to(x1 - tr, y0);
+    if tr > 0.0 {
+        pb.cubic_to(x1 - tr + K * tr, y0, x1, y0 + tr - K * tr, x1, y0 + tr);
+    }
+    pb.line_to(x1, y1 - br);
+    if br > 0.0 {
+        pb.cubic_to(x1, y1 - br + K * br, x1 - br + K * br, y1, x1 - br, y1);
+    }
+    pb.line_to(x0 + bl, y1);
+    if bl > 0.0 {
+        pb.cubic_to(x0 + bl - K * bl, y1, x0, y1 - bl + K * bl, x0, y1 - bl);
+    }
+    pb.line_to(x0, y0 + tl);
+    if tl > 0.0 {
+        pb.cubic_to(x0, y0 + tl - K * tl, x0 + tl - K * tl, y0, x0 + tl, y0);
+    }
     pb.close();
     pb.finish()
+}
+
+/// The pen of a border `w` wide. Dashes are as a browser draws them: 3 widths
+/// long up to 3 px, 2 from there on, and their gaps stretched so that a line
+/// of the given `length` (0: a closed path) ends in a dash at both ends. Dots
+/// are round from 2 px wide.
+fn stroke_of(style: LineStyle, w: f32, length: f32) -> Stroke {
+    let (on, gap, round) = match style {
+        LineStyle::Dashed => {
+            let on = if w <= 3.0 { 3.0 * w } else { 2.0 * w };
+            (on, on, false)
+        }
+        LineStyle::Dotted if w >= 2.0 => (0.01, 2.0 * w, true),
+        LineStyle::Dotted => (w, w, false),
+        _ => {
+            return Stroke {
+                width: w,
+                ..Default::default()
+            };
+        }
+    };
+    let gap = if length > on + gap {
+        let n = ((length + gap) / (on + gap)).round().max(2.0);
+        (length - n * on) / (n - 1.0)
+    } else {
+        gap
+    };
+    Stroke {
+        width: w,
+        line_cap: if round {
+            tiny_skia::LineCap::Round
+        } else {
+            tiny_skia::LineCap::Butt
+        },
+        dash: tiny_skia::StrokeDash::new(vec![on, gap.max(0.01)], 0.0),
+        ..Default::default()
+    }
 }
 
 /// Paint the document band starting at device row `y_px` into `pm`, at
@@ -216,8 +265,8 @@ pub fn render_at(
                 if !visible(&d) || color[3] == 0 {
                     continue;
                 }
-                if *radius > 0.5 {
-                    if let Some(p) = rrect(d, radius * scale) {
+                if radius.px > 0.5 {
+                    if let Some(p) = rrect(d, radius.scaled(scale)) {
                         pm.fill_path(
                             &p,
                             &paint_of(*color),
@@ -237,6 +286,7 @@ pub fn render_at(
                 width,
                 color,
                 radius,
+                style,
             } => {
                 let d = dev(r);
                 if !visible(&d) || color[3] == 0 {
@@ -249,11 +299,30 @@ pub fn render_at(
                     w: d.w - w,
                     h: d.h - w,
                 };
-                if let Some(p) = rrect(inset, (radius * scale - w / 2.0).max(0.0)) {
-                    let st = Stroke {
-                        width: w,
-                        ..Default::default()
-                    };
+                // One side of a box is a line along its length.
+                let side = d.w <= w + 0.01 || d.h <= w + 0.01;
+                let path = if side {
+                    let mut pb = PathBuilder::new();
+                    if d.h <= d.w {
+                        pb.move_to(d.x, inset.y);
+                        pb.line_to(d.x + d.w, inset.y);
+                    } else {
+                        pb.move_to(inset.x, d.y);
+                        pb.line_to(inset.x, d.y + d.h);
+                    }
+                    pb.finish()
+                } else {
+                    rrect(
+                        inset,
+                        Radius {
+                            px: (radius.px * scale - w / 2.0).max(0.0),
+                            ..*radius
+                        },
+                    )
+                };
+                let length = if side { d.w.max(d.h) } else { 0.0 };
+                if let Some(p) = path {
+                    let st = stroke_of(*style, w, length);
                     pm.stroke_path(&p, &paint_of(*color), &st, Transform::identity(), None);
                 }
             }
@@ -262,6 +331,7 @@ pub fn render_at(
                 img,
                 clip,
                 radius,
+                alpha,
             } => {
                 let d = dev(r);
                 let Some(im) = doc.images.get(*img) else {
@@ -271,20 +341,14 @@ pub fn render_at(
                     continue;
                 }
                 let (iw, ih) = (im.pix.width() as f32, im.pix.height() as f32);
-                // Background images cover their box; others stretch to it.
-                let (sx, sy) = if clip.is_some() {
-                    let s = (d.w / iw).max(d.h / ih).max(0.0001);
-                    (s, s)
-                } else {
-                    (d.w / iw, d.h / ih)
-                };
+                let (sx, sy) = (d.w / iw, d.h / ih);
                 let area = clip.as_ref().map_or(d, dev);
                 // A dark logo on a clear ground in a dimmed message: a light
                 // plate (the page's original white, softened) behind it.
                 if doc.dimmed && clip.is_none() && im.dark_on_clear {
                     let plate = paint_of(PLATE);
-                    if *radius > 0.5 {
-                        if let Some(p) = rrect(area, radius * scale) {
+                    if radius.px > 0.5 {
+                        if let Some(p) = rrect(area, radius.scaled(scale)) {
                             pm.fill_path(
                                 &p,
                                 &plate,
@@ -298,7 +362,7 @@ pub fn render_at(
                     }
                 }
                 let unit = (sx - 1.0).abs() < 0.01 && (sy - 1.0).abs() < 0.01;
-                if unit && *radius <= 0.5 {
+                if unit && radius.px <= 0.5 && *alpha >= 1.0 {
                     // Pre-scaled at layout: a plain clipped src-over copy.
                     blit_image(pm, &im.pix, d.x.round() as i32, d.y.round() as i32, area);
                     continue;
@@ -309,19 +373,110 @@ pub fn render_at(
                     FilterQuality::Bilinear
                 };
                 let t = Transform::from_row(sx, 0.0, 0.0, sy, d.x, d.y);
-                let shader = Pattern::new(im.pix.as_ref(), SpreadMode::Pad, quality, 1.0, t);
+                let shader = Pattern::new((*im.pix).as_ref(), SpreadMode::Pad, quality, *alpha, t);
                 let paint = Paint {
                     shader,
                     anti_alias: true,
                     ..Default::default()
                 };
-                if *radius > 0.5 {
-                    if let Some(p) = rrect(area, radius * scale) {
+                if radius.px > 0.5 {
+                    if let Some(p) = rrect(area, radius.scaled(scale)) {
                         pm.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
                     }
                 } else if let Some(rc) = clip_rect(area, vw, vh) {
                     pm.fill_rect(rc, &paint, Transform::identity(), None);
                 }
+            }
+            Item::Tiled {
+                r,
+                img,
+                tile,
+                repeat,
+                radius,
+            } => {
+                let (d, t) = (dev(r), dev(tile));
+                let Some(im) = doc.images.get(*img) else {
+                    continue;
+                };
+                if !visible(&d) || t.w < 0.5 || t.h < 0.5 {
+                    continue;
+                }
+                // Along an axis that does not repeat only the tile is painted.
+                let cut = |start: f32, len: f32, t0: f32, tl: f32, rep: bool| {
+                    if rep {
+                        (start, len)
+                    } else {
+                        let a = start.max(t0);
+                        (a, (start + len).min(t0 + tl) - a)
+                    }
+                };
+                let (x, w) = cut(d.x, d.w, t.x, t.w, repeat.0);
+                let (y, h) = cut(d.y, d.h, t.y, t.h, repeat.1);
+                let area = Rect { x, y, w, h };
+                if w <= 0.0 || h <= 0.0 || !visible(&area) {
+                    continue;
+                }
+                let (iw, ih) = (im.pix.width() as f32, im.pix.height() as f32);
+                let (sx, sy) = (t.w / iw, t.h / ih);
+                let unit = (sx - 1.0).abs() < 0.01 && (sy - 1.0).abs() < 0.01;
+                // Pre-scaled at layout: pixels land on pixels.
+                let (m, quality) = if unit {
+                    (
+                        Transform::from_translate(t.x.round(), t.y.round()),
+                        FilterQuality::Nearest,
+                    )
+                } else {
+                    (
+                        Transform::from_row(sx, 0.0, 0.0, sy, t.x, t.y),
+                        FilterQuality::Bilinear,
+                    )
+                };
+                let shader = Pattern::new((*im.pix).as_ref(), SpreadMode::Repeat, quality, 1.0, m);
+                let paint = Paint {
+                    shader,
+                    anti_alias: radius.px > 0.5,
+                    ..Default::default()
+                };
+                fill_area(pm, area, &paint, radius.scaled(scale), vw, vh);
+            }
+            Item::Gradient {
+                r,
+                radius,
+                line,
+                stops,
+            } => {
+                let d = dev(r);
+                if !visible(&d) {
+                    continue;
+                }
+                let at = |x: f32, y: f32| {
+                    tiny_skia::Point::from_xy((x + dx) * scale, (y + dy) * scale - y_px)
+                };
+                let colors = stops
+                    .stops
+                    .iter()
+                    .map(|&(p, c)| {
+                        tiny_skia::GradientStop::new(
+                            p,
+                            tiny_skia::Color::from_rgba8(c[0], c[1], c[2], c[3]),
+                        )
+                    })
+                    .collect();
+                let Some(shader) = tiny_skia::LinearGradient::new(
+                    at(line[0], line[1]),
+                    at(line[2], line[3]),
+                    colors,
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                ) else {
+                    continue;
+                };
+                let paint = Paint {
+                    shader,
+                    anti_alias: radius.px > 0.5,
+                    ..Default::default()
+                };
+                fill_area(pm, d, &paint, radius.scaled(scale), vw, vh);
             }
             Item::Link { .. } | Item::Anchor { .. } => {}
             Item::Text {
@@ -344,6 +499,17 @@ pub fn render_at(
     }
 }
 
+/// Fill device rectangle `d` with `paint`, rounded by `radius`.
+fn fill_area(pm: &mut Pixmap, d: Rect, paint: &Paint, radius: Radius, vw: f32, vh: f32) {
+    if radius.px > 0.5 {
+        if let Some(p) = rrect(d, radius) {
+            pm.fill_path(&p, paint, FillRule::Winding, Transform::identity(), None);
+        }
+    } else if let Some(rc) = clip_rect(d, vw, vh) {
+        pm.fill_rect(rc, paint, Transform::identity(), None);
+    }
+}
+
 /// Start a paint: trim the glyph cache and advance its clock.
 pub(super) fn begin(cache: &mut GlyphCache) {
     cache.trim();
@@ -356,7 +522,7 @@ pub(super) fn fill(pm: &mut Pixmap, d: Rect, color: [u8; 4], radius: f32) {
         return;
     }
     if radius > 0.5 {
-        if let Some(p) = rrect(d, radius) {
+        if let Some(p) = rrect(d, Radius::all(radius)) {
             pm.fill_path(
                 &p,
                 &paint_of(color),

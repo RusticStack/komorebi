@@ -48,3 +48,69 @@ pub fn big_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T
         .join()
         .unwrap()
 }
+
+/// Hashes of what a layout draws and says: the pixels (rasterized in
+/// 256 px bands), the text lines and the geometry. Two layouts of the same
+/// message that must be identical have equal hashes.
+pub fn doc_hashes(
+    doc: &komorebi::mail::render::Doc,
+    engine: &mut komorebi::mail::render::Engine,
+    all_bands: bool,
+) -> (u64, u64, u64) {
+    use komorebi::mail::render;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    const BAND: u32 = 256;
+    let mut px = DefaultHasher::new();
+    let h = doc.height.max(0.0) as u32;
+    let mut y = 0;
+    while y < h {
+        let band = BAND.min(h - y);
+        // Without `all_bands`: the first and last 8 bands.
+        let edge = y < 8 * BAND || y + 8 * BAND >= h;
+        if !all_bands && !edge {
+            y += BAND;
+            continue;
+        }
+        if let Some(pm) = render::rasterize(doc, engine, y, band, 1.0) {
+            pm.data().hash(&mut px);
+        }
+        y += BAND;
+    }
+    let mut text = DefaultHasher::new();
+    for l in doc.text_lines() {
+        l.text.hash(&mut text);
+    }
+    let mut geo = DefaultHasher::new();
+    doc.items.len().hash(&mut geo);
+    doc.layouts.len().hash(&mut geo);
+    doc.height.to_bits().hash(&mut geo);
+    doc.width.to_bits().hash(&mut geo);
+    doc.natural_width.to_bits().hash(&mut geo);
+    doc.links.len().hash(&mut geo);
+    doc.images.len().hash(&mut geo);
+    for t in &doc.texts {
+        t.hash(&mut geo);
+    }
+    (px.finish(), text.finish(), geo.finish())
+}
+
+/// The open-time corpus: the reader fixtures and the HTML corpus.
+pub fn open_corpus() -> Vec<(String, RenderInput)> {
+    let mut v = vec![];
+    for name in [
+        "01-emoji",
+        "02-heavy-newsletter",
+        "03-heavy-digest",
+        "04-heavy-statement",
+    ] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/reader")
+            .join(format!("{name}.eml"));
+        let raw = std::fs::read(path).unwrap();
+        v.push((format!("reader/{name}"), mime::parse_reader(&raw).1));
+    }
+    for name in FILES {
+        v.push((format!("html/{name}"), input(&raw(name))));
+    }
+    v
+}

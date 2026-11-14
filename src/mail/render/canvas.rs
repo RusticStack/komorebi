@@ -67,6 +67,7 @@ impl Engine {
         b.push_default(StyleProperty::Brush(Brush {
             color: base.color,
             link: 0,
+            deco: 0,
         }));
         for s in spans {
             let r = s.start.min(end)..s.end.min(end);
@@ -99,6 +100,7 @@ impl Engine {
                     StyleProperty::Brush(Brush {
                         color: s.color,
                         link: 0,
+                        deco: 0,
                     }),
                     r.clone(),
                 );
@@ -185,7 +187,7 @@ impl Band<'_> {
 /// A PNG or JPEG decoded, scaled down towards `target_w` device px.
 pub fn decode_image(bytes: &[u8], target_w: u32) -> Option<Pixmap> {
     let mut budget = img::MAX_PIXELS;
-    img::decode(bytes, target_w, &mut budget).map(|d| d.pix)
+    img::decode(bytes, target_w, &mut budget).map(|d| std::sync::Arc::unwrap_or_clone(d.pix))
 }
 
 /// Text colour `fg` (chosen for a white page) as it should be drawn on

@@ -25,10 +25,13 @@ key by hand. It never goes to CI.
 
 On the maintainer's machine, from a clean checkout of the commit to
 release. The Cargo version and the top `CHANGELOG.md` section already say
-the new version (here `0.4.1`):
+the new version (here `0.4.1`). The release exe is `komorebi.exe` (the
+`komorebi-gpui` package, Komorebi 1.0), the name every version since 0.1
+installed, so the installer, its shortcuts, the autostart value and the
+`mailto:` registration of an older install keep working on an update:
 
 ```powershell
-cargo build --release --locked
+cargo build --release --locked -p komorebi-gpui
 pwsh scripts/build-installer.ps1 -Exe target\release\komorebi.exe -Version 0.4.1
 cargo run --example sign_update -- sign dist\komorebi-0.4.1-setup.exe 0.4.1
 gh release create v0.4.1 --title "Komorebi 0.4.1" --notes-file notes.md `
@@ -59,17 +62,21 @@ It runs when a `v*` tag is pushed and by hand (Actions > Release > Run
 workflow). It never publishes a release. It runs on the Blacksmith Windows
 runner and does:
 
-1. `cargo test --locked`, the release build, the size check (at most
-   20,500,000 bytes) and the offline boot snapshot.
+1. `scripts/find-fxc.ps1`, `cargo test --locked` (the library), the app's
+   and xtask's tests, the release build
+   (`cargo build --release --locked -p komorebi-gpui`), the size check
+   (`cargo xtask size`: komorebi.exe at most 21,500,000 bytes), its
+   manifest, and the boot checks on WARP (an empty cache and a seeded one).
 2. Uploads the unsigned `komorebi.exe` as the artifact `unsigned-exe`.
-3. Builds the installer with Inno Setup (installed through Chocolatey if
-   the image lacks it) and uploads it as the artifact `unsigned-installer`.
-4. Builds the portable zip, the debug symbols and `SHA256SUMS`, and keeps
-   everything as the workflow artifact `komorebi-<version>`.
+3. Builds the installer around it with Inno Setup (installed through
+   Chocolatey if the image lacks it) and uploads it as `unsigned-installer`.
+4. Builds the portable zip, the debug symbols (`komorebi.pdb`) and
+   `SHA256SUMS`, and keeps everything as the workflow artifact
+   `komorebi-<version>`.
 5. On a tag (or by hand with "create_draft" ticked) attaches the packages
    to a draft release `v<version>`, with this version's `CHANGELOG.md`
-   section as the notes. A tag that does not match the Cargo version fails
-   the run.
+   section as the notes. A tag that does not match the Cargo version of the
+   `komorebi` package fails the run.
 
 The artifact names are stable so that a SignPath signing request can point
 at them.

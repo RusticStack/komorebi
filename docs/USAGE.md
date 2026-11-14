@@ -64,13 +64,45 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-0.7.0-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-0.7.0-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-1.0.0-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-1.0.0-setup.exe .\SHA256SUMS
 ```
 
 How releases are made, signed and published is in
 [RELEASING.md](RELEASING.md).
 
+
+## Access keys
+
+Hold Alt: the commands that have an access key show its letter in a small
+chip under them; Alt and the letter does what the command's own shortcut
+does, wherever that command is available (so Alt+A attaches in the
+composer and archives elsewhere). The letters are chosen per language,
+because the letter has to be in the name you read:
+
+| Command | English | Portuguese |
+|---|---|---|
+| New mail | Alt+N | Alt+N |
+| Search | Alt+E | Alt+P |
+| Refresh | Alt+F | Alt+Z |
+| Folders | Alt+O | Alt+T |
+| Settings | Alt+T | Alt+F |
+| Reply / Reply all / Forward | Alt+R / Alt+L / Alt+W | Alt+R / Alt+O / Alt+H |
+| Archive / Delete / Move to | Alt+A / Alt+D / Alt+V | Alt+A / Alt+L / Alt+M |
+| Mark as important | Alt+I | Alt+I |
+| Mark as read / Mark as unread | Alt+M / Alt+U | Alt+C / Alt+D |
+| Save as .eml | Alt+S | Alt+E |
+| Send / Attach / Link (in the composer) | Alt+S / Alt+A / Alt+L | Alt+S / Alt+X / Alt+G |
+| Settings: Accounts / Signatures / Rules | Alt+A / Alt+S / Alt+R | Alt+C / Alt+A / Alt+R |
+| Settings: General / Privacy / About | Alt+G / Alt+P / Alt+B | Alt+G / Alt+I / Alt+E |
+
+The chips are drawn under the main commands, the reader's and the
+composer's buttons and the Settings sections (in Settings, Alt and a
+section's letter shows that section), and screen readers are told each
+letter. In the message menus (the More menu, the right-click menu and the
+one Shift+F10 opens) the items with a key show the same letter at their end
+while Alt is held, and the letter alone runs the item while the menu is
+open; screen readers are told it too.
 
 ## Keyboard
 
@@ -98,10 +130,9 @@ How releases are made, signed and published is in
 | Ctrl+Z / Ctrl+Y | Undo / redo text and formatting together (200 steps) |
 | Ctrl+Shift+V | Paste as plain text (in the body, where it does not move messages) |
 | Esc | Close the composer, saving the draft (in a composer tab, close the tab) |
-| Tab / Shift+Tab | Next / previous control; the folders, the list, the reader's toolbar and the composer's formatting buttons are one stop each (a row's quick actions, shown on hover and on the keyboard's row, are never Tab stops: the keys below do the same) |
+| Tab / Shift+Tab | Next / previous control (the list is one stop and its rows move with the arrow keys; a row's quick actions, shown on hover and on the keyboard's row, are never Tab stops: the keys below do the same). The reader's toolbar and the composer's formatting row are one Tab stop each (the button last used); Left and Right move along their buttons, Home and End go to the first and last |
 | F6 / Shift+F6 | Next / previous pane: the title bar's search, folders, message list, reader (toolbar, composer or the selection's buttons) |
 | Space or Enter | Press the focused button or toggle |
-| Left / Right | Move along the reader's toolbar or the formatting buttons (while they have the focus) |
 | Up / Down, Home / End, Enter or Space | Move through the folders and open one (while they have the focus; Left / Right fold an account) |
 | Shift+F10 or Menu | In the folders: the row's menu (Mark all as read and Collapse all; on an account also Refresh and Account settings; on a rail tile its Inbox, Sent and Archive) |
 | Ctrl+R / Ctrl+Shift+R | Reply / Reply all |
@@ -117,7 +148,7 @@ How releases are made, signed and published is in
 | Home / End | First / last message |
 | PageUp / PageDown | Up / down by the rows the list shows |
 | Enter | Open the selected message (with none, the first) and move to the page, where PageUp/PageDown, Space and Tab work |
-| Esc | Close the folder pane opened over a narrow window (the toggle at the top of the narrow rail opens it), else clear the search, else the selection and the open message or Outbox entry (below 720 px, back to the list, as the reader's back arrow does), else "Select messages", else the status line (Esc on its buttons always closes it); never the Undo offer at the bottom of the list |
+| Esc | Close the folder pane opened over a narrow window (the toggle at the top of the narrow rail opens it), else clear the search, else the selection and the open message or Outbox entry (below 720 px, back to the list, as the reader's back arrow does), else "Select messages", else the list's status line, else the sync line at the foot of the window (its own button closes it too); never the Undo offer at the bottom of the list |
 | Ctrl+click / Shift+click | Add or remove a message from the selection / select a range |
 | Shift+Up / Shift+Down | Extend the selection |
 | Ctrl+A | Select every message in the list (with the list focused) |
@@ -128,7 +159,7 @@ How releases are made, signed and published is in
 | Ctrl+Shift+E | Show / hide the folders (the pane folds to the rail) |
 | Double-click, Shift+Enter | Open the message in a new tab (a tab it already has comes forward) |
 | Middle-click | On a message row, open it in a background tab; on a tab, close it |
-| Ctrl+O | Open the message in a new window (a tab moved this way closes) |
+| Ctrl+O | Open the message in a new window (a tab moved this way closes); in a draft (the pane's or a tab's), or on a row of the Drafts list, the draft in a composer window of its own, as the composer's More menu does |
 | Ctrl+W or Ctrl+F4 | Close the tab (not the Mail tab); in a message window, close the window |
 | Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp | Next / previous tab |
 | Ctrl+1 to Ctrl+8, Ctrl+9 | Go to tab 1 to 8, the last tab |

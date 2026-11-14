@@ -1220,44 +1220,12 @@ mod tests {
         key: &'static [u8],
         chain: &'static [&'static [u8]],
     ) -> u16 {
-        use schannel::cert_context::{CertContext, KeySpec};
-        use schannel::cert_store::{CertAdd, Memory};
-        use schannel::crypt_prov::{AcquireOptions, ProviderType};
-        use schannel::schannel_cred::{Direction, SchannelCred};
+        let acceptor = crate::mail::fake_tls::Acceptor::new(leaf, key, chain);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
-            let mut store = Memory::new().unwrap().into_store();
-            let cert = CertContext::from_pem(std::str::from_utf8(leaf).unwrap()).unwrap();
-            let name = format!("komorebi-chain-test-{port}");
-            let mut options = AcquireOptions::new();
-            options.container(&name);
-            let mut prov = match options.acquire(ProviderType::rsa_full()) {
-                Ok(p) => p,
-                Err(_) => options
-                    .new_keyset(true)
-                    .acquire(ProviderType::rsa_full())
-                    .unwrap(),
-            };
-            prov.import().import_pkcs8_pem(key).unwrap();
-            cert.set_key_prov_info()
-                .container(&name)
-                .type_(ProviderType::rsa_full())
-                .keep_open(true)
-                .key_spec(KeySpec::key_exchange())
-                .set()
-                .unwrap();
-            let context = store.add_cert(&cert, CertAdd::Always).unwrap();
-            for pem in chain {
-                let c = CertContext::from_pem(std::str::from_utf8(pem).unwrap()).unwrap();
-                store.add_cert(&c, CertAdd::Always).unwrap();
-            }
-            let cred = SchannelCred::builder()
-                .cert(context)
-                .acquire(Direction::Inbound)
-                .unwrap();
             let (tcp, _) = listener.accept().unwrap();
-            let _ = schannel::tls_stream::Builder::new().accept(cred, tcp);
+            let _ = acceptor.accept(tcp);
         });
         port
     }

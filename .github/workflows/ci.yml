@@ -17,8 +17,10 @@ jobs:
     # Komorebi is a Windows app: rust-toolchain.toml pins the
     # x86_64-pc-windows-msvc target. Blacksmith's Windows Server 2025
     # image follows GitHub's windows-2025 image and ships VS Build Tools
-    # 2022 (MSVC + Windows SDK), which Slint's winit backend and
-    # rusqlite's bundled SQLite build need. 8 vCPUs for the compile.
+    # 2022 (MSVC + Windows SDK), which rusqlite's bundled SQLite build and
+    # the exe's resources need, and the SDK's fxc.exe, which the app's
+    # release build compiles its shaders with (docs/GPUI-BUILD.md). 8 vCPUs
+    # for the compile.
     runs-on: blacksmith-8vcpu-windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -35,57 +37,113 @@ jobs:
       # from its co-located cache, with no workflow change.
       - uses: Swatinem/rust-cache@v2
 
+      # The app's release build compiles its shaders with the Windows
+      # SDK's fxc.exe. Its build script finds the newest SDK by itself; this
+      # step says which one (and sets GPUI_FXC_PATH to it), and fails early
+      # with a clear message when the image has none.
+      - name: Locate fxc.exe
+        shell: pwsh
+        run: ./scripts/find-fxc.ps1
+
       # Cheapest first. Clippy type-checks every target (it replaces a
       # separate cargo check), and cargo test builds the dev profile.
       - name: cargo fmt
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
-      # Lints in this crate are errors. The imap-proto future-incompat
-      # notice (transitive, via the imap crate) is a cargo report, not a
-      # lint, so it does not fail this step.
+      # Lints in the workspace (the library, the app in crates/komorebi-gpui;
+      # not the vendored third_party crates) are errors. The imap-proto future-incompat notice (transitive, via the
+      # imap crate) is a cargo report, not a lint, so it does not fail
+      # this step.
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # The app on its own (clippy above covers it with the workspace): a
+      # plain check of every target, so a clippy-only pass never hides a
+      # build error.
+      - name: cargo check (app)
+        run: cargo check -p komorebi-gpui --all-targets --locked
+
+      # The app's source lints: colours and sizes only from the token layer,
+      # no timers or sleeps (xtask/src/lint.rs, docs/GPUI-TESTING.md).
+      - name: GPUI lints
+        run: cargo xtask lint
+
+      # The library (unit and integration tests).
       - name: cargo test
         run: cargo test --locked
+
+      # The app's tests run on GPUI's headless test platform; the DirectX
+      # pre-flight test uses WARP, so no GPU is needed. komorebi-i18n is the
+      # catalog the app reads (tr!, trn!). Then the xtask crate's own tests
+      # (the lints and size gates).
+      - name: cargo test (app)
+        run: |
+          cargo test -p komorebi-gpui -p komorebi-i18n --locked
+          cargo test -p xtask --locked
 
       # The exact-pinned renderer crates must stay single copies.
       - name: Pin consistency
         shell: pwsh
         run: ./scripts/check-pins.ps1
 
+      # komorebi.exe (Komorebi 1.0, the release exe; fxc.exe compiles its
+      # shaders here).
       - name: Release build
-        run: cargo build --release --locked
+        run: cargo build --release --locked -p komorebi-gpui
 
-      # The product budget: komorebi.exe at most 20.5 MB (decimal).
+      # The product budget, decimal bytes (xtask/src/size.rs): komorebi.exe
+      # at most 21,500,000.
       - name: Binary size
-        shell: pwsh
-        run: |
-          $size = (Get-Item target/release/komorebi.exe).Length
-          "komorebi.exe: $size bytes ({0:N2} MiB, {1:N3} MB; ceiling 20,500,000 bytes)" -f ($size / 1MB), ($size / 1e6)
-          if ($size -gt 20500000) { throw "komorebi.exe is over the 20.5 MB ceiling" }
+        run: cargo xtask size
 
-      # Boot the release build offline on a freshly seeded throwaway cache,
-      # open the newest message and render the window to a file. The app
-      # exits non-zero if the list or the reader came out blank.
-      - name: Offline boot snapshot
+      # One RT_MANIFEST (id 1), with PerMonitorV2 and what GPUI's own
+      # manifest carried (docs/GPUI-BUILD.md "The manifest").
+      - name: Manifest
         shell: pwsh
         run: |
-          $db = Join-Path $env:RUNNER_TEMP 'seed.sqlite3'
+          ./scripts/check-manifest.ps1 target/release/komorebi.exe
+          if ($LASTEXITCODE -ne 0) { throw 'komorebi.exe manifest' }
+
+      # The app's boot check: offline on a new throwaway cache, drawn
+      # with WARP (the runner has no GPU), its first frame captured
+      # (PrintWindow) and checked, exit 0. To verify on the first run: the
+      # runner's session has a desktop with DWM, so the window opens and
+      # the capture is not black (docs/GPUI-TESTING.md "CI").
+      # -Fallback: a blank first run is tried again with
+      # GPUI_DISABLE_DIRECT_COMPOSITION=1 (the runner's DWM may not compose
+      # DirectComposition surfaces); the log says which mode passed.
+      - name: GPUI boot check (WARP)
+        shell: pwsh
+        run: |
+          ./scripts/gpui-boot-check.ps1 -Exe target/release/komorebi.exe `
+            -Cache (Join-Path $env:RUNNER_TEMP 'gpui-boot.sqlite3') `
+            -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot.png') -Warp -Fallback
+          if ($LASTEXITCODE -ne 0) { throw "GPUI boot check failed (exit $LASTEXITCODE)" }
+
+      # The same on a seeded cache with the newest message open: the folder
+      # pane, the list and the reading pane all have content
+      # (snapshot::blank_panes).
+      - name: GPUI boot check, seeded (WARP)
+        shell: pwsh
+        run: |
+          $db = Join-Path $env:RUNNER_TEMP 'gpui-seed.sqlite3'
           cargo run --release --locked --example seed -- $db 2000
           if ($LASTEXITCODE -ne 0) { throw 'seeding failed' }
-          $env:KOMOREBI_OFFLINE = '1'
-          $env:KOMOREBI_DB = $db
-          $env:KOMOREBI_TIMING = '1'
-          $env:KOMOREBI_SNAPSHOT = Join-Path $env:RUNNER_TEMP 'boot.bmp'
-          $env:KOMOREBI_SNAPSHOT_CHECK = '1'
-          $env:KOMOREBI_SNAPSHOT_SELECT = '0'
-          $env:KOMOREBI_SIZE = '1280x800'
-          $env:KOMOREBI_THEME = 'light'
-          $p = Start-Process target/release/komorebi.exe -NoNewWindow -Wait -PassThru `
-            -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'boot.log')
-          Get-Content (Join-Path $env:RUNNER_TEMP 'boot.log')
-          if ($p.ExitCode -ne 0) { throw "boot snapshot failed (exit $($p.ExitCode))" }
+          ./scripts/gpui-boot-check.ps1 -Exe target/release/komorebi.exe `
+            -Cache $db -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot-mail.png') `
+            -Warp -Fallback -Select 0
+          if ($LASTEXITCODE -ne 0) { throw "GPUI seeded boot check failed (exit $LASTEXITCODE)" }
+
+      # What UI Automation (Narrator) reads on the GPUI window.
+      # Informational (GPUI-MIGRATION.md phase 13).
+      - name: GPUI UI Automation dump
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./scripts/gpui-uia-check.ps1 -Exe target/release/komorebi.exe `
+            -Cache (Join-Path $env:RUNNER_TEMP 'gpui-uia.sqlite3') -Warp `
+            -DumpPath (Join-Path $env:RUNNER_TEMP 'gpui-uia.txt')
+          if ($LASTEXITCODE -ne 0) { throw "UIA check failed (exit $LASTEXITCODE)" }
 
       # A convenience copy only: a full artifact storage quota must not
       # fail a build whose checks passed.
@@ -95,10 +153,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: boot-snapshot
-          path: ${{ runner.temp }}/boot.bmp
+          path: |
+            ${{ runner.temp }}/gpui-boot.png
+            ${{ runner.temp }}/gpui-boot.png.log
+            ${{ runner.temp }}/gpui-boot-mail.png
+            ${{ runner.temp }}/gpui-boot-mail.png.log
+            ${{ runner.temp }}/gpui-uia.txt
           if-no-files-found: ignore
 
-  # Licenses (deny.toml) and RustSec advisories for the Windows graph.
+  # Licenses (deny.toml) and RustSec advisories for the Windows graph of
+  # the whole workspace.
   # No compile here, so the smallest Blacksmith Windows runner.
   deny:
     runs-on: blacksmith-2vcpu-windows-2025
@@ -115,4 +179,4 @@ jobs:
           tool: cargo-deny@0.20.2
 
       - name: cargo deny
-        run: cargo deny --locked check licenses advisories
+        run: cargo deny --workspace --locked check licenses advisories

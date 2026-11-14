@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/logo-light.png">
-    <img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/logo.png" width="320" alt="Komorebi logo: a sun behind an envelope">
+    <img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/logo.png" width="320" alt="Komorebi logo: a persimmon seal with a carved K, and the wordmark komorebi">
   </picture>
 </p>
 
 <h1 align="center">Komorebi</h1>
 
-<p align="center"><b>A small, fast email client for Windows.</b><br>
+<p align="center"><b>A fast email client for Windows.</b><br>
 Read and write mail without getting in the way. No AI, no telemetry, no web engine.</p>
 
 <p align="center">
@@ -25,7 +25,7 @@ Read and write mail without getting in the way. No AI, no telemetry, no web engi
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-personal-dark.webp">
-    <img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-personal-light.webp" width="820" alt="Komorebi showing an inbox with a message open in the reading pane">
+    <img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-personal-light.webp" width="820" alt="Komorebi showing an inbox with a formatted newsletter open in the reading pane">
   </picture>
 </p>
 
@@ -33,9 +33,11 @@ Read and write mail without getting in the way. No AI, no telemetry, no web engi
 
 ## What it does
 
-- **Fast and light.** A window in under 200 ms (about 40 to 60 ms measured on a
-  quiet machine), a cached folder listed in under 600 ms, and an installer of
-  about 8.9 MB.
+- **Fast.** A window in under 200 ms (77 ms to the first frame was measured
+  on one development PC with a 2,000-message cache), and a cached folder
+  listed in under 600 ms. Komorebi 1.0 draws its interface with GPUI, which
+  keeps more memory in use while it idles than Komorebi 0.7 did; that is
+  accepted for 1.0, and reducing it is planned for 1.1.
 - **IMAP and SMTP** with a local SQLite cache and several accounts. Presets for
   Purelymail and Postale.io, manual settings for any other server, and SMTP
   without sign-in for a relay on your own network.
@@ -45,8 +47,9 @@ Read and write mail without getting in the way. No AI, no telemetry, no web engi
   recipient chips, attachments and drafts.
 - **Tabs and separate windows**, keyboard shortcuts, meeting invitations.
 - **Rules** that file and flag mail for you, with Copy as Sieve.
-- **Contacts** with groups and CardDAV, and a **calendar** with CalDAV: month,
-  week, day and agenda views, event editing and opt-in reminders.
+- **Contacts** with groups and CardDAV. There is no calendar in 1.0: the one in
+  0.7 is left out for now and planned to return in 1.1 (an invitation in a
+  message still shows on a card, and Save .ics takes it to your calendar app).
 - **Notifications and tray mode**, both opt-in.
 - **Safe connections.** Certificate pinning (exact certificate, server key or
   issuing CA) and an optional encrypted cache.
@@ -60,23 +63,20 @@ Every feature in detail: [docs/FEATURES.md](docs/FEATURES.md).
 
 <table>
   <tr>
-    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-light.webp" alt="Inbox with remote images blocked"></picture><br><sub>Inbox, remote images blocked</sub></td>
-    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/compose-table-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/compose-table-light.webp" alt="Composer with a table"></picture><br><sub>Rich-text composer</sub></td>
-    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/calendar-month-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/calendar-month-light.webp" alt="Calendar, month view"></picture><br><sub>Calendar</sub></td>
+    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/inbox-light.webp" alt="Inbox with a message and its attachment open"></picture><br><sub>Inbox with an attachment</sub></td>
+    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/compose-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/compose-light.webp" alt="Rich-text composer"></picture><br><sub>Rich-text composer</sub></td>
   </tr>
   <tr>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/rules-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/rules-light.webp" alt="Rules list"></picture><br><sub>Rules</sub></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/contacts-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/contacts-light.webp" alt="Contacts"></picture><br><sub>Contacts</sub></td>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/tabs-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/tabs-light.webp" alt="Messages open in tabs"></picture><br><sub>Tabs</sub></td>
   </tr>
   <tr>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/cert-prompt-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/cert-prompt-light.webp" alt="Certificate review prompt"></picture><br><sub>Certificate review</sub></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/settings-privacy-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/settings-privacy-light.webp" alt="Privacy settings"></picture><br><sub>Privacy settings</sub></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/welcome-dark.webp"><img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/screenshots/welcome-light.webp" alt="Welcome screen"></picture><br><sub>Welcome</sub></td>
   </tr>
 </table>
 
-The screenshots show made-up sample mail from the repository's offline test data.
+The screenshots show a made-up demo mailbox (`examples/demo_mailbox.rs`): invented people on example.com and example.org, no real mail.
 
 ## Getting started
 
@@ -145,19 +145,29 @@ How a release is made: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## For developers
 
-Komorebi is written in Rust with [Slint](https://slint.dev) (Fluent style, software
-renderer), using `rusqlite`, `imap`, `lettre` and `mail-parser`.
+Komorebi is written in Rust, using `rusqlite`, `imap`, `lettre` and `mail-parser`.
+Komorebi 1.0 draws its interface with [GPUI](https://gpui.rs) and GPUI Kit: the app
+is `komorebi.exe` (the package `komorebi-gpui`, in `crates/komorebi-gpui`), over the
+library in `src/lib.rs` ([docs/GPUI-MIGRATION.md](docs/GPUI-MIGRATION.md)). The release
+exe must stay under 21.5 MB (21,500,000 bytes). Komorebi 0.7's Slint interface is gone
+from the repository; its mail engine, cache and calendar code are the library.
 
 ```powershell
 git clone https://github.com/RusticStack/komorebi
 cd komorebi
-cargo build --release --locked   # target\release\komorebi.exe
-cargo test --locked
+cargo build -p komorebi-gpui     # the app, Komorebi 1.0 (docs/GPUI-BUILD.md)
+cargo build --release --locked -p komorebi-gpui   # target\release\komorebi.exe
+cargo test --locked --workspace
+cargo xtask check                # the gate before a commit (docs/GPUI-TESTING.md)
 ```
 
 | Document | What is in it |
 |---|---|
 | [docs/BUILDING.md](docs/BUILDING.md) | Build from source, the checks, verifying a build |
+| [docs/GPUI-BUILD.md](docs/GPUI-BUILD.md) | Building the GPUI app: fxc.exe, vendored crates and patches, switches |
+| [docs/GPUI-MIGRATION.md](docs/GPUI-MIGRATION.md) | The move to GPUI for 1.0: phases, decisions, measurements |
+| [docs/GPUI-TESTING.md](docs/GPUI-TESTING.md) | Testing the GPUI app: the harness, snapshots on WARP, lints, `cargo xtask check` |
+| [docs/GPUI-TEST-PORT.md](docs/GPUI-TEST-PORT.md) | Every test of the old Slint app and where it went in the GPUI app |
 | [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | Environment variables and development switches, the offline snapshot tool |
 | [docs/FEATURES.md](docs/FEATURES.md) | Every feature in detail |
 | [docs/USAGE.md](docs/USAGE.md) | Installing, adding an account, keyboard shortcuts |
@@ -173,5 +183,4 @@ Found a bug or have an idea? [Open an issue](https://github.com/RusticStack/komo
 ## License
 
 GPL-3.0-or-later ([LICENSE](LICENSE)). Third-party notices are in [NOTICE](NOTICE).
-Slint is used under its GPL-3.0 option; its attribution still appears in Settings,
-About.
+The app includes GPUI, GPUI Kit (Apache-2.0) and the Lucide icons.

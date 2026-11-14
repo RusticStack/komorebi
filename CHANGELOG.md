@@ -5,7 +5,73 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
-## [Unreleased]
+## [1.0.0] - Unreleased
+
+Komorebi 1.0 is a new interface on the same mail engine. Your accounts,
+mail cache, rules, contacts and settings carry over; what changes for you is
+how it looks and feels, and that the calendar is gone.
+
+### Changed
+
+- The interface moves from Slint to [GPUI](https://gpui.rs) with GPUI Kit,
+  drawn through DirectX 11 (with WARP, Windows' software renderer, when there
+  is no usable GPU). Mail, the composer, tabs and message windows, Settings, the
+  first-run flow, Rules, Contacts and the update bars are redone on it,
+  following Fluent 2.
+- A new look: the hanko K seal in persimmon as the app icon, the tray icon
+  (it turns persimmon while unread mail waits) and the toast image, paper
+  panes with pills and solid sender spots for unread mail, and new setup
+  wizard images. The tagline is "Read. Reply. Rest.".
+- Launch and the cached list keep their promises (a window in under 200 ms,
+  a cached folder in under 600 ms; 77 ms to the first frame was measured on
+  one development PC, on a 2,000-message cache, drawing with WARP). **Idle memory and CPU are higher than in 0.7**: GPUI
+  and DirectX hold more than the Slint app did. This is accepted for 1.0 and
+  reducing it is planned for 1.1. The program file is larger as well (its
+  size ceiling went from 20.5 MB to 21.5 MB).
+- The installer and the portable zip carry the new app, installed as
+  `komorebi.exe` as in 0.7.
+- The mail cache engine (SQLite) is updated to 3.54.1 for a security fix
+  (RUSTSEC-2026-0459). Your existing cache opens as before.
+
+### Added
+
+- Access keys: hold Alt to see a letter on the main commands (New mail,
+  Folders, Settings, Refresh, Reply, Forward, Archive, Delete, and Attach,
+  Send and Link in the composer; Mark as read, Mark as unread and Save as .eml
+  have a key but show no letter yet), then press Alt and the letter. The letters
+  follow the language.
+- Dialogs, menus and text fields use Portuguese (Portugal) text in every
+  built-in string, not only Komorebi's own.
+
+### Removed
+
+- **The calendar** (for now; it is planned to return in 1.1). The calendar
+  that 0.7 added is left out of 1.0: the Calendar page
+  and its month, week, day and agenda views, event editing, CalDAV calendar
+  sync, and event reminders (with the setting for their notifications). A
+  meeting invitation in a message still shows on its card with its details,
+  Accept, Tentative and Decline (the reply goes only to the organizer, as in
+  0.7) and Save .ics, but nothing is added to a calendar, so "Remove from
+  calendar" and "In your calendar on this PC" are gone. Use Save .ics to take
+  an event to a calendar app. Contacts and CardDAV stay.
+- High contrast themes are not supported in 1.0; Komorebi follows the light
+  and dark theme.
+
+### Known gaps
+
+- The window opens at its default place the first time: 0.7's saved place is
+  not carried over (1.0 saves its own).
+- Teaching tips, the size a message window had last time, and a complete
+  Narrator pass are not done yet. The full list is in
+  [docs/GPUI-MIGRATION.md](docs/GPUI-MIGRATION.md).
+
+Local data: no schema change; the cache stays at schema v18 and 0.7 caches
+open as they are (nothing is converted and the mail is not downloaded
+again). The calendar's tables and any events and CalDAV calendars
+saved by 0.7 stay in `cache.sqlite3`, unused and not shown, until you choose
+Remove all data (removing an account still deletes its CalDAV calendars).
+A new setting, `gpui_window`, holds the window place; 0.7's `window` setting
+is left alone. Credential Manager is unchanged.
 
 ## [0.7.0] - 2026-10-23
 

@@ -2,5 +2,7 @@
 tests/fixtures/**/*.eml -text
 # The fetch tests' throwaway TLS identity: keep it byte-exact.
 tests/fixtures/tls/*.pem -text
-# The app icon (assets/komorebi.ico).
+# The app icons (assets/komorebi.ico, assets/brand-1.0) and the installer's
+# wizard images (docs/BRANDING.md).
 *.ico binary
+*.bmp binary

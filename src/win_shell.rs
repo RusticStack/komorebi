@@ -8,13 +8,22 @@
 //!
 //! Everything runs on the UI thread: [`Shell::new`] creates a hidden
 //! message-only window on the calling thread, whose messages are dispatched by
-//! the message loop Slint already runs. Events reach the app through the
+//! the message loop the app already runs. Events reach the app through the
 //! callback given to `new`, always on that thread.
 //!
 //! The window is a hidden top-level one (never shown), not a message-only one,
 //! because only top-level windows receive the `TaskbarCreated` broadcast; on
 //! it the tray icon is added again after an Explorer restart, with the current
-//! tooltip.
+//! tooltip. It also hears `WM_SETTINGCHANGE`, which says when the taskbar's
+//! theme changed.
+//!
+//! Tray icon: an exe that carries the brand tray icons (resources 101 to 103,
+//! komorebi.exe through `assets/komorebi.rc`) shows the seal
+//! in ink on a light taskbar, white on a dark one (`SystemUsesLightTheme`,
+//! not the app's theme) and persimmon while unread mail waits
+//! ([`Shell::set_unread`]); its notifications carry the seal (resource 1) as
+//! their large icon. An exe without them (the library's tests and examples)
+//! shows its own icon 1 in every state. See docs/BRANDING.md.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -28,22 +37,24 @@ use windows_sys::Win32::Foundation::{
     WPARAM,
 };
 use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::LibraryLoader::{FindResourceW, GetModuleHandleW};
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegDeleteValueW,
-    RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, RRF_RT_REG_DWORD, RegCloseKey,
+    RegDeleteValueW, RegGetValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_NONE, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-    NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_LARGE_ICON, NIIF_NONE, NIIF_USER, NIM_ADD,
+    NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    FindWindowExW, GetCursorPos, IDI_APPLICATION, LoadIconW, MF_CHECKED, MF_SEPARATOR, MF_STRING,
-    PostMessageW, RegisterClassW, RegisterWindowMessageW, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
-    SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP, WM_CONTEXTMENU,
-    WM_COPYDATA, WM_ENDSESSION, WM_LBUTTONUP, WM_NULL, WM_QUERYENDSESSION, WM_RBUTTONUP, WNDCLASSW,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
+    DestroyWindow, FindWindowExW, GetCursorPos, GetSystemMetrics, HICON, IDI_APPLICATION,
+    IMAGE_ICON, LoadIconW, LoadImageW, MF_CHECKED, MF_SEPARATOR, MF_STRING, PostMessageW,
+    RegisterClassW, RegisterWindowMessageW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
+    SMTO_ABORTIFHUNG, SendMessageTimeoutW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenu, WM_APP, WM_CONTEXTMENU, WM_COPYDATA, WM_ENDSESSION, WM_LBUTTONUP, WM_NULL,
+    WM_QUERYENDSESSION, WM_RBUTTONUP, WM_SETTINGCHANGE, WNDCLASSW,
 };
 
 use crate::notify::Target;
@@ -61,6 +72,119 @@ static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// True when `msg` is the registered, non-zero `TaskbarCreated` message.
 fn is_taskbar_created(msg: u32, registered: u32) -> bool {
     registered != 0 && msg == registered
+}
+
+/// Resource id of the exe's own icon (the seal in komorebi.exe).
+const APP_ICON: u16 = 1;
+
+/// The notification area icon for a state of the taskbar and the mail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrayIcon {
+    /// The ink seal, for a light taskbar.
+    Light,
+    /// The white seal, for a dark taskbar.
+    Dark,
+    /// The persimmon seal while unread mail waits, on either taskbar.
+    Unread,
+}
+
+impl TrayIcon {
+    /// Persimmon while mail is unread (it contrasts with both taskbars,
+    /// 4.6:1 and 3.2:1); otherwise the glyph that contrasts with the taskbar
+    /// (the crossed pairs are 1.1:1, so the theme must decide).
+    fn pick(light_taskbar: bool, unread: bool) -> TrayIcon {
+        match (unread, light_taskbar) {
+            (true, _) => TrayIcon::Unread,
+            (false, true) => TrayIcon::Light,
+            (false, false) => TrayIcon::Dark,
+        }
+    }
+
+    /// The icon's resource id in `assets/komorebi.rc`.
+    fn resource_id(self) -> u16 {
+        match self {
+            TrayIcon::Light => 101,
+            TrayIcon::Dark => 102,
+            TrayIcon::Unread => 103,
+        }
+    }
+}
+
+const PERSONALIZE_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+const LIGHT_TASKBAR_VALUE: &str = "SystemUsesLightTheme";
+
+/// The taskbar is light only when `SystemUsesLightTheme` is 1. A missing
+/// value (Windows 10 before 1903, whose taskbar is always dark) or any other
+/// value means dark.
+fn light_taskbar_from(value: Option<u32>) -> bool {
+    value == Some(1)
+}
+
+/// True when a `WM_SETTINGCHANGE` names the area Windows sends when the
+/// light or dark mode (or the accent) changed: "ImmersiveColorSet".
+fn is_colour_change(area: &[u16]) -> bool {
+    area.iter().copied().eq("ImmersiveColorSet".encode_utf16())
+}
+
+/// Reads `SystemUsesLightTheme` for the current user.
+fn read_light_taskbar() -> bool {
+    let key = wide(PERSONALIZE_KEY);
+    let name = wide(LIGHT_TASKBAR_VALUE);
+    let mut data: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: both strings are NUL-terminated; data and size are valid for a
+    // REG_DWORD read, which RRF_RT_REG_DWORD enforces.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            (&mut data as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    light_taskbar_from((rc == ERROR_SUCCESS).then_some(data))
+}
+
+/// True when this exe carries the brand tray icons (komorebi.exe).
+fn has_brand_tray_icons() -> bool {
+    // SAFETY: a lookup in this exe's resource table; nothing is loaded.
+    unsafe {
+        let module = GetModuleHandleW(null());
+        !FindResourceW(
+            module,
+            std::ptr::without_provenance::<u16>(TrayIcon::Light.resource_id() as usize),
+            std::ptr::without_provenance::<u16>(RT_GROUP_ICON),
+        )
+        .is_null()
+    }
+}
+
+/// RT_GROUP_ICON (MAKEINTRESOURCE(14)).
+const RT_GROUP_ICON: usize = 14;
+
+/// Loads icon resource `id` of this exe at the system's small (`large` =
+/// false) or large icon size for the current DPI, picking the best image of
+/// the ICO. The caller owns the handle (DestroyIcon). Null when missing.
+fn load_icon(id: u16, large: bool) -> HICON {
+    // SAFETY: plain metric queries and a resource load from this exe.
+    unsafe {
+        let (cx, cy) = if large {
+            (GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON))
+        } else {
+            (GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON))
+        };
+        LoadImageW(
+            GetModuleHandleW(null()),
+            std::ptr::without_provenance::<u16>(id as usize),
+            IMAGE_ICON,
+            cx,
+            cy,
+            0,
+        ) as HICON
+    }
 }
 
 const CMD_OPEN: usize = 1;
@@ -104,6 +228,17 @@ struct Inner {
     tooltip: String,
     last_toast: Option<Target>,
     handler: Rc<dyn Fn(ShellEvent)>,
+    /// The exe carries the brand tray icons ([`has_brand_tray_icons`]).
+    brand: bool,
+    /// `SystemUsesLightTheme`, refreshed on `WM_SETTINGCHANGE`.
+    light_taskbar: bool,
+    /// Unread mail waits ([`Shell::set_unread`]).
+    unread: bool,
+    /// The brand tray icon the shell shows now, owned here (null without
+    /// brand icons, where the shared app icon is used).
+    icon: HICON,
+    /// The seal for notifications, loaded on the first one (brand only).
+    toast_icon: HICON,
 }
 
 thread_local! {
@@ -150,6 +285,100 @@ fn app_icon() -> *mut c_void {
         } else {
             icon
         }
+    }
+}
+
+/// Puts the tray icon for the current state into `d.hIcon`, runs `call`
+/// (the Shell_NotifyIconW that shows it), then keeps a loaded brand icon in
+/// INNER and destroys the one it replaces. Without brand icons it is the
+/// exe's shared icon 1, which is never destroyed.
+fn with_tray_icon(d: &mut NOTIFYICONDATAW, call: impl FnOnce(&NOTIFYICONDATAW) -> bool) -> bool {
+    let state = INNER.with(|i| {
+        i.try_borrow()
+            .ok()
+            .and_then(|b| b.as_ref().map(|s| (s.brand, s.light_taskbar, s.unread)))
+    });
+    let owned = match state {
+        Some((true, light, unread)) => {
+            load_icon(TrayIcon::pick(light, unread).resource_id(), false)
+        }
+        _ => null_mut(),
+    };
+    d.hIcon = if owned.is_null() { app_icon() } else { owned };
+    let shown = call(d);
+    if !owned.is_null() {
+        let old = INNER.with(|i| {
+            i.try_borrow_mut()
+                .ok()
+                .and_then(|mut b| b.as_mut().map(|s| std::mem::replace(&mut s.icon, owned)))
+        });
+        // SAFETY: icons this module loaded with LoadImageW and owns; the
+        // shell keeps its own copy of the one it shows.
+        unsafe {
+            match old {
+                Some(old) if !old.is_null() => {
+                    DestroyIcon(old);
+                }
+                Some(_) => {}
+                None => {
+                    DestroyIcon(owned);
+                }
+            }
+        }
+    }
+    shown
+}
+
+/// Shows the tray icon for the current state (after a theme or unread change).
+fn modify_icon(hwnd: HWND) {
+    let mut d = nid(hwnd);
+    d.uFlags = NIF_ICON;
+    // SAFETY: d is fully initialised.
+    with_tray_icon(&mut d, |d| unsafe { Shell_NotifyIconW(NIM_MODIFY, d) != 0 });
+}
+
+/// Re-reads the taskbar theme and swaps the brand tray icon if it changed.
+fn refresh_theme(hwnd: HWND) {
+    let brand = INNER.with(|i| {
+        i.try_borrow()
+            .ok()
+            .and_then(|b| b.as_ref().map(|s| s.brand))
+    });
+    if brand != Some(true) {
+        return;
+    }
+    let light = read_light_taskbar();
+    let changed = INNER.with(|i| {
+        i.try_borrow_mut().ok().and_then(|mut b| {
+            b.as_mut().map(|s| {
+                let changed = s.light_taskbar != light;
+                s.light_taskbar = light;
+                changed
+            })
+        })
+    });
+    if changed == Some(true) {
+        modify_icon(hwnd);
+    }
+}
+
+/// The NUL-terminated UTF-16 string at `p` (at most 256 units), or empty.
+///
+/// # Safety
+/// `p` is null or points to a NUL-terminated UTF-16 string that stays valid
+/// for the returned lifetime.
+unsafe fn wide_at<'a>(p: *const u16) -> &'a [u16] {
+    if p.is_null() {
+        return &[];
+    }
+    let mut n = 0;
+    // SAFETY: the caller guarantees a NUL within the string; the cap stops a
+    // runaway read on a malformed one at a length no area name reaches.
+    unsafe {
+        while n < 256 && *p.add(n) != 0 {
+            n += 1;
+        }
+        std::slice::from_raw_parts(p, n)
     }
 }
 
@@ -219,6 +448,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 }
                 None => 0,
             }
+        }
+        WM_SETTINGCHANGE => {
+            // SAFETY: for WM_SETTINGCHANGE, lParam is null or a NUL-terminated
+            // area name valid for the call.
+            let area = unsafe { wide_at(lp as *const u16) };
+            if is_colour_change(area) {
+                // The light or dark mode changed: the taskbar may have too.
+                refresh_theme(hwnd);
+            }
+            // SAFETY: forwarding the message with its original arguments.
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
         m if is_taskbar_created(m, TASKBAR_CREATED.load(Ordering::Relaxed)) => {
             // Explorer restarted and lost our icon; add it again.
@@ -301,10 +541,9 @@ fn add_icon_for(hwnd: HWND) -> bool {
     let mut d = nid(hwnd);
     d.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     d.uCallbackMessage = MSG_TRAY;
-    d.hIcon = app_icon();
     copy_wide(&mut d.szTip, &tip);
     // SAFETY: d is fully initialised.
-    unsafe { Shell_NotifyIconW(NIM_ADD, &d) != 0 }
+    with_tray_icon(&mut d, |d| unsafe { Shell_NotifyIconW(NIM_ADD, d) != 0 })
 }
 
 impl Shell {
@@ -344,6 +583,7 @@ impl Shell {
         if hwnd.is_null() {
             return None;
         }
+        let brand = has_brand_tray_icons();
         INNER.with(|i| {
             *i.borrow_mut() = Some(Inner {
                 labels,
@@ -351,6 +591,11 @@ impl Shell {
                 tooltip: tooltip.to_string(),
                 last_toast: None,
                 handler: Rc::new(handler),
+                brand,
+                light_taskbar: brand && read_light_taskbar(),
+                unread: false,
+                icon: null_mut(),
+                toast_icon: null_mut(),
             });
         });
         // SAFETY: the name is NUL-terminated and lives across the call.
@@ -390,6 +635,21 @@ impl Shell {
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &d) };
     }
 
+    /// Says whether unread mail waits: the brand tray seal turns persimmon
+    /// while it does. Nothing changes in an exe without the brand icons.
+    pub fn set_unread(&self, unread: bool) {
+        let changed = INNER.with(|i| {
+            i.borrow_mut().as_mut().map(|s| {
+                let changed = s.brand && s.unread != unread;
+                s.unread = unread;
+                changed
+            })
+        });
+        if changed == Some(true) {
+            modify_icon(self.hwnd);
+        }
+    }
+
     /// Updates the menu's checked state for "Pause notifications".
     pub fn set_paused(&self, paused: bool) {
         INNER.with(|i| {
@@ -412,16 +672,28 @@ impl Shell {
     /// reduced to the allowed content level by the caller. A click raises
     /// [`ShellEvent::ToastClicked`] with `target`.
     pub fn show_toast(&self, title: &str, body: &str, target: Option<Target>) {
-        INNER.with(|i| {
-            if let Some(s) = i.borrow_mut().as_mut() {
+        // With the brand icons, the notification carries the seal (icon 1 at
+        // the large icon size) as its image; otherwise Windows' default.
+        let toast_icon = INNER.with(|i| {
+            i.borrow_mut().as_mut().and_then(|s| {
                 s.last_toast = target;
-            }
+                if s.brand && s.toast_icon.is_null() {
+                    s.toast_icon = load_icon(APP_ICON, true);
+                }
+                (s.brand && !s.toast_icon.is_null()).then_some(s.toast_icon)
+            })
         });
         let mut d = nid(self.hwnd);
         d.uFlags = NIF_INFO;
         copy_wide(&mut d.szInfoTitle, title);
         copy_wide(&mut d.szInfo, body);
-        d.dwInfoFlags = NIIF_NONE;
+        match toast_icon {
+            Some(icon) => {
+                d.hBalloonIcon = icon;
+                d.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
+            }
+            None => d.dwInfoFlags = NIIF_NONE,
+        }
         // SAFETY: d is fully initialised.
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &d) };
     }
@@ -435,7 +707,15 @@ impl Drop for Shell {
             Shell_NotifyIconW(NIM_DELETE, &d);
             DestroyWindow(self.hwnd);
         }
-        INNER.with(|i| *i.borrow_mut() = None);
+        if let Some(s) = INNER.with(|i| i.borrow_mut().take()) {
+            for icon in [s.icon, s.toast_icon] {
+                if !icon.is_null() {
+                    // SAFETY: icons this module loaded and owns; the shell
+                    // no longer shows them.
+                    unsafe { DestroyIcon(icon) };
+                }
+            }
+        }
     }
 }
 
@@ -605,6 +885,64 @@ mod tests {
         assert!(is_taskbar_created(0xC123, 0xC123));
         assert!(!is_taskbar_created(0xC124, 0xC123));
         assert!(!is_taskbar_created(0, 0));
+    }
+
+    #[test]
+    fn tray_icon_follows_the_taskbar_and_turns_persimmon_while_unread() {
+        assert_eq!(TrayIcon::pick(true, false), TrayIcon::Light);
+        assert_eq!(TrayIcon::pick(false, false), TrayIcon::Dark);
+        assert_eq!(TrayIcon::pick(true, true), TrayIcon::Unread);
+        assert_eq!(TrayIcon::pick(false, true), TrayIcon::Unread);
+    }
+
+    #[test]
+    fn tray_icon_resource_ids_match_the_brand_rc() {
+        let ids = [TrayIcon::Light, TrayIcon::Dark, TrayIcon::Unread].map(TrayIcon::resource_id);
+        assert_eq!(ids, [101, 102, 103]);
+        assert!(!ids.contains(&APP_ICON));
+        let rc = include_str!("../assets/komorebi.rc");
+        for (id, file) in ids.iter().zip(["tray-light", "tray-dark", "tray-unread"]) {
+            assert!(
+                rc.contains(&format!("{id} ICON \"tray/{file}.ico\"")),
+                "{id} {file}"
+            );
+        }
+        assert!(rc.contains(&format!("{APP_ICON} ICON \"komorebi.ico\"")));
+    }
+
+    #[test]
+    fn light_taskbar_only_when_the_value_is_one() {
+        assert!(light_taskbar_from(Some(1)));
+        assert!(!light_taskbar_from(Some(0)));
+        assert!(!light_taskbar_from(Some(2)));
+        // Windows 10 before 1903 has no value and a dark taskbar.
+        assert!(!light_taskbar_from(None));
+    }
+
+    #[test]
+    fn colour_change_is_the_immersive_color_set_area() {
+        let w = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        assert!(is_colour_change(&w("ImmersiveColorSet")));
+        assert!(!is_colour_change(&w("immersivecolorset ")));
+        assert!(!is_colour_change(&w("WindowsThemeElement")));
+        assert!(!is_colour_change(&w("Policy")));
+        assert!(!is_colour_change(&[]));
+    }
+
+    #[test]
+    fn wide_at_reads_up_to_the_nul_and_accepts_null() {
+        let s = wide("ImmersiveColorSet");
+        // SAFETY: `s` is NUL-terminated and outlives the slice.
+        assert!(is_colour_change(unsafe { wide_at(s.as_ptr()) }));
+        // SAFETY: null is allowed.
+        assert!(unsafe { wide_at(null()) }.is_empty());
+    }
+
+    #[test]
+    fn this_test_exe_has_no_brand_tray_icons() {
+        // The library's tests carry no resources 101 to
+        // 103: the tray keeps icon 1 and notifications keep Windows' image.
+        assert!(!has_brand_tray_icons());
     }
 
     #[test]

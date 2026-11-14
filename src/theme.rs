@@ -83,8 +83,24 @@ impl Default for SystemTheme {
 /// Windows' default caret blink (half a cycle).
 pub const DEFAULT_BLINK_MS: u32 = 530;
 
+/// What [`pin`] fixed, for the rest of the process.
+static PINNED: std::sync::OnceLock<SystemTheme> = std::sync::OnceLock::new();
+
+/// Makes [`read`] answer `theme` for the rest of the process, whatever
+/// Windows says (the first call wins). For tests only: an app window
+/// reads the settings again when it becomes active, and a test that got
+/// this machine's (animation effects on, its own text size) would change
+/// with the machine and the moment: Kit's dialogs would slide in real time
+/// under a click.
+pub fn pin(theme: SystemTheme) {
+    let _ = PINNED.set(theme);
+}
+
 /// Windows' appearance settings, with the development switches over them.
 pub fn read() -> SystemTheme {
+    if let Some(pinned) = PINNED.get() {
+        return pinned.clone();
+    }
     let mut theme = read_system();
     dev_overrides(&mut theme);
     theme

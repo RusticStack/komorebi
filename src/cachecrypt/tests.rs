@@ -4,8 +4,7 @@ use super::*;
 use rusqlite::OpenFlags;
 
 fn tmp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("komorebi-cc-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = crate::testdir::unique("komorebi-cc", name);
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("cache.sqlite3")
 }

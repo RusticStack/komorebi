@@ -4,7 +4,12 @@
 //! every line the client sends, plain or secure, so a test can assert that
 //! no credentials arrived.
 
-use native_tls::{Certificate, Identity, TlsAcceptor, TlsStream};
+use native_tls::Certificate;
+use schannel::cert_context::KeySpec;
+use schannel::cert_store::{CertAdd, CertStore, Memory};
+use schannel::crypt_prov::{AcquireOptions, ProviderType};
+use schannel::schannel_cred::{Direction, SchannelCred};
+use schannel::tls_stream::{self, HandshakeError, TlsStream};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -20,16 +25,131 @@ pub(crate) fn der_of(pem: &[u8]) -> Vec<u8> {
     Certificate::from_pem(pem).unwrap().to_der().unwrap()
 }
 
-pub(crate) fn acceptor(cert: &'static [u8], key: &'static [u8]) -> Arc<TlsAcceptor> {
-    // One acceptor per identity (Windows keeps its key in a container).
-    type Cache = Mutex<Vec<(usize, Arc<TlsAcceptor>)>>;
+/// A TLS server identity for a fake: the leaf certificate, its private key
+/// and the further certificates a server would send with it.
+///
+/// Schannel needs the key in a named key container of the user's profile
+/// (an ephemeral key, `CRYPT_VERIFYCONTEXT`, is refused: "the credentials
+/// supplied to the package were not recognized"). `native_tls::Identity::
+/// from_pkcs8` names the container `native-tls-<n>`, `n` counted from 0 in
+/// each process. Test binaries that run at the same time (two worktrees,
+/// two `cargo test` runs) share that profile, so they imported different
+/// keys over each other's `native-tls-0` and the handshake presented the
+/// wrong certificate ("the certificate of localhost is not the saved
+/// one"). Here the name has the process id and a counter in it, so no two
+/// identities share a container, and the containers are deleted when the
+/// process exits ([`delete_containers_at_exit`]).
+pub(crate) struct Acceptor {
+    cred: SchannelCred,
+    /// Kept for as long as the credential.
+    _store: CertStore,
+}
+
+/// The key containers this process made, for [`delete_containers_at_exit`].
+static CONTAINERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// A container name no other process or identity shares.
+fn container_name() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "komorebi-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Deletes the key containers made by this process, as it exits (the
+/// credentials hold their keys open by then; a container that cannot be
+/// deleted is left, as a killed run leaves its own).
+extern "C" fn delete_containers_at_exit() {
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_DELETEKEYSET, CryptAcquireContextW, PROV_RSA_FULL,
+    };
+    let names = match CONTAINERS.lock() {
+        Ok(names) => names.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    for name in names {
+        let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+        let mut handle = 0;
+        // SAFETY: `wide` is NUL-terminated and outlives the call; a delete
+        // returns no handle to release.
+        unsafe {
+            CryptAcquireContextW(
+                &mut handle,
+                wide.as_ptr(),
+                std::ptr::null(),
+                PROV_RSA_FULL,
+                CRYPT_DELETEKEYSET,
+            );
+        }
+    }
+}
+
+impl Acceptor {
+    pub(crate) fn new(cert: &[u8], key: &[u8], chain: &[&[u8]]) -> Self {
+        use schannel::cert_context::CertContext;
+        unsafe extern "C" {
+            fn atexit(callback: extern "C" fn()) -> i32;
+        }
+        static CLEANUP: std::sync::Once = std::sync::Once::new();
+        CLEANUP.call_once(|| {
+            // SAFETY: a plain C callback with no arguments.
+            unsafe { atexit(delete_containers_at_exit) };
+        });
+
+        let mut store = Memory::new().unwrap().into_store();
+        let leaf = CertContext::from_pem(std::str::from_utf8(cert).unwrap()).unwrap();
+        let name = container_name();
+        let kind = ProviderType::rsa_full();
+        let mut options = AcquireOptions::new();
+        options.container(&name);
+        let mut container = options.new_keyset(true).acquire(kind).unwrap();
+        CONTAINERS.lock().unwrap().push(name.clone());
+        container.import().import_pkcs8_pem(key).unwrap();
+        leaf.set_key_prov_info()
+            .container(&name)
+            .type_(kind)
+            .keep_open(true)
+            .key_spec(KeySpec::key_exchange())
+            .set()
+            .unwrap();
+        let context = store.add_cert(&leaf, CertAdd::Always).unwrap();
+        for pem in chain {
+            let c = CertContext::from_pem(std::str::from_utf8(pem).unwrap()).unwrap();
+            store.add_cert(&c, CertAdd::Always).unwrap();
+        }
+        let cred = SchannelCred::builder()
+            .cert(context)
+            .acquire(Direction::Inbound)
+            .unwrap();
+        Acceptor {
+            cred,
+            _store: store,
+        }
+    }
+
+    /// The server side of a handshake on `tcp`.
+    pub(crate) fn accept(&self, tcp: TcpStream) -> std::io::Result<TlsStream<TcpStream>> {
+        match tls_stream::Builder::new().accept(self.cred.clone(), tcp) {
+            Ok(stream) => Ok(stream),
+            Err(HandshakeError::Failure(e)) => Err(e),
+            Err(HandshakeError::Interrupted(_)) => Err(std::io::ErrorKind::WouldBlock.into()),
+        }
+    }
+}
+
+pub(crate) fn acceptor(cert: &'static [u8], key: &'static [u8]) -> Arc<Acceptor> {
+    // One acceptor per identity, made once for the whole run.
+    type Cache = Mutex<Vec<(usize, Arc<Acceptor>)>>;
     static ACCEPTORS: OnceLock<Cache> = OnceLock::new();
     let mut all = ACCEPTORS.get_or_init(Default::default).lock().unwrap();
     let id = cert.as_ptr() as usize;
     if let Some((_, a)) = all.iter().find(|(i, _)| *i == id) {
         return a.clone();
     }
-    let a = Arc::new(TlsAcceptor::new(Identity::from_pkcs8(cert, key).unwrap()).unwrap());
+    let a = Arc::new(Acceptor::new(cert, key, &[]));
     all.push((id, a.clone()));
     a
 }
@@ -230,7 +350,7 @@ impl Secure {
         }
     }
 
-    fn upgrade(&mut self, acceptor: &TlsAcceptor) -> Option<()> {
+    fn upgrade(&mut self, acceptor: &Acceptor) -> Option<()> {
         let Secure::Plain(tcp) = std::mem::replace(self, Secure::Gone) else {
             return None;
         };

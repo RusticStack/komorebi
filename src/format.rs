@@ -1,9 +1,12 @@
-//! Display formatting for dates, sizes, names and avatars.
+//! Display formatting for dates, sizes, names and avatars, shared by both
+//! apps (moved out of the Slint binary for the GPUI app, docs/GPUI-I18N.md):
+//! dates, numbers and sizes take a [`Lang`]; the outbox sentences go through
+//! `tr!` in the language shown; nothing here knows a toolkit.
 
 use crate::db::{Outbox, OutboxEntry};
-use crate::tr::t;
+use crate::i18n::Lang;
 use chrono::{DateTime, Datelike, Local, TimeZone};
-use komorebi::i18n::Lang;
+use komorebi_i18n::tr;
 
 /// Month names abbreviated, as CLDR has them for pt-PT (format context).
 const MONTHS_PT: [&str; 12] = [
@@ -359,18 +362,20 @@ pub fn full_date(lang: Lang, ts: i64) -> String {
 /// ([`send_sentence`]); the record itself is shown only behind Details.
 pub fn outbox_status(e: &OutboxEntry, now: i64) -> String {
     match e.state {
-        Outbox::Pending => t!(invoke_outbox_pending),
+        Outbox::Pending => tr!("Sending in a few seconds"),
         Outbox::Queued => match e.next_try.and_then(|t| Local.timestamp_opt(t, 0).single()) {
-            Some(at) if at.timestamp() > now && !e.last_error.is_empty() => t!(
-                invoke_outbox_retry,
-                send_sentence(&e.last_error, &e.to, false).into(),
-                clock(&at).into()
+            Some(at) if at.timestamp() > now && !e.last_error.is_empty() => tr!(
+                "{0} Trying again at {1}.",
+                send_sentence(&e.last_error, &e.to, false),
+                clock(&at)
             ),
-            _ => t!(invoke_outbox_waiting),
+            _ => tr!("Waiting to send"),
         },
-        Outbox::Sending => t!(invoke_sending),
+        Outbox::Sending => tr!("Sending\u{a0}…"),
         Outbox::Failed => send_sentence(&e.last_error, &e.to, true),
-        Outbox::Unconfirmed => t!(invoke_send_unconfirmed),
+        Outbox::Unconfirmed => tr!(
+            "The connection broke while sending, so it may have gone out. Check Sent before you send it again."
+        ),
     }
 }
 
@@ -378,7 +383,7 @@ pub fn outbox_status(e: &OutboxEntry, now: i64) -> String {
 /// record (`last_error`) and its To line. `gave_up`: no automatic try
 /// follows, so a temporary failure says what to do.
 pub fn send_sentence(record: &str, to: &str, gave_up: bool) -> String {
-    use komorebi::mail::smtp::{SendClass::*, classify, mailbox_parts, split_addresses};
+    use crate::mail::smtp::{SendClass::*, classify, mailbox_parts, split_addresses};
     let f = classify(record);
     match f.class {
         NoSuchRecipient => {
@@ -387,22 +392,42 @@ pub fn send_sentence(record: &str, to: &str, gave_up: bool) -> String {
                 (list.len() == 1).then(|| mailbox_parts(&list[0]).1.to_string())
             };
             match f.address.or_else(single) {
-                Some(a) => t!(invoke_send_no_such, a.into()),
-                None => t!(invoke_send_no_such_any),
+                Some(a) => tr!("{0} doesn't exist. Check the address and send again.", a),
+                None => {
+                    tr!("One of the addresses doesn't exist. Check the addresses and send again.")
+                }
             }
         }
-        BadAddress => t!(invoke_send_bad_address),
-        MailboxFull => t!(invoke_send_mailbox_full),
-        TooLarge => t!(invoke_send_too_large),
-        SenderRefused => t!(invoke_send_sender_refused),
-        Policy => t!(invoke_send_policy),
-        SignIn => t!(invoke_send_sign_in),
-        Certificate => t!(invoke_send_certificate),
-        Busy if gave_up => t!(invoke_send_busy_gave_up),
-        Busy => t!(invoke_send_busy),
-        Unreachable if gave_up => t!(invoke_send_unreachable_gave_up),
-        Unreachable => t!(invoke_send_unreachable),
-        Other => t!(invoke_send_other),
+        BadAddress => tr!(
+            "The server says an address isn't written correctly. Check the addresses and send again."
+        ),
+        MailboxFull => {
+            tr!("The recipient's mailbox is full. Try again later, or reach them another way.")
+        }
+        TooLarge => {
+            tr!("The message is too large for the server. Remove an attachment, then send again.")
+        }
+        SenderRefused => tr!(
+            "The server won't send from this address. Check the account's address and SMTP username in Settings."
+        ),
+        Policy => tr!(
+            "The server refused the message under its rules, for example as spam. Change the message, or ask your provider."
+        ),
+        SignIn => tr!(
+            "The server rejected the sign-in. Update the password in Settings, then send again."
+        ),
+        Certificate => tr!(
+            "Couldn't make a secure connection to the server. Check the account in Settings, then send again."
+        ),
+        Busy if gave_up => tr!(
+            "The server couldn't take the message, and Komorebi stopped trying. Select Retry to send it again."
+        ),
+        Busy => tr!("The server couldn't take the message right now."),
+        Unreachable if gave_up => tr!(
+            "Couldn't reach the server, and Komorebi stopped trying. Check your internet connection, then select Retry."
+        ),
+        Unreachable => tr!("Couldn't reach the server."),
+        Other => tr!("The server refused the message. Details says why."),
     }
 }
 
@@ -467,8 +492,8 @@ pub fn sender(name: &str, addr: &str) -> String {
 /// none.
 pub fn recipients(list: &str) -> String {
     let mut out = String::new();
-    for entry in komorebi::mail::smtp::split_addresses(list) {
-        let (name, addr) = komorebi::mail::smtp::mailbox_parts(&entry);
+    for entry in crate::mail::smtp::split_addresses(list) {
+        let (name, addr) = crate::mail::smtp::mailbox_parts(&entry);
         if !out.is_empty() {
             out.push_str(", ");
         }
@@ -495,8 +520,9 @@ pub fn initials(name: &str, addr: &str) -> String {
         .collect()
 }
 
-/// Stable Fluent 2 persona color for an address.
-pub fn avatar_color(addr: &str) -> slint::Color {
+/// A stable Fluent 2 persona colour for an address, as `0xRRGGBB` (the
+/// Slint app's avatars; the 1.0 brand draws its spots in ink and has none).
+pub fn avatar_rgb(addr: &str) -> u32 {
     const COLORS: &[u32] = &[
         0x0f6cbd, 0xc239b3, 0x13a10e, 0xca5010, 0x8764b8, 0x038387, 0xd13438, 0x4f6bed, 0x986f0b,
         0x00727c, 0xb146c2, 0x5c2e91,
@@ -505,7 +531,7 @@ pub fn avatar_color(addr: &str) -> slint::Color {
         .to_lowercase()
         .bytes()
         .fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
-    slint::Color::from_argb_encoded(0xff00_0000 | COLORS[h as usize % COLORS.len()])
+    COLORS[h as usize % COLORS.len()]
 }
 
 #[cfg(test)]
@@ -714,7 +740,10 @@ mod tests {
 
     #[test]
     fn outbox_lines() {
-        let _ui = crate::tr::tests::window();
+        komorebi_i18n::with_lang(Lang::En, outbox_lines_in_english);
+    }
+
+    fn outbox_lines_in_english() {
         let now = 1_000_000;
         // A refusal reads as a sentence for its class; the server's words
         // stay behind Details.
@@ -765,8 +794,10 @@ mod tests {
 
     #[test]
     fn outbox_lines_in_portuguese() {
-        let _ui = crate::tr::tests::window();
-        assert!(komorebi::i18n::select(Lang::PtPt));
+        komorebi_i18n::with_lang(Lang::PtPt, outbox_lines_pt);
+    }
+
+    fn outbox_lines_pt() {
         let now = 1_000_000;
         let at = Local
             .timestamp_opt(now + 60, 0)
@@ -802,6 +833,11 @@ mod tests {
         for l in &lines {
             assert!(!l.contains("error") && !l.contains("Recipient"), "{l}");
         }
-        komorebi::i18n::select(Lang::En);
+    }
+
+    #[test]
+    fn avatar_colours_are_stable_per_address() {
+        assert_eq!(avatar_rgb("Ana@X.org"), avatar_rgb("ana@x.org"));
+        assert!(avatar_rgb("ana@x.org") <= 0xff_ffff);
     }
 }

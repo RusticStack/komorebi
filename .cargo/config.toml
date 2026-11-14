@@ -3,6 +3,10 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
+# `cargo xtask check|lint|size`: the GPUI app's gate (xtask/, docs/GPUI-TESTING.md).
+[alias]
+xtask = "run --package xtask --quiet --"
+
 # The bundled SQLite is built without the optional modules the cache never
 # uses (full-text search, R-tree, STAT4 planner samples, dbstat, soundex).
 # This keeps the release binary under its size ceiling.

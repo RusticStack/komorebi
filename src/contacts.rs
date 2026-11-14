@@ -167,6 +167,44 @@ pub fn sort_key(c: &Contact) -> String {
     key
 }
 
+/// The letter a contact is listed under (the Contacts list's group
+/// headers): [`key_letter`] of its [`sort_key`].
+pub fn letter(c: &Contact) -> char {
+    key_letter(&sort_key(c))
+}
+
+/// The letter a stored [`sort_key`] is listed under: its first character
+/// after the separators of empty name parts (a contact with no family name
+/// goes under its given or shown name), upper case; `#` for anything that
+/// is not a letter. The list orders by the same text ([`list_order`]), so
+/// a letter's contacts stay together.
+pub fn key_letter(key: &str) -> char {
+    match key.chars().find(|ch| *ch != '\u{1}' && !ch.is_whitespace()) {
+        Some(ch) if ch.is_alphabetic() => ch.to_uppercase().next().unwrap_or(ch),
+        _ => '#',
+    }
+}
+
+/// Puts `(id, sort_key)` pairs in list order: `#` first, then letter by
+/// letter, and within a letter by the key without its leading separators,
+/// then by id. Every letter's contacts are together, in the order their
+/// headers come.
+pub fn list_order(rows: &mut [(i64, String)]) {
+    rows.sort_by(|(a_id, a), (b_id, b)| {
+        let rank = |key: &str| {
+            let l = key_letter(key);
+            (l != '#', l)
+        };
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| {
+                a.trim_start_matches('\u{1}')
+                    .cmp(b.trim_start_matches('\u{1}'))
+            })
+            .then_with(|| a_id.cmp(b_id))
+    });
+}
+
 /// The words a contact is found by: each folded word of the names and
 /// organization, and each address with its local part and domain.
 pub fn terms(c: &Contact) -> Vec<String> {
@@ -252,6 +290,78 @@ mod tests {
         });
         assert_eq!(bad.normalize(), Err(Invalid::Email(1)));
         assert_eq!(Contact::default().normalize(), Err(Invalid::Empty));
+    }
+
+    #[test]
+    fn letter_follows_the_sort_key() {
+        let c = |name: &str, given: &str, family: &str| Contact {
+            name: name.into(),
+            given: given.into(),
+            family: family.into(),
+            ..Contact::default()
+        };
+        // Family name first, folded: accents and case join their letter.
+        assert_eq!(letter(&c("Ana Silva", "Ana", "Silva")), 'S');
+        assert_eq!(letter(&c("", "Ana", "\u{c9}vora")), 'E');
+        assert_eq!(letter(&c("ana rocha", "", "")), 'A');
+        // No name at all: the address (the shown name); no letter: '#'.
+        let mut bare = c("", "", "");
+        bare.emails.push(Email {
+            addr: "z\u{e9}@example.pt".into(),
+            ..Email::default()
+        });
+        assert_eq!(letter(&bare), 'Z');
+        assert_eq!(letter(&c("42 Studio", "", "")), '#');
+        assert_eq!(letter(&c("", "", "")), '#');
+    }
+
+    /// Contacts with and without a family name, and names that start with
+    /// a digit or a symbol, still list letter by letter, each letter once
+    /// (review: a key that starts with a separator sorted before every
+    /// family name, so 'B' came twice).
+    #[test]
+    fn list_order_keeps_each_letter_together() {
+        let c = |name: &str, given: &str, family: &str| Contact {
+            name: name.into(),
+            given: given.into(),
+            family: family.into(),
+            ..Contact::default()
+        };
+        let all = [
+            c("Bruno", "", ""),
+            c("Ze To", "", ""),
+            c("Rui Almeida", "Rui", "Almeida"),
+            c("Ana Borges", "Ana", "Borges"),
+            c("", "Carla", ""),
+            c("42 Studio", "", ""),
+            c("~ Bot", "", ""),
+            c("\u{c1}lvaro", "", ""),
+        ];
+        let mut rows: Vec<(i64, String)> = all
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i as i64, sort_key(c)))
+            .collect();
+        list_order(&mut rows);
+        let names: Vec<String> = rows
+            .iter()
+            .map(|(id, _)| all[*id as usize].display())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "42 Studio",
+                "~ Bot",
+                "Rui Almeida",
+                "\u{c1}lvaro",
+                "Ana Borges",
+                "Bruno",
+                "Carla",
+                "Ze To"
+            ]
+        );
+        let letters: Vec<char> = rows.iter().map(|(_, k)| key_letter(k)).collect();
+        assert_eq!(letters, ['#', '#', 'A', 'A', 'B', 'B', 'C', 'Z']);
     }
 
     #[test]

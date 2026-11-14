@@ -264,64 +264,10 @@ Features in more detail:
   names such as `Europe/Lisbon` and Outlook's Windows names), else the
   time shows with the zone's name ("09:30 (Mars/Base)"); dates are
   all-day. The card reads only the first event; an invite that can't be
-  read (or is over 256 KB) shows as an ordinary message. Accept and
-  Tentative also add the event to the local calendar (a newer version of
-  the same invitation replaces it, an older one is ignored, one changed
-  occurrence joins its series), Decline removes it (declining one
-  occurrence leaves just that one out), the card says "In your calendar
-  on this PC." once it is there, and a cancelled event offers Remove from
-  calendar.
-- **Calendar:** the Calendar item above Settings (in the folder pane and
-  the rail) opens the calendar over the mail, in the view last chosen:
-  **Month** (the default: six weeks from the first day of the week Windows
-  uses, each day with the events that fit and "+N more", the selected
-  day's agenda beside it, or under it on a narrow window), **Week** and
-  **Day** (a time grid with an all-day strip, overlapping events side by
-  side and a line at the current time), and **Agenda** (30 days: a header
-  for each day, each event's time or "All day", title, place, and a mark
-  for a repeating event or one with a reminder; a cancelled event says
-  so). Today, Previous and Next (Page Up, Page Down; Home for today) move
-  by the period shown; the arrow keys move the selected day in Month.
-  **New event** and a click on an event open the editor: title,
-  calendar, all day, start and end (typed, or picked from a month
-  flyout; Up and Down step a time by 15 minutes), repeat (every day,
-  week, month on the day or on the weekday, or year; a rule set in
-  another app is kept and shown as it is), reminder, place and notes.
-  For a repeating event you choose "Only this event" or "The whole
-  series" (Delete then leaves out one occurrence or deletes the
-  series). An event someone else organized is read only, apart from
-  **Remove from calendar**.
-  Events live in one local calendar, "On this PC", stored in the cache;
-  repeating events are expanded on this computer (daily, weekly, monthly
-  and yearly rules with their exceptions; a rule beyond that shows its
-  first occurrence). Nothing about the calendar runs at start: the agenda
-  is read when the page opens.
-  **Calendars** on the command bar lists each account's CalDAV calendars.
-  Changes to their events show at once and are sent on the next sync,
-  each only over the version you changed (If-Match); when the event
-  changed on another device meanwhile, the server's version stays and a
-  bar offers **Apply my changes again** or **Discard**, and a calendar
-  that refuses changes becomes read only. Komorebi looks for them only when you press **Find
-  calendars**: with the server address empty it first looks it up from
-  your mail address (DNS SRV and `/.well-known/caldav`, without
-  credentials; a server outside your mail domain is shown first and
-  used only on a second press), then signs in with the user name and
-  password set in
-  Contacts > Sync (by default your mail address and mail password, from
-  Windows Credential Manager). Task lists are left out; each calendar can
-  be turned off. Calendars sync when the page opens, on **Sync now**, and
-  at most every 15 minutes while one is on and Komorebi is open
-  (sync-collection when the server offers it, else the calendar's ctag
-  and ETags). An event under way says **Now**, and one whose reminder is
-  due says **In 10 minutes**. With Settings > General > **Notifications
-  for event reminders** on (off by default), Windows also shows a
-  notification with the event's title, start time and place (never its
-  notes) when the reminder is due, but only while Komorebi is open or in
-  the notification area: one timer in the app, armed to the next
-  reminder, no scheduled task or background service. A reminder missed
-  by more than five minutes (Komorebi was closed) stays a marker; Pause
-  notifications in the tray menu pauses these too, and clicking one
-  opens the Calendar.
+  read (or is over 256 KB) shows as an ordinary message. Komorebi has no
+  calendar (the one in 0.7 was removed in 1.0): the card is a display of
+  the invitation in the mail, nothing is added to a calendar, and Save
+  .ics is how you take the event to the calendar app you use.
 - **Writing:** compose, reply, reply all and forward, with attachments:
   attach from the dialog, drop files from Explorer on the window while the
   composer shows (it gets an accent border), or copy them in Explorer and

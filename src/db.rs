@@ -772,8 +772,11 @@ pub struct Settings {
     /// Flash the taskbar button when new mail arrives while the window
     /// is in the background (key `flash_taskbar`: `1` or `0`).
     pub flash_taskbar: bool,
-    /// The window's place when it last closed (key `window`).
-    pub window: Option<Geometry>,
+    /// The window's place when it last closed (key `gpui_window`), in
+    /// logical px as GPUI reports it. The key is not `window`: that was
+    /// 0.7's, in physical px, and 1.0 never reads it, so the first 1.0
+    /// start opens at the default place (docs/GPUI-MIGRATION.md).
+    pub gpui_window: Option<Geometry>,
     /// Keep the diagnostics log (`crate::diag`; key `diagnostics_log`:
     /// `1` or `0`). Off by default.
     pub diagnostics_log: bool,
@@ -863,8 +866,8 @@ impl ThemeChoice {
     }
 }
 
-/// A window's outer position and size in physical pixels, and whether it
-/// was maximized (then the rest is where it goes when restored).
+/// A window's outer position and size, and whether it was maximized (then
+/// the rest is where it goes when restored).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Geometry {
     pub x: i32,
@@ -919,7 +922,7 @@ impl Default for Settings {
             theme: ThemeChoice::System,
             check_interval_secs: CHECK_INTERVALS[0],
             flash_taskbar: false,
-            window: None,
+            gpui_window: None,
             diagnostics_log: false,
             language: crate::i18n::LangSetting::System,
             nav_folded: String::new(),
@@ -983,9 +986,9 @@ impl Settings {
                 "0" => self.flash_taskbar = false,
                 _ => {}
             },
-            "window" => {
+            "gpui_window" => {
                 if let Some(g) = Geometry::from_setting(value) {
-                    self.window = Some(g);
+                    self.gpui_window = Some(g);
                 }
             }
             "diagnostics_log" => match value.trim() {
@@ -1421,6 +1424,15 @@ pub struct Db {
 }
 
 impl Db {
+    /// The cache file this connection has open (none for an in-memory
+    /// cache): what a worker opens its own connection to.
+    pub fn file(&self) -> Option<PathBuf> {
+        self.conn
+            .path()
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+    }
+
     /// Open the cache, creating or upgrading it as needed.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
@@ -2461,6 +2473,18 @@ impl Db {
                     })
                 },
             )
+            .optional()?)
+    }
+
+    /// Message `id`'s Message-ID as the server gave it (empty: it has
+    /// none), without loading the message or its body (Copy Message-ID).
+    /// `None`: no such message.
+    pub fn message_id(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT msgid FROM messages WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
             .optional()?)
     }
 
@@ -4517,6 +4541,53 @@ mod tests {
         assert_eq!(db.fingerprint(f).unwrap(), None);
     }
 
+    /// Komorebi 0.7 wrote schema v18 and 1.0 reads that cache as it is: the
+    /// accounts, the cached messages and the settings carry over, nothing is
+    /// converted or downloaded again, and the calendar tables are never
+    /// touched (the calendar returns in 1.1.0). Raising `SCHEMA_VERSION`
+    /// means a migration of 0.7 caches and a new decision about them.
+    #[test]
+    fn a_07_cache_opens_in_1_0_with_everything_in_it() {
+        assert_eq!(SCHEMA_VERSION, 18, "0.7.0 wrote schema v18");
+        let tmp = TempDb::new("cache-07");
+        let (acc, inbox, calendars, events) = {
+            let mut db = Db::open(&tmp.0).unwrap();
+            let acc = account(&db);
+            let inbox = db
+                .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+                .unwrap();
+            db.insert_headers(acc, inbox, &[header(1, 10, "kept"), header(2, 20, "too")])
+                .unwrap();
+            db.set_setting("theme", "dark").unwrap();
+            db.set_setting("window", "10 20 1280 820 0").unwrap();
+            db.local_calendar().unwrap();
+            let count = |table: &str| -> i64 {
+                db.conn
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                    .unwrap()
+            };
+            (acc, inbox, count("calendars"), count("events"))
+        };
+        assert!(calendars > 0);
+        // 1.0 starts: the same open as the app's.
+        let (db, aside) = Db::open_ui(&tmp.0).unwrap();
+        assert!(aside.is_none(), "nothing is set aside");
+        assert_eq!(user_version(&db.conn).unwrap(), 18);
+        let accounts = db.accounts().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, acc);
+        assert_eq!(db.message_ids(&[inbox], "").unwrap().len(), 2);
+        let s = db.settings().unwrap();
+        assert_eq!(s.theme, ThemeChoice::Dark);
+        assert_eq!(s.gpui_window, None, "0.7's window place is not read");
+        let count = |table: &str| -> i64 {
+            db.conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!((count("calendars"), count("events")), (calendars, events));
+    }
+
     /// A unique file under the temp directory, removed (with its WAL files)
     /// on drop.
     struct TempDb(PathBuf);
@@ -4758,6 +4829,34 @@ mod tests {
         assert_eq!(db.remote_allow_list().unwrap(), ["other@x.example"]);
         db.forget_all_remote().unwrap();
         assert!(db.remote_allow_list().unwrap().is_empty());
+    }
+
+    /// Copy Message-ID reads the one column, body or not.
+    #[test]
+    fn message_id_reads_the_header_without_the_message() {
+        let mut db = Db::in_memory().unwrap();
+        let acc = account(&db);
+        let f = db
+            .upsert_folder(acc, "INBOX", "Inbox", 0, Role::Inbox)
+            .unwrap();
+        let with = NewHeader {
+            uid: 1,
+            msgid: "<a1@example.pt>".into(),
+            ..Default::default()
+        };
+        let without = NewHeader {
+            uid: 2,
+            ..Default::default()
+        };
+        db.insert_headers(acc, f, &[with, without]).unwrap();
+        let ids = db.message_ids(&[f], "").unwrap();
+        let mut got: Vec<String> = ids
+            .iter()
+            .map(|&id| db.message_id(id).unwrap().expect("the message"))
+            .collect();
+        got.sort();
+        assert_eq!(got, ["", "<a1@example.pt>"]);
+        assert_eq!(db.message_id(i64::MAX).unwrap(), None);
     }
 
     #[test]
@@ -6493,7 +6592,12 @@ example.com"
         let db = Db::in_memory().unwrap();
         let s = db.settings().unwrap();
         assert_eq!(
-            (s.theme, s.check_interval_secs, s.flash_taskbar, s.window),
+            (
+                s.theme,
+                s.check_interval_secs,
+                s.flash_taskbar,
+                s.gpui_window,
+            ),
             (ThemeChoice::System, 60, false, None)
         );
         for t in [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System] {
@@ -6524,8 +6628,12 @@ example.com"
             h: 820,
             maximized: true,
         };
+        // 0.7 saved its window under `window`, in physical px: 1.0 never
+        // reads it (the first start opens at the default place).
         db.set_setting("window", &g.to_setting()).unwrap();
-        assert_eq!(db.settings().unwrap().window, Some(g));
+        assert_eq!(db.settings().unwrap().gpui_window, None);
+        db.set_setting("gpui_window", &g.to_setting()).unwrap();
+        assert_eq!(db.settings().unwrap().gpui_window, Some(g));
         for bad in ["", "1 2 3 4", "1 2 0 4 0", "1 2 3 4 0 6", "a b c d e"] {
             assert_eq!(Geometry::from_setting(bad), None, "{bad}");
         }

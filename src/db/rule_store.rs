@@ -304,6 +304,43 @@ impl Db {
         Ok(true)
     }
 
+    /// Move rule `id` to place `to` among its account's rules (past the
+    /// end: last), the others keeping their order, in one transaction: the
+    /// account's rules are numbered again from 0. Returns whether it moved
+    /// (false: no such rule, or it is already there).
+    pub fn move_rule_to(&self, id: i64, to: usize) -> Result<bool> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let Some(account_id) = tx
+            .query_row("SELECT account_id FROM rules WHERE id = ?1", [id], |r| {
+                r.get::<_, i64>(0)
+            })
+            .optional()?
+        else {
+            return Ok(false);
+        };
+        let mut ids: Vec<i64> = tx
+            .prepare("SELECT id FROM rules WHERE account_id = ?1 ORDER BY position, id")?
+            .query_map([account_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let Some(from) = ids.iter().position(|x| *x == id) else {
+            return Ok(false);
+        };
+        let to = to.min(ids.len() - 1);
+        if from == to {
+            return Ok(false);
+        }
+        ids.remove(from);
+        ids.insert(to, id);
+        {
+            let mut set = tx.prepare("UPDATE rules SET position = ?2 WHERE id = ?1")?;
+            for (pos, rule) in ids.iter().enumerate() {
+                set.execute(params![rule, pos as i64])?;
+            }
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Pause the account's rules whose destination is not among the
     /// folders the server lists (`names`). Returns how many were paused.
     pub fn pause_rules_missing(&self, account_id: i64, names: &HashSet<String>) -> Result<usize> {

@@ -2,28 +2,13 @@
 //! Portuguese (Portugal; never Brazilian). It follows the Windows display
 //! language unless Settings says otherwise.
 //!
-//! The text itself lives in the `.slint` files (`@tr`), bundled at build
-//! time from `translations/pt-PT/LC_MESSAGES/komorebi.po`; `select` switches
-//! which catalog Slint reads, and every `@tr` binding follows at once.
+//! The text itself lives in the gettext catalog
+//! (`translations/pt-PT/LC_MESSAGES/komorebi.po`), read through
+//! `komorebi_i18n` (`tr!`, `trn!`), whose current language the app sets.
 
-/// A language the app is shown in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lang {
-    #[default]
-    En,
-    PtPt,
-}
-
-impl Lang {
-    /// The name of its catalog folder under `translations/` (what
-    /// `slint::select_bundled_translation` takes; `en` is the source text).
-    pub fn tag(self) -> &'static str {
-        match self {
-            Lang::En => "en",
-            Lang::PtPt => "pt-PT",
-        }
-    }
-}
+/// A language the app is shown in (`tag()` is its catalog folder under
+/// `translations/`; `en` is the source text).
+pub use komorebi_i18n::Lang;
 
 /// The language choice in Settings (key `language`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -172,13 +157,6 @@ pub fn resolve_here(setting: LangSetting) -> Lang {
 /// the first frame): Windows' display language, or the development switch.
 pub fn startup_lang() -> Lang {
     resolve_here(dev_setting().unwrap_or_default())
-}
-
-/// Show the UI in `lang`: every `@tr` binding re-evaluates. Needs a window
-/// to exist (Slint bundles its catalogs when the first one is created). On
-/// failure the UI stays as it was; the result says whether it worked.
-pub fn select(lang: Lang) -> bool {
-    slint::select_bundled_translation(lang.tag()).is_ok()
 }
 
 #[cfg(test)]

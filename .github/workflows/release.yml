@@ -3,11 +3,12 @@ name: Release
 # A CI release build that Authenticode signing (SignPath) can sign.
 #
 # Runs when a version tag (v*) is pushed, or by hand (Actions > Release >
-# Run workflow). It tests, builds the release exe, checks its size, builds
-# the installer, and keeps the UNSIGNED exe and installer as workflow
-# artifacts with stable names (unsigned-exe, unsigned-installer), which a
-# SignPath signing request takes as input. Then it attaches the packages
-# to a DRAFT release. It never publishes a release.
+# Run workflow). It tests, builds the release exe (komorebi.exe, Komorebi
+# 1.0), checks its size against 21,500,000 bytes, builds the installer
+# around it, and keeps the UNSIGNED exe and installer as workflow artifacts
+# with stable names (unsigned-exe, unsigned-installer), which a SignPath
+# signing request takes as input. Then it attaches the packages to a DRAFT
+# release. It never publishes a release.
 #
 # The in-app update signature (Ed25519) is NOT made here: the private key
 # never goes to CI. It stays a manual local step on the maintainer's
@@ -61,39 +62,60 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "Komorebi $version"
 
+      # fxc.exe for the app's shaders (see ci.yml).
+      - name: Locate fxc.exe
+        shell: pwsh
+        run: ./scripts/find-fxc.ps1
+
+      # The library (unit and integration tests).
       - name: cargo test
         run: cargo test --locked
 
+      # The app's tests and the xtask gates run here too.
+      - name: cargo test (app)
+        run: |
+          cargo test -p komorebi-gpui --locked
+          cargo test -p xtask --locked
+
+      # fxc.exe compiles the app's shaders here.
       - name: Release build
-        run: cargo build --release --locked
+        run: cargo build --release --locked -p komorebi-gpui
 
+      # The product budget (xtask/src/size.rs): komorebi.exe at most
+      # 21,500,000 bytes.
       - name: Binary size
-        shell: pwsh
-        run: |
-          $size = (Get-Item target/release/komorebi.exe).Length
-          "komorebi.exe: $size bytes ({0:N3} MB; ceiling 20,500,000 bytes)" -f ($size / 1e6)
-          if ($size -gt 20500000) { throw "komorebi.exe is over the 20.5 MB ceiling" }
+        run: cargo xtask size
 
-      # As in ci.yml: boot offline on a freshly seeded throwaway cache and
-      # fail on a blank list or reader.
-      - name: Offline boot snapshot
+      # One RT_MANIFEST (id 1) with PerMonitorV2 and the rest
+      # (docs/GPUI-BUILD.md "The manifest").
+      - name: Manifest
         shell: pwsh
         run: |
-          $db = Join-Path $env:RUNNER_TEMP 'seed.sqlite3'
+          ./scripts/check-manifest.ps1 target/release/komorebi.exe
+          if ($LASTEXITCODE -ne 0) { throw 'komorebi.exe manifest' }
+
+      # As in ci.yml: the app draws its first frame on WARP, offline.
+      - name: GPUI boot check (WARP)
+        shell: pwsh
+        run: |
+          ./scripts/gpui-boot-check.ps1 -Exe target/release/komorebi.exe `
+            -Cache (Join-Path $env:RUNNER_TEMP 'gpui-boot.sqlite3') `
+            -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot.png') -Warp -Fallback
+          if ($LASTEXITCODE -ne 0) { throw "GPUI boot check failed (exit $LASTEXITCODE)" }
+
+      # As in ci.yml: the same on a seeded cache with the newest message
+      # open; the folder pane, the list and the reading pane must all have
+      # content.
+      - name: GPUI boot check, seeded (WARP)
+        shell: pwsh
+        run: |
+          $db = Join-Path $env:RUNNER_TEMP 'gpui-seed.sqlite3'
           cargo run --release --locked --example seed -- $db 2000
           if ($LASTEXITCODE -ne 0) { throw 'seeding failed' }
-          $env:KOMOREBI_OFFLINE = '1'
-          $env:KOMOREBI_DB = $db
-          $env:KOMOREBI_TIMING = '1'
-          $env:KOMOREBI_SNAPSHOT = Join-Path $env:RUNNER_TEMP 'boot.bmp'
-          $env:KOMOREBI_SNAPSHOT_CHECK = '1'
-          $env:KOMOREBI_SNAPSHOT_SELECT = '0'
-          $env:KOMOREBI_SIZE = '1280x800'
-          $env:KOMOREBI_THEME = 'light'
-          $p = Start-Process target/release/komorebi.exe -NoNewWindow -Wait -PassThru `
-            -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'boot.log')
-          Get-Content (Join-Path $env:RUNNER_TEMP 'boot.log')
-          if ($p.ExitCode -ne 0) { throw "boot snapshot failed (exit $($p.ExitCode))" }
+          ./scripts/gpui-boot-check.ps1 -Exe target/release/komorebi.exe `
+            -Cache $db -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot-mail.png') `
+            -Warp -Fallback -Select 0
+          if ($LASTEXITCODE -ne 0) { throw "GPUI seeded boot check failed (exit $LASTEXITCODE)" }
 
       # The unsigned exe, uploaded alone under a stable name. SignPath
       # signs this first, because the installer wraps the exe.
@@ -130,7 +152,8 @@ jobs:
 
       # Inno Setup 6, if the runner image does not have it. The script
       # compiles installer/komorebi.iss around target/release/komorebi.exe
-      # (the signed copy, once the SignPath steps above are enabled).
+      # (the signed copy, once the SignPath steps above are enabled), which
+      # the setup installs as komorebi.exe, where 0.7 put it.
       - name: Installer
         shell: pwsh
         run: |
@@ -175,15 +198,15 @@ jobs:
       # sign_update -- sign <installer> <version>` on the final signed
       # installer and adds them to the draft release (docs/RELEASING.md).
 
-      # The portable zip (the same komorebi.exe as built above), the debug
-      # symbols as their own asset, and checksums of everything in dist/.
+      # The portable zip (the same exe as built above), the debug symbols as
+      # their own asset, and checksums of everything in dist/.
       - name: Package
         shell: pwsh
         run: |
           $v = '${{ steps.version.outputs.version }}'
           $stage = Join-Path $env:RUNNER_TEMP "komorebi-$v"
           New-Item -ItemType Directory -Force $stage | Out-Null
-          Copy-Item target/release/komorebi.exe $stage
+          Copy-Item target/release/komorebi.exe (Join-Path $stage 'komorebi.exe')
           Copy-Item LICENSE (Join-Path $stage 'LICENSE.txt')
           Copy-Item NOTICE (Join-Path $stage 'NOTICE.txt')
           Copy-Item PRIVACY.md, README.md, CHANGELOG.md $stage
@@ -217,7 +240,8 @@ jobs:
           path: |
             dist/
             ${{ runner.temp }}/notes.md
-            ${{ runner.temp }}/boot.bmp
+            ${{ runner.temp }}/gpui-boot.png
+            ${{ runner.temp }}/gpui-boot-mail.png
           if-no-files-found: error
 
       # A draft only: the maintainer reviews it, replaces the files with

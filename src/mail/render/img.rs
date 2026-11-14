@@ -4,11 +4,17 @@
 //! HTML labelled image/png) is rejected. Dimensions are checked from the
 //! header before any pixel buffer is allocated.
 
+use super::Deadline;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
-use tiny_skia::Pixmap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::Duration;
+use tiny_skia::{IntSize, Pixmap};
 
+#[derive(Clone)]
 pub struct ImageData {
-    pub pix: Pixmap,
+    pub pix: Arc<Pixmap>,
     pub nat_w: u32,
     pub nat_h: u32,
     /// Dark marks on a transparent ground (a black logo): in a dimmed
@@ -35,59 +41,198 @@ pub const MAX_PIXELS: u64 = 16_000_000;
 /// Decoded (and resampled) pixels per message.
 pub const MAX_TOTAL_PIXELS: u64 = 64_000_000;
 
+/// Pixels decoded at the same time at most (unless one image alone is more):
+/// what bounds the memory of decoding in parallel, at 4 bytes a pixel.
+const MAX_IN_FLIGHT: u64 = 40_000_000;
+/// Decoding threads per message at most.
+const MAX_DECODERS: usize = 4;
+/// Encoded bytes below which a thread is not worth starting.
+const WORTH_A_THREAD: usize = 64 * 1024;
+/// Time to decode a message's images; those not started by then stay
+/// placeholders. The layout budget starts after it.
+pub const DECODE_BUDGET: Duration = Duration::from_secs(2);
+
+/// The images of a message decoded ahead of its layout, kept across passes.
+pub struct Decoded {
+    /// By source (`None`: no use).
+    pub images: HashMap<String, Option<ImageData>>,
+    /// Sources that were not there (a blocked or missing remote image).
+    pub absent: HashSet<String>,
+    /// Pixels left for decoding.
+    pub pixels: u64,
+}
+
+impl Default for Decoded {
+    fn default() -> Self {
+        Decoded {
+            images: HashMap::new(),
+            absent: HashSet::new(),
+            pixels: MAX_TOTAL_PIXELS,
+        }
+    }
+}
+
+/// An image the layout is going to need.
+pub struct Wanted {
+    pub src: String,
+    pub bytes: Arc<[u8]>,
+    /// The widest it will be shown, in device pixels.
+    pub cap_w: u32,
+}
+
+/// The pixel budget and what is being decoded now, for the decoding threads.
+struct Flight {
+    /// Pixels left, and pixels being decoded.
+    state: Mutex<(u64, u64)>,
+    room: Condvar,
+}
+
+impl Flight {
+    /// Charge an image of `px` pixels, waiting for room while others decode.
+    /// False when it is over a budget.
+    fn enter(&self, px: u64) -> bool {
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if px > MAX_PIXELS || px > st.0 {
+            return false;
+        }
+        st.0 = st.0.saturating_sub(px);
+        while st.1 > 0 && st.1.saturating_add(px) > MAX_IN_FLIGHT {
+            st = self
+                .room
+                .wait_timeout(st, Duration::from_millis(20))
+                .map_or_else(|e| e.into_inner().0, |r| r.0);
+        }
+        st.1 = st.1.saturating_add(px);
+        true
+    }
+
+    fn leave(&self, px: u64) {
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        st.1 = st.1.saturating_sub(px);
+        self.room.notify_all();
+    }
+}
+
+/// Decode `wanted` on up to [`MAX_DECODERS`] threads, in order, each shrunk to
+/// the width it is shown at as soon as it is decoded. Returns what came out
+/// of each source (`None` for the undecodable and those out of budget or
+/// time) and the pixels left of `budget`.
+pub fn decode_all(wanted: Vec<Wanted>, budget: u64) -> (HashMap<String, Option<ImageData>>, u64) {
+    let until = Deadline::after(DECODE_BUDGET);
+    let flight = Flight {
+        state: Mutex::new((budget, 0)),
+        room: Condvar::new(),
+    };
+    let next = AtomicUsize::new(0);
+    let done = Mutex::new(HashMap::with_capacity(wanted.len()));
+    let work = || {
+        while let Some(w) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
+            let got = if until.expired() {
+                None
+            } else {
+                let mut charged = 0u64;
+                let got = decode_checked(&w.bytes, w.cap_w, &mut |iw, ih| {
+                    let px = u64::from(iw).saturating_mul(u64::from(ih));
+                    let ok = iw > 0 && ih > 0 && flight.enter(px);
+                    if ok {
+                        charged = px;
+                    }
+                    ok
+                });
+                flight.leave(charged);
+                got
+            };
+            done.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(w.src.clone(), got);
+        }
+    };
+    let encoded: usize = wanted.iter().map(|w| w.bytes.len()).sum();
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = cores.min(MAX_DECODERS).min(wanted.len());
+    if threads <= 1 || encoded < WORTH_A_THREAD {
+        work();
+    } else {
+        std::thread::scope(|s| {
+            for _ in 1..threads {
+                s.spawn(work);
+            }
+            work();
+        });
+    }
+    let left = flight
+        .state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .0;
+    (
+        done.into_inner().unwrap_or_else(PoisonError::into_inner),
+        left,
+    )
+}
+
 /// Decode `bytes`, charging the pixels to `budget`; big images are
 /// downscaled once towards `target_w` (0: natural size).
 pub fn decode(bytes: &[u8], target_w: u32, budget: &mut u64) -> Option<ImageData> {
-    if bytes.len() > MAX_ENCODED {
-        return None;
-    }
-    let mut check = |w: u32, h: u32| -> bool {
+    decode_checked(bytes, target_w, &mut |w, h| {
         let px = u64::from(w).saturating_mul(u64::from(h));
         let ok = w > 0 && h > 0 && px <= MAX_PIXELS && px <= *budget;
         if ok {
             *budget = budget.saturating_sub(px);
         }
         ok
-    };
-    let (w, h, rgba) = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        decode_png(bytes, &mut check)?
+    })
+}
+
+/// [`decode`], with `check` asked about the size from the header before any
+/// pixel buffer is allocated.
+fn decode_checked(bytes: &[u8], target_w: u32, check: Checked) -> Option<ImageData> {
+    if bytes.len() > MAX_ENCODED {
+        return None;
+    }
+    let (w, h, mut rgba, opaque) = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        decode_png(bytes, check)?
     } else if bytes.starts_with(&[0xFF, 0xD8]) {
-        decode_jpeg(bytes, &mut check)?
+        decode_jpeg(bytes, check)?
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        decode_gif(bytes, &mut check)?
+        decode_gif(bytes, check)?
     } else if bytes.get(..4) == Some(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        decode_webp(bytes, &mut check)?
+        decode_webp(bytes, check)?
     } else {
         return None;
     };
-    let mut pix = Pixmap::new(w, h)?;
-    let (mut clear, mut solid, mut luma) = (0u64, 0u64, 0u64);
-    for (dst, src) in pix
-        .data_mut()
-        .as_chunks_mut::<4>()
-        .0
-        .iter_mut()
-        .zip(rgba.as_chunks::<4>().0)
-    {
-        let a = u32::from(src[3]);
-        let pm = |c: u8| (u32::from(c).wrapping_mul(a).wrapping_add(127) / 255) as u8;
-        *dst = [pm(src[0]), pm(src[1]), pm(src[2]), src[3]];
-        // At most 16 M pixels of luma 255 each: the sums never wrap.
-        if a < 128 {
-            clear = clear.wrapping_add(1);
-        } else {
-            solid = solid.wrapping_add(1);
-            // Rec. 601 luma, in integers (at most 255).
-            let y = u32::from(src[0])
-                .wrapping_mul(299)
-                .wrapping_add(u32::from(src[1]).wrapping_mul(587))
-                .wrapping_add(u32::from(src[2]).wrapping_mul(114))
-                / 1000;
-            luma = luma.wrapping_add(u64::from(y));
-        }
-    }
     let total = u64::from(w).saturating_mul(u64::from(h));
-    let dark_on_clear = needs_plate(total, clear, solid, luma);
+    rgba.truncate((total as usize).saturating_mul(4));
+    // In place, so an image never exists twice. Without alpha there is
+    // nothing to multiply and nothing the plate would be for.
+    let dark_on_clear = if opaque {
+        false
+    } else {
+        let (mut clear, mut solid, mut luma) = (0u64, 0u64, 0u64);
+        for px in rgba.as_chunks_mut::<4>().0 {
+            let a = u32::from(px[3]);
+            // Rec. 601 luma, in integers (at most 255), from the straight
+            // colours. At most 16 M pixels of it: the sums never wrap.
+            let y = u32::from(px[0])
+                .wrapping_mul(299)
+                .wrapping_add(u32::from(px[1]).wrapping_mul(587))
+                .wrapping_add(u32::from(px[2]).wrapping_mul(114))
+                / 1000;
+            if a < 128 {
+                clear = clear.wrapping_add(1);
+            } else {
+                solid = solid.wrapping_add(1);
+                luma = luma.wrapping_add(u64::from(y));
+            }
+            if a != 255 {
+                for c in px.iter_mut().take(3) {
+                    *c = (u32::from(*c).wrapping_mul(a).wrapping_add(127) / 255) as u8;
+                }
+            }
+        }
+        needs_plate(total, clear, solid, luma)
+    };
+    let mut pix = Pixmap::from_vec(rgba, IntSize::from_wh(w, h)?)?;
     // Pre-scale big images once to their display size (area average).
     if target_w > 0 && u64::from(target_w).saturating_mul(3) / 2 < u64::from(w) {
         let th = u64::from(h)
@@ -100,7 +245,7 @@ pub fn decode(bytes: &[u8], target_w: u32, budget: &mut u64) -> Option<ImageData
         }
     }
     Some(ImageData {
-        pix,
+        pix: Arc::new(pix),
         nat_w: w,
         nat_h: h,
         dark_on_clear,
@@ -176,7 +321,10 @@ fn box_down(src: &Pixmap, tw: u32, th: u32) -> Option<Pixmap> {
 
 type Checked<'a> = &'a mut dyn FnMut(u32, u32) -> bool;
 
-fn decode_png(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
+/// Width, height, straight RGBA, and whether the format had no alpha.
+type Raw = (u32, u32, Vec<u8>, bool);
+
+fn decode_png(bytes: &[u8], check: Checked) -> Option<Raw> {
     let mut dec = png::Decoder::new(Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut r = dec.read_info().ok()?;
@@ -186,10 +334,15 @@ fn decode_png(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
     }
     let mut buf = vec![0; r.output_buffer_size()?];
     let info = r.next_frame(&mut buf).ok()?;
+    if info.color_type == png::ColorType::Rgba {
+        buf.truncate(info.buffer_size());
+        return Some((info.width, info.height, buf, false));
+    }
     let data = buf.get(..info.buffer_size())?;
     let mut out = Vec::with_capacity((w as usize).saturating_mul(h as usize).saturating_mul(4));
+    let mut opaque = true;
     match info.color_type {
-        png::ColorType::Rgba => out.extend_from_slice(data),
+        png::ColorType::Rgba => return None,
         png::ColorType::Rgb => {
             for p in data.as_chunks::<3>().0 {
                 out.extend_from_slice(&[p[0], p[1], p[2], 255]);
@@ -201,16 +354,17 @@ fn decode_png(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
             }
         }
         png::ColorType::GrayscaleAlpha => {
+            opaque = false;
             for p in data.as_chunks::<2>().0 {
                 out.extend_from_slice(&[p[0], p[0], p[0], p[1]]);
             }
         }
         png::ColorType::Indexed => return None,
     }
-    Some((info.width, info.height, out))
+    Some((info.width, info.height, out, opaque))
 }
 
-fn decode_jpeg(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
+fn decode_jpeg(bytes: &[u8], check: Checked) -> Option<Raw> {
     use zune_core::{bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions};
     let opts = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
     let mut d = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(bytes), opts);
@@ -222,10 +376,10 @@ fn decode_jpeg(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
     }
     let px = d.decode().ok()?;
     let need = (w as usize).saturating_mul(h as usize).saturating_mul(4);
-    (px.len() >= need).then_some((w, h, px))
+    (px.len() >= need).then_some((w, h, px, true))
 }
 
-fn decode_gif(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
+fn decode_gif(bytes: &[u8], check: Checked) -> Option<Raw> {
     let mut opts = gif::DecodeOptions::new();
     opts.set_color_output(gif::ColorOutput::RGBA);
     let limit = std::num::NonZeroU64::new(MAX_PIXELS.saturating_mul(4))?;
@@ -259,10 +413,10 @@ fn decode_gif(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
             dst.copy_from_slice(src);
         }
     }
-    Some((sw as u32, sh as u32, out))
+    Some((sw as u32, sh as u32, out, false))
 }
 
-fn decode_webp(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
+fn decode_webp(bytes: &[u8], check: Checked) -> Option<Raw> {
     let mut d = image_webp::WebPDecoder::new(Cursor::new(bytes)).ok()?;
     let (w, h) = d.dimensions();
     if !check(w, h) {
@@ -271,13 +425,13 @@ fn decode_webp(bytes: &[u8], check: Checked) -> Option<(u32, u32, Vec<u8>)> {
     let mut buf = vec![0u8; d.output_buffer_size()?];
     d.read_image(&mut buf).ok()?;
     if d.has_alpha() {
-        return Some((w, h, buf));
+        return Some((w, h, buf, false));
     }
     let mut out = Vec::with_capacity((buf.len() / 3).saturating_mul(4));
     for p in buf.as_chunks::<3>().0 {
         out.extend_from_slice(&[p[0], p[1], p[2], 255]);
     }
-    Some((w, h, out))
+    Some((w, h, out, true))
 }
 
 #[cfg(test)]

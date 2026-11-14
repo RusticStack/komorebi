@@ -4130,12 +4130,30 @@ MIME-Version: 1.0
     }
 
     /// A port nothing listens on: connecting fails before any SMTP.
+    ///
+    /// The ports come from 20000..32000, which neither Windows (ephemeral
+    /// ports start at 49152) nor Linux (32768) hands out for `bind(":0")`,
+    /// so a fake server started by a test running in parallel can never be
+    /// given a port returned here (binding a port and dropping it, as this
+    /// used to, let the OS hand the same port to the next `:0` bind: a fake
+    /// TLS server then answered where the test wanted a refusal). Every call
+    /// takes a fresh port, and one that cannot be bound (a process outside
+    /// the tests holds it) is skipped.
     fn closed_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
+        use std::sync::atomic::{AtomicU16, Ordering};
+        const FIRST: u16 = 20_000;
+        const COUNT: u16 = 12_000;
+        static NEXT: AtomicU16 = AtomicU16::new(0);
+        loop {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            // Start at a per-process offset so two test processes running at
+            // once do not walk the same ports in step.
+            let offset = (n.wrapping_add(std::process::id() as u16)) % COUNT;
+            let port = FIRST + offset;
+            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                return port;
+            }
+        }
     }
 
     fn outbox_state(db: &Db, row: i64) -> Option<(db::Outbox, Option<i64>)> {

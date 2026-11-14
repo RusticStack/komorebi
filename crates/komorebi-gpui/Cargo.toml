@@ -1,0 +1,103 @@
+[package]
+name = "komorebi-gpui"
+# Komorebi 1.0 on GPUI (docs/GPUI-MIGRATION.md). The release version is
+# this one and the library's (the root package) together; the installer, the
+# exe's version resource and About read it.
+version = "1.0.0"
+edition = "2024"
+description = "Komorebi 1.0: the GPUI user interface over the komorebi library"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/RusticStack/komorebi"
+publish = false
+build = "build.rs"
+
+# The app's modules are a library (theme, widgets, window shell), so the
+# binary, the component gallery and the integration tests share them.
+[lib]
+path = "src/lib.rs"
+
+# The release exe is komorebi.exe, the name 0.7 installed (the installer,
+# the Start menu shortcut, the Run value and the mailto registration all
+# point at it; installer/komorebi.iss).
+[[bin]]
+name = "komorebi"
+path = "src/main.rs"
+
+[features]
+# A counting global allocator for the A/B harness (alloc_count.rs): allocation
+# counts and bytes at the bench marks. Development only.
+alloc-count = []
+# An in-process sampling profiler for the A/B harness (sampler.rs): the
+# hottest functions of a run, with file and line. Development only.
+sampler = [
+    "windows/Win32_System_Diagnostics_Debug",
+    "windows/Win32_System_Diagnostics_ToolHelp",
+    "windows/Win32_System_Kernel",
+    "windows/Win32_System_Threading",
+    "windows/Win32_System_WindowsProgramming",
+]
+# The component gallery (KOMOREBI_GALLERY=light|dark): every widget in one
+# window, for screenshots against the brand mockups. Development only;
+# release builds leave it out.
+gallery = ["gpui-kit/test-support"]
+
+[dependencies]
+# The mail engine, cache, settings and Win32 shell code.
+komorebi = { path = "../.." }
+# tr! and trn! over the gettext catalog (docs/GPUI-I18N.md).
+komorebi-i18n = { path = "../komorebi-i18n" }
+# Komorebi's own RT_MANIFEST (assets/komorebi.manifest) replaces GPUI's
+# (third_party/gpui-pre/KOMOREBI-PATCH.md).
+gpui = { workspace = true, features = ["windows-manifest-provided-by-host"] }
+gpui-kit = { workspace = true }
+anyhow = "1"
+# The global allocator (main.rs): mimalloc 2 (MIT; C code, built by the cc
+# crate with the MSVC toolchain the bundled SQLite already needs).
+mimalloc = { version = "=0.1.52", default-features = false, features = ["v2"] }
+# KOMOREBI_SNAPSHOT=<file>.png (src/snapshot.rs). The copy the library's
+# HTML renderer links, pinned as there.
+png = "=0.18.1"
+# The text size watcher's thread hands changes to the UI thread
+# (cookbook_async). The copy GPUI links.
+futures = "=0.3.34"
+# The reader's tiles and the composer's painted pages as GPUI images
+# (`image::Frame`), and the gallery's PNG shots. The copy GPUI links.
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# The reader's dates and the invite card's "now" (the library's own copy
+# and features).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Grapheme boundaries for the composer's caret (the copy the library and
+# GPUI link, pinned as in the library).
+unicode-segmentation = "=1.13.3"
+# Server names in their xn-- form (the account form; the library's copy).
+idna = "=1.1.0"
+# The save dialog's start folder: the Downloads Known Folder (the
+# library's copy).
+dirs = "6"
+
+[target.'cfg(windows)'.dependencies]
+# The DirectX pre-flight's message box; the snapshot capture (PrintWindow into a GDI bitmap,
+# Graphics_Gdi and Storage_Xps, DwmFlush in Graphics_Dwm). The copy
+# gpui-pre-windows already links.
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_WindowsAndMessaging"] }
+# The pre-flight makes the DirectX devices GPUI will draw with, once, and hands
+# them to the platform (gpui_windows::prepare_devices; KOMOREBI PATCH
+# device-once in third_party/gpui-pre-windows/KOMOREBI-PATCH.md).
+gpui-pre-windows = "=0.3.9"
+# The HWND behind GPUI's window, for the window mark that a second launch
+# finds (komorebi::instance). The copy GPUI links.
+raw-window-handle = "=0.6.2"
+
+[build-dependencies]
+# Compiles ../../assets/komorebi.rc (icons, version information, manifest).
+embed-resource = "3"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
+# The Kit theme test compares every colour field through serde.
+serde_json = "=1.0.151"
+# The reader's accessibility test reads its nodes as the Windows adapter does.
+accesskit_consumer = "=0.38.0"
+# The settings tests read a certificate fixture (the library's copy).
+native-tls = "0.2"

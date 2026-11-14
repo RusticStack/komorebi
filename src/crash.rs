@@ -94,8 +94,11 @@ mod tests {
     fn the_line_never_carries_the_panic_message() {
         static CAUGHT: Mutex<String> = Mutex::new(String::new());
         let previous = std::panic::take_hook();
+        // Tests run in parallel: only this test's thread is caught.
         std::panic::set_hook(Box::new(|info| {
-            *CAUGHT.lock().unwrap() = line(info, "2026-10-08T10:00:00Z");
+            if std::thread::current().name() == Some("reader") {
+                *CAUGHT.lock().unwrap() = line(info, "2026-10-08T10:00:00Z");
+            }
         }));
         let r = std::thread::Builder::new()
             .name("reader".into())

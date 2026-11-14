@@ -1,7 +1,7 @@
 ; Komorebi installer (Inno Setup 6.3 or later). Built by
 ; scripts/build-installer.ps1 and .github/workflows/release.yml:
 ;
-;   ISCC [/DAppVersion=0.7.0] [/DBinDir=<folder>] installer\komorebi.iss
+;   ISCC [/DAppVersion=1.0.0] [/DBinDir=<folder>] installer\komorebi.iss
 ;
 ; The version defaults to the one inside komorebi.exe (BinDir, default
 ; target\release). Output: dist\komorebi-<version>-setup.exe.
@@ -57,7 +57,7 @@ MinVersion=10.0
 ; quits on WM_ENDSESSION, tray or not, src/win_shell.rs). Restart Manager
 ; only restarts programs registered for it, so a silent update that asks
 ; for /RESTARTAPPLICATIONS starts Komorebi itself ([Run], [Code]). Every
-; running Komorebi also holds the fixed mutex Komorebi.App (src/main.rs,
+; running Komorebi also holds the fixed mutex Komorebi.App (src/instance.rs,
 ; beside its per-cache single-instance mutex); the self-update closes it
 ; just before it starts this installer, so AppMutex only stops an install
 ; that would replace a Komorebi still running.
@@ -65,7 +65,12 @@ AppMutex=Komorebi.App,Global\Komorebi.App
 CloseApplications=yes
 CloseApplicationsFilter=komorebi.exe
 RestartApplications=yes
+; The seal as the setup icon, and wizard images on paper with the seal and
+; the wordmark, at 100 and 200 percent (Setup picks the one for the DPI;
+; docs/BRANDING.md).
 SetupIconFile=..\assets\komorebi.ico
+WizardImageFile=wizard-image.bmp,wizard-image-2x.bmp
+WizardSmallImageFile=wizard-small.bmp,wizard-small-2x.bmp
 UninstallDisplayIcon={app}\komorebi.exe
 UninstallDisplayName=Komorebi
 LicenseFile=..\LICENSE

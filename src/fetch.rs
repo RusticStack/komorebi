@@ -509,22 +509,16 @@ impl Write for Timed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use native_tls::{Certificate, Identity, TlsAcceptor};
+    use native_tls::Certificate;
     use std::net::TcpListener;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     const CERT: &[u8] = include_bytes!("../tests/fixtures/tls/test-cert.pem");
     const KEY: &[u8] = include_bytes!("../tests/fixtures/tls/test-key.pem");
 
-    /// One acceptor per test run (Windows keeps its key in a container).
-    fn acceptor() -> Arc<TlsAcceptor> {
-        static ACCEPTOR: OnceLock<Arc<TlsAcceptor>> = OnceLock::new();
-        ACCEPTOR
-            .get_or_init(|| {
-                let id = Identity::from_pkcs8(CERT, KEY).unwrap();
-                Arc::new(TlsAcceptor::new(id).unwrap())
-            })
-            .clone()
+    /// One acceptor per test run, in memory (`fake_tls::Acceptor`).
+    fn acceptor() -> Arc<crate::mail::fake_tls::Acceptor> {
+        crate::mail::fake_tls::acceptor(CERT, KEY)
     }
 
     fn client() -> Client {

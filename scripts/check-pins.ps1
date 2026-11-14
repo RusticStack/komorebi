@@ -1,7 +1,15 @@
-# Fails if any crate pinned to an exact version in Cargo.toml (`"=x.y.z"`)
-# is linked in two versions (`cargo tree -d`): the HTML renderer's crates
-# are pinned to the copies Slint already links, so a Slint bump must move
-# them together. Run from the repository root (CI runs it on every push).
+# Fails if any crate pinned to an exact version (`"=x.y.z"`) is linked in two
+# versions (`cargo tree -d`), for each app:
+#
+# - the library (the root package): the pins in Cargo.toml. The HTML
+#   renderer's crates are pinned to one copy each.
+# - the app (crates/komorebi-gpui, komorebi.exe): its own pins, the GPUI
+#   stack's in [workspace.dependencies], and the library's (it links the
+#   library). The GPUI stack links some of the renderer's crates again in
+#   older versions; those known pairs are listed below with the phase that
+#   removes them, and any other second copy fails.
+#
+# Run from the repository root (CI runs it on every push).
 #
 #   pwsh scripts/check-pins.ps1
 $ErrorActionPreference = 'Stop'
@@ -12,52 +20,75 @@ $exempt = @{
     'windows-sys' = 'pinned for its feature list; other crates link older versions'
 }
 
-$pinned = Select-String -Path Cargo.toml -Pattern '^([A-Za-z0-9_-]+)\s*=\s*(?:\{[^}]*version\s*=\s*)?"=([^"]+)"' |
-    ForEach-Object { $_.Matches[0].Groups[1].Value }
-if (-not $pinned) { throw 'no exact pins found in Cargo.toml' }
+# Second copies the GPUI stack brings into the app (not the library).
+$gpuiKnown = @{
+    'tiny-skia' = '0.11 through resvg 0.45 (gpui-component) and 0.46 (gpui-pre); size cut 2, phase 18 (docs/GPUI-MIGRATION.md)'
+    'png'       = '0.17 through tiny-skia 0.11; size cut 2, phase 18'
+    'gif'       = '0.13 through resvg 0.45 (gpui-component); size cut 2, phase 18'
+    'roxmltree' = '0.20 through usvg 0.45 (gpui-component); size cut 2, phase 18'
+    'zune-jpeg' = '0.4 through resvg 0.45 (gpui-component); size cut 2, phase 18'
+    'zune-core' = '0.4 through zune-jpeg 0.4; size cut 2, phase 18'
+    'windows'   = 'pinned to the copy gpui-pre-windows links; gpui-base links 0.58'
+}
 
-$tree = cargo tree --locked --duplicates --depth 0 --prefix none --target x86_64-pc-windows-msvc
-if ($LASTEXITCODE -ne 0) { throw 'cargo tree failed' }
-$versions = @{}
-foreach ($line in $tree) {
-    if ($line -match '^(\S+) v(\S+)') {
-        if (-not $versions.ContainsKey($Matches[1])) { $versions[$Matches[1]] = [System.Collections.Generic.HashSet[string]]::new() }
-        [void]$versions[$Matches[1]].Add($Matches[2])
+# The exact pins of a manifest: crate names (a `package = "..."` rename
+# names the crate), from dependency lines and tables alike.
+function Get-Pins([string]$manifest) {
+    Select-String -Path $manifest -Pattern '^([A-Za-z0-9_-]+)\s*=\s*(\{[^}]*\}|"=[^"]+")' | ForEach-Object {
+        $name = $_.Matches[0].Groups[1].Value
+        $value = $_.Matches[0].Groups[2].Value
+        if ($value -match '^"=' -or $value -match 'version\s*=\s*"=') {
+            if ($value -match 'package\s*=\s*"([^"]+)"') { $Matches[1] } else { $name }
+        }
     }
+}
+
+# Crate name to the set of versions linked, for one package's graph.
+function Get-Versions([string]$package) {
+    $tree = cargo tree --locked -p $package --duplicates --depth 0 --prefix none --target x86_64-pc-windows-msvc
+    if ($LASTEXITCODE -ne 0) { throw "cargo tree -p $package failed" }
+    $versions = @{}
+    foreach ($line in $tree) {
+        if ($line -match '^(\S+) v(\S+)') {
+            if (-not $versions.ContainsKey($Matches[1])) { $versions[$Matches[1]] = [System.Collections.Generic.HashSet[string]]::new() }
+            [void]$versions[$Matches[1]].Add($Matches[2])
+        }
+    }
+    $versions
 }
 
 $failed = $false
-foreach ($name in $pinned) {
-    $seen = $versions[$name]
-    if ($seen -and $seen.Count -gt 1) {
-        if ($exempt.ContainsKey($name)) {
-            Write-Output "ok   $name ($($seen -join ', '); exempt: $($exempt[$name]))"
+function Test-Pins([string]$label, [string]$package, [string[]]$pinned, [hashtable]$known) {
+    Write-Output "== $label ($package)"
+    $versions = Get-Versions $package
+    foreach ($name in ($pinned | Sort-Object -Unique)) {
+        $seen = $versions[$name]
+        if ($seen -and $seen.Count -gt 1) {
+            if ($exempt.ContainsKey($name)) {
+                Write-Output "ok   $name ($($seen -join ', '); exempt: $($exempt[$name]))"
+            } elseif ($known.ContainsKey($name)) {
+                Write-Output "ok   $name ($($seen -join ', '); known: $($known[$name]))"
+            } else {
+                Write-Output "FAIL $name is linked in $($seen.Count) versions: $($seen -join ', ')"
+                $script:failed = $true
+            }
         } else {
-            Write-Output "FAIL $name is linked in $($seen.Count) versions: $($seen -join ', ')"
-            $failed = $true
+            Write-Output "ok   $name"
         }
-    } else {
-        Write-Output "ok   $name"
     }
+    Write-Output ''
 }
 
-Write-Output ''
-# Slint marks TextInput's anchor-position-byte-offset, cursor-position-byte-offset
-# and preedit-text internal; ui/widgets.slint (ComposeBody) and ui/editor.slint
-# read them. They must still be declared by the Slint compiler's TextInput
-# (builtin_elements.rs), or the editor loses its selection and the IME's
-# composition. A bump that renames them fails here with the names.
-$meta = cargo metadata --locked --format-version 1 --filter-platform x86_64-pc-windows-msvc | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
-$compiler = $meta.packages | Where-Object { $_.name -eq 'i-slint-compiler' } | Select-Object -First 1
-if (-not $compiler) { throw 'i-slint-compiler is not in the dependency tree' }
-$builtins = Get-Content -Raw (Join-Path (Split-Path $compiler.manifest_path) 'builtin_elements.rs')
-foreach ($prop in 'anchor-position-byte-offset', 'cursor-position-byte-offset', 'preedit-text') {
-    if ($builtins -match "property\s*<[^>]+>\s*$([regex]::Escape($prop))\s*;") {
-        Write-Output "ok   TextInput $prop"
-    } else {
-        Write-Output "FAIL Slint $($compiler.version) no longer declares the TextInput property '$prop', which ComposeBody (ui/widgets.slint) and the editor (ui/editor.slint) read. Find its replacement, update both files, and test typing, Ctrl+B / Ctrl+K and an IME in a formatted message."
-        $failed = $true
-    }
+$rootPins = @(Get-Pins Cargo.toml)
+if (-not $rootPins) { throw 'no exact pins found in Cargo.toml' }
+$gpuiPins = @(Get-Pins crates/komorebi-gpui/Cargo.toml)
+foreach ($required in 'gpui-pre', 'gpui-kit') {
+    if ($rootPins -notcontains $required) { throw "Cargo.toml [workspace.dependencies] no longer pins $required exactly" }
 }
+
+# The root manifest's pins include the GPUI stack's workspace pins, which the
+# library does not link (no versions seen: ok).
+Test-Pins 'Library' 'komorebi' $rootPins @{}
+Test-Pins 'App' 'komorebi-gpui' ($rootPins + $gpuiPins) $gpuiKnown
+
 if ($failed) { exit 1 }

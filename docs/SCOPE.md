@@ -10,8 +10,10 @@ feature.
 1. **Fast.** Window on screen in under 200 ms. All cached mail for the
    selected folder listed in under 600 ms. Scrolling, switching folders and
    opening messages never stutter.
-2. **Light.** One small native binary, low idle memory, no background
-   services, no web engine.
+2. **Light.** One native binary, no background services, no web engine.
+   Komorebi 1.0 draws with GPUI, which holds more memory at idle than the
+   0.7 line did; that is accepted for 1.0 and optimizing it is the work of
+   1.1 (docs/PERF.md, docs/GPUI-MIGRATION.md).
 3. **Correct.** Mail stays organized the way the server has it: folders,
    read and starred state, deletions, all two-way.
 4. **Multiple accounts**, each with its own folders.
@@ -22,14 +24,12 @@ feature.
    basic text formatting and named signatures. Formatted mail goes out as
    text/plain plus a generated text/html alternative; any message can be
    switched to plain text.
-7. **Rules, contacts and calendar** (added 2026-10-15). Local mail rules
-   (move, mark as read, mark as important, delete to Trash) run by the sync
-   worker on new Inbox mail and on demand. Contacts with groups, stored
-   locally and synced over CardDAV. A calendar with agenda, day, week and
-   month views, recurrences and time zones, synced over CalDAV, with
-   invitations added to it and opt-in reminders while the app runs. All of
-   it uses the account's own credentials, loads lazily (never on the launch
-   path), and has its own size budget inside the 20.5 MB ceiling.
+7. **Rules and contacts** (added 2026-10-15). Local mail rules (move, mark
+   as read, mark as important, delete to Trash) run by the sync worker on
+   new Inbox mail and on demand. Contacts with groups, stored locally and
+   synced over CardDAV. Both use the account's own credentials and load
+   lazily (never on the launch path). The calendar that 0.7 added with them
+   is not in 1.0 (see the non-goals).
 
 ## Non-goals
 
@@ -62,10 +62,14 @@ planned.
   headings, merged table cells, images in the message body (a signature may
   carry one small logo), stationery, templates, HTML source editing, signature
   files and server-synced signatures.
-- Calendar features beyond personal events: no scheduling assistant, no
-  free/busy lookup, no shared or delegated calendars, no counter-proposals,
-  no tasks or journals, no web or subscription feeds beyond CalDAV, and no
-  background service for reminders (they fire only while Komorebi runs).
+- A calendar: no agenda, day, week or month views, no event editing, no
+  CalDAV sync, no event reminders and no adding an invitation to a calendar.
+  The calendar of 0.7 is not in 1.0 (owner decision, 2026-11-06); it is
+  planned to return in 1.1.0, and its library code (`src/cal`,
+  `src/dav/caldav`, the calendar tables and their tests) stays in the tree,
+  compiling and tested, for that. A
+  meeting invitation in a message is still shown on a card, and Save .ics
+  hands the event to the calendar app you use.
 - Windows beyond the main one and its read-only message windows. Closing the
   main window closes every window and ends the app. No dragging tabs out into
   windows, no split view inside one window.
@@ -87,6 +91,6 @@ use an app password.
   reading accounts, settings and folders, and reading the header rows of
   the selected folder. Nothing on the network runs before the first frame.
 - **Cached list under 600 ms** for the selected folder.
-- **Release binary under 20.5 MB** (raised from 20.0 MB on 2026-10-15 to make room for rules, contacts and calendar; each of them has its own size budget).
+- **Release binary under 21.5 MB** (21,500,000 bytes), for `komorebi.exe`, the Komorebi 1.0 release exe. The ceiling was 20.0 MB, then 20.5 MB; it was raised to 21.5 MB on 2026-10-25 for Komorebi 1.0 on GPUI (docs/GPUI-MIGRATION.md). Higher idle memory and CPU than the 0.7 Slint app are accepted for 1.0 (optimization is planned for 1.1); launch and cached list keep their budgets.
 
 See `PERF.md` for how to measure.

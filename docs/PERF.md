@@ -1,8 +1,17 @@
 # Komorebi performance reference
 
-Binding for any speed, memory or size work. Product promises: launch < 200 ms, cached list < 600 ms, exe <= 20.5 MB, light on memory. Safety and correct mail semantics outrank speed (CONTRIBUTING.md). Panic strategy, `unsafe` and the panic-free lints in `src/mail/render` and `src/mail/ical.rs` are not performance levers.
+Binding for any speed, memory or size work. Product promises: launch < 200 ms, cached list < 600 ms, exe <= 21.5 MB (21,500,000 bytes; raised from 20.5 MB for Komorebi 1.0 on GPUI, 2026-10-25; the ceiling is komorebi.exe's, the Komorebi 1.0 release exe; the Slint app is deleted). Komorebi 1.0 is not light on memory: idle memory and CPU above the 0.7 Slint app's are accepted for 1.0 and optimizing them is 1.1 work (section 0). Safety and correct mail semantics outrank speed (CONTRIBUTING.md). Panic strategy, `unsafe` and the panic-free lints in `src/mail/render` and `src/mail/ical.rs` are not performance levers.
 
 **The meta-rule: a change stays only if it beats the baseline by more than the run-to-run spread, or shrinks exe/memory measurably without slowing anything. Cite the rule below in the commit or changelog note, with numbers. Cleverness that does not measure is reverted.**
+
+## 0. Komorebi 1.0 on GPUI: what is measured, what is not
+
+Sections 1 to 7 below were measured on the 0.7 Slint app (deleted at the cut-over) and mostly do not apply to the GPUI app (`crates/komorebi-gpui`); they stay as the record and for the shared library. For 1.0 the owner accepted a higher idle memory and CPU than 0.7 had; the optimization pass (docs/GPUI-MIGRATION.md phase 18) is moved to 1.1. Nothing here claims a low memory figure for 1.0.
+
+- Exe size. The last release build of the GPUI app (then still named `komorebi-gpui.exe`) measured it at 22,051,328 bytes (stage D, `main` alone 22,036,480), 551,328 bytes OVER the 21,500,000 ceiling, so the CI "Binary size" step fails until the exe is cut or the ceiling is moved (docs/GPUI-MIGRATION.md, stage D "other"). Earlier points: 11,074,048 bytes for the stage A skeleton. The tree was not rebuilt in release for the cut-over preparation, so the current size is not measured.
+- Launch. Time to the first drawn frame, `KOMOREBI_TIMING=1`, seeded 2,000-message cache, offline, WARP, 1280x800, median of 9: 77.0 ms (range 75.0 to 80.7 ms; the cache loads in about 40 ms), against the 200 ms budget. The cached-list budget (600 ms) was not measured on its own: the list is drawn in that first frame. Cold first launches after a build were not measured for the full app.
+- Memory and idle CPU. No figure for the full GPUI app exists. The feasibility spike (branch `spike/gpui`, `spike-gpui/REPORT.md` S2 and S3) measured a skeleton window with a list and no message open, against the 0.7 Slint app on the same cache (Get-Process and WorkingSetPrivate, 2 s after the first frame): private bytes 111.1 MB against 11.6 MB, private working set 22.1 MB against 10.7 MB, working set 55.2 MB against 34.1 MB, 35 threads against 11. Most of the private bytes were reserved and never touched: the DirectX runtime and driver were put at about 85 to 90 MB of commit, which the spike did not confirm with PIX or VMMap. Idle CPU over 60 s was 0.017 percent of one core visible and 0.006 percent minimized for the skeleton, against 0.012 and 0.136 percent for the Slint app. These are spike figures on a skeleton, not the shipped app; measure the release build before quoting any of them.
+- 1.1 candidates (from the spike's optimization list, not done): lazy and smaller GPU resources, dropping a RenderImage's CPU bytes after upload, capping background executor threads, glyph atlas tuning, size trims, an explicit WARP fallback.
 
 ## 1. Where time goes (measured, release, 2000 messages, 2026-10)
 
@@ -36,19 +45,19 @@ Source: Rust Performance Book "Heap Allocations", "Iterators", "Bounds Checks"; 
 5. Pre-size `Vec` when the length is known; do not `shrink_to_fit` on hot paths.
 6. `Rc`/`Arc` only for data actually shared; `Box<str>` for immutable long-lived text. No crossover numbers exist for `SmallVec`/`Box<str>`: profile (DHAT) first.
 7. Case folding on hot paths: check `iter().any(u8::is_ascii_uppercase)` first and match borrowed bytes; fold only when needed, into a reused buffer. Folding must stay identical to `src/fold.rs`; never swap in `str::to_lowercase` (Unicode folding changes results).
-8. Memory numbers come from a run without `KOMOREBI_SNAPSHOT` (the snapshot adds about 12 MB of transient buffers): a live instance is about 32.6 MB working set and 11.7 MB private.
+8. Memory numbers come from a run without `KOMOREBI_SNAPSHOT` (the snapshot adds about 12 MB of transient buffers): a live instance of the 0.7 Slint app is about 32.6 MB working set and 11.7 MB private (the GPUI app: section 0).
 
 ## 4. Codegen, profile and size
 
 Source: Cargo book "Profiles"; rustc codegen options; Perf Book "Build Configuration", "Inlining"; cargo-bloat.
 
-1. Current profile: `opt-level = "s"`, fat LTO, `codegen-units = 1`, `strip`. `"z"` (disables loop vectorization) only for code with no loop that matters: the generated UI crate `crates/komorebi-ui` and the cold crates listed in `Cargo.toml` (see 4.8); never for the `komorebi` package itself (see 4.8). Per-package `opt-level = 3` goes only on crates whose loops are the product promise (Slint core and renderer, tiny-skia, SQLite C code); every other crate stays `s`.
+1. Current profile (speed first, owner's decision 2026-11-07; the exe's size matters least): `opt-level = 3`, fat LTO, `codegen-units = 1`, `strip`, `panic = "abort"`. `"z"` only for `ed25519-compact` and `sha2` (the update check's signature, once per update). Earlier profiles (`"s"` with per-package 3 for tiny-skia, SQLite and the text stack, and `"z"` for cold crates, the views and Kit) are in the git history (docs/PERF.md 4.8 is the record of what each cost in size).
    Development uses the unoptimized `dev` profile only (dependencies optimized once and cached); `release` is built once at the end of a task for the size ceiling and for any timing or memory number, which `dev` cannot give.
 2. A per-package override changes that crate's codegen before LTO; generic code is instantiated in the caller and follows the caller's level. Verify every override with a build and a timing, not by reasoning. `libsqlite3-sys` takes its C flags from the package's `OPT_LEVEL` through the `cc` crate.
 3. Raising the whole `komorebi` package to 3 overshoots the budget (measured 20.4 MB). Hot render code at 3 needs a separate workspace crate; do that only if a 9-run app measurement beats the spread.
 4. Do not add `#[inline(never)]`/`#[inline(always)]` speculatively; measure with cargo-bloat first. Forced Slint features (SVG, 3.8 MB of ICU dictionaries for complex scripts) cannot be dropped from our Cargo.toml; removing them changes behaviour or needs a vendored patch: out of scope.
 5. No `target-cpu=native` (the installer ships to unknown CPUs). PGO/BOLT are not planned (no Windows evidence).
-6. Size changes are checked with `cargo bloat --release --crates` on an unstripped build in a scratch target dir; the CI check is the stripped exe <= 20,500,000 bytes.
+6. Size changes are checked with `cargo bloat --release --crates` on an unstripped build in a scratch target dir; the CI check (`cargo xtask size`, `xtask/src/size.rs`) is the stripped exe against its ceiling: komorebi.exe <= 21,500,000 bytes.
 7. Not applied (no app-level measurement was made). Delay-loading (`/DELAYLOAD`, `delayimp.lib`) of DLLs needed only after the first frame (crypt32, ws2_32, secur32) saves about 1 ms of process start that `KOMOREBI_TIMING` cannot see (its clock starts at `main`). Failures move to the first call: the TLS tests and one fake-server sync must pass.
 
 8. Size, 2026-10-15 (merged 0.7 tree: rules, contacts, calendar; unstripped scratch build with `cargo bloat`, stripped exe from the repo profile; sections of the exe sum to the file, so symbols add nothing). Merged tree at the old profile: 21,352,960 bytes (20.5 MB ceiling exceeded by 853 KB; 0.6.0 was 19,780,608). Slint's generated code was 3.6 MiB of the `komorebi` crate's 5.1 MiB `.text`, most of it `ensure_instantiated` and `new` of the window and its pages.
@@ -97,15 +106,16 @@ Source: Perf Book; parley and tiny-skia docs; Chromium image decode cache design
 
 All runs: release, `--locked`, nothing else compiling or rendering, throwaway `KOMOREBI_DB`, `KOMOREBI_OFFLINE=1`. Never the real cache, real mail or `.env*`.
 
-- Build: `cargo build --release --locked`. Exe size: `(Get-Item target\release\komorebi.exe).Length` (<= 20,500,000).
-- Launch: `KOMOREBI_TIMING=1` with `KOMOREBI_SNAPSHOT` on a seeded copy (`examples/seed.rs`, 2000 and 20000 messages). Report a fresh-copy (cold) number and a warm second launch: the first launch pays one-time default-fold writes.
+- A/B harness: `pwsh -File scripts/opt-ab.ps1 -A <exe> -B <exe>` runs interleaved rounds (A B, B A, ...) of launch to first frame (empty, 2,000 and 55,000 caches), memory 2 s after the first frame and after opening the heavy message, open to tiles and to complete (every visible tile in a rendered frame, images decoded, the page laid out; then the read-ahead window too), blank tiles while reading it, list scrolling, composer typing and idle CPU (visible and minimized), and writes medians, min, max, the run count, the machine load and a verdict against a noise run (`-Noise`) to `results.json` and `report.md`. Run it with A and B the same exe first: that run is the noise floor, the smallest difference that counts. The in-app steps are `KOMOREBI_BENCH` (docs/ENVIRONMENT.md); `scripts/opt-prof.ps1` adds the in-process CPU sampler (`--features sampler`) and the counting allocator (`--features alloc-count`); `scripts/opt-threads.ps1` lists the threads. Seeding: `-Prepare -SeedExe <seed.exe>`.
+- Build: `cargo build --release --locked -p komorebi-gpui`. Exe size: `cargo xtask size` (komorebi.exe <= 21,500,000, docs/GPUI-MIGRATION.md "Measurements").
+- Launch: `KOMOREBI_TIMING=1` (`scripts/gpui-bench.ps1`) on a seeded copy (`examples/seed.rs`, 2000 and 20000 messages). Report a fresh-copy (cold) number and a warm second launch: the first launch pays one-time default-fold writes.
 - Reader: the HTML corpus walk prints the open-to-first-tile line. `examples/render_html.rs` renders a fixture to PNG: compare byte for byte before and after.
 - Search/list/DB: an `Instant` example or `#[test] #[ignore]` harness, variants interleaved in one process, 15 runs, assert equal results. No criterion.
 - Statistics: at least 7 runs (9 for app runs), report median and min and the spread. Interleave A and B (A B A B) so drift hits both. The delta must exceed the spread.
 - Pixels: the offline snapshot matrix must show no differences except explained ones (relative dates).
 - Memory: live instance without `KOMOREBI_SNAPSHOT`, read PeakWorkingSet64 and PrivateMemorySize64 after 2 s.
 - Size attribution: unstripped scratch build, `cargo bloat --release --crates`.
-- Gates: `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`, `scripts/check-pins.ps1`, `cargo deny --locked check licenses advisories` (when Cargo.toml/lock change), `KOMOREBI_SNAPSHOT_CHECK`.
+- Gates: `cargo xtask check`, `cargo test --locked --workspace`, `scripts/check-pins.ps1`, `cargo deny --workspace --locked check licenses advisories` (when Cargo.toml/lock change), `scripts/gpui-boot-check.ps1`.
 - Cold disk (first boot, Defender scan) can dwarf warm numbers; say which one a claim is about.
 
 ## 9. Rejected so far (do not retry without new evidence)
@@ -139,3 +149,62 @@ Measured (release, own target dir, 55,000-message seeded throwaway cache, 12 MB,
 | Open message (header + message) x50 | 0.68 / 0.67, 0.66 / 0.65 | 0.65 / 0.65, 0.64 / 0.64 |
 
 The list load and the open-message reads are within the spread (the encrypted file is about 9 percent smaller after its copy, which makes its open a little faster); search pays about 1 ms (4 percent) for decrypting every page it reads. Exe: 19,680,768 bytes before, 19,696,640 after (+15,872 bytes; 303,360 bytes of room left). First frame (9 interleaved app runs, plaintext 55,000 cache, `KOMOREBI_TIMING`): before median 44.7 / min 40.6 ms, after 46.9 / 40.1 ms; a second round of 9 pairs: before 45.3 / 40.8, after 46.3 / 40.2. Slow outliers came on both (to 64 and 73 ms), so the difference is inside the run-to-run spread. The release exe measured was built just before the page 1 marker (a 16-byte copy per page 1 read or write), so an app launch on an encrypted cache was not timed; the cache-load part of launch is the `db_bench` row above.
+
+## 11. Speed-first profile, allocator and PGO (2026-11-07)
+
+Owner's decision: the exe's size matters least; responsiveness (scroll frame, typing, open to first tile, launch), then private and peak working set, then idle CPU. Every row is a 9-round `scripts/opt-ab.ps1` A/B against the row above it, judged against `noise-floor.json`; the full tables are in `C:\dev-overflow\claude-tmp\komorebi-opt\runs\speed-*`. The frame metrics (scroll, typing) include the wait for the display's next frame, so they move by a few tenths of a millisecond and sometimes against the process cycles per frame; read both.
+
+| Step | Result (beyond the floor) | Exe bytes |
+|---|---|---|
+| start: views and Kit at "z" (904e0cd) | | 15,537,152 |
+| revert both to "s" | open -6 ms; peak working set after open +0.5 MB; frames and launch equal | 16,774,656 |
+| root opt-level 3, cold crates "z" | open -17 ms (-12 percent); scroll and typing frames +4 to +11 percent slower (two batches, load flagged) | 21,301,760 |
+| mimalloc 2 + purge delay 0 | open -17 ms (-13 percent); working set +0.8 MB before a message is open, -1.5 MB (peak -1.9 MB) after; private bytes +6 and +12 MB | 21,188,096 |
+| SegmentHeap on top | private bytes -1.2 and -1.7 MB, private working set -0.8 and -1.0 MB, peak unchanged, speed unchanged | 21,188,096 |
+| UI stack (gpui-pre, taffy, Kit, the views) at "s", the rest 3 | scroll -7 percent, typing -10 percent (two batches, load flagged), open +5 to +7 ms, scroll Mcycles/frame +15 percent | 17,895,424 |
+| whole lane vs the start (valid) | open -34.7 ms (-23 percent); working set after open -2.3 MB, peak -1.6 MB; private bytes +6.4 and +10.6 MB; frames, launch, idle equal | 17,895,424 |
+
+Not kept:
+
+- Root 3 with no "z" crate at all: 21,668,864 bytes, 168,864 over the 21,500,000 ceiling (not raised).
+- mimalloc 3 (the crate's default): private bytes +27 to +32 MB, peak working set +25 MB after the heavy message (valid batch); the "v2" feature is used instead.
+- PGO (below): not committed.
+
+### PGO on Windows MSVC (measured, not in the release flow)
+
+Works with the pinned toolchain 1.95.0: `RUSTFLAGS=-Cprofile-generate=<dir>` with `--target x86_64-pc-windows-msvc` (the explicit target keeps build scripts and proc macros uninstrumented), the harness workloads as training (`opt-ab.ps1 -A x -B x -Metrics launch,mem,open,scroll,type -Rounds 3`, with `LLVM_PROFILE_FILE=<dir>/komorebi-%p-%m.profraw`; 45 files of 20 MB), `llvm-profdata merge` from the rustup `llvm-tools` component (added to the 1.95.0 toolchain under `C:\dev-overflow\rustup`; the stable toolchain's tool is LLVM 23, the compiler's is 22), then `-Cprofile-use=<file>.profdata`. Instrumented build 14 minutes, instrumented exe 75 MB, training 3 minutes, final build 8 minutes.
+
+A/B vs the same config without PGO (valid, load 5 percent): open to first tile -18.7 ms (-16 percent), scroll Mcycles/frame -10 percent, launch -4 percent (within floor), peak working set -1 MB; but scroll median +7.5 percent, p95 +4.8 percent, typing median +11.8 percent (beyond the floors), and the exe is 0.9 MB larger. Not committed: it loses on the frame metrics the owner ranks first, and the release needs a pipeline that CI cannot reasonably run on a Blacksmith Windows runner (a 26 MB profile that depends on the exact sources, a GUI session with a GPU or WARP for the training, 25 minutes of extra builds, `llvm-tools` in the toolchain).
+
+## 12. Cached views in the mail window (`views/mail/panes.rs`, optimization pass)
+
+GPUI rebuilds the element tree and lays out all of it every frame, so a frame costs by node count, not by what changed. The Skua fork's splice (`third_party/gpui-pre/src/window/splice.rs`) redraws only the top-level cached views that were notified and replays every other view's last prepaint and paint. The folder pane, the message list and the composer are cached views (`.cached(style)`), so a wheel step or a hover in the list, or a key in the composer, no longer lays out the rest of the window.
+
+Rules for a cached view (a break shows as a pane that does not change, not as a failure):
+
+1. A cached view replays its last frame until it, or a view inside it, is notified, or its bounds, content mask or text style change, or the window refreshes. The style given to `.cached(..)` has to be definite (a size or a flex), so the view is the box its parent laid out.
+2. It has to `cx.observe` every entity its `render` reads (the mail view, the hub, the composer's inputs), and call `cx.notify()` from the observer. Globals (the language, the theme) are covered by `refresh_windows`, which the Settings choices call, and which bypasses every cache.
+3. A handler that notifies "the whole window" from inside a pane (a row's hover, the wheel) notifies the pane (`MailView::notify_list`), or the cached folder pane and composer are redrawn for nothing and the splice falls back to a full draw.
+4. A view that is not cached, or a model, notified inside a cached one makes the splice fall back to a full draw; so do a refresh, a focus or modality change, a resize, a drag, a prompt and the accessibility tree.
+5. Tests do not use `render_frame` for what they assert: it refreshes and ignores every cache. They call `cx.run_until_parked()` and read the last drawn frame (`names`), or count draws (`panes::renders()`, `composer::renders()`, `cfg(test)`).
+
+Measured (alloc-count fast build, 2,000 message cache, bench script of `scripts/opt-ab.ps1`): typing 6,779 allocations and 4.45 MB per key before, 1,801 and 1.10 MB with the composer cached; scrolling 6,715 allocations and 4.49 MB per frame before, 3,789 and 3.04 MB with the panes cached.
+
+## 13. Optimization pass, integrated (opt/integ, 2026-11-14)
+
+Lanes merged with `--no-ff` in this order: fork-win, fork-core, speed (contains fork-kit), app, render (contains lib), then overlap, plus the reader wiring of `RenderImage::from_shared_bgra` and a fix to the flaky `closed_port()` test helper. `opt/fast` is empty (reverted) and was skipped.
+
+**Not done, deferred to a later update (owner's decision):** the combined re-measurement against the baseline, and the leave-one-out runs for mimalloc, the UI stack at "s" and the cached panes. Every change stays as each lane left it; nothing was reverted on timing. The numbers below are each lane's own, against its own parent; several batches were flagged INVALID by machine load (said per row). The combined batches run on the merged tree (runs/integ-01 to integ-06, integ-loo-a) were all INVALID for load (other builds and a game; 50 to 100 percent) and are not results. Two leave-one-out batches on the merged tree were valid: removing the UI-stack "s" setting (scroll median 3.79 -> 3.98 ms, typing 4.15 -> 4.14, Mcycles/frame 6.97 -> 6.17, memory equal, all within the floor) and removing the cached panes (scroll median 3.97 -> 3.54, Mcycles/frame 5.89 -> 7.53, typing equal, within the floor). They settle nothing; both configurations are kept.
+
+| Lane | Change | Measured by the lane |
+|---|---|---|
+| fork-win | one D3D device, lazy path MSAA, shared-pixel images | valid: launch 137.0 -> 87.4 ms, private bytes after first frame 110.9 -> 49.9 MB, after open 124.9 -> 100.0 MB; `from_shared_bgra` -3.3 MB after open |
+| fork-core | six per-frame patches | allocations per scroll frame -20 percent, bytes -52 percent, Mcycles/frame -10.8 percent; frame time +0.2 ms (scroll 3.44 -> 3.67, typing 3.02 -> 3.30), kept by the owner |
+| speed/fork-kit | dependency trims, root opt-level 3, mimalloc 2 (purge delay 0), SegmentHeap, UI stack at "s" | valid whole-lane: open to first tile 153.5 -> 118.8 ms, working set after open -2.3 MB, peak -1.6 MB, private bytes +6 to +11 MB; the UI stack at "s": scroll -7 percent, typing -10 percent, Mcycles/frame +15 percent (batches INVALID for end load) |
+| app | cached composer and panes | typing allocations per key 6,779 -> 1,801; scroll Mcycles/frame -19 to -22 percent; scroll median +0.5 ms once (batch INVALID), unconfirmed |
+| render | layout reuse, fidelity F1 to F15, image pre-decode, white space, long threads laid out whole with a first look, size-based budget | photo newsletter complete view 297 -> 111 ms; t60-big first tile 47 -> 24 ms (page laid out whole instead of cut at 30,000 px) |
+| overlap | one overlap check on painted glyphs, floats go below earlier floats, block-only line after a br keeps its height | correctness fixes (tests/render_overlap.rs) |
+
+Merge-time fix: `tests/render_reuse.rs` failed on opt/render itself since 07ea921 (a picture decoded for a first pass at another width was reused). `wanted_images` now keeps a decoded picture only at the width a fresh decode would give; pixels equal a layout from scratch.
+
+Exe: 18,014,208 bytes at the merged HEAD before this section (ceiling 21,500,000, not raised); recorded for information.

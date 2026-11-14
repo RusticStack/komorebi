@@ -7,15 +7,18 @@ and the gaps we know about.
 
 ## Product budgets
 
-Measured on a release build, software renderer, offline against throwaway
-caches (see `docs/PERF.md` for the method):
+Promises for Komorebi 1.0, the GPUI app (see `docs/PERF.md` section 0 for what
+is measured and the method):
 
 - Launch to window under 200 ms; cached message list under 600 ms.
-- Window created in about 6 ms; 55,000 cached messages listed in about
-  30 ms (the list is a lazy model over ids, so cost barely grows with
-  mailbox size).
-- Private memory about 9 to 11 MB with the cache loaded.
-- Release binary under 20.5 MB (CI enforces it).
+- Release binary under 21.5 MB (21,500,000 bytes) for komorebi.exe, the
+  1.0 release exe. The last release build measured 22,387,712 bytes, over the
+  ceiling (docs/PERF.md section 0, docs/GPUI-MIGRATION.md); the size cut is
+  the optimization pass after the cut-over (CI enforces the ceiling with
+  `cargo xtask size`).
+- Memory: no promise. The GPUI app holds more memory at idle than the 0.7
+  Slint app (about 9 to 11 MB private there); that is accepted for 1.0 and
+  optimizing it is 1.1 work.
 
 ## Open
 
@@ -89,8 +92,8 @@ caches (see `docs/PERF.md` for the method):
 - [x] Narrator on a message over 16 KB: told its length and that it reads
       the part around the cursor (Slint gives the proxy one value; a whole
       long message there would lay out on every key).
-- [ ] Recipient chips stay on one line (the field scrolls to the text being
-      typed); wrapping them onto more lines as the field fills is left.
+- [x] Recipient chips wrap onto more lines as the field fills (the GPUI
+      `ChipField`; test `recipient_chips_wrap_onto_more_lines`).
 
 ### Windows 11 look
 
@@ -105,11 +108,8 @@ caches (see `docs/PERF.md` for the method):
 - [ ] Below 720 px (one pane) the reading pane's "open in its own window"
       placeholder for a popped-out draft is not shown (the list shows);
       it needs a Back to list there first.
-- [ ] Removing or re-downloading an account, or a folder vanishing, while
-      one of its messages shows in a message tab leaves the tab's reader
-      empty; it should say the message is gone, as a sync does.
-- [ ] Settings opened from a message tab show without the folder pane, and
-      F6 there still aims at the pane.
+- [ ] F6 in Settings opened from a message tab still aims at the folder
+      pane (the pane itself stays; the mail view's `pane_stops` decides).
 
 ### Encrypted cache
 
@@ -139,52 +139,15 @@ plain on purpose. Left:
 - [ ] Start a fresh cache leaves the old accounts' passwords in Credential
       Manager (as a damaged cache does) until an account takes their place.
 
-### Calendar
+### Calendar (back in 1.1.0)
 
-Done: the library (`src/cal/`: recurrence expansion, time zones through
-VTIMEZONE and Windows' rules, `mail::ical` resources, write and patch),
-the store (schema v17 with the CalDAV sync fields), the agenda page and
-the invitation link (local calendar). Next, in order:
-
-- [ ] Event details in the agenda (a selected event's description,
-      organizer, attendees, the invitation it came from), and a calendar
-      picker on the invite card ("Add to"), stored as `cal_default`.
-- [x] Create, edit and delete events (`src/app/calendar_edit.rs`,
-      `cal::edit`, `cal::write`): the editor in the page's content area,
-      "only this event" (an override or an EXDATE) or "the whole series",
-      a date picker flyout on the month grid. Left: a 12-hour time field
-      for English locales that use one (today 24-hour in both languages),
-      a warning in "Remove all data" and account removal when changes
-      are not yet sent (`Db::unsent_changes` is ready), an InfoBar on
-      the event itself for its conflict (today one bar on the page).
-- [x] CalDAV discovery and read-only sync on the shared `src/dav/`
-      layer (`dav::caldav`, the Calendars pane, `src/app/calendar_sync.rs`).
-- [x] CalDAV writes through the `cal_queue` write queue (If-None-Match
-      for new events, If-Match for edits and deletes, 412 kept as a
-      conflict, 403 marks the calendar read only; `dav::caldav::flush`).
-- [ ] `can_write` from `current-user-privilege-set` (today: writable
-      until a write is refused), calendar
-      colours, a separate calendar password field in the Calendars pane
-      (today the Contacts one is used), "Allow a server on my local
-      network" and Review certificate for the DAV host (shared with
-      Contacts), and a "last synced" time per calendar.
-- [x] Month, week and day views (`ui/calendar.slint`: `CalendarGrid`,
-      `TimeGrid`; `cal::layout` for overlaps, midnight and DST days).
-      Left: dragging events on the grid, and a ComboBox-only command bar
-      below the compact width.
-- [x] Reminders: "Now" and "In N minutes" markers in the agenda, and
-      opt-in notifications while the app runs (`cal::remind`,
-      `src/app/reminders.rs`; off by default). Left: re-arming on
-      `WM_TIMECHANGE` and resume from sleep (today the timer looks again
-      at least every hour).
-- [ ] Restore the Calendar page at start (`last_view`), and a shortcut
-      (Ctrl+1 to Ctrl+9 are the tabs').
-- [ ] Rebuild occurrences on `WM_TIMECHANGE` and a time zone change
-      while the page is open (today: when the page opens), off the UI
-      thread for large CalDAV calendars.
-- [ ] The full CLDR zone table: `scripts/gen-tz-table.ps1` with a
-      downloaded `windowsZones.xml` (today about 150 common zones,
-      hand-curated).
+Komorebi 1.0 has no calendar UI (owner decision, 2026-11-06): no calendar views,
+event editor, CalDAV sync or event reminders, and nothing to add an invitation
+to. The calendar returns in 1.1.0. The library keeps all of its code
+(`src/cal/`, `src/dav/caldav`, the calendar tables in the cache, `invite::record`
+and their tests), compiling and tested; the Slint app that used it is deleted.
+Never delete that code. The 0.7 calendar items that were open here are gone
+with the old UI; the 1.1.0 view starts from the library.
 
 ## Deferred on purpose
 
@@ -195,9 +158,7 @@ the invitation link (local calendar). Next, in order:
   tested through `issuer_of` and the `account-cert-ca` snapshot, not end to
   end; an intermediate CA pin is untested. Check both on a real self-hosted
   server.
-- Anything on the non-goals list in `docs/SCOPE.md` (for the calendar:
-  organizing meetings, free/busy, VTODO and journals, subscribing to web
-  calendars, "this and following" edits).
+- Anything on the non-goals list in `docs/SCOPE.md` (the calendar included).
 
 ## Contacts and DAV (wf5/c)
 

@@ -60,6 +60,89 @@ struct Compound {
     first_child: bool,
     last_child: bool,
     root: bool,
+    /// `:link`, `:any-link`: an `<a>` with an `href`. No link counts as
+    /// visited, so `:visited` matches nothing.
+    link: bool,
+    /// `:empty`.
+    empty: bool,
+    /// `:nth-child()` and its family.
+    nth: Vec<Nth>,
+    /// `:not()`: every one of these must fail.
+    not: Vec<Compound>,
+}
+
+/// `an+b` counted among the siblings, or those of the same tag, from either
+/// end.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Nth {
+    a: i32,
+    b: i32,
+    of_type: bool,
+    from_end: bool,
+}
+
+impl Nth {
+    /// Whether the 1-based position `pos` is an `an+b` with `n >= 0`.
+    fn holds(&self, pos: i32) -> bool {
+        let d = pos.saturating_sub(self.b);
+        match (d.checked_rem(self.a), d.checked_div(self.a)) {
+            (Some(rem), Some(n)) => rem == 0 && n >= 0,
+            _ => d == 0, // a == 0
+        }
+    }
+
+    /// The `an+b` of `:nth-child(...)`: `odd`, `even`, `3`, `2n+1`, `-n + 3`.
+    fn parse(v: &str, of_type: bool, from_end: bool) -> Option<Nth> {
+        let v: String = v
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        let (a, b) = match v.as_str() {
+            "odd" => (2, 1),
+            "even" => (2, 0),
+            v => match v.split_once('n') {
+                Some((a, b)) => {
+                    let a = match a {
+                        "" | "+" => 1,
+                        "-" => -1,
+                        a => a.parse().ok()?,
+                    };
+                    let b = if b.is_empty() { 0 } else { b.parse().ok()? };
+                    (a, b)
+                }
+                None => (0, v.parse().ok()?),
+            },
+        };
+        Some(Nth {
+            a,
+            b,
+            of_type,
+            from_end,
+        })
+    }
+}
+
+/// The inside of the parentheses that open at `b[open]`, and the offset past
+/// them.
+fn in_parens(s: &str, open: usize) -> Option<(&str, usize)> {
+    let b = s.as_bytes();
+    let mut depth = 0u32;
+    let mut i = open;
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'(' => depth = depth.saturating_add(1),
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some((s.get(open.saturating_add(1)..i)?, i.saturating_add(1)));
+                }
+            }
+            _ => {}
+        }
+        i = i.saturating_add(1);
+    }
+    None
 }
 
 #[derive(Clone, Debug)]
@@ -426,14 +509,61 @@ fn parse_selector(s: &str) -> Option<Selector> {
                     return None; // pseudo-elements never match
                 }
                 let e = ident_end(b, next);
-                match sub(s, next, e).to_ascii_lowercase().as_str() {
+                let name = sub(s, next, e).to_ascii_lowercase();
+                let args = if b.get(e) == Some(&b'(') {
+                    Some(in_parens(s, e)?)
+                } else {
+                    None
+                };
+                let nth =
+                    |of_type, from_end| -> Option<Nth> { Nth::parse(args?.0, of_type, from_end) };
+                let one = |of_type, from_end| Nth {
+                    a: 0,
+                    b: 1,
+                    of_type,
+                    from_end,
+                };
+                match name.as_str() {
                     "first-child" => cur.first_child = true,
                     "last-child" => cur.last_child = true,
                     "root" => cur.root = true,
-                    _ => return None, // :hover, :not(), ...: never matches
+                    "link" | "any-link" => cur.link = true,
+                    "empty" => cur.empty = true,
+                    "only-child" => {
+                        cur.first_child = true;
+                        cur.last_child = true;
+                    }
+                    "first-of-type" => cur.nth.push(one(true, false)),
+                    "last-of-type" => cur.nth.push(one(true, true)),
+                    "only-of-type" => cur.nth.extend([one(true, false), one(true, true)]),
+                    "nth-child" => cur.nth.push(nth(false, false)?),
+                    "nth-last-child" => cur.nth.push(nth(false, true)?),
+                    "nth-of-type" => cur.nth.push(nth(true, false)?),
+                    "nth-last-of-type" => cur.nth.push(nth(true, true)?),
+                    "not" => {
+                        let list = args?.0;
+                        // No nesting: a hostile `:not(:not(...` stops here.
+                        if list.contains('(') {
+                            return None;
+                        }
+                        let mut most = 0;
+                        for part in list.split(',') {
+                            let mut inner = parse_selector(part)?;
+                            if inner.parts.len() != 1 {
+                                return None;
+                            }
+                            most = most.max(inner.spec);
+                            cur.not.extend(inner.parts.pop());
+                        }
+                        a = a.saturating_add(most >> 16);
+                        bb = bb.saturating_add((most >> 8) & 255);
+                        c = c.saturating_add(most & 255);
+                        bb = bb.saturating_sub(1); // the pseudo-class itself counts nothing
+                    }
+                    _ => return None, // :hover, :focus, :visited...: never matches
                 }
                 bb = bb.saturating_add(1);
-                i = e;
+                i = args.map_or(e, |(_, end)| end);
             }
             _ if ch.is_ascii_alphabetic() || ch == b'_' || ch >= 0x80 => {
                 let e = ident_end(b, i);
@@ -711,7 +841,28 @@ fn prev_elem(dom: &Dom, id: Id) -> Option<Id> {
         .copied()
 }
 
-fn compound_matches(dom: &Dom, id: Id, c: &Compound) -> bool {
+/// The 1-based position of `id` among its element siblings as `n` counts
+/// them. Every step is charged to `budget`: `None` once it is spent.
+fn sibling_pos(dom: &Dom, id: Id, n: &Nth, budget: &mut u32) -> Option<i32> {
+    let kids = dom.children(dom.parent(id));
+    let tag = dom.tag(id);
+    let mut pos = 0i32;
+    let mut walk = |k: &Id| {
+        *budget = budget.saturating_sub(1);
+        if dom.is_elem(*k) && (!n.of_type || dom.tag(*k) == tag) {
+            pos = pos.saturating_add(1);
+        }
+        *k != id && *budget > 0
+    };
+    let found = if n.from_end {
+        !kids.iter().rev().all(&mut walk)
+    } else {
+        !kids.iter().all(&mut walk)
+    };
+    (found && *budget > 0).then_some(pos)
+}
+
+fn compound_matches(dom: &Dom, id: Id, c: &Compound, budget: &mut u32) -> bool {
     if c.tag.as_deref().is_some_and(|t| dom.tag(id) != t) {
         return false;
     }
@@ -759,6 +910,20 @@ fn compound_matches(dom: &Dom, id: Id, c: &Compound) -> bool {
     if c.root && dom.tag(id) != "html" {
         return false;
     }
+    if c.link && !(dom.tag(id) == "a" && dom.attr(id, "href").is_some()) {
+        return false;
+    }
+    if c.empty && !dom.children(id).is_empty() {
+        return false;
+    }
+    for n in &c.nth {
+        if !sibling_pos(dom, id, n, budget).is_some_and(|p| n.holds(p)) {
+            return false;
+        }
+    }
+    if c.not.iter().any(|x| compound_matches(dom, id, x, budget)) {
+        return false;
+    }
     if c.first_child || c.last_child {
         let kids = dom.children(dom.parent(id));
         if c.first_child && kids.iter().find(|&&k| dom.is_elem(k)) != Some(&id) {
@@ -785,7 +950,7 @@ fn matches_from(dom: &Dom, id: Id, sel: &Selector, k: usize, budget: &mut u32) -
         return false;
     }
     *budget = budget.saturating_sub(1);
-    if !compound_matches(dom, id, part) {
+    if !compound_matches(dom, id, part, budget) {
         return false;
     }
     let Some(&comb) = sel.comb.get(k) else {

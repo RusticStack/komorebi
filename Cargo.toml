@@ -1,14 +1,27 @@
 [package]
 name = "komorebi"
-version = "0.7.0"
+version = "1.0.0"
 edition = "2024"
 description = "A small, fast, privacy-respecting email client for Windows"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/RusticStack/komorebi"
-build = "build.rs"
 
 [workspace]
-members = ["crates/komorebi-ui"]
+# This package is the library (src/lib.rs and below): the mail engine, the
+# cache and the Win32 shell code. crates/komorebi-gpui is the app, the
+# `komorebi` exe (Komorebi 1.0, docs/GPUI-MIGRATION.md).
+# crates/komorebi-i18n is the catalog the app and the library read (tr!, trn!).
+# xtask holds its development gate (`cargo xtask check`, docs/GPUI-TESTING.md).
+members = ["crates/komorebi-gpui", "crates/komorebi-i18n", "xtask"]
+# Vendored upstream crates are path patches, never members: no Komorebi
+# fmt, clippy or tests run on them (third_party/README.md).
+exclude = ["third_party"]
+
+[workspace.dependencies]
+# The GPUI stack, pinned as a pair (as in Skua): gpui-pre is imported as
+# `gpui`; gpui-kit with its default features (component, assets).
+gpui = { package = "gpui-pre", version = "=0.3.9" }
+gpui-kit = { version = "=0.8.0" }
 
 [dependencies]
 anyhow = "1"
@@ -23,15 +36,12 @@ lettre = { version = "0.11", default-features = false, features = ["builder", "n
 # full_encoding decodes legacy CJK charsets (ISO-2022-JP, Big5, GB2312, ...).
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 native-tls = "0.2"
-rfd = { version = "0.17", default-features = false }
-rusqlite = { version = "0.40", features = ["bundled", "functions"] }
-# Pinned: the HTML renderer's parley/tiny-skia versions below are coupled to it.
-slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
-# The generated user interface (ui/*.slint), a crate of its own so the release
-# profile can size-optimize it.
-komorebi-ui = { path = "crates/komorebi-ui" }
-# HTML renderer (src/mail/render). Each is already linked into the app through
-# Slint; pinned to the exact locked version so no second copy appears.
+rusqlite = { version = "0.41", features = ["bundled", "functions"] }
+# The display language and the catalog for Rust code (tr!, trn!), read from
+# the .po files (docs/GPUI-I18N.md). No dependencies.
+komorebi-i18n = { path = "crates/komorebi-i18n" }
+# HTML renderer (src/mail/render). Pinned to the exact locked version so no
+# second copy appears.
 gif = "=0.14.2"
 image-webp = "=0.2.4"
 parley = "=0.11.1"
@@ -39,18 +49,18 @@ png = "=0.18.1"
 skrifa = "=0.44.0"
 tiny-skia = "=0.12.0"
 # Caps characters per grapheme cluster before shaping (parley counts them
-# in a u8). Already linked through Slint; pinned to the locked version.
+# in a u8). Pinned to the locked version.
 unicode-segmentation = "=1.13.3"
 zune-core = "=0.5.3"
 zune-jpeg = "=0.5.15"
 # Link checks parse URLs as browsers do (host in xn-- form, numeric IPs).
-# Already linked through lettre and Slint; pinned to the locked version.
+# Already linked through lettre; pinned to the locked version.
 url = "=2.5.8"
 # The sender notice shows an xn-- domain in its Unicode form. Already linked
 # through url; pinned to the locked version.
 idna = "=1.1.0"
 # "Find settings" reads a provider's autoconfig file. Already linked through
-# Slint (resvg); pinned to the locked version.
+# resvg (GPUI's SVG icons); pinned to the locked version.
 roxmltree = "=0.21.1"
 # Update check (src/update.rs): the installer's SHA-256 and its Ed25519
 # signature against the public key compiled into the app. Both small and
@@ -88,53 +98,27 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Glob
 # Honor KOMOREBI_PASSWORD (with KOMOREBI_DB) in release builds too.
 dev-env-password = []
 
-[build-dependencies]
-# Compiles assets/komorebi.rc (icon, version information, manifest).
-embed-resource = "3"
-
 [dev-dependencies]
 base64 = "0.22"
 # examples/sign_update.rs keygen: a random seed (tests use fixed seeds).
 ed25519-compact = { version = "2.6.0", default-features = false, features = ["std", "random"] }
 
-# Size-optimized, except Slint's core and software renderer, whose pixel
-# loops need full optimization to keep frame times unchanged. Never "z".
+# Speed first (owner's decision, 2026-11-07): the exe's size matters least;
+# responsiveness, memory and CPU matter most. Everything is built at
+# opt-level 3 (the reader's raster and text stack, SQLite, the mail engine,
+# GPUI and the views).
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
 
-[profile.release.package.i-slint-core]
-opt-level = 3
-
-[profile.release.package.i-slint-renderer-software]
-opt-level = 3
-
-# The reader's tile raster (fills, gradients, image blits) runs in tiny-skia;
-# docs/PERF.md 4.1.
-[profile.release.package.tiny-skia]
-opt-level = 3
-
-[profile.release.package.tiny-skia-path]
-opt-level = 3
-
-# The bundled SQLite C code answers the list, filter, unread and search
-# queries; docs/PERF.md 4.2.
-[profile.release.package.libsqlite3-sys]
-opt-level = 3
-
-# The generated user interface: instantiation code run once per window, no
-# loop that matters (the pixel loops are Slint core and the software renderer,
-# at 3). Measured in docs/PERF.md 4.1.
-[profile.release.package.komorebi-ui]
-opt-level = "z"
-
-# Code that is cold or runs once per user action (the update check's
-# signature, SVG and XML parsing, the platform glue, the SMTP client) takes
-# "z"; it holds no loop that matters. Pixel, shaping, decoding and parsing
-# crates stay at "s" or 3 (docs/PERF.md 4.1).
+# Code that is cold or runs once per user action (the update check's SHA-256
+# and Ed25519 signature, once per update; SVG and XML parsing of icons and
+# autoconfig files; the SMTP client) takes "z": it holds no loop that
+# matters, and it keeps the exe under the 21,500,000-byte ceiling
+# (xtask/src/size.rs) at opt-level 3 everywhere else.
 [profile.release.package.ed25519-compact]
 opt-level = "z"
 
@@ -156,29 +140,68 @@ opt-level = "z"
 [profile.release.package.roxmltree]
 opt-level = "z"
 
-[profile.release.package.winit]
-opt-level = "z"
-
-[profile.release.package.accesskit]
-opt-level = "z"
-
-[profile.release.package.accesskit_consumer]
-opt-level = "z"
-
-[profile.release.package.accesskit_windows]
-opt-level = "z"
-
-[profile.release.package.accesskit_winit]
-opt-level = "z"
-
 [profile.release.package.lettre]
 opt-level = "z"
 
-[profile.release.package.muda]
-opt-level = "z"
+# The UI stack builds the element tree and lays it out every frame (taffy,
+# GPUI's window and elements, Kit, the views). Measured against opt-level 3:
+# scroll and typing frames are 7 to 10 percent faster at "s" (smaller code,
+# fewer instruction cache misses), the reader's open to first tile is about
+# 5 ms slower (within its floor). The reader, the text stack, tiny-skia and
+# SQLite stay at 3.
+[profile.release.package.gpui-pre]
+opt-level = "s"
 
-# Slint's software renderer is unusably slow unoptimized; optimize
-# dependencies in debug builds and keep our own crate fast to rebuild.
+[profile.release.package.gpui-pre-windows]
+opt-level = "s"
+
+[profile.release.package.gpui-pre-platform]
+opt-level = "s"
+
+[profile.release.package.gpui-pre-collections]
+opt-level = "s"
+
+[profile.release.package.gpui-pre-sum-tree]
+opt-level = "s"
+
+[profile.release.package.gpui-pre-refineable]
+opt-level = "s"
+
+[profile.release.package.gpui-pre-shared-string]
+opt-level = "s"
+
+[profile.release.package.gpui-pre-scheduler]
+opt-level = "s"
+
+[profile.release.package.taffy]
+opt-level = "s"
+
+[profile.release.package.gpui-component]
+opt-level = "s"
+
+[profile.release.package.gpui-base]
+opt-level = "s"
+
+[profile.release.package.gpui-kit]
+opt-level = "s"
+
+[profile.release.package.komorebi-gpui]
+opt-level = "s"
+
+# The GPUI stack's owner-approved patches of published crates (as in Skua):
+# each third_party/<crate> is the exact crates.io source plus the diffs its
+# SKUA-PATCH.md and KOMOREBI-PATCH.md describe (third_party/README.md).
+[patch.crates-io]
+gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
+gpui-pre = { path = "third_party/gpui-pre" }
+# gpui-kit is a facade; the hooks live in gpui-component.
+gpui-component = { path = "third_party/gpui-component" }
+# The unstyled base under Kit (the dialog host's name, Komorebi's patch).
+gpui-base = { path = "third_party/gpui-base" }
+
+# Dependencies (GPUI, the HTML renderer, SQLite) are unusably slow
+# unoptimized; optimize them in debug builds and keep our own crates fast to
+# rebuild.
 [profile.dev]
 debug = "line-tables-only"
 

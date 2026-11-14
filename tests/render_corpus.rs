@@ -34,12 +34,16 @@ const EXPECT: [Expect; 14] = [
     ("04-order-receipt", [1390.0, 1350.0], [11, 12], [4, 4]),
     ("05-bank-statement", [9099.0, 9099.0], [1, 1], [0, 0]),
     ("06-outlook-word", [2727.0, 2457.0], [2, 2], [0, 0]),
-    ("07-gmail-reply-chain", [13173.0, 7635.0], [4, 4], [0, 0]),
+    // Gmail's blank lines (`<div><br></div>`) are one line each, as in a
+    // browser, no longer two. Its quotes stop indenting at a readable column
+    // (half the page or 320 px), where a browser keeps narrowing them.
+    ("07-gmail-reply-chain", [7785.0, 5614.0], [4, 4], [0, 0]),
     ("08-dark-marketing", [2159.0, 2183.0], [7, 7], [6, 6]),
     ("09-image-heavy-promo", [1468.0, 1468.0], [14, 14], [17, 16]),
     ("10-transactional-buttons", [788.0, 788.0], [3, 3], [0, 0]),
     ("11-newsletter-2col", [4647.0, 3574.0], [21, 21], [6, 6]),
-    ("12-personal-applemail", [756.0, 734.0], [2, 2], [0, 0]),
+    // Its blank lines (`<div><br></div>`), as for 07.
+    ("12-personal-applemail", [585.0, 564.0], [2, 2], [0, 0]),
     ("13-calendar-invite", [709.0, 697.0], [6, 6], [1, 1]),
     (
         "14-adversarial-malformed",
@@ -387,7 +391,7 @@ fn adversarial_message_is_contained() {
 
 #[test]
 fn tall_documents_are_capped() {
-    let html = "<p>line</p>".repeat(3000);
+    let html = "<p>line</p>".repeat(8000);
     let d = big_stack(move || {
         render(
             &RenderInput {

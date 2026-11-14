@@ -1,4 +1,5 @@
-# cargo-deny (CI: `cargo deny --locked check licenses advisories`).
+# cargo-deny (CI: `cargo deny --workspace --locked check licenses
+# advisories`: the library and the app, crates/komorebi-gpui).
 # Only the Windows build's dependency graph counts.
 [graph]
 targets = ["x86_64-pc-windows-msvc"]
@@ -7,14 +8,21 @@ all-features = true
 [advisories]
 # RustSec: known vulnerabilities, unsound, unmaintained and yanked crates.
 yanked = "deny"
-ignore = []
+# Unmaintained (no vulnerability) crates that only the GPUI stack links
+# (crates/komorebi-gpui; docs/GPUI-MIGRATION.md): no maintained release of
+# gpui-pre 0.3.9 or gpui-kit 0.8.0 avoids them. Look again whenever those
+# pins move.
+ignore = [
+    { id = "RUSTSEC-2024-0384", reason = "instant, through gpui-base and gpui-component (GPUI Kit 0.8.0)" },
+    { id = "RUSTSEC-2024-0436", reason = "paste (proc macro), through gpui-component and image's exr codec (gpui-pre 0.3.9)" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser, through gpui-pre and usvg/fontdb (resvg 0.45 and 0.46)" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz, through usvg (resvg 0.45 and 0.46, GPUI's SVG icons)" },
+]
 
 [licenses]
 # Komorebi is GPL-3.0-or-later. Allowed: permissive licenses (all GPLv3
-# compatible), MPL-2.0 (file-level copyleft, GPLv3 compatible, used
-# unmodified) and Slint's GPL-3.0 option (GPL-3.0-only; it is the licence
-# taken for Slint). The Slint royalty-free licence stays allowed as an
-# alternative in dual-licensed expressions. No GPL-2.0-only code is allowed.
+# compatible) and MPL-2.0 (file-level copyleft, GPLv3 compatible, used
+# unmodified). No GPL-2.0-only code is allowed.
 allow = [
     "0BSD",
     "Apache-2.0",
@@ -22,9 +30,7 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "CC0-1.0",
-    "GPL-3.0-only",
     "GPL-3.0-or-later",
-    "LicenseRef-Slint-Royalty-free-2.0",
     "MIT",
     "MPL-2.0",
     "Unicode-3.0",

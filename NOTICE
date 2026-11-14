@@ -8,11 +8,93 @@ Source: https://github.com/RusticStack/komorebi
 Komorebi includes third-party software, linked into komorebi.exe from
 crates.io, each under its own license:
 
-- Slint (https://slint.dev), used under its GPL-3.0 option (it is dual
-  licensed; GPL-3.0-only is compatible with GPL-3.0-or-later as a whole
-  work under GPL-3.0). Its attribution is still shown in Settings > About.
 - SQLite (https://sqlite.org), in the public domain, through rusqlite's
   bundled build (MIT).
+
+The interface (crates/komorebi-gpui) also includes:
+
+- GPUI (https://gpui.rs), Zed's user interface framework
+  (https://github.com/zed-industries/zed), as the gpui-pre crates, under
+  the Apache License 2.0. The vendored copies in third_party/ carry their
+  LICENSE-APACHE and the local changes described in their SKUA-PATCH.md and
+  KOMOREBI-PATCH.md files.
+- GPUI Kit (gpui-kit, gpui-base, gpui-component, gpui-kit-assets;
+  https://github.com/longbridge/gpui-kit), under the Apache License 2.0.
+- mimalloc (https://github.com/microsoft/mimalloc, Microsoft), the global
+  allocator, through the mimalloc and libmimalloc-sys crates, under the MIT
+  License. It is C code, compiled into komorebi.exe.
+- Lucide icons (https://lucide.dev), bundled by gpui-kit-assets, under the
+  ISC License; the icons derived from Feather are under the MIT License.
+  The crate declares Apache-2.0, so cargo deny does not list these. Their
+  notices (gpui-kit-assets' LICENSE-LUCIDE):
+
+      ISC License
+
+      Copyright (c) 2026 Lucide Icons and Contributors
+
+      Permission to use, copy, modify, and/or distribute this software for
+      any purpose with or without fee is hereby granted, provided that the
+      above copyright notice and this permission notice appear in all
+      copies.
+
+      THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+      WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+      WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+      AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL
+      DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
+      PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+      TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+      PERFORMANCE OF THIS SOFTWARE.
+
+      The MIT License (MIT) (for the Lucide icons derived from Feather)
+
+      Copyright (c) 2013-present Cole Bemis
+
+      Permission is hereby granted, free of charge, to any person obtaining
+      a copy of this software and associated documentation files (the
+      "Software"), to deal in the Software without restriction, including
+      without limitation the rights to use, copy, modify, merge, publish,
+      distribute, sublicense, and/or sell copies of the Software, and to
+      permit persons to whom the Software is furnished to do so, subject to
+      the following conditions:
+
+      The above copyright notice and this permission notice shall be
+      included in all copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+      MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+      NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+      LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+      OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+      WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- Fluent System Icons (https://github.com/microsoft/fluentui-system-icons,
+  the @fluentui/svg-icons 1.1.292 package), 65 of them bundled in
+  komorebi.exe (crates/komorebi-gpui/assets/icons/fluent), under the
+  MIT License:
+
+      MIT License
+
+      Copyright (c) 2020 Microsoft Corporation
+
+      Permission is hereby granted, free of charge, to any person obtaining
+      a copy of this software and associated documentation files (the
+      "Software"), to deal in the Software without restriction, including
+      without limitation the rights to use, copy, modify, merge, publish,
+      distribute, sublicense, and/or sell copies of the Software, and to
+      permit persons to whom the Software is furnished to do so, subject to
+      the following conditions:
+
+      The above copyright notice and this permission notice shall be
+      included in all copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+      MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+      NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+      LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+      OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+      WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - Other crates under permissive licenses (MIT, Apache-2.0, BSD-2-Clause,
   BSD-3-Clause, BSL-1.0, Zlib, Unicode-3.0, CC0-1.0, 0BSD, Unlicense) or
   MPL-2.0 (used unmodified; its source is on crates.io). deny.toml lists
@@ -21,8 +103,11 @@ crates.io, each under its own license:
 
       cargo deny --locked list --layout crate
 
-The icon (assets/komorebi.ico) was made for Komorebi and is under the
-same license as the code (GPL-3.0-or-later).
+The icon (assets/komorebi.ico) and the seal mark
+(crates/komorebi-gpui/assets/brand/seal.svg) were made for Komorebi and are
+under the same license as the code (GPL-3.0-or-later).
 
-No fonts or other third-party assets are bundled in the repository; the
-interface uses the fonts installed with Windows.
+No fonts are bundled; the interface uses the fonts installed with Windows.
+The only third-party assets are the Lucide and Fluent System Icons above
+(komorebi.exe only). The third-party sources vendored in third_party/ keep their own
+licence files.

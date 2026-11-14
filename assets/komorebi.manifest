@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<!-- Embedded by build.rs (assets/komorebi.rc). Per-monitor DPI awareness
-     (PerMonitorV2) is set at run time by winit, before the window opens. -->
+<!-- Embedded by crates/komorebi-gpui/build.rs (assets/komorebi.rc) into
+     komorebi.exe, whose GPUI does not embed its own (the
+     windows-manifest-provided-by-host feature). It carries everything GPUI's
+     manifest did, so per-monitor DPI awareness (PerMonitorV2) is declared
+     here: GPUI sets none at run time. -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity type="win32" name="Komorebi" version="1.0.0.0" processorArchitecture="amd64"/>
   <!-- Themed message boxes (Common Controls 6). -->
@@ -25,6 +28,13 @@
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <!-- Per-monitor DPI awareness: PerMonitorV2 on Windows 10 1703 and
+           later, per-monitor (true/pm) before. heapType SegmentHeap: the Win32
+           heap (the CRT, DirectWrite and the drivers' allocations; Windows 10
+           2004 and later, earlier versions ignore it) is the segment heap. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <heapType xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">SegmentHeap</heapType>
     </windowsSettings>
   </application>
 </assembly>

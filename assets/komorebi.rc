@@ -1,10 +1,19 @@
-// Windows resources for komorebi.exe, compiled by build.rs (embed-resource).
+// Windows resources for komorebi.exe (Komorebi 1.0), compiled by
+// crates/komorebi-gpui/build.rs (embed-resource); docs/BRANDING.md.
 // No #include: rc.exe finds <windows.h> only in a Visual Studio prompt, so
 // the resource types are numeric. build.rs defines VER_MAJOR, VER_MINOR,
 // VER_PATCH and VER_STRING from the Cargo package version.
 
-// The first icon: the .exe's icon in Explorer, and the window's.
+// The first icon: the .exe's icon in Explorer, the window's, the taskbar's
+// and the large image of a notification (src/win_shell.rs).
 1 ICON "komorebi.ico"
+
+// The notification area icons (src/win_shell.rs, TRAY_ICON_*): the seal in
+// ink for a light taskbar, white for a dark one, persimmon while unread mail
+// waits. Their presence is what switches the tray to the brand icons.
+101 ICON "tray/tray-light.ico"
+102 ICON "tray/tray-dark.ico"
+103 ICON "tray/tray-unread.ico"
 
 // RT_MANIFEST (24), id 1: the process manifest.
 1 24 "komorebi.manifest"

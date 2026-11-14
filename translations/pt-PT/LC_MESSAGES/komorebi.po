@@ -17,18 +17,8 @@ msgctxt "suggestion"
 msgid "{0}, {1}"
 msgstr "{0}, {1}"
 
-msgctxt "recipient"
-msgid "{0}, {1}"
-msgstr "{0}, {1}"
-
-msgid "Not a valid address"
-msgstr "Endereço inválido"
-
 msgid "Forget certificate"
 msgstr "Esquecer certificado"
-
-msgid "Back to accounts"
-msgstr "Voltar às contas"
 
 msgid "Accounts"
 msgstr "Contas"
@@ -96,9 +86,6 @@ msgstr "Apresentado aos destinatários"
 msgid "Email"
 msgstr "E-mail"
 
-msgid "you@yourdomain.com"
-msgstr "nome@exemplo.pt"
-
 msgid "Password"
 msgstr "Palavra-passe"
 
@@ -110,9 +97,6 @@ msgstr "Deixe vazio para manter a atual"
 
 msgid "Find settings"
 msgstr "Procurar definições"
-
-msgid "Looking up settings"
-msgstr "A procurar definições"
 
 msgid "Looking up settings …"
 msgstr "A procurar definições …"
@@ -217,17 +201,8 @@ msgstr "Verifica os servidores e o início de sessão sem guardar nada"
 msgid "Cancel"
 msgstr "Cancelar"
 
-msgid "Reading the certificate"
-msgstr "A ler o certificado"
-
-msgid "Signing in"
-msgstr "A iniciar sessão"
-
 msgid "Reading the certificate …"
 msgstr "A ler o certificado …"
-
-msgid "Signing in …"
-msgstr "A iniciar sessão …"
 
 msgid "Find the incoming server"
 msgstr "Localizar o servidor de receção"
@@ -343,9 +318,6 @@ msgstr "Fazer piscar o botão da barra de tarefas"
 
 msgid "When new mail arrives while Komorebi is in the background."
 msgstr "Quando chega correio novo e o Komorebi está em segundo plano."
-
-msgid "Flash the taskbar button when new mail arrives"
-msgstr "Fazer piscar o botão da barra de tarefas quando chega correio novo"
 
 msgctxt "settings language"
 msgid "Language"
@@ -491,9 +463,6 @@ msgstr "Marcar todas como lidas"
 msgid "Syncing …"
 msgstr "A sincronizar …"
 
-msgid "Refresh (F5)"
-msgstr "Atualizar (F5)"
-
 msgid "All folders"
 msgstr "Todas as pastas"
 
@@ -602,18 +571,6 @@ msgstr "Cancelar (Esc)"
 
 msgid "Message body"
 msgstr "Corpo da mensagem"
-
-msgid "This message is open in its own window"
-msgstr "Esta mensagem está aberta numa janela própria"
-
-msgid "Bring to front"
-msgstr "Trazer para a frente"
-
-msgid "Select a draft to keep writing"
-msgstr "Selecione um rascunho para continuar a escrever"
-
-msgid "Select a message to read"
-msgstr "Selecione uma mensagem para ler"
 
 msgid "{n} message selected"
 msgid_plural "{n} messages selected"
@@ -725,14 +682,8 @@ msgstr "Novo correio"
 msgid "New mail (Ctrl+N)"
 msgstr "Novo correio (Ctrl+N)"
 
-msgid "Settings (Ctrl+,)"
-msgstr "Definições (Ctrl+,)"
-
 msgid "Open this link in your browser?"
 msgstr "Abrir esta hiperligação no navegador?"
-
-msgid "Discard this draft?"
-msgstr "Descartar este rascunho?"
 
 msgid "Original message"
 msgstr "Mensagem original"
@@ -885,44 +836,20 @@ msgstr "Não removido. {0}"
 msgid "Not reset. {0}"
 msgstr "Não reposto. {0}"
 
-msgid "Stopped, no files removed. {0}"
-msgstr "Interrompido, nenhum ficheiro removido. {0}"
-
-msgid "Couldn't save: {0}"
-msgstr "Não foi possível guardar: {0}"
-
 msgid "Couldn't save {0}: {1}"
 msgstr "Não foi possível guardar {0}: {1}"
 
 msgid "Couldn't open {0}: {1}"
 msgstr "Não foi possível abrir {0}: {1}"
 
-msgid "Couldn't attach the files: {0}"
-msgstr "Não foi possível anexar os ficheiros: {0}"
-
-msgid "Couldn't open the draft: {0}"
-msgstr "Não foi possível abrir o rascunho: {0}"
-
 msgid "Couldn't save the draft: {0}"
 msgstr "Não foi possível guardar o rascunho: {0}"
-
-msgid "Couldn't send: {0}"
-msgstr "Não foi possível enviar: {0}"
-
-msgid "Couldn't send: {0}. It is back in Drafts."
-msgstr "Não foi possível enviar: {0}. Voltou aos Rascunhos."
-
-msgid "Couldn't undo: {0}"
-msgstr "Não foi possível desfazer: {0}"
 
 msgid "Couldn't send the reply: {0}"
 msgstr "Não foi possível enviar a resposta: {0}"
 
 msgid "Couldn't download this message: {0}"
 msgstr "Não foi possível transferir esta mensagem: {0}"
-
-msgid "Couldn't download this message.\n\n{0}"
-msgstr "Não foi possível transferir esta mensagem.\n\n{0}"
 
 msgid "Saved {0}"
 msgstr "Guardado: {0}"
@@ -964,9 +891,6 @@ msgstr "A enviar dentro de instantes"
 msgid "Waiting to send"
 msgstr "A aguardar o envio"
 
-msgid "Too late to undo: the message is being sent."
-msgstr "Tarde demais para desfazer: a mensagem está a ser enviada."
-
 msgid "Your reply is in the Outbox; only the organizer gets it."
 msgstr "A sua resposta está na Caixa de saída; só o organizador a recebe."
 
@@ -978,9 +902,6 @@ msgstr "Desfazer"
 
 msgid "Enter your full email address."
 msgstr "Introduza o seu endereço de e-mail completo."
-
-msgid "Enter your full email address first."
-msgstr "Introduza primeiro o seu endereço de e-mail completo."
 
 msgid "This account is already added."
 msgstr "Esta conta já foi adicionada."
@@ -1026,12 +947,6 @@ msgstr "Todos os passos foram bem-sucedidos. Nada foi guardado; utilize Adiciona
 
 msgid "Saved {0}."
 msgstr "Conta {0} guardada."
-
-msgid "Off: no connections; its downloaded mail stays"
-msgstr "Desativada: sem ligações; o correio transferido mantém-se"
-
-msgid "Downloading {0} of {1} …"
-msgstr "A transferir {0} de {1} …"
 
 msgid "Sign-in rejected"
 msgstr "Início de sessão rejeitado"
@@ -1171,9 +1086,6 @@ msgstr "grego"
 
 msgid "Fetching message …"
 msgstr "A obter a mensagem …"
-
-msgid "This message isn't downloaded yet."
-msgstr "Esta mensagem ainda não foi transferida."
 
 msgid "This message has no Message-ID."
 msgstr "Esta mensagem não tem Message-ID."
@@ -1398,21 +1310,6 @@ msgstr "{0} apresentou um certificado em que o Windows não confia. Confiar nest
 msgid "Trust this certificate"
 msgstr "Confiar neste certificado"
 
-msgid "Copy fingerprint"
-msgstr "Copiar impressão digital"
-
-msgid "Save attachment"
-msgstr "Guardar anexo"
-
-msgid "Save invitation"
-msgstr "Guardar convite"
-
-msgid "Save message"
-msgstr "Guardar mensagem"
-
-msgid "Attach files"
-msgstr "Anexar ficheiros"
-
 msgid "switched off"
 msgstr "desativada"
 
@@ -1421,9 +1318,6 @@ msgstr "início de sessão rejeitado"
 
 msgid "{0} unread"
 msgstr "{0} por ler"
-
-msgid "{0} ({1} unread)"
-msgstr "{0} ({1} por ler)"
 
 msgid "Draft"
 msgstr "Rascunho"
@@ -1437,39 +1331,8 @@ msgstr "Respondida"
 msgid "in {0}"
 msgstr "em {0}"
 
-msgid "Open {0}, {1}"
-msgstr "Abrir {0}, {1}"
-
-msgctxt "attachment"
-msgid "{0}, {1}"
-msgstr "{0}, {1}"
-
-msgid "Cut"
-msgstr "Cortar"
-
-msgid "Paste"
-msgstr "Colar"
-
-msgid "Clear"
-msgstr "Limpar"
-
-msgid "Hide password"
-msgstr "Ocultar palavra-passe"
-
-msgid "Show password"
-msgstr "Mostrar palavra-passe"
-
-msgid "Search"
-msgstr "Pesquisar"
-
 msgid "Search mail"
 msgstr "Pesquisar correio"
-
-msgid "Search (Ctrl+E)"
-msgstr "Pesquisar (Ctrl+E)"
-
-msgid "Clear search (Esc)"
-msgstr "Limpar pesquisa (Esc)"
 
 msgid "Search scope"
 msgstr "Âmbito da pesquisa"
@@ -1518,24 +1381,11 @@ msgstr "Restaurar"
 msgid "On"
 msgstr "Ativado"
 
-msgid "Error: {0}"
-msgstr "Erro: {0}"
-
 msgid "Warning: {0}"
 msgstr "Aviso: {0}"
 
-msgctxt "percent"
-msgid "{0}%"
-msgstr "{0}%"
-
 msgid ", level {0}"
 msgstr ", nível {0}"
-
-msgid "Expand"
-msgstr "Expandir"
-
-msgid "Collapse"
-msgstr "Fechar"
 
 msgid "Refresh"
 msgstr "Atualizar"
@@ -1553,9 +1403,6 @@ msgstr "{0} - {1} ({2} por ler)"
 msgctxt "rail account tooltip"
 msgid "{0} - {1}"
 msgstr "{0} - {1}"
-
-msgid "Back to mail (Esc)"
-msgstr "Voltar ao correio (Esc)"
 
 msgid "Back to list (Esc)"
 msgstr "Voltar à lista (Esc)"
@@ -1584,18 +1431,6 @@ msgstr "Caixas de entrada"
 
 msgid "Filter folders"
 msgstr "Filtrar pastas"
-
-msgid "No folders match"
-msgstr "Nenhuma pasta corresponde"
-
-msgid "Recent"
-msgstr "Recentes"
-
-msgid "Mark all as read, Select messages"
-msgstr "Marcar todas como lidas, Selecionar mensagens"
-
-msgid "Undo (Ctrl+Z)"
-msgstr "Desfazer (Ctrl+Z)"
 
 msgid "Archive (Backspace)"
 msgstr "Arquivar (Retrocesso)"
@@ -1720,9 +1555,6 @@ msgstr "Definir nome de utilizador"
 msgid "Stops the check; the form stays as typed"
 msgstr "Para a verificação; o formulário fica como o escreveu"
 
-msgid "Still signing in … You can cancel and check the server name."
-msgstr "Ainda a iniciar sessão … Pode cancelar e verificar o nome do servidor."
-
 msgid "Downloading your mail"
 msgstr "A transferir o seu correio"
 
@@ -1779,9 +1611,6 @@ msgstr "Atalhos de teclado"
 msgid "Every key, by group. Press F1 or Ctrl+/ anywhere."
 msgstr "Todas as teclas, por grupo. Prima F1 ou Ctrl+/ em qualquer lado."
 
-msgid "Every key, by group. Up and Down scroll the list; Esc closes."
-msgstr "Todas as teclas, por grupo. As setas para cima e para baixo percorrem a lista; Esc fecha."
-
 msgctxt "about"
 msgid "Show"
 msgstr "Mostrar"
@@ -1815,31 +1644,6 @@ msgstr "O que o Komorebi guarda neste PC e o que envia, e para onde."
 
 msgid "Open the privacy statement in the browser"
 msgstr "Abrir a declaração de privacidade no navegador"
-
-msgctxt "teaching tip"
-msgid "Your folders"
-msgstr "As suas pastas"
-
-msgctxt "teaching tip"
-msgid "Search"
-msgstr "Pesquisar"
-
-msgctxt "teaching tip"
-msgid "Keys and help"
-msgstr "Teclas e ajuda"
-
-msgid "Accounts and folders are behind this button when the window is narrow."
-msgstr "As contas e as pastas ficam atrás deste botão quando a janela é estreita."
-
-msgid "Search this folder or all folders. Ctrl+E or Ctrl+F opens it."
-msgstr "Pesquise nesta pasta ou em todas as pastas. Ctrl+E ou Ctrl+F abre a pesquisa."
-
-msgid "Keyboard shortcuts and help are in Settings › About, or press F1."
-msgstr "Os atalhos de teclado e a ajuda estão em Definições › Acerca de, ou prima F1."
-
-msgctxt "teaching tip"
-msgid "{0} of {1}"
-msgstr "{0} de {1}"
 
 msgctxt "shortcut group"
 msgid "Anywhere"
@@ -1916,14 +1720,6 @@ msgstr "Espaço ou Enter"
 msgctxt "shortcut"
 msgid "Press the focused button"
 msgstr "Premir o botão com o foco"
-
-msgctxt "shortcut key"
-msgid "Left / Right"
-msgstr "Seta para a esquerda / direita"
-
-msgctxt "shortcut"
-msgid "Move along a toolbar"
-msgstr "Percorrer uma barra de ferramentas"
 
 msgctxt "shortcut key"
 msgid "Esc"
@@ -2159,21 +1955,9 @@ msgstr "O Komorebi foi atualizado para a versão {0}."
 msgid "What's new"
 msgstr "Novidades"
 
-msgid "Skip tips"
-msgstr "Ignorar dicas"
-
-msgid "Got it"
-msgstr "Entendido"
-
 # Stage 6: composer, drafts and Outbox
 msgid "Close (Esc)"
 msgstr "Fechar (Esc)"
-
-msgid "Saves the draft in Drafts"
-msgstr "Guarda o rascunho em Rascunhos"
-
-msgid "Quote (Ctrl+Shift+Q)"
-msgstr "Citação (Ctrl+Shift+Q)"
 
 msgid "Preview"
 msgstr "Pré-visualizar"
@@ -2187,17 +1971,11 @@ msgstr "Importância baixa"
 msgid "Couldn't draw the preview. The message is sent as written."
 msgstr "Não foi possível mostrar a pré-visualização. A mensagem é enviada tal como foi escrita."
 
-msgid "The preview shows the beginning of the message."
-msgstr "A pré-visualização mostra o início da mensagem."
-
 msgid "Write your message"
 msgstr "Escreva a sua mensagem"
 
 msgid "Show quoted text"
 msgstr "Mostrar texto citado"
-
-msgid "The server's reply, as it came"
-msgstr "A resposta do servidor, tal como chegou"
 
 msgid "Drop to attach"
 msgstr "Largue para anexar"
@@ -2333,9 +2111,6 @@ msgstr "Remover esta conta"
 msgid "Removes the account and its downloaded mail from this computer. Mail on the server is not affected."
 msgstr "Remove a conta e o respetivo correio transferido deste computador. O correio no servidor não é afetado."
 
-msgid "Some text changes after Komorebi restarts."
-msgstr "Algum texto só muda depois de reiniciar o Komorebi."
-
 msgid "Records only server commands, response codes and timings on this PC, never mail, addresses or passwords; nothing is sent."
 msgstr "Regista apenas comandos do servidor, códigos de resposta e tempos neste PC, nunca correio, endereços nem palavras-passe; nada é enviado."
 
@@ -2362,12 +2137,6 @@ msgstr "Ajuda"
 msgctxt "about group"
 msgid "About"
 msgstr "Acerca de"
-
-msgid "Made with Slint"
-msgstr "Feito com Slint"
-
-msgid "The toolkit Komorebi's window is built with."
-msgstr "A biblioteca com que a janela do Komorebi é feita."
 
 msgid "This message may not be from who it says"
 msgstr "Esta mensagem pode não ser de quem diz ser"
@@ -2427,9 +2196,6 @@ msgstr "Este não é o certificado que guardou. Se não esperava um novo, cancel
 msgid "Ask whoever runs the server for its fingerprint, or run openssl x509 -noout -fingerprint -sha256 on its certificate, and compare every byte. Only trust it on a network you control. A saved certificate has to be reviewed again when the server renews it."
 msgstr "Peça a impressão digital a quem gere o servidor, ou execute openssl x509 -noout -fingerprint -sha256 no respetivo certificado, e compare todos os bytes. Só confie nele numa rede que controle. Um certificado guardado tem de ser revisto novamente quando o servidor o renovar."
 
-msgid "How do I check this?"
-msgstr "Como posso verificar isto?"
-
 msgid "Downloading your mail …"
 msgstr "A transferir o seu e-mail …"
 
@@ -2483,9 +2249,6 @@ msgstr "nome@exemplo.pt"
 
 msgid "Email address"
 msgstr "Endereço de e-mail"
-
-msgid "Enter an email address like name@example.com."
-msgstr "Introduza um endereço de e-mail como nome@exemplo.pt."
 
 msgid "This account is already in Komorebi."
 msgstr "Esta conta já está no Komorebi."
@@ -2609,25 +2372,9 @@ msgstr "O seu e-mail mais recente já chegou."
 msgid "Open your inbox"
 msgstr "Abrir a caixa de entrada"
 
-msgid "Step {0} of {1}"
-msgstr "Passo {0} de {1}"
-
-msgid "{0}, step {1} of {2}, completed"
-msgstr "{0}, passo {1} de {2}, concluído"
-
-msgid "{0}, step {1} of {2}, current"
-msgstr "{0}, passo {1} de {2}, atual"
-
-msgid "{0}, step {1} of {2}, not started"
-msgstr "{0}, passo {1} de {2}, não iniciado"
-
 msgctxt "change the servers"
 msgid "Change"
 msgstr "Alterar"
-
-msgid "Change the server settings"
-msgstr "Alterar as definições do servidor"
-
 
 msgid "Signatures"
 msgstr "Assinaturas"
@@ -2708,9 +2455,6 @@ msgstr "Nenhuma"
 msgid "Manage signatures…"
 msgstr "Gerir assinaturas…"
 
-msgid "Align"
-msgstr "Alinhar"
-
 msgid "Decrease indent"
 msgstr "Diminuir avanço"
 
@@ -2734,12 +2478,6 @@ msgstr "Mais opções"
 
 msgid "Edit quoted text"
 msgstr "Editar texto citado"
-
-msgid "Switch to plain text?"
-msgstr "Mudar para texto simples?"
-
-msgid "Formatting, tables and the signature logo are removed. You can undo this."
-msgstr "A formatação, as tabelas e o logótipo da assinatura são removidos. Pode anular esta ação."
 
 msgid "Black"
 msgstr "Preto"
@@ -2787,23 +2525,6 @@ msgstr "Justificar"
 msgid "Align left"
 msgstr "Alinhar à esquerda"
 
-msgid "Paste as plain text"
-msgstr "Colar como texto simples"
-
-msgid "Long message of {n} character. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end."
-msgid_plural "Long message of {n} characters. The screen reader reads the part around the cursor; the arrow keys move it, and Ctrl+Home and Ctrl+End go to the start and the end."
-msgstr[0] "Mensagem longa de {n} carácter. O leitor de ecrã lê a parte à volta do cursor; as teclas de seta movem-na, e Ctrl+Home e Ctrl+End vão para o início e para o fim."
-msgstr[1] "Mensagem longa de {n} caracteres. O leitor de ecrã lê a parte à volta do cursor; as teclas de seta movem-na, e Ctrl+Home e Ctrl+End vão para o início e para o fim."
-
-msgid "{0} × {1} table"
-msgstr "Tabela de {0} × {1}"
-
-msgid "Rows"
-msgstr "Linhas"
-
-msgid "Columns"
-msgstr "Colunas"
-
 msgid "Insert row above"
 msgstr "Inserir linha acima"
 
@@ -2831,29 +2552,11 @@ msgstr "Sublinhado (Ctrl+U)"
 msgid "Strikethrough (Ctrl+Shift+X)"
 msgstr "Rasurado (Ctrl+Shift+X)"
 
-msgid "Font colour: {0}"
-msgstr "Cor do tipo de letra: {0}"
-
-msgid "More font colours"
-msgstr "Mais cores do tipo de letra"
-
-msgid "Decrease indent (Ctrl+Shift+M)"
-msgstr "Diminuir avanço (Ctrl+Shift+M)"
-
-msgid "Increase indent (Ctrl+M)"
-msgstr "Aumentar avanço (Ctrl+M)"
-
-msgid "Align: {0}"
-msgstr "Alinhamento: {0}"
-
 msgid "Table"
 msgstr "Tabela"
 
 msgid "Insert table"
 msgstr "Inserir tabela"
-
-msgid "Clear formatting (Ctrl+Space)"
-msgstr "Limpar formatação (Ctrl+Espaço)"
 
 msgctxt "shortcut group"
 msgid "Formatting (message body)"
@@ -3103,9 +2806,6 @@ msgstr "Fechar separador (Ctrl+W)"
 msgid "Tabs"
 msgstr "Separadores"
 
-msgid "All tabs"
-msgstr "Todos os separadores"
-
 msgid "Notifications for new mail"
 msgstr "Notificações de correio novo"
 
@@ -3118,26 +2818,17 @@ msgstr "Mostrar o remetente e o assunto"
 msgid "Off: a notification only says New mail, which is safer on a shared screen or the lock screen."
 msgstr "Desativado: a notificação diz apenas Novo correio, o que é mais seguro num ecrã partilhado ou no ecrã de bloqueio."
 
-msgid "Show the sender and subject in notifications"
-msgstr "Mostrar o remetente e o assunto nas notificações"
-
 msgid "Keep running in the notification area"
 msgstr "Continuar na área de notificação"
 
 msgid "Closing the window keeps Komorebi in the notification area, so mail keeps arriving. Quit from its icon's menu."
 msgstr "Ao fechar a janela, o Komorebi continua na área de notificação e o correio continua a chegar. Para sair, use o menu do ícone."
 
-msgid "Keep running in the notification area when the window closes"
-msgstr "Continuar na área de notificação quando a janela fecha"
-
 msgid "Start with Windows"
 msgstr "Iniciar com o Windows"
 
 msgid "Komorebi starts in the notification area when you sign in to Windows."
 msgstr "O Komorebi inicia na área de notificação quando entra no Windows."
-
-msgid "Start Komorebi with Windows"
-msgstr "Iniciar o Komorebi com o Windows"
 
 msgid "Refresh (F5). {0}"
 msgstr "Atualizar (F5). {0}"
@@ -3302,17 +2993,6 @@ msgstr "A AC emissora: {0}"
 msgid "Certificates it issues for this server name are accepted. CA SHA-256: {0}"
 msgstr "Os certificados que emitir para este nome de servidor são aceites. SHA-256 da AC: {0}"
 
-msgid "What to trust"
-msgstr "Em que confiar"
-
-msgid "{0}, group of {1}"
-msgstr "{0}, grupo de {1}"
-
-msgid "{n} person"
-msgid_plural "{n} people"
-msgstr[0] "{n} pessoa"
-msgstr[1] "{n} pessoas"
-
 msgid "Contacts"
 msgstr "Contactos"
 
@@ -3370,14 +3050,8 @@ msgstr "Organização"
 msgid "Job title"
 msgstr "Cargo"
 
-msgid "Remove email"
-msgstr "Remover e-mail"
-
 msgid "Add email"
 msgstr "Adicionar e-mail"
-
-msgid "Remove phone"
-msgstr "Remover telefone"
 
 msgid "Add phone"
 msgstr "Adicionar telefone"
@@ -3493,9 +3167,6 @@ msgstr "Ainda não há regras. Uma regra pode mover, eliminar ou marcar o e-mail
 msgid "Folder not found. This rule is paused."
 msgstr "Pasta não encontrada. Esta regra está em pausa."
 
-msgid "Add rule"
-msgstr "Adicionar regra"
-
 msgid "Activity"
 msgstr "Atividade"
 
@@ -3531,9 +3202,6 @@ msgstr "termina em"
 
 msgid "Value"
 msgstr "Valor"
-
-msgid "Remove condition"
-msgstr "Remover condição"
 
 msgid "Rule name"
 msgstr "Nome da regra"
@@ -3705,45 +3373,6 @@ msgstr "Copiar as regras como um script para os filtros de e-mail do seu fornece
 msgid "Copied as a Sieve script. Paste it into your provider’s mail filters."
 msgstr "Copiado como script Sieve. Cole-o nos filtros de e-mail do seu fornecedor."
 
-msgid "Calendar"
-msgstr "Calendário"
-
-msgid "Today"
-msgstr "Hoje"
-
-msgid "No events in these 30 days. Invitations you accept are added here."
-msgstr "Sem eventos nestes 30 dias. Os convites que aceitar são adicionados aqui."
-
-msgid "Cancelled: {}"
-msgstr "Cancelado: {}"
-
-msgid "Repeats; has a reminder"
-msgstr "Repete-se; tem um lembrete"
-
-msgid "Repeats"
-msgstr "Repete-se"
-
-msgid "Has a reminder"
-msgstr "Tem um lembrete"
-
-msgid "In your calendar on this PC."
-msgstr "No seu calendário neste PC."
-
-msgid "{0} to {1}"
-msgstr "{0} a {1}"
-
-msgid "Today, {}"
-msgstr "Hoje, {}"
-
-msgid "Tomorrow, {}"
-msgstr "Amanhã, {}"
-
-msgid "All day"
-msgstr "Todo o dia"
-
-msgid "Remove from calendar"
-msgstr "Remover do calendário"
-
 msgctxt "shortcut key"
 msgid "Enter (in the contact editor's Name box)"
 msgstr "Enter (na caixa Nome do editor de contactos)"
@@ -3801,236 +3430,101 @@ msgctxt "dialog button"
 msgid "Quit"
 msgstr "Sair"
 
-msgid "Show each account's CalDAV calendars here, read only. Komorebi looks for them only when you press Find calendars, and syncs them only while it is open. The user name and password are the ones set in Contacts > Sync, or your mail address and mail password."
-msgstr "Mostre aqui os calendários CalDAV de cada conta, só de leitura. O Komorebi só os procura quando premir Procurar calendários e só os sincroniza enquanto estiver aberto. O nome de utilizador e a palavra-passe são os definidos em Contactos > Sincronizar, ou o seu endereço e a palavra-passe do correio."
+msgid "Komorebi can't start: Windows could not create a DirectX 11 graphics device on this PC.\n\nUpdate the graphics driver and try again.\n\n{0}"
+msgstr "O Komorebi não consegue iniciar: o Windows não conseguiu criar um dispositivo gráfico DirectX 11 neste PC.\n\nAtualize o controlador gráfico e tente novamente.\n\n{0}"
 
-msgid "Leave it empty to look it up from your mail address. For Purelymail, copy it from purelymail.com/manage/calDavUrl."
-msgstr "Deixe vazio para o procurar a partir do seu endereço de correio. No Purelymail, copie-o de purelymail.com/manage/calDavUrl."
+msgid "Filter"
+msgstr "Filtro"
 
-msgid "Find calendars"
-msgstr "Procurar calendários"
+msgid "How Komorebi looks and starts."
+msgstr "Como o Komorebi se apresenta e arranca."
 
-msgid "Calendars"
-msgstr "Calendários"
+msgid "Appearance"
+msgstr "Aspeto"
 
-msgid "Choose which calendars to show and sync"
-msgstr "Escolher os calendários a mostrar e sincronizar"
+msgid "Notifications"
+msgstr "Notificações"
 
-msgid "Calendar sync is off while Komorebi is offline."
-msgstr "A sincronização de calendários está desligada enquanto o Komorebi está offline."
+msgid "Startup"
+msgstr "Arranque"
 
-msgid "The calendar server refused the user name or password."
-msgstr "O servidor de calendários recusou o nome de utilizador ou a palavra-passe."
+msgid "What Komorebi keeps on this PC."
+msgstr "O que o Komorebi guarda neste PC."
 
-msgid "No calendar was found at this address."
-msgstr "Não foi encontrado nenhum calendário neste endereço."
+msgid "{n} rule, in this order"
+msgid_plural "{n} rules, in this order"
+msgstr[0] "{n} regra, por esta ordem"
+msgstr[1] "{n} regras, por esta ordem"
 
-msgid "The calendar server's certificate couldn't be checked."
-msgstr "Não foi possível verificar o certificado do servidor de calendários."
+msgid "Needs attention"
+msgstr "Requer atenção"
 
-msgid "Calendar sync failed ({0})."
-msgstr "A sincronização de calendários falhou ({0})."
+msgid "Steps to add an account"
+msgstr "Passos para adicionar uma conta"
 
-msgid "No calendars with events were found at this address."
-msgstr "Não foram encontrados calendários com eventos neste endereço."
+msgid "{0}, done"
+msgstr "{0}, concluído"
 
-msgid "{n} event from this account on this computer."
-msgid_plural "{n} events from this account on this computer."
-msgstr[0] "{n} evento desta conta neste computador."
-msgstr[1] "{n} eventos desta conta neste computador."
+msgid "{0}, current step"
+msgstr "{0}, passo atual"
 
-msgid "Found a calendar server at {0}. Check that it belongs to your mail provider, then press Find calendars again to sign in there."
-msgstr "Foi encontrado um servidor de calendários em {0}. Confirme que pertence ao seu fornecedor de correio e prima Procurar calendários de novo para iniciar sessão nele."
+msgid "Condition {0}"
+msgstr "Condição {0}"
 
-msgid "Working with the calendar server..."
-msgstr "A comunicar com o servidor de calendários..."
+msgid "Condition {0} comparison"
+msgstr "Comparação da condição {0}"
 
-msgid "Notifications for event reminders"
-msgstr "Notificações dos lembretes de eventos"
+msgid "Condition {0} value"
+msgstr "Valor da condição {0}"
 
-msgid "Windows shows a notification when an event's reminder is due, only while Komorebi is open or in the notification area. The agenda marks due events either way."
-msgstr "O Windows mostra uma notificação quando chega a hora do lembrete de um evento, só enquanto o Komorebi estiver aberto ou na área de notificação. A agenda assinala esses eventos de qualquer forma."
+msgid "Remove condition {0}"
+msgstr "Remover condição {0}"
 
-msgid "In {n} minute"
-msgid_plural "In {n} minutes"
-msgstr[0] "Daqui a {n} minuto"
-msgstr[1] "Daqui a {n} minutos"
+msgid "More actions for {0}"
+msgstr "Mais ações para {0}"
 
-msgid "Starts at {0}."
-msgstr "Início: {0}."
+msgid "Email {0}"
+msgstr "E-mail {0}"
 
-msgid "Starts at {0}, {1}."
-msgstr "Início: {0}, {1}."
+msgid "Remove email {0}"
+msgstr "Remover e-mail {0}"
 
-msgctxt "event"
-msgid "Now"
-msgstr "Agora"
+msgid "Phone {0}"
+msgstr "Telefone {0}"
 
-msgid "{0}, {n} event"
-msgid_plural "{0}, {n} events"
-msgstr[0] "{0}, {n} evento"
-msgstr[1] "{0}, {n} eventos"
+msgid "Remove phone {0}"
+msgstr "Remover telefone {0}"
 
-msgid "+{n} more"
-msgid_plural "+{n} more"
-msgstr[0] "+{n} outro"
-msgstr[1] "+{n} outros"
+msgctxt "teaching tip"
+msgid "Your folders"
+msgstr "As suas pastas"
 
-msgid "Choose a date"
-msgstr "Escolher uma data"
+msgctxt "teaching tip"
+msgid "Search"
+msgstr "Pesquisar"
 
-msgid "Previous month"
-msgstr "Mês anterior"
+msgctxt "teaching tip"
+msgid "Keys and help"
+msgstr "Teclas e ajuda"
 
-msgid "Next month"
-msgstr "Mês seguinte"
+msgid "Accounts and folders are behind this button when the window is narrow."
+msgstr "As contas e as pastas ficam atrás deste botão quando a janela é estreita."
 
-msgid "Organized by {0}"
-msgstr "Organizado por {0}"
+msgid "Search this folder or all folders. Ctrl+E or Ctrl+F opens it."
+msgstr "Pesquise nesta pasta ou em todas as pastas. Ctrl+E ou Ctrl+F abre a pesquisa."
 
-msgid "Answer the invitation from its message. You can remove the event from your calendar here."
-msgstr "Responda ao convite a partir da mensagem. Aqui pode remover o evento do seu calendário."
+msgid "Keyboard shortcuts and help are in Settings › About, or press F1."
+msgstr "Os atalhos de teclado e a ajuda estão em Definições › Acerca de, ou prima F1."
 
-msgid "Only this event"
-msgstr "Só este evento"
+msgid "Got it"
+msgstr "Entendido"
 
-msgid "The whole series"
-msgstr "Toda a série"
+msgid "Skip tips"
+msgstr "Ignorar dicas"
 
-msgid "Title"
-msgstr "Título"
+#. The reader's command bar, as a toolbar to screen readers.
+msgid "Message commands"
+msgstr "Comandos da mensagem"
 
-msgid "Add a title"
-msgstr "Adicionar um título"
-
-msgid "Starts"
-msgstr "Início"
-
-msgid "Ends"
-msgstr "Fim"
-
-msgid "Repeat"
-msgstr "Repetir"
-
-msgid "Repeats by a rule set in another app ({0}). It is kept as it is."
-msgstr "Repete-se segundo uma regra definida noutra aplicação ({0}). A regra é mantida."
-
-msgid "Reminder"
-msgstr "Lembrete"
-
-msgid "None"
-msgstr "Nenhum"
-
-msgid "At the start"
-msgstr "No início"
-
-msgid "5 minutes before"
-msgstr "5 minutos antes"
-
-msgid "15 minutes before"
-msgstr "15 minutos antes"
-
-msgid "30 minutes before"
-msgstr "30 minutos antes"
-
-msgid "1 hour before"
-msgstr "1 hora antes"
-
-msgid "1 day before"
-msgstr "1 dia antes"
-
-msgid "Location"
-msgstr "Local"
-
-msgid "New event"
-msgstr "Novo evento"
-
-msgid "Event"
-msgstr "Evento"
-
-msgid "{n} change wasn't saved because the event changed on another device."
-msgid_plural "{n} changes weren't saved because the events changed on another device."
-msgstr[0] "{n} alteração não foi guardada porque o evento foi alterado noutro dispositivo."
-msgstr[1] "{n} alterações não foram guardadas porque os eventos foram alterados noutro dispositivo."
-
-msgid "Apply my changes again"
-msgstr "Aplicar novamente as minhas alterações"
-
-msgid "Previous (Page Up)"
-msgstr "Anterior (Page Up)"
-
-msgid "Next (Page Down)"
-msgstr "Seguinte (Page Down)"
-
-msgid "Agenda"
-msgstr "Agenda"
-
-msgctxt "calendar view"
-msgid "Day"
-msgstr "Dia"
-
-msgid "Week"
-msgstr "Semana"
-
-msgid "Month"
-msgstr "Mês"
-
-msgid "On this PC"
-msgstr "Neste PC"
-
-msgid "{0} ({1})"
-msgstr "{0} ({1})"
-
-msgid "Does not repeat"
-msgstr "Não se repete"
-
-msgid "Every day"
-msgstr "Todos os dias"
-
-msgid "Every week on {0}"
-msgstr "Todas as semanas: {0}"
-
-msgid "Every month on day {0}"
-msgstr "Todos os meses, no dia {0}"
-
-msgid "Every month on the first {0}"
-msgstr "Todos os meses, na primeira ocorrência de {0}"
-
-msgid "Every month on the second {0}"
-msgstr "Todos os meses, na segunda ocorrência de {0}"
-
-msgid "Every month on the third {0}"
-msgstr "Todos os meses, na terceira ocorrência de {0}"
-
-msgid "Every month on the fourth {0}"
-msgstr "Todos os meses, na quarta ocorrência de {0}"
-
-msgid "Every month on the last {0}"
-msgstr "Todos os meses, na última ocorrência de {0}"
-
-msgid "Every year on {0}"
-msgstr "Todos os anos, a {0}"
-
-msgid "dd/mm/yyyy"
-msgstr "dd/mm/aaaa"
-
-msgid "yyyy-mm-dd"
-msgstr "aaaa-mm-dd"
-
-msgid "Type the dates as {0}."
-msgstr "Escreva as datas no formato {0}."
-
-msgid "Type the times as 09:30."
-msgstr "Escreva as horas no formato 09:30."
-
-msgid "The event ends before it starts."
-msgstr "O evento termina antes de começar."
-
-msgid "That time doesn't exist here: the clocks change then."
-msgstr "Essa hora não existe aqui: é a hora da mudança dos relógios."
-
-msgid "This calendar is read only. Choose another one."
-msgstr "Este calendário é só de leitura. Escolha outro."
-
-msgid "The event couldn't be saved ({0})."
-msgstr "Não foi possível guardar o evento ({0})."
+msgid "Drag to reorder {0}"
+msgstr "Arraste para reordenar {0}"

@@ -1,27 +1,43 @@
 //! Komorebi's mail engine: the SQLite cache, IMAP sync, SMTP send, MIME and
 //! HTML handling, provider presets, credential access and the Windows
-//! appearance settings. The desktop app (`src/main.rs`) and development
-//! tools (`examples/`) build on it.
+//! appearance settings. The desktop app (`crates/komorebi-gpui`) and
+//! development tools (`examples/`) build on it.
 
 #[cfg(windows)]
 pub mod cachecrypt;
 pub mod cal;
 pub mod chrome;
+pub mod compose;
 pub mod contacts;
+pub mod contacts_page;
+pub mod contacts_sync;
+pub mod crash;
 pub mod dav;
 pub mod db;
 pub mod diag;
 pub mod fetch;
+pub mod files;
+pub mod find;
 pub mod fold;
+pub mod format;
 pub mod i18n;
+pub mod instance;
+pub mod invite;
 pub mod launch;
 pub mod mail;
 pub mod notify;
 pub mod onboard;
 pub mod providers;
+pub mod reader;
 pub mod role;
+pub mod rows;
 pub mod rules;
+pub mod rules_page;
 pub mod secrets;
+pub mod seed;
+pub mod tabs;
+#[cfg(test)]
+pub(crate) mod testdir;
 pub mod theme;
 pub mod tree;
 pub mod trust;
