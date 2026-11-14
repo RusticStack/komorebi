@@ -283,11 +283,21 @@ layer and cards: layer #f3f3f3 / #202020, card #ffffff / #2b2b2b.
     **Continue** on the email step (or Find settings on the manual page),
     never on typing or focus change. A preset domain (`providers::guess`)
     skips the lookup. The lookup never sends the password. Under
-    `KOMOREBI_OFFLINE` it refuses, and the flow goes straight to manual
-    setup with a one-line note.
-  - **Sign in**: the provider chip says what was found (looking, found,
-    not found with the provider choice inline, or Change for manual
-    setup), then the Password box. Sign in pressed while the lookup still
+    `KOMOREBI_OFFLINE` it refuses, and the flow shows the provider list at
+    once with a one-line note.
+  - **Sign in**: the provider chip says what was found (looking, a
+    provider, "Your mail is hosted by" one from the MX records, found, not
+    found, or a provider not supported yet), then the provider list when
+    one is needed, then the Password box. The list
+    (`onboarding/providers.rs`) is a search box over a list box: the focus
+    stays in the box, Up, Down, Page Up, Page Down, Home and End move the
+    selected option (Narrator reads its name and note), Enter picks, Esc
+    clears the search and then goes back; each option shows the
+    provider's bundled icon (a monogram if none), its name and a note on
+    how it signs in. Providers Komorebi cannot sign in to are shown in
+    the tertiary ink and cannot be picked. "Add provider" (a secondary
+    button under the list) opens manual setup; Change on the chip opens
+    the list again. Sign in pressed while the lookup still
     runs waits for it.
   - **Wait**: the check shows three grouped stages (Connecting securely,
     Checking your password, Getting ready to send) at once; Back and Esc

@@ -150,7 +150,12 @@ mod port {
         f.act(cx, |v, w, cx| v.start(w, cx));
         f.set(cx, |v| v.email_input(), "ana.silva@purelymail.com");
         f.act(cx, |v, w, cx| v.continue_email(w, cx));
-        cx.read(|cx| assert_eq!(f.view.read(cx).chip(), &flow::Chip::Preset(0)));
+        cx.read(|cx| {
+            assert_eq!(
+                f.view.read(cx).chip(),
+                &flow::Chip::Preset(preset("purelymail"))
+            )
+        });
         f.set(cx, |v| v.password_input(), "secret");
         f.act(cx, |v, w, cx| v.submit(w, cx));
         cx.run_until_parked();
@@ -238,7 +243,7 @@ mod port {
             assert_eq!(f.view.read(cx).email_problem(), Some(EmailProblem::Invalid));
             assert_eq!(f.view.read(cx).step(), Step::Email);
         });
-        // Offline: manual setup, no lookup.
+        // Offline: the provider list, no lookup.
         cx.update(|cx| {
             cx.set_global(Services {
                 offline: true,
@@ -249,14 +254,20 @@ mod port {
         f.act(cx, |v, w, cx| v.continue_email(w, cx));
         cx.read(|cx| {
             let v = f.view.read(cx);
-            assert!(v.manual() && v.offline());
+            assert!(v.choosing() && v.offline() && !v.manual());
             assert_eq!(v.step(), Step::SignIn);
         });
         // Sign in with nothing typed marks what is missing.
         f.act(cx, |v, w, cx| v.submit(w, cx));
         cx.read(|cx| {
             let m = f.view.read(cx).missing();
-            assert!(m.password && m.imap && m.smtp);
+            assert!(m.password && m.provider);
+        });
+        f.act(cx, |v, w, cx| v.go_manual(w, cx));
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.read(|cx| {
+            let m = f.view.read(cx).missing();
+            assert!(m.password && m.imap && m.smtp && !m.provider);
         });
     }
 
@@ -278,6 +289,7 @@ mod port {
             },
             sources: vec![Source::Autoconfig],
             refused: Vec::new(),
+            preset: None,
         }
     }
 
@@ -342,6 +354,7 @@ mod port {
         let f = open(cx, "ob-cert-line", svc, false);
         f.set(cx, |v| v.email_input(), "rui@example.org");
         f.act(cx, |v, w, cx| v.continue_email(w, cx));
+        f.act(cx, |v, w, cx| v.go_manual(w, cx));
         let server = komorebi::providers::Server {
             host: "mail.example.org".into(),
             port: 993,
@@ -383,9 +396,35 @@ mod port {
         });
     }
 
-    /// When nothing was found, the providers are radio buttons with their
-    /// descriptions; the welcome lists its three values; the step
-    /// indicator is a named list that says which steps are done.
+    fn preset(id: &str) -> usize {
+        komorebi::providers::index_of(id).expect("a preset")
+    }
+
+    /// Open the flow at Sign in for an address no preset knows and the
+    /// lookup can't find: the provider list shows, its search focused.
+    fn at_the_list(cx: &mut TestAppContext, name: &str) -> Fixture {
+        let svc = Services {
+            verify: pass_all,
+            lookup: |_| Outcome::default(),
+            ..services::refusing()
+        };
+        let f = open(cx, name, svc, false);
+        f.set(cx, |v| v.email_input(), "rui@example.org");
+        f.act(cx, |v, w, cx| v.continue_email(w, cx));
+        cx.run_until_parked();
+        f.act(cx, |v, w, cx| v.focus_first(w, cx));
+        cx.run_until_parked();
+        f
+    }
+
+    fn shown(f: &Fixture, cx: &mut TestAppContext) -> Vec<usize> {
+        cx.read(|cx| f.view.read(cx).picker().read(cx).matches().to_vec())
+    }
+
+    /// When nothing was found, the providers are a named list box whose
+    /// options say how each signs in, with Add provider after it; the
+    /// welcome lists its three values; the step indicator is a named list
+    /// that says which steps are done.
     #[gpui::test]
     fn the_flow_names_its_steps_values_and_providers(cx: &mut TestAppContext) {
         // Not `fakes()`: its lookup counter belongs to the skip test.
@@ -403,7 +442,7 @@ mod port {
             );
             assert_named(
                 window,
-                "Works with your provider. Purelymail, Postale.io or your own server.",
+                "Works with your provider. Gmail, iCloud, Fastmail, Postale.io and more, or your own server.",
                 Role::ListItem,
             );
         });
@@ -415,71 +454,319 @@ mod port {
         f.set(cx, |v| v.email_input(), "rui@example.org");
         f.act(cx, |v, w, cx| v.continue_email(w, cx));
         cx.run_until_parked();
-        cx.read(|cx| assert_eq!(f.view.read(cx).chip(), &flow::Chip::NotFound));
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.chip(), &flow::Chip::NotFound);
+            assert!(v.choosing());
+        });
+        f.act(cx, |v, w, cx| v.focus_first(w, cx));
         in_window(cx, f.window, |window, _| {
             assert_named(window, "Your email, done", Role::ListItem);
             assert_named(window, "Sign in, current step", Role::ListItem);
-            assert_named(window, "Provider", Role::RadioGroup);
-            assert_named(window, "Purelymail", Role::RadioButton);
-            assert_named(window, "Other server", Role::RadioButton);
+            assert_named(window, "Search for your provider", Role::TextInput);
+            assert_named(window, "Providers", Role::ListBox);
+            assert_named(window, "Gmail, App password needed", Role::ListBoxOption);
+            assert_named(window, "Free, Your account password", Role::ListBoxOption);
+            assert_named(
+                window,
+                "Add provider: any other IMAP and SMTP server",
+                Role::Button,
+            );
         });
-        assert_eq!(
-            flow::preset_note("Purelymail"),
-            "Any domain hosted at Purelymail"
-        );
+        // A provider further down, found by the search.
+        in_window(cx, f.window, |window, cx| {
+            test_support::type_text(window, "outlook", cx)
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            assert_named(
+                window,
+                "Outlook.com, Not supported yet: needs Microsoft sign-in",
+                Role::ListBoxOption,
+            );
+        });
+        // Sign in with no provider asks for one.
+        f.set(cx, |v| v.password_input(), "secret");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.read(|cx| assert!(f.view.read(cx).missing().provider));
     }
 
-    /// The arrows step through the provider list without leaving it: on
-    /// Other server they only move the focus; Space picks it and opens
-    /// manual setup.
+    /// The keyboard: the focus stays in the search box; Down, End, Home
+    /// and Up move the highlighted provider; Enter picks it, which closes
+    /// the list and names it on the chip; Change opens the list again and
+    /// Esc closes it.
     #[gpui::test]
-    fn the_arrows_step_through_the_providers_without_leaving(cx: &mut TestAppContext) {
-        let svc = Services {
-            verify: pass_all,
-            lookup: |_| Outcome::default(),
-            ..services::refusing()
+    fn the_keyboard_moves_through_the_providers_and_picks_one(cx: &mut TestAppContext) {
+        let f = at_the_list(cx, "ob-provider-keys");
+        let all = shown(&f, cx);
+        assert_eq!(all.len(), komorebi::providers::PRESETS.len());
+        let active = |f: &Fixture, cx: &mut TestAppContext| {
+            cx.read(|cx| f.view.read(cx).picker().read(cx).active())
         };
-        let f = open(cx, "ob-provider-keys", svc, false);
-        f.act(cx, |v, w, cx| v.start(w, cx));
-        f.set(cx, |v| v.email_input(), "rui@example.org");
-        f.act(cx, |v, w, cx| v.continue_email(w, cx));
-        cx.run_until_parked();
+        assert_eq!(active(&f, cx), Some(all[0]));
         in_window(cx, f.window, |window, cx| {
-            test_support::click_named(window, "Postale.io", cx);
+            test_support::press(window, &["down", "down"], cx);
         });
         cx.run_until_parked();
-        cx.read(|cx| assert_eq!(f.view.read(cx).provider(), Some(1)));
-        // Down from Postale.io lands on Other server: the list stays.
+        assert_eq!(active(&f, cx), Some(all[2]));
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["end"], cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(active(&f, cx), all.last().copied());
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["home", "down", "up"], cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(active(&f, cx), Some(all[0]));
+        // The highlighted option is the list box's selected one.
         in_window(cx, f.window, |window, cx| {
             test_support::press(window, &["down"], cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(active(&f, cx), Some(all[1]));
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["enter"], cx)
         });
         cx.run_until_parked();
         cx.read(|cx| {
             let v = f.view.read(cx);
-            assert!(!v.manual());
-            assert_eq!(v.provider(), Some(1));
+            assert_eq!(v.provider(), Some(all[1]));
+            assert_eq!(v.chip(), &flow::Chip::Preset(all[1]));
+            assert!(!v.choosing() && !v.manual());
         });
+        in_window(cx, f.window, |window, cx| {
+            assert_named(window, "Change provider", Role::Button);
+            test_support::click_named(window, "Change provider", cx);
+        });
+        cx.run_until_parked();
+        cx.read(|cx| assert!(f.view.read(cx).choosing()));
+        // Esc in the empty search box closes the list over the provider.
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["escape"], cx)
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert!(!v.choosing());
+            assert_eq!(v.step(), Step::SignIn);
+            assert_eq!(v.provider(), Some(all[1]));
+        });
+    }
+
+    /// Typing filters by name or domain (accents and case aside); a search
+    /// with no match says so and points at Add provider; Esc clears it.
+    #[gpui::test]
+    fn the_search_filters_the_providers(cx: &mut TestAppContext) {
+        let f = at_the_list(cx, "ob-provider-search");
+        in_window(cx, f.window, |window, cx| {
+            test_support::type_text(window, "POSTÁLE", cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(shown(&f, cx), vec![preset("postale")]);
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["enter"], cx)
+        });
+        cx.run_until_parked();
+        cx.read(|cx| assert_eq!(f.view.read(cx).provider(), Some(preset("postale"))));
+        // A domain finds its provider.
+        in_window(cx, f.window, |window, cx| {
+            test_support::click_named(window, "Change provider", cx);
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, cx| {
+            test_support::type_text(window, "hotmail.com", cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(shown(&f, cx), vec![preset("outlook")]);
+        // Esc clears the search, then a search with no match.
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["escape"], cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(shown(&f, cx).len(), komorebi::providers::PRESETS.len());
+        in_window(cx, f.window, |window, cx| {
+            test_support::type_text(window, "nothing like it", cx);
+        });
+        cx.run_until_parked();
+        assert!(shown(&f, cx).is_empty());
         in_window(cx, f.window, |window, _| {
-            assert_named(window, "Provider", Role::RadioGroup);
+            assert!(
+                test_support::names(window)
+                    .iter()
+                    .any(|(_, n)| n.contains("No provider matches"))
+            );
         });
-        // Down again wraps to Purelymail and picks it; Up wraps back to
-        // Other server, still in the list.
         in_window(cx, f.window, |window, cx| {
-            test_support::press(window, &["down"], cx);
-        });
-        cx.run_until_parked();
-        cx.read(|cx| assert_eq!(f.view.read(cx).provider(), Some(0)));
-        in_window(cx, f.window, |window, cx| {
-            test_support::press(window, &["up"], cx);
+            test_support::press(window, &["escape"], cx)
         });
         cx.run_until_parked();
-        cx.read(|cx| assert!(!f.view.read(cx).manual()));
-        // Space on the focused Other server picks it.
+        assert_eq!(shown(&f, cx).len(), komorebi::providers::PRESETS.len());
+    }
+
+    /// Add provider opens manual setup; Back returns to the list.
+    #[gpui::test]
+    fn add_provider_opens_manual_setup(cx: &mut TestAppContext) {
+        let f = at_the_list(cx, "ob-add-provider");
         in_window(cx, f.window, |window, cx| {
-            test_support::press(window, &["space"], cx);
+            test_support::click_named(window, "Add provider: any other IMAP and SMTP server", cx);
         });
         cx.run_until_parked();
         cx.read(|cx| assert!(f.view.read(cx).manual()));
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Incoming (IMAP) server", Role::TextInput);
+            assert_named(window, "Find settings", Role::Button);
+        });
+        f.act(cx, |v, w, cx| assert!(v.back(w, cx)));
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert!(!v.manual() && v.choosing());
+            assert_eq!(v.step(), Step::SignIn);
+        });
+    }
+
+    /// Picking a provider fills in its servers: the account added uses the
+    /// preset's, the address as the username.
+    #[gpui::test]
+    fn a_picked_provider_signs_in_with_its_servers(cx: &mut TestAppContext) {
+        let f = at_the_list(cx, "ob-provider-pick");
+        in_window(cx, f.window, |window, cx| {
+            test_support::click_named(window, "Fastmail, App password needed", cx);
+        });
+        cx.run_until_parked();
+        f.set(cx, |v| v.password_input(), "secret");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        cx.read(|cx| assert_eq!(f.view.read(cx).step(), Step::Yours));
+        let a = f.db().accounts().unwrap();
+        assert_eq!(a[0].imap.host, "imap.fastmail.com");
+        assert_eq!(a[0].smtp.host, "smtp.fastmail.com");
+    }
+
+    /// Outlook.com can't be picked (no Microsoft sign-in yet); an address
+    /// at it says so and keeps the list open.
+    #[gpui::test]
+    fn outlook_is_listed_but_cannot_be_picked(cx: &mut TestAppContext) {
+        let f = at_the_list(cx, "ob-outlook");
+        in_window(cx, f.window, |window, cx| {
+            test_support::type_text(window, "outlook", cx)
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, cx| {
+            test_support::click_named(
+                window,
+                "Outlook.com, Not supported yet: needs Microsoft sign-in",
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.provider(), None);
+            assert!(v.choosing());
+        });
+        // By its domain: the chip says why, nothing is looked up.
+        f.act(cx, |v, w, cx| {
+            v.back(w, cx);
+        });
+        f.set(cx, |v| v.email_input(), "rui@hotmail.com");
+        f.act(cx, |v, w, cx| v.continue_email(w, cx));
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.chip(), &flow::Chip::Unsupported(preset("outlook")));
+            assert!(v.choosing() && v.provider().is_none());
+        });
+        in_window(cx, f.window, |window, _| {
+            assert!(
+                test_support::names(window)
+                    .iter()
+                    .any(|(_, n)| n.starts_with("Outlook.com isn't supported yet"))
+            );
+        });
+    }
+
+    /// Proton Mail fills manual setup with Bridge's local servers and says
+    /// Bridge must run.
+    #[gpui::test]
+    fn proton_fills_in_bridge(cx: &mut TestAppContext) {
+        let f = at_the_list(cx, "ob-bridge");
+        in_window(cx, f.window, |window, cx| {
+            test_support::type_text(window, "proton", cx)
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, cx| {
+            test_support::click_named(window, "Proton Mail, Needs Proton Mail Bridge", cx);
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert!(v.manual() && v.bridge());
+            let typed = v.server_form().read(cx).fields(cx);
+            assert_eq!(typed.imap_host, "127.0.0.1");
+            assert_eq!(typed.imap_port, "1143");
+            assert!(typed.imap_starttls);
+            assert_eq!(typed.smtp_port, "1025");
+        });
+        in_window(cx, f.window, |window, _| {
+            assert!(
+                test_support::names(window)
+                    .iter()
+                    .any(|(_, n)| n.contains("Proton Mail Bridge must be running"))
+            );
+        });
+        // Back: the list again, Bridge's note gone.
+        f.act(cx, |v, w, cx| assert!(v.back(w, cx)));
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert!(!v.manual() && !v.bridge() && v.choosing());
+        });
+    }
+
+    fn hosted_by_postale(_: &str) -> Outcome {
+        use komorebi::mail::discover::Source;
+        let i = komorebi::providers::index_of("postale").unwrap();
+        Outcome {
+            found: discover::preset_servers(i),
+            sources: vec![Source::Mx],
+            refused: Vec::new(),
+            preset: Some(i),
+        }
+    }
+
+    /// A custom domain whose MX records name a built-in provider: the chip
+    /// says who hosts it, and Sign in uses the preset.
+    #[gpui::test]
+    fn a_custom_domain_hosted_by_a_preset_says_so(cx: &mut TestAppContext) {
+        let svc = Services {
+            verify: pass_all,
+            lookup: hosted_by_postale,
+            ..services::refusing()
+        };
+        let f = open(cx, "ob-hosted", svc, false);
+        f.set(cx, |v| v.email_input(), "ana@example.pt");
+        f.act(cx, |v, w, cx| v.continue_email(w, cx));
+        cx.run_until_parked();
+        let postale = preset("postale");
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.chip(), &flow::Chip::Hosted(postale));
+            assert_eq!(v.provider(), Some(postale));
+            assert!(!v.choosing());
+        });
+        in_window(cx, f.window, |window, _| {
+            assert!(
+                test_support::names(window)
+                    .iter()
+                    .any(|(_, n)| n.starts_with("Your mail is hosted by Postale.io"))
+            );
+        });
+        f.set(cx, |v| v.password_input(), "secret");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        let a = f.db().accounts().unwrap();
+        assert_eq!(a[0].email, "ana@example.pt");
+        assert_eq!(a[0].imap.host, "mail.postale.io");
     }
 
     /// Ports the onboarding half of `the_first_account_saves_the_version_silently`

@@ -68,8 +68,8 @@ msgstr "Ainda sem contas"
 msgid "Add another account"
 msgstr "Adicionar outra conta"
 
-msgid "Purelymail, Postale.io or any IMAP and SMTP server."
-msgstr "Purelymail, Postale.io ou qualquer servidor IMAP e SMTP."
+msgid "Gmail, iCloud, Fastmail, Postale.io and more, or any IMAP and SMTP server."
+msgstr "Gmail, iCloud, Fastmail, Postale.io e outros, ou qualquer servidor IMAP e SMTP."
 
 msgid "Add account"
 msgstr "Adicionar conta"
@@ -1525,18 +1525,6 @@ msgstr "Nome de utilizador"
 msgid "The name you sign in with, if it isn't your email address."
 msgstr "O nome com que inicia sessão, se não for o seu endereço de e-mail."
 
-msgid "Any domain hosted at Purelymail"
-msgstr "Qualquer domínio alojado na Purelymail"
-
-msgid "Any domain hosted at Postale"
-msgstr "Qualquer domínio alojado na Postale"
-
-msgid "Other server"
-msgstr "Outro servidor"
-
-msgid "Any other IMAP and SMTP server"
-msgstr "Qualquer outro servidor IMAP e SMTP"
-
 msgid "Fills in the servers for your address. Only your domain name is looked up, and nothing is saved."
 msgstr "Preenche os servidores do seu endereço. Só é procurado o nome do seu domínio, e nada é guardado."
 
@@ -1569,9 +1557,6 @@ msgstr "Declaração de privacidade"
 
 msgid "{0} rejected the password for {1}. If sign-in uses two steps, create an app password."
 msgstr "{0} rejeitou a palavra-passe de {1}. Se o início de sessão usa dois passos, crie uma palavra-passe de aplicação."
-
-msgid "Is your mail at {0}? Change Provider."
-msgstr "O seu correio está na {0}? Altere o Fornecedor."
 
 msgid "This folder is empty"
 msgstr "Esta pasta está vazia"
@@ -2226,8 +2211,8 @@ msgstr "Abre num instante e funciona sem ligação com o que já foi transferido
 msgid "Works with your provider"
 msgstr "Funciona com o seu fornecedor"
 
-msgid "Purelymail, Postale.io or your own server."
-msgstr "Purelymail, Postale.io ou o seu próprio servidor."
+msgid "Gmail, iCloud, Fastmail, Postale.io and more, or your own server."
+msgstr "Gmail, iCloud, Fastmail, Postale.io e outros, ou o seu próprio servidor."
 
 msgid "Your email"
 msgstr "O seu e-mail"
@@ -2274,14 +2259,8 @@ msgstr "Definições encontradas"
 msgid "We couldn't find settings for {0}"
 msgstr "Não encontrámos as definições de {0}"
 
-msgid "Settings ready"
-msgstr "Definições prontas"
-
 msgid "{0} · encrypted"
 msgstr "{0} · cifrado"
-
-msgid "Choose your provider or set it up yourself."
-msgstr "Escolha o seu fornecedor ou configure manualmente."
 
 msgid "Incoming (IMAP) server"
 msgstr "Servidor de receção (IMAP)"
@@ -3528,3 +3507,75 @@ msgstr "Comandos da mensagem"
 
 msgid "Drag to reorder {0}"
 msgstr "Arraste para reordenar {0}"
+
+msgid "Settings ready · {0}"
+msgstr "Definições prontas · {0}"
+
+msgid "Your mail is hosted by {0}"
+msgstr "O seu correio está alojado em {0}"
+
+msgid "{0} isn't supported yet"
+msgstr "{0} ainda não é suportado"
+
+msgid "It needs Microsoft sign-in, which Komorebi doesn't have yet. Choose another provider below."
+msgstr "Requer o início de sessão da Microsoft, que o Komorebi ainda não tem. Escolha outro fornecedor abaixo."
+
+msgid "Choose your provider below, or add it yourself."
+msgstr "Escolha o seu fornecedor abaixo ou adicione-o manualmente."
+
+msgid "Change provider"
+msgstr "Alterar fornecedor"
+
+msgid "Proton Mail Bridge must be running on this PC. Sign in with the password Bridge shows, not your Proton password."
+msgstr "O Proton Mail Bridge tem de estar em execução neste PC. Inicie sessão com a palavra-passe que o Bridge mostra, não com a palavra-passe do Proton."
+
+msgid "You're offline, so we can't look up settings. Choose your provider, or add it yourself."
+msgstr "Está offline, por isso não podemos procurar as definições. Escolha o seu fornecedor ou adicione-o manualmente."
+
+msgid "Your account password"
+msgstr "Palavra-passe da conta"
+
+msgid "App password if two-step sign-in is on"
+msgstr "Palavra-passe de aplicação se tiver a verificação em dois passos"
+
+msgid "App password needed"
+msgstr "Requer palavra-passe de aplicação"
+
+msgid "Turn on IMAP in its settings first"
+msgstr "Ative primeiro o IMAP nas definições"
+
+msgid "Turn on IMAP and use an app password"
+msgstr "Ative o IMAP e use uma palavra-passe de aplicação"
+
+msgid "IMAP needs a paid plan"
+msgstr "O IMAP requer um plano pago"
+
+msgid "Needs Proton Mail Bridge"
+msgstr "Requer o Proton Mail Bridge"
+
+msgid "Not supported yet: needs Microsoft sign-in"
+msgstr "Ainda não suportado: requer início de sessão da Microsoft"
+
+msgid "Search for your provider"
+msgstr "Procurar o seu fornecedor"
+
+msgid "No provider matches. Use Add provider for any other server."
+msgstr "Nenhum fornecedor corresponde. Use Adicionar fornecedor para qualquer outro servidor."
+
+msgid "Providers"
+msgstr "Fornecedores"
+
+msgid "Add provider"
+msgstr "Adicionar fornecedor"
+
+msgid "Add provider: any other IMAP and SMTP server"
+msgstr "Adicionar fornecedor: qualquer outro servidor IMAP e SMTP"
+
+msgid "Your mail is hosted by {0}. Komorebi has its settings built in."
+msgstr "O seu correio está alojado em {0}. O Komorebi já tem as definições incluídas."
+
+msgid "{0} needs Microsoft sign-in, which Komorebi doesn't have yet."
+msgstr "{0} requer o início de sessão da Microsoft, que o Komorebi ainda não tem."
+
+msgid "Is your mail really at {0}? Go back and choose another provider."
+msgstr "O seu correio está mesmo em {0}? Volte atrás e escolha outro fornecedor."

@@ -76,7 +76,7 @@ pub enum EditorEvent {
 pub fn is_preset(a: &Account) -> bool {
     providers::PRESETS
         .iter()
-        .any(|p| p.imap.0 == a.imap.host && p.smtp.0 == a.smtp.host)
+        .any(|p| p.is_fixed() && p.imap.0 == a.imap.host && p.smtp.0 == a.smtp.host)
 }
 
 /// Whether Server settings start open: a certificate is saved, or the SMTP

@@ -3,8 +3,9 @@
 //! place in the app that holds colour literals (the token lint,
 //! `tests/token_lint.rs`, fails any outside `src/theme/`).
 //!
-//! Windows' accent colour is never read (BRAND.md: the brand owns one
-//! colour). High contrast is not in 1.0; it becomes one more [`Scheme`]
+//! Windows' accent colour is never read, and Komorebi has no accent colour
+//! of its own: after 1.0.0 the seal is neutral too (docs/BRANDING.md), so
+//! the one hue is Windows' Close red. High contrast is not in 1.0; it becomes one more [`Scheme`]
 //! variant whose palette is filled from the Windows system colours
 //! (`komorebi::theme::SystemTheme::contrast`), with no change to the views.
 
@@ -50,14 +51,12 @@ pub struct Palette {
     pub ink_3: Hsla,
     /// Text and glyphs on ink.
     pub on_ink: Hsla,
-    /// The persimmon seal: the seal path only (BRAND.md persimmon rule).
-    pub seal: Hsla,
     /// The selected segment of a segmented control on an inset track.
     pub segment_on: Hsla,
     /// Pills and selects that sit inside an inset card.
     pub pill_on_inset: Hsla,
-    /// Close's hover: Windows' own caption red, the one hue besides the
-    /// seal, because it is Windows' control (IMPLEMENTATION.md section 4).
+    /// Close's hover: Windows' own caption red, the one hue in the
+    /// app, because it is Windows' control (IMPLEMENTATION.md section 4).
     pub close_hover: Hsla,
     /// The glyph on [`Palette::close_hover`].
     pub on_close: Hsla,
@@ -67,7 +66,6 @@ pub struct Palette {
     pub clear: Hsla,
 }
 
-const SEAL: u32 = 0xB3503A;
 const CLOSE_HOVER: u32 = 0xC42B1C;
 const ON_CLOSE: u32 = 0xFFFFFF;
 /// IMPLEMENTATION.md: dialog overlay, black at 0.32.
@@ -106,7 +104,6 @@ pub fn palette(scheme: Scheme) -> Palette {
             ink_2: hex(0x555552),
             ink_3: hex(0x6A6A66),
             on_ink: hex(0xFFFFFF),
-            seal: hex(SEAL),
             segment_on: hex(0xFFFFFF),
             pill_on_inset: hex(0xFFFFFF),
             close_hover: hex(CLOSE_HOVER),
@@ -126,7 +123,6 @@ pub fn palette(scheme: Scheme) -> Palette {
             ink_2: hex(0xB0B0AC),
             ink_3: hex(0x939390),
             on_ink: hex(0x141414),
-            seal: hex(SEAL),
             segment_on: hex(0x333333),
             pill_on_inset: hex(0x303030),
             close_hover: hex(CLOSE_HOVER),
@@ -158,10 +154,38 @@ mod tests {
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
     }
 
+    /// No accent colour (docs/BRANDING.md): every colour but Close's hover
+    /// red is a grey, its channels within 8 of each other out of 255 (the
+    /// warm greys differ by at most 5, spot #BEBEB9; the former persimmon
+    /// seal #B3503A by 121).
     #[test]
-    fn the_seal_is_the_same_persimmon_in_both_schemes() {
-        assert_eq!(palette(Scheme::Light).seal, palette(Scheme::Dark).seal);
-        assert_eq!(palette(Scheme::Light).seal, hex(0xB3503A));
+    fn the_palette_has_no_accent_colour() {
+        let spread = |c: Hsla| {
+            let c = c.to_rgb();
+            let (hi, lo) = (c.r.max(c.g).max(c.b), c.r.min(c.g).min(c.b));
+            ((hi - lo) * 255.).round()
+        };
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            let p = palette(scheme);
+            for (name, c) in [
+                ("canvas", p.canvas),
+                ("paper", p.paper),
+                ("inset", p.inset),
+                ("wash", p.wash),
+                ("fall", p.fall),
+                ("line", p.line),
+                ("spot", p.spot),
+                ("ink", p.ink),
+                ("ink-2", p.ink_2),
+                ("ink-3", p.ink_3),
+                ("on-ink", p.on_ink),
+                ("segment-on", p.segment_on),
+                ("pill-on-inset", p.pill_on_inset),
+                ("on-close", p.on_close),
+            ] {
+                assert!(spread(c) <= 8., "{scheme:?} {name} has a hue");
+            }
+        }
     }
 
     /// BRAND.md's contrast claims hold for the text ramp on every ground

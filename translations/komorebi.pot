@@ -862,7 +862,7 @@ msgctxt "contact label"
 msgid "Mobile"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/rules/text.rs
+#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/onboarding/providers.rs crates/komorebi-gpui/src/views/rules/text.rs
 msgid "{0}, {1}"
 msgstr ""
 
@@ -1724,14 +1724,6 @@ msgid "Delete (Del)"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/flow.rs
-msgid "Any domain hosted at Purelymail"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/onboarding/flow.rs
-msgid "Any domain hosted at Postale"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/onboarding/flow.rs
 msgid "{0}, done"
 msgstr ""
 
@@ -1817,7 +1809,7 @@ msgid "Works with your provider"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
-msgid "Purelymail, Postale.io or your own server."
+msgid "Gmail, iCloud, Fastmail, Postale.io and more, or your own server."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
@@ -1861,7 +1853,19 @@ msgid "Looking up settings for {0} …"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
-msgid "Settings ready"
+msgid "Settings ready · {0}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Your mail is hosted by {0}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "{0} isn't supported yet"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "It needs Microsoft sign-in, which Komorebi doesn't have yet. Choose another provider below."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
@@ -1877,7 +1881,7 @@ msgid "We couldn't find settings for {0}"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
-msgid "Choose your provider or set it up yourself."
+msgid "Choose your provider below, or add it yourself."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
@@ -1886,11 +1890,7 @@ msgid "Change"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
-msgid "Other server"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/onboarding/mod.rs
-msgid "Any other IMAP and SMTP server"
+msgid "Change provider"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/text.rs
@@ -1994,6 +1994,14 @@ msgid "Your provider's help pages list these. If you run your own server, use it
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Proton Mail Bridge must be running on this PC. Sign in with the password Bridge shows, not your Proton password."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "You're offline, so we can't look up settings. Choose your provider, or add it yourself."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
 msgid "Enter the incoming (IMAP) server."
 msgstr ""
 
@@ -2064,6 +2072,58 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/accounts.rs
 msgid "Add account"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Your account password"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "App password if two-step sign-in is on"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "App password needed"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Turn on IMAP in its settings first"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Turn on IMAP and use an app password"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "IMAP needs a paid plan"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Needs Proton Mail Bridge"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Not supported yet: needs Microsoft sign-in"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Search for your provider"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "No provider matches. Use Add provider for any other server."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Providers"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Add provider"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/providers.rs
+msgid "Add provider: any other IMAP and SMTP server"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/reader/actions.rs crates/komorebi-gpui/src/views/reader/mod.rs
@@ -2885,7 +2945,7 @@ msgid "Review the certificate of {0}"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/accounts.rs
-msgid "Purelymail, Postale.io or any IMAP and SMTP server."
+msgid "Gmail, iCloud, Fastmail, Postale.io and more, or any IMAP and SMTP server."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/accounts.rs
@@ -4363,6 +4423,14 @@ msgid "Found in your domain's DNS records."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/text.rs
+msgid "Your mail is hosted by {0}. Komorebi has its settings built in."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/text.rs
+msgid "{0} needs Microsoft sign-in, which Komorebi doesn't have yet."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/text.rs
 msgid "Found by your provider's autoconfig."
 msgstr ""
 
@@ -4391,7 +4459,7 @@ msgid "{0} rejected the password for {1}. If sign-in uses two steps, create an a
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/text.rs
-msgid "Is your mail at {0}? Change Provider."
+msgid "Is your mail really at {0}? Go back and choose another provider."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/tabs/text.rs

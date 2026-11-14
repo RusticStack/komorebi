@@ -1,6 +1,6 @@
 [package]
 name = "komorebi-i18n"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Komorebi's message catalog for Rust code: tr!/trn! over the gettext .po files, built into a static table"
 license = "GPL-3.0-or-later"

@@ -1713,6 +1713,8 @@ mod tests {
         let out = discover(
             "alice@example.org",
             &discover::Lookups {
+                mx: &|_| Vec::new(),
+                ptr: &|_| Vec::new(),
                 srv: &srv,
                 fetch: &fetch,
             },

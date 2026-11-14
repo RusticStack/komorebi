@@ -12,7 +12,8 @@ use super::hosts::{FormError, Proto, host_for_display, parse_port, validate_host
 /// The provider a form chose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Provider {
-    /// One of [`providers::PRESETS`].
+    /// One of [`providers::PRESETS`] whose servers are fixed (not the
+    /// Bridge, not a provider Komorebi cannot sign in to).
     Preset(usize),
     /// Other server: the servers are typed.
     Other,
@@ -107,7 +108,11 @@ impl AccountForm {
     /// The preset the form chose (`None`: Other server, or none chosen yet).
     pub fn preset(&self) -> Option<usize> {
         match self.provider {
-            Some(Provider::Preset(i)) if i < providers::PRESETS.len() => Some(i),
+            Some(Provider::Preset(i))
+                if providers::PRESETS.get(i).is_some_and(|p| p.is_fixed()) =>
+            {
+                Some(i)
+            }
             _ => None,
         }
     }
@@ -123,8 +128,8 @@ impl AccountForm {
         let Some(provider) = self.provider else {
             return Err(FormError::Provider);
         };
-        if let Provider::Preset(i) = provider
-            && let Some(p) = providers::PRESETS.get(i)
+        if matches!(provider, Provider::Preset(_))
+            && let Some(p) = self.preset().and_then(|i| providers::PRESETS.get(i))
         {
             return Ok((p.imap_server(), p.smtp_server()));
         }

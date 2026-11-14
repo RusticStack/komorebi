@@ -3,7 +3,7 @@ name = "komorebi-gpui"
 # Komorebi 1.0 on GPUI (docs/GPUI-MIGRATION.md). The release version is
 # this one and the library's (the root package) together; the installer, the
 # exe's version resource and About read it.
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Komorebi 1.0: the GPUI user interface over the komorebi library"
 license = "GPL-3.0-or-later"

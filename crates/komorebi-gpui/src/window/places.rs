@@ -221,7 +221,7 @@ impl MainWindow {
                 self.show_mail_tab(window, cx);
                 self.with_mail(window, cx, crate::views::mail::MailView::new_mail);
             }
-            "ob-welcome" | "ob-email" | "ob-sign-in" | "ob-manual" => {
+            "ob-welcome" | "ob-email" | "ob-sign-in" | "ob-manual" | "ob-providers" => {
                 if self.onboarding().is_none() {
                     self.show_place(Place::Onboarding, window, cx);
                 }
@@ -231,8 +231,10 @@ impl MainWindow {
                         if action != "ob-welcome" {
                             v.start(window, cx);
                         }
-                        if action == "ob-sign-in" || action == "ob-manual" {
-                            let email = if action == "ob-manual" {
+                        if matches!(action.as_str(), "ob-sign-in" | "ob-manual" | "ob-providers") {
+                            // ob-providers: a domain no preset knows; offline (as
+                            // every snapshot runs) the provider list shows.
+                            let email = if action != "ob-sign-in" {
                                 "alice@example.com"
                             } else {
                                 "ana.silva@purelymail.com"

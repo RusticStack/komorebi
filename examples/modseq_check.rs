@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use komorebi::mail::imap::Imap;
-use komorebi::providers::PRESETS;
+use komorebi::providers::by_id;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -27,7 +27,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("{k} missing"))
     };
     let mut imap = Imap::connect(
-        &PRESETS[1].imap_server(),
+        &by_id("postale").expect("Postale.io").imap_server(),
         None,
         &var("EMAIL")?,
         &var("PASSWORD_EMAIL")?,

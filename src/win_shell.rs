@@ -17,10 +17,10 @@
 //! tooltip. It also hears `WM_SETTINGCHANGE`, which says when the taskbar's
 //! theme changed.
 //!
-//! Tray icon: an exe that carries the brand tray icons (resources 101 to 103,
+//! Tray icon: an exe that carries the brand tray icons (resources 101 to 104,
 //! komorebi.exe through `assets/komorebi.rc`) shows the seal
 //! in ink on a light taskbar, white on a dark one (`SystemUsesLightTheme`,
-//! not the app's theme) and persimmon while unread mail waits
+//! not the app's theme), with the unread spot while unread mail waits
 //! ([`Shell::set_unread`]); its notifications carry the seal (resource 1) as
 //! their large icon. An exe without them (the library's tests and examples)
 //! shows its own icon 1 in every state. See docs/BRANDING.md.
@@ -84,17 +84,20 @@ enum TrayIcon {
     Light,
     /// The white seal, for a dark taskbar.
     Dark,
-    /// The persimmon seal while unread mail waits, on either taskbar.
-    Unread,
+    /// The ink seal with the unread spot, while unread mail waits.
+    UnreadLight,
+    /// The white seal with the unread spot.
+    UnreadDark,
 }
 
 impl TrayIcon {
-    /// Persimmon while mail is unread (it contrasts with both taskbars,
-    /// 4.6:1 and 3.2:1); otherwise the glyph that contrasts with the taskbar
-    /// (the crossed pairs are 1.1:1, so the theme must decide).
+    /// The glyph that contrasts with the taskbar (the crossed pairs are
+    /// 1.1:1, so the theme must decide), with the unread spot while mail is
+    /// unread: neutral, no colour (docs/BRANDING.md).
     fn pick(light_taskbar: bool, unread: bool) -> TrayIcon {
         match (unread, light_taskbar) {
-            (true, _) => TrayIcon::Unread,
+            (true, true) => TrayIcon::UnreadLight,
+            (true, false) => TrayIcon::UnreadDark,
             (false, true) => TrayIcon::Light,
             (false, false) => TrayIcon::Dark,
         }
@@ -105,7 +108,8 @@ impl TrayIcon {
         match self {
             TrayIcon::Light => 101,
             TrayIcon::Dark => 102,
-            TrayIcon::Unread => 103,
+            TrayIcon::UnreadLight => 103,
+            TrayIcon::UnreadDark => 104,
         }
     }
 }
@@ -635,8 +639,8 @@ impl Shell {
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &d) };
     }
 
-    /// Says whether unread mail waits: the brand tray seal turns persimmon
-    /// while it does. Nothing changes in an exe without the brand icons.
+    /// Says whether unread mail waits: the brand tray seal shows the unread
+    /// spot while it does. Nothing changes in an exe without the brand icons.
     pub fn set_unread(&self, unread: bool) {
         let changed = INNER.with(|i| {
             i.borrow_mut().as_mut().map(|s| {
@@ -888,20 +892,31 @@ mod tests {
     }
 
     #[test]
-    fn tray_icon_follows_the_taskbar_and_turns_persimmon_while_unread() {
+    fn tray_icon_follows_the_taskbar_and_shows_the_spot_while_unread() {
         assert_eq!(TrayIcon::pick(true, false), TrayIcon::Light);
         assert_eq!(TrayIcon::pick(false, false), TrayIcon::Dark);
-        assert_eq!(TrayIcon::pick(true, true), TrayIcon::Unread);
-        assert_eq!(TrayIcon::pick(false, true), TrayIcon::Unread);
+        assert_eq!(TrayIcon::pick(true, true), TrayIcon::UnreadLight);
+        assert_eq!(TrayIcon::pick(false, true), TrayIcon::UnreadDark);
     }
 
     #[test]
     fn tray_icon_resource_ids_match_the_brand_rc() {
-        let ids = [TrayIcon::Light, TrayIcon::Dark, TrayIcon::Unread].map(TrayIcon::resource_id);
-        assert_eq!(ids, [101, 102, 103]);
+        let ids = [
+            TrayIcon::Light,
+            TrayIcon::Dark,
+            TrayIcon::UnreadLight,
+            TrayIcon::UnreadDark,
+        ]
+        .map(TrayIcon::resource_id);
+        assert_eq!(ids, [101, 102, 103, 104]);
         assert!(!ids.contains(&APP_ICON));
         let rc = include_str!("../assets/komorebi.rc");
-        for (id, file) in ids.iter().zip(["tray-light", "tray-dark", "tray-unread"]) {
+        for (id, file) in ids.iter().zip([
+            "tray-light",
+            "tray-dark",
+            "tray-unread-light",
+            "tray-unread-dark",
+        ]) {
             assert!(
                 rc.contains(&format!("{id} ICON \"tray/{file}.ico\"")),
                 "{id} {file}"
@@ -941,7 +956,7 @@ mod tests {
     #[test]
     fn this_test_exe_has_no_brand_tray_icons() {
         // The library's tests carry no resources 101 to
-        // 103: the tray keeps icon 1 and notifications keep Windows' image.
+        // 104: the tray keeps icon 1 and notifications keep Windows' image.
         assert!(!has_brand_tray_icons());
     }
 

@@ -1,6 +1,6 @@
 fn main() {
     // The icons, version information and manifest of komorebi.exe, from
-    // assets/komorebi.rc: the seal icon and the three tray icons
+    // assets/komorebi.rc: the seal icon and the four tray icons
     // (docs/BRANDING.md), and the manifest (assets/komorebi.manifest).
     // Linked into the binary only, not tests. The
     // manifest carries what GPUI's own did (PerMonitorV2 DPI awareness,
@@ -12,7 +12,8 @@ fn main() {
             "komorebi.ico",
             "tray/tray-light.ico",
             "tray/tray-dark.ico",
-            "tray/tray-unread.ico",
+            "tray/tray-unread-light.ico",
+            "tray/tray-unread-dark.ico",
             "komorebi.manifest",
         ] {
             println!("cargo:rerun-if-changed=../../assets/{file}");

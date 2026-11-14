@@ -5,6 +5,48 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
+## [1.0.1] - 2026-11-14
+
+Komorebi 1.0.1 makes adding an account easier and gives Komorebi a calmer,
+grey look. Your accounts, mail and settings carry over; nothing in your
+local data changes.
+
+### Added
+
+- **A list of 26 email providers** when you add an account, each with its
+  own icon. Type a name or a domain to find yours, or use the arrow keys and
+  Enter. Each one already knows its server settings and tells you how it
+  signs in, for example that Gmail, Yahoo, iCloud and AOL need an app
+  password, that GMX, WEB.DE, Zoho and Yandex need IMAP turned on first, and
+  that Proton Mail works through Proton Mail Bridge. The icons come with
+  Komorebi; nothing is downloaded to show them.
+- **Add provider**, at the end of the list, for any other mail server: it
+  opens the manual settings.
+- **Your own domain is recognised** when one of the listed providers hosts
+  its mail. Komorebi looks up which mail server receives the domain's mail
+  (its MX records) and, if it belongs to a listed provider, fills in that
+  provider's settings. For example, an address at your own domain hosted
+  at Postale.io is set up as a Postale.io account ("Your mail is hosted by
+  Postale.io"). The lookup can only pick a provider from the list; it never
+  fills in a server on its own.
+
+### Changed
+
+- **A neutral app icon**: the K seal is now grey with a white K, on the
+  taskbar, in Start and File Explorer, in notifications and in the setup
+  wizard. It is easy to see on both light and dark taskbars.
+- **A neutral tray icon**: while unread mail waits, the tray icon shows a
+  small dot in its own black or white instead of turning orange-red.
+- **No accent colour**: the seal on the welcome screen, at the end of adding
+  an account and in the "Sent" notice is drawn in the same ink as the text,
+  like the one in the title bar.
+
+### Known limitations
+
+- **Outlook.com and Microsoft 365 are listed but not supported yet.** They
+  show in the provider list but cannot be chosen: they need a Microsoft
+  sign-in, which Komorebi does not have yet.
+
 ## [1.0.0] - 2026-11-14
 
 Komorebi 1.0 is a new interface on the same mail engine. Your accounts,

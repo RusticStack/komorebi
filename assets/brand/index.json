@@ -1,7 +1,8 @@
 {
   "note": "Komorebi 1.0 brand assets for the GPUI app. Sources: assets/brand-src; generator: scripts/brand-assets.js; guide: docs/BRANDING.md.",
   "colours": {
-    "seal": "#B3503A",
+    "seal": "#6A6A66",
+    "seal_k": "#FFFFFF",
     "ink": "#171717",
     "ink_dark": "#F2F2F0",
     "fall": "#F1F1EE",
@@ -10,18 +11,18 @@
   "svg": {
     "mark": {
       "file": "mark.svg",
-      "fill": "seal",
-      "use": "The seal: welcome, About, the Sent notice. Persimmon, never in text."
+      "fill": "seal + seal_k",
+      "use": "The neutral seal as a picture (ink-3, white K), as the app icon. No accent colour; never in text."
     },
     "mark_mono": {
       "file": "mark-mono.svg",
       "fill": "currentColor",
-      "use": "The ink mark in the title bar (recoloured with the text colour)."
+      "use": "The ink mark (recoloured with the text colour): the title bar, welcome and the Sent notice."
     },
     "fall": {
       "file": "fall.svg",
       "fill": "currentColor",
-      "use": "The large light shape on the welcome screen only, in the fall tone; never persimmon or ink."
+      "use": "The large light shape on the welcome screen only, in the fall tone; never ink."
     },
     "wordmark": {
       "file": "wordmark.svg",
@@ -35,13 +36,13 @@
     },
     "logo": {
       "file": "logo.svg",
-      "fill": "seal + ink",
-      "use": "Seal and wordmark lockup on light grounds (About)."
+      "fill": "seal + seal_k + ink",
+      "use": "Neutral seal and wordmark lockup on light grounds."
     },
     "logo_dark": {
       "file": "logo-dark.svg",
-      "fill": "seal + ink_dark",
-      "use": "Seal and wordmark lockup on dark grounds (About)."
+      "fill": "seal + seal_k + ink_dark",
+      "use": "Neutral seal and wordmark lockup on dark grounds."
     }
   },
   "png": {

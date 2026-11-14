@@ -26,8 +26,8 @@ pub fn form_error(e: FormError) -> String {
 /// A rejected password in the account form, by provider (`preset`: the
 /// index of the one chosen; `None`: Other server, or an edited account): a
 /// preset gets the app-password advice only, and, for an address on
-/// another domain than its own, a pointer to the other preset; any other
-/// server also the username advice (`text::rejected`).
+/// another domain than its own, a pointer back to the provider list; any
+/// other server also the username advice (`text::rejected`).
 pub fn rejected(preset: Option<usize>, email: &str, host: &str, login: &str) -> String {
     let Some(index) = preset.filter(|&i| i < providers::PRESETS.len()) else {
         return say_rejected(host, login);
@@ -36,14 +36,10 @@ pub fn rejected(preset: Option<usize>, email: &str, host: &str, login: &str) -> 
     if providers::on_own_domain(index, email) {
         return advice;
     }
-    match providers::PRESETS
-        .iter()
-        .enumerate()
-        .find(|(i, _)| *i != index)
-    {
-        Some((_, other)) => format!("{advice} {}", say_other_preset(other.name)),
-        None => advice,
-    }
+    format!(
+        "{advice} {}",
+        say_check_provider(providers::PRESETS[index].name)
+    )
 }
 
 // The Slint app's `Tr` functions, word for word (generated from
@@ -414,6 +410,22 @@ pub fn find_srv() -> String {
     tr!("Found in your domain's DNS records.")
 }
 
+/// The domain's MX records name a built-in provider.
+pub fn find_hosted(provider: &str) -> String {
+    tr!(
+        "Your mail is hosted by {0}. Komorebi has its settings built in.",
+        provider
+    )
+}
+
+/// A provider Komorebi cannot sign in to yet (Outlook.com, Microsoft 365).
+pub fn find_unsupported(provider: &str) -> String {
+    tr!(
+        "{0} needs Microsoft sign-in, which Komorebi doesn't have yet.",
+        provider
+    )
+}
+
 pub fn find_autoconfig() -> String {
     tr!("Found by your provider's autoconfig.")
 }
@@ -465,8 +477,11 @@ pub fn say_rejected_preset(host: &str, login: &str) -> String {
     )
 }
 
-pub fn say_other_preset(provider: &str) -> String {
-    tr!("Is your mail at {0}? Change Provider.", provider)
+pub fn say_check_provider(provider: &str) -> String {
+    tr!(
+        "Is your mail really at {0}? Go back and choose another provider.",
+        provider
+    )
 }
 
 // ---- Words of the page chrome (the Slint app's `ui/app.slint`).

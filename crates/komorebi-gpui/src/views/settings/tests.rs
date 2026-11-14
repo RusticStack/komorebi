@@ -669,6 +669,7 @@ mod port {
             },
             sources: vec![Source::Autoconfig],
             refused: Vec::new(),
+            preset: None,
         }
     }
 
@@ -928,7 +929,7 @@ mod port {
     /// Ports the rest of `a_rejected_password_sets_the_username_path_by_provider`:
     /// the rejection's sentence by provider (`text::rejected`): another
     /// server's ends with the username advice; a preset on a custom domain
-    /// gives the app password advice, then the other preset.
+    /// gives the app password advice, then a pointer back to the list.
     #[test]
     fn a_rejected_password_is_worded_by_provider() {
         komorebi_i18n::with_lang(Lang::En, || {
@@ -936,11 +937,17 @@ mod port {
             let login = "ana@example.net";
             let other = text::rejected(None, login, host, login);
             assert!(other.ends_with("set the username."), "{other}");
-            let preset = text::rejected(Some(0), login, host, login);
+            let preset = text::rejected(
+                komorebi::providers::index_of("purelymail"),
+                login,
+                host,
+                login,
+            );
             assert_eq!(
                 preset,
                 "mail.example.net rejected the password for ana@example.net. If sign-in uses two steps, \
-                 create an app password. Is your mail at Postale.io? Change Provider."
+                 create an app password. Is your mail really at Purelymail? Go back and choose another \
+                 provider."
             );
         });
     }

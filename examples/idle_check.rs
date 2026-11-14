@@ -13,7 +13,7 @@
 use anyhow::{Context, Result, bail};
 use komorebi::mail::imap::Imap;
 use komorebi::mail::smtp;
-use komorebi::providers::PRESETS;
+use komorebi::providers::by_id;
 use std::time::{Duration, Instant};
 
 fn main() -> Result<()> {
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("{k} missing"))
     };
     let (email, password) = (var("EMAIL")?, var("PASSWORD_EMAIL")?);
-    let server = PRESETS[1].imap_server();
+    let server = by_id("postale").expect("Postale.io").imap_server();
 
     let mut writer = Imap::connect(&server, None, &email, &password)?;
     let uidvalidity = writer.select("INBOX")?.uidvalidity;
@@ -85,7 +85,12 @@ fn main() -> Result<()> {
             ..Default::default()
         })?;
         let t_send = t0.elapsed().as_secs_f64();
-        smtp::send(&PRESETS[1].smtp_server(), &email, &password, &msg)?;
+        smtp::send(
+            &by_id("postale").expect("Postale.io").smtp_server(),
+            &email,
+            &password,
+            &msg,
+        )?;
         println!(
             "sent at {t_send:.1} s, smtp done at {:.1} s",
             t0.elapsed().as_secs_f64()

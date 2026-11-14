@@ -92,7 +92,7 @@ fn app_icon_has_every_size_with_a_png_256() {
 
 #[test]
 fn tray_icons_have_the_small_icon_sizes() {
-    for state in ["light", "dark", "unread"] {
+    for state in ["light", "dark", "unread-light", "unread-dark"] {
         let path = repo().join(format!("assets/tray/tray-{state}.ico"));
         let got = entries(&path);
         let want: Vec<Entry> = [16, 20, 24, 32]

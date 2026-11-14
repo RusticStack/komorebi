@@ -1,7 +1,7 @@
 # Compiles the Windows installer around a built komorebi.exe and prints the
 # installer's SHA-256.
 #
-#   pwsh scripts/build-installer.ps1 [-Exe target\release\komorebi.exe] [-Version 1.0.0] [-OutDir dist]
+#   pwsh scripts/build-installer.ps1 [-Exe target\release\komorebi.exe] [-Version 1.0.1] [-OutDir dist]
 #
 # Needs Inno Setup 6.3 or later (ISCC.exe on PATH or in its usual folders;
 # winget install JRSoftware.InnoSetup). The version defaults to the one

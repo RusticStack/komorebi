@@ -1,7 +1,7 @@
 //! The Sent notice (BRAND.md "Sending"; mockup `.toast`): an ink pill with
-//! the persimmon seal and "Sent to Marta Silva", at the bottom centre of
-//! the reader, for 2 s. One of the three places the app shows its colour
-//! (with welcome and About).
+//! the seal and "Sent to Marta Silva", at the bottom centre of the reader,
+//! for 2 s. The seal is neutral like the rest of the app (docs/BRANDING.md):
+//! drawn in the on-ink colour, as the text is.
 //!
 //! Cost (IMPLEMENTATION.md section 5): fade in over 250 ms, hold with no
 //! frames (a timer, not an animation), fade out over 250 ms: about 30
@@ -126,7 +126,7 @@ impl Render for Toast {
                     .path(Icon::Seal.path())
                     .size(px(layout::TOAST_SEAL))
                     .flex_none()
-                    .text_color(c.seal),
+                    .text_color(c.on_ink),
             )
             .child(message)
             .test_support();

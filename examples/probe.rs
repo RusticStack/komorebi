@@ -22,7 +22,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use komorebi::db::{Db, Folder, Fp, NewAccount};
 use komorebi::mail::imap::{Imap, WaitOutcome};
 use komorebi::mail::{self, mime, smtp};
-use komorebi::providers::{PRESETS, Preset, Security, Server};
+use komorebi::providers::{Preset, Security, Server, by_id};
 use komorebi::role::Role;
 use native_tls::TlsConnector;
 use std::collections::HashMap;
@@ -79,7 +79,7 @@ fn run() -> Result<()> {
             .get("PASSWORD_EMAIL")
             .context("PASSWORD_EMAIL missing")?
             .clone(),
-        preset: &PRESETS[1], // Postale.io
+        preset: by_id("postale").expect("the Postale.io preset"),
         db_path: db_path.clone(),
     };
 

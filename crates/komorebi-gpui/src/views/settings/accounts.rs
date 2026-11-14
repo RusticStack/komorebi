@@ -284,7 +284,9 @@ impl SettingsView {
         let empty = cards.is_empty();
         let add = Card::new("settings-add-account", tr!("Add account"))
             .icon(Icon::Add)
-            .note(tr!("Purelymail, Postale.io or any IMAP and SMTP server."))
+            .note(tr!(
+                "Gmail, iCloud, Fastmail, Postale.io and more, or any IMAP and SMTP server."
+            ))
             .control(
                 Button::new("settings-add-account-button")
                     .label(if empty {

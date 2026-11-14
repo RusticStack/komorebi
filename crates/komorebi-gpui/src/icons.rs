@@ -129,10 +129,14 @@ pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        match Icon::ALL.iter().find(|i| i.path() == path) {
-            Some(icon) => Ok(Some(Cow::Borrowed(icon.bytes()))),
-            None => gpui_kit::assets::Assets.load(path),
+        if let Some(icon) = Icon::ALL.iter().find(|i| i.path() == path) {
+            return Ok(Some(Cow::Borrowed(icon.bytes())));
         }
+        // The providers' own icons (the setup's provider list), compiled in.
+        if let Some(bytes) = crate::views::onboarding::providers::icon_bytes(path) {
+            return Ok(Some(Cow::Borrowed(bytes)));
+        }
+        gpui_kit::assets::Assets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
@@ -142,6 +146,9 @@ impl AssetSource for AppAssets {
                 .iter()
                 .filter(|i| i.path().starts_with(path))
                 .map(|i| SharedString::from(i.path())),
+        );
+        list.extend(
+            crate::views::onboarding::providers::icon_paths().filter(|p| p.starts_with(path)),
         );
         Ok(list)
     }
@@ -189,6 +196,12 @@ mod tests {
             .expect("present");
         assert!(kit.starts_with(b"<svg"));
         let own = AppAssets.list("komorebi/").expect("list");
-        assert_eq!(own.len(), Icon::ALL.len());
+        let providers = crate::views::onboarding::providers::icon_paths().count();
+        assert_eq!(own.len(), Icon::ALL.len() + providers);
+        let gmail = AppAssets
+            .load("komorebi/providers/gmail@2x.png")
+            .expect("load")
+            .expect("present");
+        assert!(gmail.starts_with(b"\x89PNG"));
     }
 }

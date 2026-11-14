@@ -9,11 +9,13 @@
 1 ICON "komorebi.ico"
 
 // The notification area icons (src/win_shell.rs, TRAY_ICON_*): the seal in
-// ink for a light taskbar, white for a dark one, persimmon while unread mail
-// waits. Their presence is what switches the tray to the brand icons.
+// ink for a light taskbar, white for a dark one, and the same with the unread
+// spot while unread mail waits (neutral; docs/BRANDING.md). Their presence is
+// what switches the tray to the brand icons.
 101 ICON "tray/tray-light.ico"
 102 ICON "tray/tray-dark.ico"
-103 ICON "tray/tray-unread.ico"
+103 ICON "tray/tray-unread-light.ico"
+104 ICON "tray/tray-unread-dark.ico"
 
 // RT_MANIFEST (24), id 1: the process manifest.
 1 24 "komorebi.manifest"

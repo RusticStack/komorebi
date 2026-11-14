@@ -74,7 +74,7 @@ pub fn assign_colors(c: &mut ThemeColor, t: &Tokens) {
         c.secondary_active,
         c.secondary_foreground,
     ) = (wash, wash, wash, ink);
-    // No status hues: errors are words and an icon (BRAND.md persimmon rule).
+    // No status hues: errors are words and an icon (no accent colour; docs/BRANDING.md).
     for (base, h, a, fg) in [
         (
             &mut c.danger,

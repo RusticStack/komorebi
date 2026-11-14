@@ -317,13 +317,21 @@ Komorebi connects only to the servers you configure:
   an account's page; never while you type or when a field loses focus,
   and never under `KOMOREBI_OFFLINE`: your
   email domain (the part after the @, never the address or the password) goes
-  to your system's DNS resolver as SRV queries (`_imaps._tcp`,
-  `_submissions._tcp`, and their STARTTLS forms), in the clear unless your
-  system uses DNS over HTTPS, so your network and resolver can see it; and,
-  if those find nothing, over HTTPS to `autoconfig.<your domain>` and to
-  `<your domain>` (`/.well-known/autoconfig/mail/config-v1.1.xml`), your
-  domain's own web servers, which see your IP address and the domain. At most
-  four DNS queries and two web requests, never repeated by itself. Nothing
+  to your system's DNS resolver as one MX query (which mail servers take
+  your domain's mail); when none of them belongs to a built-in provider,
+  the addresses of the first two and their reverse (PTR) names are asked
+  of the same resolver (at most four reverse queries each); then SRV
+  queries (`_imaps._tcp`, `_submissions._tcp`, and their STARTTLS forms).
+  All of these are in the clear unless your system uses DNS over HTTPS, so
+  your network and resolver can see them; nothing is sent to the mail
+  servers the MX records name. If DNS finds nothing, the domain goes over
+  HTTPS to `autoconfig.<your domain>` and to `<your domain>`
+  (`/.well-known/autoconfig/mail/config-v1.1.xml`), your domain's own web
+  servers, which see your IP address and the domain. An MX or PTR answer
+  can only choose one of the built-in providers (whose servers are compiled
+  into Komorebi); a name in the answer never becomes a server in the form.
+  At most one MX query, two address lookups, eight reverse queries, four SRV
+  queries and two web requests, never repeated by itself. Nothing
   goes to Mozilla or any other third party. The answer only fills the form's
   empty server fields: a server on another domain than your address is shown
   but not filled in, and nothing is saved or signed in to until you press Add

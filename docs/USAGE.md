@@ -12,14 +12,20 @@ above them (Settings → Accounts → Add account opens the same steps):
 
 1. **Your email.** Continue checks the address. For purelymail.com and
    postale.io the settings are built in; for any other domain Komorebi
-   looks them up from your domain (DNS, then its autoconfig page; only the
-   domain name is sent, never the password), and only because you pressed
-   Continue. Offline, it goes straight to the server settings.
+   looks them up from your domain (DNS: its MX records, which name the
+   provider when a listed one hosts your domain, then SRV records, then its
+   autoconfig page; only the domain name is sent, never the password), and
+   only because you pressed Continue. Offline, the provider list shows
+   at once.
 2. **Sign in.** What was found shows above the Password box (an app
    password if your provider uses two-step sign-in; it is saved in
    Windows Credential Manager, never in Komorebi's files). If nothing was
-   found, pick Purelymail, Postale.io or Other server; "Change" opens the
-   server settings (hosts, ports, encryption, username, and "This server
+   found, choose your provider from the list: type to search it by name or
+   domain, Up and Down move through it, Enter picks; each provider says
+   how it signs in (an app password, turning IMAP on first, Proton Mail
+   Bridge). Outlook.com and Microsoft 365 are listed but can't be picked yet
+   (they need Microsoft sign-in). "Change" opens the list again. **Add
+   provider** opens the server settings (hosts, ports, encryption, username, and "This server
    does not need a sign-in for sending" for a relay on your own network:
    no password goes to it, and TLS or STARTTLS is still required). Sign in checks
    each step (connecting securely, checking your password, getting ready
@@ -64,8 +70,8 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-1.0.0-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-1.0.0-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-1.0.1-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-1.0.1-setup.exe .\SHA256SUMS
 ```
 
 How releases are made, signed and published is in

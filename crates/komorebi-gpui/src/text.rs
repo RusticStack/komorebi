@@ -334,39 +334,40 @@ mod tests {
                  app password. If the login isn't your email address, set the username."
             );
             // A preset on its own domain: the app-password advice only.
-            let own = settings_text::rejected(Some(0), "ana@purelymail.com", host, login);
+            let purely = komorebi::providers::index_of("purelymail");
+            let postale = komorebi::providers::index_of("postale");
+            let own = settings_text::rejected(purely, "ana@purelymail.com", host, login);
             assert_eq!(
                 own,
                 "mail.example.com rejected the password for ana. If sign-in uses two steps, create an \
                  app password."
             );
-            // On a custom domain: maybe the other preset hosts it.
-            let custom = settings_text::rejected(Some(0), "ana@example.com", host, login);
+            // On a custom domain: maybe another provider hosts it.
+            let custom = settings_text::rejected(purely, "ana@example.com", host, login);
             assert!(
-                custom.ends_with(" Is your mail at Postale.io? Change Provider."),
-                "{custom}"
-            );
-            let custom = settings_text::rejected(Some(1), "ana@example.com", host, login);
-            assert!(
-                custom.ends_with(" Is your mail at Purelymail? Change Provider."),
+                custom.ends_with(
+                    " Is your mail really at Purelymail? Go back and choose another provider."
+                ),
                 "{custom}"
             );
             // A preset index that is no preset reads as Other server.
             assert_eq!(
-                settings_text::rejected(Some(99), "ana@example.com", host, login),
+                settings_text::rejected(Some(999), "ana@example.com", host, login),
                 other
             );
-        });
-        // Portuguese, whole sentences.
-        with_lang(Lang::PtPt, || {
-            let pt = settings_text::rejected(Some(1), "ana@example.com", "mail.example.com", "ana");
-            assert!(
-                pt.ends_with("O seu correio está na Purelymail? Altere o Fornecedor."),
-                "{pt}"
-            );
+            // Portuguese, whole sentences.
+            with_lang(Lang::PtPt, || {
+                let pt =
+                    settings_text::rejected(postale, "ana@example.com", "mail.example.com", "ana");
+                assert!(
+                    pt.ends_with(
+                        "O seu correio está mesmo em Postale.io? Volte atrás e escolha outro fornecedor."
+                    ),
+                    "{pt}"
+                );
+            });
         });
     }
-
     fn folder(role: Role, display: &str) -> Folder {
         Folder {
             id: 1,

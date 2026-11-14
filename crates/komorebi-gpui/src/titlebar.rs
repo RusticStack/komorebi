@@ -259,8 +259,8 @@ impl RenderOnce for TitleBar {
                     .pl(px(space::SP_4))
                     .typo(&t.text.caption)
                     .window_control_area(WindowControlArea::Drag)
-                    // The ink mark: the window keeps its colour for the seal
-                    // moments (BRAND.md persimmon rule).
+                    // The ink mark, as on the welcome screen (Komorebi has
+                    // no accent colour; docs/BRANDING.md).
                     .child(
                         svg()
                             .path(Icon::Seal.path())

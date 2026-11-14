@@ -59,6 +59,12 @@ For layout changes, verify the window at desktop and narrow widths (the compact 
 
 ## Known gaps
 
+- Provider presets live in `src/providers.rs` as data: domains, MX host
+  suffixes, servers, how each signs in, and the official page each fact
+  comes from in a comment. A new preset needs that page, an icon in
+  `assets/providers` (32 px and 64 px, see its README) and a test in the
+  same file; MX suffixes only select a preset (`mail::discover`), so keep
+  them to hosts the provider documents.
 - Not yet validated against real Purelymail/Postale.io accounts; the onboarding flow (`crates/komorebi-gpui/src/views/onboarding`) is checked only offline, on the local fakes and in snapshots.
 - Not yet validated against a real self-hosted server (Dovecot, Stalwart, Cyrus, Proton Bridge, ...): manual accounts, certificate pinning, "Find settings" and the capability fallbacks are tested only on the local fakes. A native-tls submission client is deferred (`TODO.md`).
 - The local mail cache is plaintext unless encryption is turned on in Settings > Privacy; attachment copies stay plaintext.

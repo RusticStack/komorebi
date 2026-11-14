@@ -78,6 +78,12 @@ pub const FLOW_PAD: f32 = 32.;
 /// The step indicator's dots and the gap between them.
 pub const STEP_DOT: f32 = 8.;
 pub const STEP_GAP: f32 = 8.;
+/// The provider list: a provider's icon (the bundled 32 px PNG, 64 at 2x),
+/// a row (icon, name and note), and the list's height before it scrolls
+/// (five and a half rows, so the cut row says there is more).
+pub const PROVIDER_ICON: f32 = 32.;
+pub const PROVIDER_ROW_H: f32 = 52.;
+pub const PROVIDER_LIST_H: f32 = 296.;
 
 /// The K of the seal (komorebi-brand `logo/mark-mono.svg`, its 256 unit
 /// box), drawn alone in the fall colour: the stem, the leaf and the leg.

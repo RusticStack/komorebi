@@ -13,10 +13,20 @@ Features in more detail:
   technical detail after an error sentence stay as they came. The choice
   is the only thing stored; nothing is looked up or sent. To add a
   language, see "Translations" below.
-- **Providers:** built-in presets for [Purelymail](https://purelymail.com) and
-  [Postale.io](https://postale.io), plus manual settings for any IMAP/SMTP
-  server (TLS or STARTTLS only). What is known about each, and what is
-  not (nothing below is assumed):
+- **Providers:** a searchable list of built-in providers (Purelymail,
+  Postale.io, Gmail, Google Workspace, iCloud, Yahoo, AOL, Fastmail,
+  Proton Mail through Bridge, Zoho, GMX, WEB.DE, mail.com, Posteo,
+  mailbox.org, Infomaniak, Yandex, Orange, Free, Libero, Seznam; each with
+  its official settings page cited in `src/providers.rs` and its icon
+  bundled in `assets/providers`, never fetched), each with a note on how
+  it signs in (app password, IMAP to turn on first, a paid plan, Bridge).
+  Outlook.com and Microsoft 365 are listed but disabled until Komorebi has
+  Microsoft sign-in. A custom domain hosted by a listed provider is
+  recognised from its MX records (only a listed provider can be chosen
+  this way; the MX host itself never fills a field). "Add provider" gives
+  manual settings for any IMAP/SMTP server (TLS or STARTTLS only). What
+  is known about Purelymail and Postale.io, the providers Komorebi was
+  built and tested on, and what is not (nothing below is assumed):
   - *Sent copy:* SMTP never copies to Sent by itself, so "save a copy to
     Sent" is on for new accounts. Postale.io is known from live tests not to
     save sent mail on the server (on). Purelymail has no documentation
@@ -72,7 +82,7 @@ Features in more detail:
 - **Your own server (Other server):** adding an account asks for your
   email first. Continue (for a domain without built-in settings) or "Find
   settings" in manual setup (only when pressed) looks your email domain
-  up in DNS (SRV records) and at its own autoconfig page over HTTPS and
+  up in DNS (MX records, mapped to a listed provider only; then SRV records) and at its own autoconfig page over HTTPS and
   fills the empty server fields, never one on another domain and never
   with the password; the "Server settings" expander opens the fields by
   hand (it opens by itself after a lookup, or when a check fails). Each

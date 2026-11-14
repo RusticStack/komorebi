@@ -22,7 +22,8 @@ then existed.
 - This release is **Komorebi 1.0**, on GPUI with GPUI Kit, built on the vendored stack as Skua is.
 - **Brand:** the hanko K seal in persimmon #B3503A is the only square and the only colour, never
   in text; the dapple layout (pills, paper panes with 8 px gaps, solid sender spots for unread);
-  Segoe UI Variable text; tagline "Read. Reply. Rest.".
+  Segoe UI Variable text; tagline "Read. Reply. Rest.". (After 1.0.0 the seal became neutral
+  everywhere and Komorebi has no accent colour: [BRANDING.md](BRANDING.md) "Neutral brand".)
 - **High contrast is not in 1.0.** No work for it, but the theme token layer (phase 1) is built
   so a high contrast palette is one more branch of the palette function, with no refactor.
 - **Budgets:** launch under 200 ms and cached list under 600 ms stay; the exe ceiling is

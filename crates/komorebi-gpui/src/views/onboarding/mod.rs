@@ -7,11 +7,12 @@
 //! ([`OnboardingView::adding`]).
 //!
 //! The lookup runs only on Continue, for a domain that is not a preset's,
-//! and never sends the password; offline (`KOMOREBI_OFFLINE`) the flow goes
-//! straight to manual setup. Nothing here talks to a server but the check
+//! and never sends the password; offline (`KOMOREBI_OFFLINE`) the provider
+//! list shows at once (`providers`). Nothing here talks to a server but the check
 //! and the lookup, both through [`services`] so tests fake them.
 
 pub mod flow;
+pub mod providers;
 
 #[cfg(test)]
 mod tests;
@@ -31,17 +32,18 @@ use komorebi::find::{Fields, merge};
 use komorebi::i18n::{LangSetting, resolve_here};
 use komorebi::mail::discover::{self, Outcome};
 use komorebi::mail::pin::Kind;
-use komorebi::providers::{self, PRESETS};
+use komorebi::providers::{self as presets, PRESETS, Security, SignIn};
 use komorebi_i18n::tr;
 
 use self::flow::{Act, Chip};
+use self::providers::{PickerEvent, ProviderPicker};
 use crate::icons::Icon;
 use crate::theme::settings::{self as geo, mark};
 use crate::theme::{ActiveTokens as _, TextStyled as _, layout, radius, space};
 use crate::views::Db;
 use crate::views::settings::about::Page;
 use crate::views::settings::account;
-use crate::views::settings::card::{RadioList, labelled};
+use crate::views::settings::card::labelled;
 use crate::views::settings::check::{self, CheckFailure, CheckState, Kind3, Request, StepState};
 use crate::views::settings::form::{AccountForm, Provider};
 use crate::views::settings::general::{LANGUAGES, language_label};
@@ -136,6 +138,11 @@ pub struct OnboardingView {
     /// lookup).
     provider: Option<usize>,
     manual: bool,
+    /// The provider list shows (no provider yet, or Change pressed).
+    choosing: bool,
+    /// Manual setup filled in for Proton Mail Bridge.
+    bridge: bool,
+    picker: Entity<ProviderPicker>,
     offline: bool,
     servers: Entity<ServerForm>,
     password: Entity<InputState>,
@@ -214,7 +221,19 @@ impl OnboardingView {
             cx,
         );
         let servers = cx.new(|cx| ServerForm::new(window, cx).flow());
+        let picker = cx.new(|cx| ProviderPicker::new(window, cx));
         let subscriptions = vec![
+            cx.subscribe_in(
+                &picker,
+                window,
+                |this, _, e: &PickerEvent, window, cx| match *e {
+                    PickerEvent::Picked(i) => this.pick_provider(i, window, cx),
+                    PickerEvent::AddProvider => this.go_manual(window, cx),
+                    PickerEvent::Back => {
+                        this.back(window, cx);
+                    }
+                },
+            ),
             cx.subscribe_in(
                 &email,
                 window,
@@ -272,6 +291,9 @@ impl OnboardingView {
             chip: Chip::None,
             provider: None,
             manual: false,
+            choosing: false,
+            bridge: false,
+            picker,
             offline: false,
             servers,
             password,
@@ -319,6 +341,21 @@ impl OnboardingView {
 
     pub fn manual(&self) -> bool {
         self.manual
+    }
+
+    /// The provider list shows.
+    pub fn choosing(&self) -> bool {
+        self.choosing && !self.manual
+    }
+
+    /// Manual setup was filled in for Proton Mail Bridge.
+    pub fn bridge(&self) -> bool {
+        self.bridge
+    }
+
+    /// The provider list.
+    pub fn picker(&self) -> &Entity<ProviderPicker> {
+        &self.picker
     }
 
     /// The preset picked on the provider list (an index into `PRESETS`).
@@ -435,6 +472,8 @@ impl OnboardingView {
                         let host = s.imap_host.clone();
                         host.update(cx, |h, cx| h.focus(window, cx));
                     });
+                } else if self.choosing {
+                    self.picker.update(cx, |p, cx| p.focus(window, cx));
                 } else {
                     self.password.update(cx, |s, cx| s.focus(window, cx));
                 }
@@ -465,9 +504,33 @@ impl OnboardingView {
         }
         self.pending = false;
         match self.step {
-            Step::SignIn if self.manual && self.chip != Chip::None => {
+            // From manual setup back to the provider (or the list).
+            Step::SignIn
+                if self.manual && (self.chip != Chip::None || self.offline || self.bridge) =>
+            {
                 self.manual = false;
+                self.bridge = false;
                 self.failure = None;
+                self.provider = match self.chip {
+                    Chip::Preset(i) | Chip::Hosted(i)
+                        if PRESETS.get(i).is_some_and(|p| p.is_fixed()) =>
+                    {
+                        Some(i)
+                    }
+                    _ => None,
+                };
+                self.choosing = self.provider.is_none() && !matches!(self.chip, Chip::Found(_));
+                self.focus_first(window, cx);
+                cx.notify();
+                true
+            }
+            // The list opened over a provider: closed.
+            Step::SignIn
+                if self.choosing
+                    && (self.provider.is_some() || matches!(self.chip, Chip::Found(_))) =>
+            {
+                self.choosing = false;
+                self.focus_first(window, cx);
                 cx.notify();
                 true
             }
@@ -517,12 +580,81 @@ impl OnboardingView {
         self.pins = FormPins::default();
         self.chip = Chip::None;
         self.offline = false;
+        self.choosing = false;
+        self.bridge = false;
         self.missing = Missing::default();
+    }
+
+    /// A provider picked on the list.
+    pub fn pick_provider(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.take_preset(index, false, window, cx);
+        self.focus_first(window, cx);
+        cx.notify();
+    }
+
+    /// Use preset `index` (by the address's domain, its MX records when
+    /// `hosted`, or the list): a fixed one is the provider; Proton Mail
+    /// Bridge fills manual setup with its local servers; one Komorebi
+    /// cannot sign in to yet leaves the list open with why.
+    fn take_preset(
+        &mut self,
+        index: usize,
+        hosted: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(p) = PRESETS.get(index) else {
+            return;
+        };
+        self.missing.provider = false;
+        self.failure = None;
+        match p.sign_in {
+            SignIn::NotSupported => {
+                self.provider = None;
+                self.manual = false;
+                self.bridge = false;
+                self.chip = Chip::Unsupported(index);
+                self.choosing = true;
+            }
+            SignIn::Bridge => {
+                let fields = Fields {
+                    imap_host: p.imap.0.into(),
+                    imap_port: p.imap.1.to_string(),
+                    imap_starttls: p.imap.2 == Security::StartTls,
+                    smtp_host: p.smtp.0.into(),
+                    smtp_port: p.smtp.1.to_string(),
+                    smtp_starttls: p.smtp.2 == Security::StartTls,
+                    ..Fields::default()
+                };
+                self.servers.update(cx, |s, cx| s.set(&fields, window, cx));
+                if matches!(
+                    self.chip,
+                    Chip::Preset(_) | Chip::Hosted(_) | Chip::Found(_)
+                ) {
+                    self.chip = Chip::None;
+                }
+                self.provider = None;
+                self.manual = true;
+                self.bridge = true;
+                self.choosing = false;
+            }
+            _ => {
+                self.provider = Some(index);
+                self.manual = false;
+                self.bridge = false;
+                self.chip = if hosted {
+                    Chip::Hosted(index)
+                } else {
+                    Chip::Preset(index)
+                };
+                self.choosing = false;
+            }
+        }
     }
 
     /// Continue on the email step: refuse an address that is not one or is
     /// already here; a preset's domain has its settings (no lookup);
-    /// offline, manual setup with its note; otherwise the lookup starts
+    /// offline, the provider list with its note; otherwise the lookup starts
     /// (only because of this press) and Sign in shows at once.
     pub fn continue_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let typed = self.email.read(cx).value().to_string();
@@ -546,16 +678,16 @@ impl OnboardingView {
         self.email_problem = None;
         self.reset();
         self.domain = discover::parse_email(&address).map_or_else(String::new, |(_, d)| d);
+        self.picker.update(cx, |p, cx| p.reset(window, cx));
         let svc = services::get(cx);
-        if let Some(preset) = providers::guess(&address) {
-            self.provider = Some(preset);
-            self.manual = false;
-            self.chip = Chip::Preset(preset);
+        if let Some(preset) = presets::guess(&address) {
+            self.take_preset(preset, false, window, cx);
         } else if svc.offline {
             self.provider = None;
-            self.manual = true;
+            self.manual = false;
             self.offline = true;
             self.chip = Chip::None;
+            self.choosing = true;
         } else {
             self.provider = None;
             self.manual = false;
@@ -596,7 +728,13 @@ impl OnboardingView {
     ) {
         self.find = None;
         if self.chip == Chip::Finding {
-            self.chip = flow::chip_of(&out);
+            if let Some(i) = out.preset {
+                let hosted = out.sources.contains(&discover::Source::Mx);
+                self.take_preset(i, hosted, window, cx);
+            } else {
+                self.chip = flow::chip_of(&out);
+                self.choosing = self.chip == Chip::NotFound;
+            }
         }
         let address = discover::parse_email(email)
             .map(|(l, d)| format!("{l}@{d}"))
@@ -616,16 +754,17 @@ impl OnboardingView {
         self.find_note = flow::note(&out, merged.kept);
         if self.pending {
             self.pending = false;
-            if matches!(self.chip, Chip::Found(_)) {
+            if matches!(self.chip, Chip::Found(_)) || self.provider.is_some() {
                 self.submit(window, cx);
             }
         }
         cx.notify();
     }
 
-    /// Set up manually (the chip's Change, a failure's next step).
+    /// Set up manually (the list's Add provider, a failure's next step).
     pub fn go_manual(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.manual = true;
+        self.bridge = false;
         self.provider = None;
         self.missing.provider = false;
         self.failure = None;
@@ -704,7 +843,9 @@ impl OnboardingView {
         let form = self.form(cx);
         self.missing = Missing {
             password: form.password.is_empty(),
-            provider: !self.manual && self.chip == Chip::NotFound && self.provider.is_none(),
+            provider: !self.manual
+                && self.provider.is_none()
+                && !matches!(self.chip, Chip::Found(_) | Chip::Finding),
             imap: self.manual && form.imap_host.trim().is_empty(),
             smtp: self.manual && form.smtp_host.trim().is_empty(),
         };
@@ -1044,7 +1185,7 @@ impl OnboardingView {
                             .path(Icon::Seal.path())
                             .size(px(geo::WELCOME_SEAL))
                             .mb(px(geo::WELCOME_SEAL_GAP))
-                            .text_color(c.seal),
+                            .text_color(c.ink),
                     )
                     .child(
                         div()
@@ -1136,7 +1277,7 @@ impl OnboardingView {
             (
                 Icon::Mail,
                 tr!("Works with your provider"),
-                tr!("Purelymail, Postale.io or your own server."),
+                tr!("Gmail, iCloud, Fastmail, Postale.io and more, or your own server."),
             ),
         ];
         div()
@@ -1290,21 +1431,36 @@ impl OnboardingView {
                 tr!("Looking up settings for {0}\u{a0}…", self.domain),
                 String::new(),
             ),
-            Chip::Preset(i) => (
-                PRESETS.get(*i).map_or("", |p| p.name).to_string(),
-                tr!("Settings ready"),
-            ),
+            Chip::Preset(i) => PRESETS.get(*i).map_or_else(Default::default, |p| {
+                (
+                    p.name.to_string(),
+                    tr!("Settings ready · {0}", providers::note(p.sign_in)),
+                )
+            }),
+            Chip::Hosted(i) => PRESETS.get(*i).map_or_else(Default::default, |p| {
+                (
+                    tr!("Your mail is hosted by {0}", p.name),
+                    tr!("Settings ready · {0}", providers::note(p.sign_in)),
+                )
+            }),
+            Chip::Unsupported(i) => PRESETS.get(*i).map_or_else(Default::default, |p| {
+                (
+                    tr!("{0} isn't supported yet", p.name),
+                    tr!("It needs Microsoft sign-in, which Komorebi doesn't have yet. Choose another provider below."),
+                )
+            }),
             Chip::Found(host) => (tr!("Settings found"), tr!("{0} · encrypted", host)),
             Chip::NotFound => (
                 tr!("We couldn't find settings for {0}", self.domain),
-                tr!("Choose your provider or set it up yourself."),
+                tr!("Choose your provider below, or add it yourself."),
             ),
             Chip::None => (String::new(), String::new()),
         };
-        let can_change = self.chip != Chip::Finding && !self.busy();
+        // Change opens the list (it is open already after a failed lookup).
+        let can_change = self.chip != Chip::Finding && !self.busy() && !self.choosing;
         let icon = match self.chip {
             Chip::Finding => None,
-            Chip::NotFound => Some(Icon::Info),
+            Chip::NotFound | Chip::Unsupported(_) => Some(Icon::Info),
             _ => Some(Icon::Checkmark),
         };
         Some(
@@ -1353,53 +1509,31 @@ impl OnboardingView {
                     el.child(
                         Button::new("onboarding-chip-change")
                             .label(tr!("change the servers" => "Change"))
+                            .name(tr!("Change provider"))
                             .variant(Variant::OnInset)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.go_manual(window, cx)),
-                            ),
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.choosing = true;
+                                this.picker.update(cx, |p, cx| p.reset(window, cx));
+                                this.focus_first(window, cx);
+                                cx.notify();
+                            })),
                     )
                 })
                 .test_support(),
         )
     }
 
+    /// The provider list (`providers::ProviderPicker`): after a failed
+    /// lookup, offline, for a provider not supported yet, or on Change.
     fn render_providers(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        if self.manual || self.chip != Chip::NotFound {
+        if self.manual || !self.choosing {
             return None;
         }
-        let value = self.provider.map_or_else(String::new, |i| i.to_string());
-        let mut choices: Vec<(String, String, String)> = PRESETS
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (i.to_string(), p.name.to_string(), flow::preset_note(p.name)))
-            .collect();
-        choices.push((
-            "other".into(),
-            tr!("Other server"),
-            tr!("Any other IMAP and SMTP server"),
-        ));
         let note = self
             .missing
             .provider
             .then(|| SharedString::from(tr!("Choose your provider.")));
-        Some(labelled(
-            tr!("Provider"),
-            RadioList::new("onboarding-provider", tr!("Provider"), value)
-                .choices(choices)
-                .navigates("other")
-                .on_pick(cx.listener(|this, value: &SharedString, window, cx| {
-                    this.missing.provider = false;
-                    match value.parse::<usize>() {
-                        Ok(i) => {
-                            this.provider = Some(i);
-                            cx.notify();
-                        }
-                        Err(_) => this.go_manual(window, cx),
-                    }
-                })),
-            note,
-            cx,
-        ))
+        Some(labelled(tr!("Provider"), self.picker.clone(), note, cx))
     }
 
     /// A manual server's certificate line, with Forget certificate.
@@ -1664,6 +1798,13 @@ impl OnboardingView {
                     .text_color(c.ink_2)
                     .child(tr!("Your provider's help pages list these. If you run your own server, use its IMAP and SMTP details.")),
             );
+            if self.bridge {
+                col = col.child(Notice::new(
+                    "onboarding-bridge",
+                    notice::Kind::Info,
+                    tr!("Proton Mail Bridge must be running on this PC. Sign in with the password Bridge shows, not your Proton password."),
+                ));
+            }
             if self.offline {
                 col = col.child(Notice::new(
                     "onboarding-offline",
@@ -1671,6 +1812,12 @@ impl OnboardingView {
                     tr!("You're offline, so we can't look up settings. Enter them below."),
                 ));
             }
+        } else if self.offline {
+            col = col.child(Notice::new(
+                "onboarding-offline",
+                notice::Kind::Info,
+                tr!("You're offline, so we can't look up settings. Choose your provider, or add it yourself."),
+            ));
         }
         col = col
             .children(self.render_chip(cx))
@@ -1857,7 +2004,7 @@ impl OnboardingView {
                 svg()
                     .path(Icon::Seal.path())
                     .size(px(geo::WELCOME_SEAL))
-                    .text_color(c.seal),
+                    .text_color(c.ink),
             )
             .child(
                 div()

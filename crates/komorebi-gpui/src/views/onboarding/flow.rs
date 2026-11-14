@@ -6,6 +6,7 @@
 
 use komorebi::mail::discover::{Outcome, Source};
 use komorebi::mail::errors::Step;
+use komorebi::providers::PRESETS;
 
 use crate::views::settings::check::{Kind3, StepState};
 use crate::views::settings::text;
@@ -16,15 +17,29 @@ pub enum Chip {
     None,
     /// The lookup runs.
     Finding,
-    /// A preset's domain (`providers::PRESETS` index): no lookup.
+    /// A preset (`providers::PRESETS` index), by the address's domain or
+    /// picked from the list: no lookup.
     Preset(usize),
+    /// A preset the domain's MX records name: "Your mail is hosted by …".
+    Hosted(usize),
+    /// A provider Komorebi cannot sign in to yet (by domain or MX).
+    Unsupported(usize),
     /// Both servers found; the incoming server's name, for display.
     Found(String),
     NotFound,
 }
 
-/// The chip a lookup's answer gives: found only when both servers were.
+/// The chip a lookup's answer gives: a built-in provider it named (by
+/// domain or MX), found when both servers were, else not found.
 pub fn chip_of(out: &Outcome) -> Chip {
+    if let Some(i) = out.preset {
+        return match PRESETS.get(i) {
+            Some(p) if !p.is_supported() => Chip::Unsupported(i),
+            Some(_) if out.sources.contains(&Source::Mx) => Chip::Hosted(i),
+            Some(_) => Chip::Preset(i),
+            None => Chip::NotFound,
+        };
+    }
     match (&out.found.imap, &out.found.smtp) {
         (Some(imap), Some(_)) => Chip::Found(crate::text::host(&imap.server.host)),
         _ => Chip::NotFound,
@@ -124,13 +139,17 @@ pub fn act(kind: Kind3, user_open: bool, reviewable: bool, manual: bool) -> Act 
 /// sentence each (the Slint app's `find::note`).
 pub fn note(out: &Outcome, kept: bool) -> String {
     let mut lines = Vec::new();
-    if out.is_empty() {
+    let named = out.preset.and_then(|i| PRESETS.get(i));
+    if let Some(p) = named.filter(|p| !p.is_supported()) {
+        lines.push(text::find_unsupported(p.name));
+    } else if out.is_empty() {
         lines.push(text::find_none());
     } else {
-        lines.push(match out.sources.as_slice() {
-            [Source::Builtin] => text::find_builtin(),
-            [Source::Srv] => text::find_srv(),
-            [Source::Autoconfig] => text::find_autoconfig(),
+        lines.push(match (out.sources.as_slice(), named) {
+            ([Source::Mx], Some(p)) => text::find_hosted(p.name),
+            ([Source::Builtin], _) => text::find_builtin(),
+            ([Source::Srv], _) => text::find_srv(),
+            ([Source::Autoconfig], _) => text::find_autoconfig(),
             _ => text::find_both(),
         });
         if out.found.imap.is_none() {
@@ -147,17 +166,6 @@ pub fn note(out: &Outcome, kept: bool) -> String {
         lines.push(text::find_kept());
     }
     lines.join("\n")
-}
-
-/// The line under a preset in the provider choice (the Slint flow's
-/// `RadioButtons` descriptions).
-pub fn preset_note(name: &str) -> String {
-    use komorebi_i18n::tr;
-    match name {
-        "Purelymail" => tr!("Any domain hosted at Purelymail"),
-        "Postale.io" => tr!("Any domain hosted at Postale"),
-        _ => String::new(),
-    }
 }
 
 /// A step of the indicator as Narrator reads it: its name, and whether it
@@ -211,13 +219,11 @@ mod tests {
     }
 
     #[test]
-    fn steps_say_done_and_current_and_presets_their_line() {
+    fn steps_say_done_and_current() {
         komorebi_i18n::with_lang(Lang::En, || {
             assert_eq!(step_name("Sign in", true, false), "Sign in, done");
             assert_eq!(step_name("Sign in", false, true), "Sign in, current step");
             assert_eq!(step_name("Sign in", false, false), "Sign in");
-            assert_eq!(preset_note("Postale.io"), "Any domain hosted at Postale");
-            assert_eq!(preset_note("Other"), "");
         });
         komorebi_i18n::with_lang(Lang::PtPt, || {
             assert_eq!(step_name("Entrar", true, false), "Entrar, concluído");
@@ -231,6 +237,7 @@ mod tests {
             found: both(),
             sources: vec![Source::Autoconfig],
             refused: Vec::new(),
+            preset: None,
         };
         assert_eq!(chip_of(&out), Chip::Found("imap.example.com".into()));
         let half = Outcome {
@@ -327,6 +334,7 @@ mod tests {
                 found: both(),
                 sources,
                 refused: Vec::new(),
+                preset: None,
             };
             assert_eq!(
                 note(&ok(vec![Source::Autoconfig]), false),
@@ -355,6 +363,7 @@ mod tests {
                 },
                 sources: vec![Source::Autoconfig],
                 refused: vec!["mail.other.net".into()],
+                preset: None,
             };
             assert_eq!(
                 note(&foreign, false),

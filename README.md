@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/logo-light.png">
-    <img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/logo.png" width="320" alt="Komorebi logo: a persimmon seal with a carved K, and the wordmark komorebi">
+    <img src="https://raw.githubusercontent.com/RusticStack/komorebi/main/.github/assets/logo.png" width="320" alt="Komorebi logo: a grey seal with a white K, and the wordmark komorebi">
   </picture>
 </p>
 
@@ -38,9 +38,14 @@ Read and write mail without getting in the way. No AI, no telemetry, no web engi
   listed in under 600 ms. Komorebi 1.0 draws its interface with GPUI, which
   keeps more memory in use while it idles than Komorebi 0.7 did; that is
   accepted for 1.0, and reducing it is planned for 1.1.
-- **IMAP and SMTP** with a local SQLite cache and several accounts. Presets for
-  Purelymail and Postale.io, manual settings for any other server, and SMTP
-  without sign-in for a relay on your own network.
+- **IMAP and SMTP** with a local SQLite cache and several accounts. A searchable
+  list of 26 providers with their settings built in (Gmail, iCloud, Yahoo,
+  Fastmail, Proton Mail through Bridge, Purelymail, Postale.io and more; each
+  says whether it needs an app password), your own domain recognised from its
+  MX records when a listed provider hosts it, manual settings for any other
+  server, and SMTP without sign-in for a relay on your own network.
+  Outlook.com and Microsoft 365 are listed but not supported yet: they need
+  Microsoft sign-in, which Komorebi doesn't have.
 - **Reads HTML mail with its own layout engine.** There is no web engine, and
   remote content is never loaded unless you allow it.
 - **Writes formatted mail.** Fonts, colours, lists, tables, named signatures,
@@ -97,10 +102,13 @@ More about the installer, silent installs, the portable zip and checksums:
 ### Add an account
 
 Start Komorebi and choose **Add your email account**. Enter your address and
-Continue: for Purelymail and Postale.io the server settings are built in, and for
-other domains Komorebi looks them up from your domain name (only the domain is sent,
-never the password). Enter your password (or an app password if your provider uses
-two-step sign-in); it is saved in Windows Credential Manager, never in Komorebi's
+Continue: for the built-in providers (Gmail, iCloud, Fastmail, Purelymail,
+Postale.io and others) the server settings are built in, and for other domains
+Komorebi looks them up from your domain name (only the domain is sent, never the
+password): a domain hosted by a listed provider is recognised from its MX records.
+If nothing is found, search the provider list, or choose **Add provider** to enter
+any other server by hand. Enter your password (or an app password if your provider
+needs one; the list says which); it is saved in Windows Credential Manager, never in Komorebi's
 files. Optionally add your name and a signature, then open your inbox. The steps in
 detail are in [docs/USAGE.md](docs/USAGE.md).
 

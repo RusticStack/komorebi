@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use komorebi::mail::imap::Imap;
-use komorebi::providers::PRESETS;
+use komorebi::providers::by_id;
 
 fn main() -> Result<()> {
     let path = std::env::args()
@@ -23,7 +23,12 @@ fn main() -> Result<()> {
             .with_context(|| format!("{k} missing"))
     };
     let (email, password) = (var("EMAIL")?, var("PASSWORD_EMAIL")?);
-    let mut imap = Imap::connect(&PRESETS[1].imap_server(), None, &email, &password)?;
+    let mut imap = Imap::connect(
+        &by_id("postale").expect("Postale.io").imap_server(),
+        None,
+        &email,
+        &password,
+    )?;
     imap.set_read_only(true);
     let folder = std::env::args().nth(2).unwrap_or_else(|| "INBOX".into());
     imap.select(&folder)?;
