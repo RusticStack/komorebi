@@ -53,8 +53,9 @@ gh release create v0.4.1 --title "Komorebi 0.4.1" --notes-file notes.md `
    dist\komorebi-0.4.1-setup.exe 0.4.1`, then Settings > About > Check for
    updates on an older install.
 
-Before any release run the checks in [BUILDING.md](BUILDING.md) (format,
-clippy, tests, pins, deny, size and boot snapshot).
+Before any release run `pwsh -File scripts/ci-local.ps1` (every CI step:
+format, clippy, tests, pins, deny, size and the boot checks). The release
+job does not run the tests again.
 
 ## The CI build (`.github/workflows/release.yml`)
 
@@ -62,8 +63,7 @@ It runs when a `v*` tag is pushed and by hand (Actions > Release > Run
 workflow). It never publishes a release. It runs on a GitHub-hosted Windows
 runner and does:
 
-1. `scripts/find-fxc.ps1`, `cargo test --locked` (the library), the app's
-   and xtask's tests, the release build
+1. `scripts/find-fxc.ps1`, the release build
    (`cargo build --release --locked -p komorebi-gpui`), the size check
    (`cargo xtask size`: komorebi.exe at most 21,500,000 bytes), its
    manifest, and the boot checks on WARP (an empty cache and a seeded one).

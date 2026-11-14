@@ -68,15 +68,9 @@ jobs:
         shell: pwsh
         run: ./scripts/find-fxc.ps1
 
-      # The library (unit and integration tests).
-      - name: cargo test
-        run: cargo test --locked
-
-      # The app's tests and the xtask gates run here too.
-      - name: cargo test (app)
-        run: |
-          cargo test -p komorebi-gpui --locked
-          cargo test -p xtask --locked
+      # No tests here: the owner runs scripts/ci-local.ps1 (every CI step,
+      # tests included) before tagging, so the release job only builds,
+      # checks the exe and packages it.
 
       # fxc.exe compiles the app's shaders here.
       - name: Release build
