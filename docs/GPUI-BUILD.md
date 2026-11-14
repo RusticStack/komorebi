@@ -31,8 +31,10 @@ Tools with the Windows SDK), plus:
   $env:GPUI_FXC_PATH = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe'
   ```
 
-  A `GPUI_FXC_PATH` that names no file is an error (it is not skipped). GitHub's and
-  Blacksmith's Windows images ship the SDK, so CI needs no setting.
+  A `GPUI_FXC_PATH` that names no file is an error (it is not skipped). GitHub's
+  windows-2025 images ship the SDK, so CI needs no setting (a local machine needs Visual Studio
+  Build Tools and the Windows SDK; `pwsh -File scripts/ci-local.ps1` runs the whole CI there before
+  pushing).
 - **A Direct3D 11 device** to run it: any GPU with feature level 10.1 or better, or WARP (the
   software rasterizer every Windows has; see `KOMOREBI_GPUI_FORCE_WARP`). Tests need none: GPUI's
   test platform is headless.

@@ -6,7 +6,7 @@
 #
 # Order: GPUI_FXC_PATH when it names a file, then the newest
 # "Windows Kits\10\bin\<version>\x64\fxc.exe" (the SDK's own layout; GitHub's
-# and Blacksmith's windows-2025 images ship the Windows 11 SDK there), then
+# windows-2025 images ship the Windows 11 SDK there), then
 # fxc.exe on PATH.
 $ErrorActionPreference = 'Stop'
 

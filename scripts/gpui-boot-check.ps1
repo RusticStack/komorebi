@@ -3,7 +3,8 @@
 # first frame, capture it to -Out (KOMOREBI_SNAPSHOT, PNG or BMP by the
 # extension), check that the shell drew (KOMOREBI_SNAPSHOT_CHECK), and exit
 # with the app's code: 0 drawn and checked, 1 blank or not captured, 2
-# refused, 3 no DirectX 11 device.
+# refused, 3 no DirectX 11 device, 4 skipped (-SkipIfNoDesktop and the
+# session has no interactive desktop, so the app could not open a window).
 #
 #   pwsh scripts/gpui-boot-check.ps1 -Exe target\release\komorebi.exe `
 #        -Cache $env:RUNNER_TEMP\gpui.sqlite3 -Out $env:RUNNER_TEMP\gpui-boot.png [-Warp]
@@ -30,7 +31,11 @@ param(
     # The row to open (KOMOREBI_SNAPSHOT_SELECT) in a seeded cache.
     [ValidatePattern('^[0-9]*$')][string]$Select = '',
     # Try again without DirectComposition after a blank run.
-    [switch]$Fallback
+    [switch]$Fallback,
+    # Exit 4 (skipped) instead of 1 when the app says it cannot open windows
+    # because the session is headless (a CI runner that runs as a service, with
+    # no interactive window station). Never used locally: there it is a failure.
+    [switch]$SkipIfNoDesktop
 )
 $ErrorActionPreference = 'Stop'
 
@@ -85,6 +90,10 @@ function Invoke-Boot([bool]$NoDirectComposition) {
     $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
     $lines | Out-Host
     $code = [int]$p.ExitCode
+    if ($SkipIfNoDesktop -and ($lines -match 'cannot open windows while headless')) {
+        Write-Warning 'boot-check: skipped, this session has no interactive desktop (headless window station)'
+        return @{ Code = 4; Blank = $false }
+    }
     if ($code -eq 0 -and -not (Test-Path $outFull)) {
         Write-Warning 'boot-check: exit 0 but no snapshot file'
         return @{ Code = 1; Blank = $false }

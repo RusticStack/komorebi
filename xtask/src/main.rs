@@ -12,6 +12,9 @@
 //! - `cargo xtask lint`: the token lint and the no-timers lint (lint.rs).
 //! - `cargo xtask size`: the release `komorebi.exe` against its ceiling
 //!   (size.rs).
+//! - `cargo xtask ci [args]`: the whole CI on this machine, a thin wrapper
+//!   over `scripts/ci-local.ps1` (its options pass through: `-Fast`,
+//!   `-From <step>`, `-Scratch <dir>`).
 
 mod lint;
 mod size;
@@ -25,10 +28,11 @@ fn main() -> ExitCode {
         Some("check") => check(&args[1..]),
         Some("lint") => lint::run(&workspace_root()),
         Some("size") => size_command(&args[1..]),
+        Some("ci") => ci_command(&args[1..]),
         Some(other) => Err(format!(
-            "unknown xtask `{other}` (expected: check, lint, size)"
+            "unknown xtask `{other}` (expected: check, lint, size, ci)"
         )),
-        None => Err("usage: cargo xtask <check [--release] [--all] | lint | size>".into()),
+        None => Err("usage: cargo xtask <check [--release] [--all] | lint | size | ci [ci-local.ps1 options]>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -85,6 +89,24 @@ fn size_command(args: &[String]) -> Result<(), String> {
         return Err(format!("size: unknown option {other}"));
     }
     size::check(&[size::APP], &size::release_dir(&workspace_root()))
+}
+
+/// Runs `scripts/ci-local.ps1` with `pwsh -NoProfile -File`, passing the
+/// arguments on.
+fn ci_command(args: &[String]) -> Result<(), String> {
+    let script = workspace_root().join("scripts").join("ci-local.ps1");
+    let status = Command::new("pwsh")
+        .args(["-NoProfile", "-File"])
+        .arg(&script)
+        .args(args)
+        .current_dir(workspace_root())
+        .status()
+        .map_err(|e| format!("could not run pwsh: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ci-local.ps1 failed ({status})"))
+    }
 }
 
 /// The workspace root: the parent of this crate's folder.

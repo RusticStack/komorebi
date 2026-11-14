@@ -59,7 +59,7 @@ clippy, tests, pins, deny, size and boot snapshot).
 ## The CI build (`.github/workflows/release.yml`)
 
 It runs when a `v*` tag is pushed and by hand (Actions > Release > Run
-workflow). It never publishes a release. It runs on the Blacksmith Windows
+workflow). It never publishes a release. It runs on a GitHub-hosted Windows
 runner and does:
 
 1. `scripts/find-fxc.ps1`, `cargo test --locked` (the library), the app's

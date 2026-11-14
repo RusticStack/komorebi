@@ -172,8 +172,8 @@ edges (the check allows 3 per channel). What a GPU-less runner needs:
 - An interactive desktop session with DWM (Windows Server with Desktop Experience; the runner
   agent in a logged-on session, not session 0 as a service), so that a window can be created
   and composed. GitHub's hosted Windows images are known to run desktop UI tests in such a
-  session (a 1024 x 768 desktop); that Blacksmith's image does the same is to be verified on
-  the first run. A 1280 x 800 window on a 1024 x 768 desktop reaches past the screen edge;
+  session (a 1024 x 768 desktop); that the local machine does the same is checked by
+  `scripts/ci-local.ps1`. A 1280 x 800 window on a 1024 x 768 desktop reaches past the screen edge;
   `PW_RENDERFULLCONTENT` still renders the whole client area.
 - The Windows SDK is not needed to run, only to build (fxc.exe).
 - If DirectComposition is not available, `GPUI_DISABLE_DIRECT_COMPOSITION=1` puts the swap chain
@@ -199,7 +199,7 @@ misbehaved, 2 refused.
 
 ## CI
 
-`.github/workflows/ci.yml` (Blacksmith `blacksmith-8vcpu-windows-2025`, no GPU) runs:
+Before pushing, run `pwsh -File scripts/ci-local.ps1` (`cargo xtask ci` wraps it): it runs the steps below, natively on this PC with the pinned toolchain, stops at the first failure and prints each step's time (`-Fast` skips the release build and everything after it that needs the exe, `-From <step>` resumes; throwaway caches and snapshots go under `$env:TEMPkomorebi-ci`). GitHub Actions does not run on every push: `.github/workflows/ci.yml` runs on demand and for pull requests from forks, on GitHub's own `windows-2025` runner (no GPU), with the same steps:
 `scripts/find-fxc.ps1` (fxc.exe located and `GPUI_FXC_PATH` set), clippy over the
 workspace, `cargo check -p komorebi-gpui --all-targets`, `cargo xtask lint`, `cargo test -p
 komorebi-gpui` and `-p xtask`, the release build, `cargo xtask size` (the exe against its
@@ -213,8 +213,7 @@ and says which mode passed. The PNGs, their logs and the UIA dump are uploaded a
 around the exe (`unsigned-installer`, never signed or attached to a release by CI without the
 maintainer).
 
-To verify on the first CI run (it cannot be run from a workstation; nothing of it has run on
-Blacksmith yet, and the lane that wrote the fallbacks could not push): that `find-fxc.ps1`
+To verify on a GitHub-hosted run (the workflow's boot checks need the runner's desktop session): that `find-fxc.ps1`
 finds the image's SDK (`C:\Program Files (x86)\Windows Kits\10\bin\10.0.<build>.0\x64\fxc.exe`;
 the windows-2025 image ships the Windows 11 SDK 10.0.26100); that the boot check opens a window
 on WARP and the PNG is the shell, not black (a black capture means no DWM composition in the

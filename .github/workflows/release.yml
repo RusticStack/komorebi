@@ -32,9 +32,10 @@ env:
 
 jobs:
   release:
-    # Blacksmith's Windows Server 2025 image (see ci.yml). Inno Setup is
+    # GitHub's windows-2025 runner, free for public repositories (SignPath
+    # signing needs builds made by GitHub Actions; see ci.yml). Inno Setup is
     # installed below when the image lacks it.
-    runs-on: blacksmith-8vcpu-windows-2025
+    runs-on: windows-2025
     permissions:
       # contents: write only to create the draft release; actions: read is
       # what SignPath needs to fetch the artifact (used once the signing
@@ -100,7 +101,8 @@ jobs:
         run: |
           ./scripts/gpui-boot-check.ps1 -Exe target/release/komorebi.exe `
             -Cache (Join-Path $env:RUNNER_TEMP 'gpui-boot.sqlite3') `
-            -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot.png') -Warp -Fallback
+            -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot.png') -Warp -Fallback -SkipIfNoDesktop
+          if ($LASTEXITCODE -eq 4) { "::warning::GPUI boot check skipped: the runner session has no interactive desktop (run scripts/ci-local.ps1 locally)"; exit 0 }
           if ($LASTEXITCODE -ne 0) { throw "GPUI boot check failed (exit $LASTEXITCODE)" }
 
       # As in ci.yml: the same on a seeded cache with the newest message
@@ -114,7 +116,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'seeding failed' }
           ./scripts/gpui-boot-check.ps1 -Exe target/release/komorebi.exe `
             -Cache $db -Out (Join-Path $env:RUNNER_TEMP 'gpui-boot-mail.png') `
-            -Warp -Fallback -Select 0
+            -Warp -Fallback -SkipIfNoDesktop -Select 0
+          if ($LASTEXITCODE -eq 4) { "::warning::GPUI seeded boot check skipped: the runner session has no interactive desktop (run scripts/ci-local.ps1 locally)"; exit 0 }
           if ($LASTEXITCODE -ne 0) { throw "GPUI seeded boot check failed (exit $LASTEXITCODE)" }
 
       # The unsigned exe, uploaded alone under a stable name. SignPath
