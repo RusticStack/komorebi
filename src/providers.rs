@@ -68,6 +68,68 @@ pub enum SignIn {
 /// A server of a preset: host, port, security.
 pub type Endpoint = (&'static str, u16, Security);
 
+/// A provider that turns the account's usual password away over IMAP and
+/// SMTP and wants an app password (Google's 16 letters, Apple's
+/// app-specific password): the sign-in says so before the first try, with
+/// a button to the page where one is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppPassword {
+    /// The name the sentences use ("Google needs an app password …"): a
+    /// brand, not translated.
+    pub brand: &'static str,
+    /// Whether it is always an app password, or only once two-step
+    /// sign-in is on (then the usual password still works without it).
+    pub need: Need,
+    /// The provider's page where an app password is made (opened in the
+    /// browser when the user asks; never fetched by Komorebi).
+    pub create: &'static str,
+    /// The page that turns two-step sign-in on, when the provider allows
+    /// app passwords only after that (Google).
+    pub two_step: Option<&'static str>,
+}
+
+/// When a provider wants an app password.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Need {
+    /// Always: the usual password never works over IMAP and SMTP.
+    Always,
+    /// Only once two-step sign-in is on.
+    WithTwoStep,
+}
+
+impl AppPassword {
+    /// Always an app password (the field is called so, and typed spaces
+    /// are taken out).
+    pub fn always(&self) -> bool {
+        self.need == Need::Always
+    }
+}
+
+const GOOGLE: AppPassword = AppPassword {
+    brand: "Google",
+    need: Need::Always,
+    // https://support.google.com/mail/answer/185833
+    create: "https://myaccount.google.com/apppasswords",
+    two_step: Some("https://myaccount.google.com/signinoptions/two-step-verification"),
+};
+
+const ZOHO: AppPassword = AppPassword {
+    brand: "Zoho",
+    need: Need::WithTwoStep,
+    // https://www.zoho.com/mail/help/adminconsole/two-factor-authentication.html
+    // (with two-factor sign-in on, IMAP and SMTP need one)
+    create: "https://accounts.zoho.com/home#security/app_password",
+    two_step: None,
+};
+
+/// Spaces and line breaks taken out of a typed or pasted app password:
+/// Google shows its 16 letters as four groups of four ("abcd efgh ijkl
+/// mnop"), and the spaces are not part of it. Nothing else changes, and
+/// any length is kept (other providers' app passwords differ).
+pub fn clean_app_password(typed: &str) -> String {
+    typed.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
 pub struct Preset {
     /// A stable name for the preset: its icon file (`assets/providers`),
     /// the examples and the tests. Never shown.
@@ -91,6 +153,9 @@ pub struct Preset {
     /// elsewhere a duplicate is avoided by the Message-ID lookup of the Sent
     /// folder. Existing accounts keep their stored choice.
     pub save_sent: bool,
+    /// Set when the provider wants an app password instead of the usual
+    /// one: the sign-in names it and links to where it is made.
+    pub app_password: Option<AppPassword>,
 }
 
 use Security::{StartTls, Tls};
@@ -109,6 +174,12 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.aol.com", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: true,
+        app_password: Some(AppPassword {
+            brand: "AOL",
+            need: Need::Always,
+            create: "https://login.aol.com/account/security",
+            two_step: None,
+        }),
     },
     // https://www.fastmail.help/hc/en-us/articles/1500000278342-Server-names-and-ports
     // Domains: https://www.fastmail.help/hc/en-us/articles/6239365719055
@@ -137,6 +208,12 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.fastmail.com", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: true,
+        app_password: Some(AppPassword {
+            brand: "Fastmail",
+            need: Need::Always,
+            create: "https://app.fastmail.com/settings/security",
+            two_step: None,
+        }),
     },
     // https://assistance.free.fr/articles/609
     Preset {
@@ -148,6 +225,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.free.fr", 465, Tls),
         sign_in: SignIn::Password,
         save_sent: true,
+        app_password: None,
     },
     // https://developers.google.com/workspace/gmail/imap/imap-smtp
     // https://support.google.com/mail/answer/7126229 (app passwords with
@@ -162,6 +240,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.gmail.com", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: false,
+        app_password: Some(GOOGLE),
     },
     // https://hilfe.gmx.net/pop-imap/imap/imap-serverdaten.html
     // https://hilfe.gmx.net/account/logindaten/app-passwort.html
@@ -174,6 +253,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("mail.gmx.net", 465, Tls),
         sign_in: SignIn::TurnOnImap,
         save_sent: true,
+        app_password: None,
     },
     // https://support.gmx.com/pop-imap/imap/server.html
     // https://support.gmx.com/pop-imap/toggle.html
@@ -194,6 +274,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("mail.gmx.com", 465, Tls),
         sign_in: SignIn::TurnOnImap,
         save_sent: true,
+        app_password: None,
     },
     // https://knowledge.workspace.google.com/admin/sync/set-up-gmail-with-a-third-party-email-client
     // MX: https://knowledge.workspace.google.com/admin/domains/set-up-mx-records-for-google-workspace
@@ -208,6 +289,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.gmail.com", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: false,
+        app_password: Some(GOOGLE),
     },
     // https://support.apple.com/en-us/102525 (servers, app-specific password)
     // Domains: https://support.apple.com/en-us/118230
@@ -221,6 +303,12 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.mail.me.com", 587, StartTls),
         sign_in: SignIn::AppPassword,
         save_sent: true,
+        app_password: Some(AppPassword {
+            brand: "iCloud",
+            need: Need::Always,
+            create: "https://account.apple.com",
+            two_step: None,
+        }),
     },
     // https://www.infomaniak.com/en/support/faq/2427/sync-your-emails-across-all-your-devices
     // https://www.infomaniak.com/en/support/faq/468/understanding-ports-and-messaging-protocols
@@ -235,6 +323,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("mail.infomaniak.com", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: true,
+        app_password: None,
     },
     // https://aiuto.libero.it/articolo/mail/configurare-libero-mail-con-client-di-posta-imap-e-smtp/
     // https://aiuto.libero.it/articolo/sicurezza/password-sicura-specifica-applicazioni-client/
@@ -247,6 +336,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.libero.it", 465, Tls),
         sign_in: SignIn::AppPasswordIfTwoStep,
         save_sent: true,
+        app_password: None,
     },
     // https://support.mail.com/premium/imap/server.html
     // https://support.mail.com/pop-imap/setting-up-pop-imap.html (paid plans)
@@ -274,6 +364,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.mail.com", 465, Tls),
         sign_in: SignIn::PaidImap,
         save_sent: true,
+        app_password: None,
     },
     // https://kb.mailbox.org/en/private/e-mail/e-mail-configuration/
     // MX: https://kb.mailbox.org/en/private/custom-domains/using-emails-with-a-custom-domain/
@@ -286,6 +377,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.mailbox.org", 465, Tls),
         sign_in: SignIn::Password,
         save_sent: true,
+        app_password: None,
     },
     // https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-basic-authentication-exchange-online
     // ("Basic authentication is now disabled in all tenants", for IMAP).
@@ -300,6 +392,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.office365.com", 587, StartTls),
         sign_in: SignIn::NotSupported,
         save_sent: false,
+        app_password: None,
     },
     // https://assistance.orange.fr/mobile-tablette/tous-les-mobiles-et-tablettes/installer-et-utiliser/utiliser-internet-mail-et-cloud/mail/l-application-mail-de-votre-telephone/parametrer-et-configurer/orange-dive-73-configurer-l-acces-a-votre-boite-mail-orange-manuellement_255453-797106
     Preset {
@@ -311,6 +404,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.orange.fr", 465, Tls),
         sign_in: SignIn::Password,
         save_sent: true,
+        app_password: None,
     },
     // https://support.microsoft.com/en-us/office/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040
     // ("Outlook.com requires the use of Modern Auth / OAuth2.")
@@ -347,6 +441,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp-mail.outlook.com", 587, StartTls),
         sign_in: SignIn::NotSupported,
         save_sent: false,
+        app_password: None,
     },
     // https://postale.io/client/ (servers), https://postale.io/configure
     // (MX: mail.postale.io). Postale.io hosts custom domains only.
@@ -359,6 +454,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("mail.postale.io", 465, Tls),
         sign_in: SignIn::Password,
         save_sent: true,
+        app_password: None,
     },
     // https://posteo.de/en/help/how-do-i-set-up-posteo-in-an-email-client-pop3-imap-and-smtp
     // (no custom domains: https://posteo.de/en/site/faq)
@@ -385,6 +481,12 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("posteo.de", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: true,
+        app_password: Some(AppPassword {
+            brand: "Posteo",
+            need: Need::Always,
+            create: "https://posteo.de/konto/passwort",
+            two_step: None,
+        }),
     },
     // Proton Mail Bridge: https://proton.me/support/port-already-occupied-error
     // (ports 1143 and 1025), https://proton.me/support/bridge-ssl-connection-issue
@@ -400,6 +502,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("127.0.0.1", 1025, StartTls),
         sign_in: SignIn::Bridge,
         save_sent: true,
+        app_password: None,
     },
     // https://support.purelymail.com/support/solutions/articles/159000430778-server-settings-imap-smtp-and-pop3
     // MX: https://purelymail.com/docs/domainDocs (mailserver.purelymail.com).
@@ -413,6 +516,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.purelymail.com", 465, Tls),
         sign_in: SignIn::AppPasswordIfTwoStep,
         save_sent: true,
+        app_password: None,
     },
     // https://o-seznam.cz/napoveda/email/mohlo-by-se-hodit/postovni-programy-a-aplikace/
     Preset {
@@ -424,6 +528,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.seznam.cz", 465, Tls),
         sign_in: SignIn::Password,
         save_sent: true,
+        app_password: None,
     },
     // https://hilfe.web.de/pop-imap/imap/imap-serverdaten.html (IMAP must be
     // switched on in the WEB.DE settings)
@@ -436,6 +541,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.web.de", 465, Tls),
         sign_in: SignIn::TurnOnImap,
         save_sent: true,
+        app_password: None,
     },
     // https://help.yahoo.com/kb/SLN4075.html (servers),
     // https://help.yahoo.com/kb/SLN15241.html (app password)
@@ -466,6 +572,12 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.mail.yahoo.com", 465, Tls),
         sign_in: SignIn::AppPassword,
         save_sent: true,
+        app_password: Some(AppPassword {
+            brand: "Yahoo",
+            need: Need::Always,
+            create: "https://login.yahoo.com/account/security",
+            two_step: None,
+        }),
     },
     // https://yandex.com/support/yandex-360/customers/mail/en/mail-clients/others
     // MX: https://yandex.com/support/yandex-360/business/admin/en/domains/dns/mx
@@ -485,6 +597,12 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.yandex.com", 465, Tls),
         sign_in: SignIn::TurnOnImapAppPassword,
         save_sent: true,
+        app_password: Some(AppPassword {
+            brand: "Yandex",
+            need: Need::Always,
+            create: "https://id.yandex.com/security",
+            two_step: None,
+        }),
     },
     // https://www.zoho.com/mail/help/imap-access.html,
     // https://www.zoho.com/mail/help/zoho-smtp.html (personal and free
@@ -498,6 +616,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.zoho.com", 465, Tls),
         sign_in: SignIn::TurnOnImap,
         save_sent: true,
+        app_password: Some(ZOHO),
     },
     // Zoho's EU data centre (personal accounts): a Zoho staff answer,
     // https://help.zoho.com/portal/en/community/topic/imap-smtp-servers
@@ -511,6 +630,10 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtp.zoho.eu", 465, Tls),
         sign_in: SignIn::TurnOnImap,
         save_sent: true,
+        app_password: Some(AppPassword {
+            create: "https://accounts.zoho.eu/home#security/app_password",
+            ..ZOHO
+        }),
     },
     // The Zoho Mail help pages above: a paid organisation's (custom domain) accounts use
     // imappro.zoho.com and smtppro.zoho.com.
@@ -525,6 +648,7 @@ pub const PRESETS: &[Preset] = &[
         smtp: ("smtppro.zoho.com", 465, Tls),
         sign_in: SignIn::TurnOnImap,
         save_sent: true,
+        app_password: Some(ZOHO),
     },
 ];
 
@@ -578,6 +702,24 @@ pub fn index_of(id: &str) -> Option<usize> {
 /// The preset with this `id` (the examples' and the tests' way to name one).
 pub fn by_id(id: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|p| p.id == id)
+}
+
+/// The app-password help of preset `index`, if it wants one (`None`:
+/// another server, or a preset that takes the usual password).
+pub fn app_password(index: Option<usize>) -> Option<AppPassword> {
+    index.and_then(|i| PRESETS.get(i))?.app_password
+}
+
+/// The app-password help for a saved account, by its incoming server: a
+/// preset's IMAP host (case and a trailing dot aside) that wants one.
+/// Accounts keep their servers, not the preset they came from.
+pub fn app_password_for_imap(host: &str) -> Option<AppPassword> {
+    let host = host.trim().trim_end_matches('.');
+    PRESETS
+        .iter()
+        .filter(|p| p.is_fixed())
+        .find(|p| p.imap.0.eq_ignore_ascii_case(host))?
+        .app_password
 }
 
 /// The default of "save a copy to Sent" for a new account on preset
@@ -785,6 +927,118 @@ mod tests {
         assert_eq!(by_mx(".postale.io"), None);
         assert_eq!(by_mx(""), None);
         assert_eq!(by_mx("."), None);
+    }
+
+    #[test]
+    fn app_password_providers_are_flagged_with_their_page() {
+        let flagged: Vec<&str> = PRESETS
+            .iter()
+            .filter(|p| p.app_password.is_some())
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            flagged,
+            [
+                "aol",
+                "fastmail",
+                "gmail",
+                "google-workspace",
+                "icloud",
+                "posteo",
+                "yahoo",
+                "yandex",
+                "zoho",
+                "zoho-eu",
+                "zoho-business",
+            ]
+        );
+        for p in PRESETS {
+            if let Some(a) = p.app_password {
+                assert!(p.is_supported(), "{}", p.id);
+                assert!(!a.brand.is_empty(), "{}", p.id);
+                for url in std::iter::once(a.create).chain(a.two_step) {
+                    assert!(url.starts_with("https://"), "{url}");
+                }
+            }
+        }
+        // Gmail, googlemail.com and Workspace (found by MX) are Google's,
+        // and only Google links to two-step sign-in.
+        let google = app_password(guess("ana@googlemail.com")).unwrap();
+        assert_eq!(google.brand, "Google");
+        assert_eq!(google.create, "https://myaccount.google.com/apppasswords");
+        assert_eq!(
+            google.two_step,
+            Some("https://myaccount.google.com/signinoptions/two-step-verification")
+        );
+        assert_eq!(
+            app_password(by_mx("aspmx.l.google.com")),
+            app_password(guess("ana@gmail.com"))
+        );
+        assert_eq!(
+            app_password(guess("ana@me.com")).unwrap().create,
+            "https://account.apple.com"
+        );
+        assert_eq!(
+            app_password(guess("ana@yahoo.com")).unwrap().create,
+            "https://login.yahoo.com/account/security"
+        );
+        assert!(
+            PRESETS
+                .iter()
+                .filter_map(|p| p.app_password)
+                .all(|a| a.brand == "Google" || a.two_step.is_none())
+        );
+        // Always an app password, or only with two-step sign-in on.
+        let always: Vec<&str> = PRESETS
+            .iter()
+            .filter(|p| p.app_password.is_some_and(|a| a.always()))
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            always,
+            [
+                "aol",
+                "fastmail",
+                "gmail",
+                "google-workspace",
+                "icloud",
+                "posteo",
+                "yahoo",
+                "yandex"
+            ]
+        );
+        for id in ["zoho", "zoho-eu", "zoho-business"] {
+            let a = by_id(id).unwrap().app_password.unwrap();
+            assert_eq!(a.need, Need::WithTwoStep, "{id}");
+            assert_eq!(a.brand, "Zoho");
+        }
+        // A usual password, another server, nothing.
+        assert_eq!(app_password(guess("ana@purelymail.com")), None);
+        assert_eq!(app_password(guess("ana@postale.io")), None);
+        assert_eq!(app_password(None), None);
+        assert_eq!(app_password(Some(999)), None);
+        // A saved account, by its incoming server.
+        assert_eq!(app_password_for_imap("IMAP.gmail.com."), Some(GOOGLE));
+        assert_eq!(app_password_for_imap("imappro.zoho.com"), Some(ZOHO));
+        assert_eq!(app_password_for_imap("mail.postale.io"), None);
+        assert_eq!(app_password_for_imap("imap.example.com"), None);
+        // Proton's Bridge is 127.0.0.1, never taken for a preset's host.
+        assert_eq!(app_password_for_imap("127.0.0.1"), None);
+    }
+
+    #[test]
+    fn app_passwords_lose_their_spaces_and_line_breaks() {
+        assert_eq!(
+            clean_app_password("abcd efgh ijkl mnop"),
+            "abcdefghijklmnop"
+        );
+        assert_eq!(
+            clean_app_password(" abcd\u{a0}efgh\r\nijkl\tmnop\n"),
+            "abcdefghijklmnop"
+        );
+        // Any other length or letters stay as typed.
+        assert_eq!(clean_app_password("Ab1-xY"), "Ab1-xY");
+        assert_eq!(clean_app_password(""), "");
     }
 
     #[test]

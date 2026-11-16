@@ -1,5 +1,5 @@
 //! The Rest scene's drawn greys (`views/mail/scene.rs`, `sky.rs`): the
-//! sky's stars and clouds, the sun or moon, the water and the path on it,
+//! sky's stars and clouds, the sun or moon, the water's glimmer and the path on it,
 //! the fireflies, the lantern, the birds. Neutral greys only, from the same
 //! range as the scene's own art (light: about #2E to #EE over the paper,
 //! dark: about #0E to #F0), never a hue. The scheme picks the palette; the
@@ -51,8 +51,6 @@ pub struct SceneTones {
     pub cloud: Hsla,
     /// A water streak at its strongest.
     pub water: Hsla,
-    /// A ring on the water by the jetty or the boat, at its strongest.
-    pub ripple: Hsla,
     /// The day's mist over the far shore: lighter than the ridges in the
     /// light scheme, a little lighter than them in the dark one.
     pub mist: Hsla,
@@ -76,20 +74,19 @@ pub fn tones(scheme: Scheme) -> SceneTones {
                 crater: grey(0xDC, 1.),
                 halo: grey(0xD4, 0.42),
                 halo_reach: 30,
-                path: grey(0xC8, 0.85),
+                path: grey(0xA0, 0.95),
             },
             moon: BodyTone {
                 disc: grey(0xE0, 1.),
                 crater: grey(0xCC, 1.),
                 halo: grey(0xEC, 0.5),
                 halo_reach: 14,
-                path: grey(0xCE, 0.7),
+                path: grey(0xA8, 0.9),
             },
             limb: grey(0xFF, 1.),
             star: grey(0xC8, 1.),
             cloud: grey(0xE6, 1.),
             water: grey(0xDA, 1.),
-            ripple: grey(0xBC, 1.),
             mist: grey(0xF4, 1.),
             firefly: grey(0x3C, 1.),
             firefly_glow: grey(0x8C, 0.3),
@@ -104,20 +101,19 @@ pub fn tones(scheme: Scheme) -> SceneTones {
                 crater: grey(0x5E, 1.),
                 halo: grey(0x3E, 0.5),
                 halo_reach: 30,
-                path: grey(0x56, 0.85),
+                path: grey(0x62, 0.9),
             },
             moon: BodyTone {
                 disc: grey(0xE6, 1.),
                 crater: grey(0xC4, 1.),
                 halo: grey(0xB4, 0.26),
                 halo_reach: 18,
-                path: grey(0xBE, 0.75),
+                path: grey(0xD2, 0.9),
             },
             limb: grey(0x1A, 1.),
             star: grey(0xE0, 1.),
             cloud: grey(0x2A, 1.),
             water: grey(0x34, 1.),
-            ripple: grey(0x5C, 1.),
             mist: grey(0x44, 1.),
             firefly: grey(0xF0, 1.),
             firefly_glow: grey(0xC8, 0.42),
@@ -150,7 +146,6 @@ mod tests {
                 t.star,
                 t.cloud,
                 t.water,
-                t.ripple,
                 t.mist,
                 t.firefly,
                 t.firefly_glow,

@@ -3855,3 +3855,33 @@ msgid "{n} picture from the web isn't imported."
 msgid_plural "{n} pictures from the web aren't imported."
 msgstr[0] "{n} imagem da Web não é importada."
 msgstr[1] "{n} imagens da Web não são importadas."
+
+msgid "App password"
+msgstr "Palavra-passe de aplicação"
+
+msgid "{0} needs an app password instead of your usual one."
+msgstr "{0} precisa de uma palavra-passe de aplicação em vez da habitual."
+
+msgid "{0} didn't accept that"
+msgstr "{0} não aceitou a palavra-passe"
+
+msgid "It needs an app password, not your usual password."
+msgstr "É necessária uma palavra-passe de aplicação, não a habitual."
+
+msgid "Create app password"
+msgstr "Criar palavra-passe de aplicação"
+
+msgid "Turn on 2-Step Verification first"
+msgstr "Ativar primeiro a Validação em dois passos"
+
+msgid "Enter your app password."
+msgstr "Introduza a palavra-passe de aplicação."
+
+msgid "Paste your app password"
+msgstr "Cole a palavra-passe de aplicação"
+
+msgid "If two-step sign-in is on, {0} needs an app password."
+msgstr "Se a verificação em dois passos estiver ativa, {0} precisa de uma palavra-passe de aplicação."
+
+msgid "If two-step sign-in is on, it needs an app password."
+msgstr "Se a verificação em dois passos estiver ativa, é necessária uma palavra-passe de aplicação."

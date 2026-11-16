@@ -40,6 +40,32 @@ above them (Settings → Accounts → Add account opens the same steps):
 "You're all set" then shows the first download (newest mail first) until
 you press "Open your inbox", which opens the new Inbox.
 
+### Gmail and other accounts with two-step verification
+
+Google no longer takes your usual password from mail apps like Komorebi:
+it wants an **app password**, 16 letters you make once on your Google
+account. For a Gmail or Google Workspace address, the Sign in step says so
+before you try: the box is called "App password", one line explains why,
+**Create app password** opens Google's page in your browser, and **Turn on
+2-Step Verification first** opens the page that turns it on (Google makes
+app passwords only once 2-Step Verification is on; accounts in Advanced
+Protection, or that sign in with security keys only, can't make one).
+Paste the 16 letters as Google shows them: the spaces between the groups
+are taken out for you. If Google still refuses, the step says "Google didn't
+accept that. It needs an app password, not your usual password." instead of
+a bare "wrong password". The account's page in Settings → Accounts does the
+same when you type a new one.
+
+Yahoo, AOL, iCloud (an app-specific password, from Sign-In and Security at
+account.apple.com), Fastmail, Posteo and Yandex work the same way, each
+with a button to its own page. Zoho wants an app password only when
+two-step sign-in is on, so its box stays "Password" and the line says "If
+two-step sign-in is on, Zoho needs an app password." For any other provider, a refused
+password still mentions that two-step sign-in may need an app password.
+Komorebi opens these pages only when you press the button (after the usual
+"Open this link in your browser?" prompt) and never fetches them itself.
+Outlook.com and Microsoft 365 can't be added with any password yet.
+
 ### Import from Outlook
 
 If classic Outlook is on this PC, the welcome also shows **Import from
@@ -89,8 +115,8 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-1.1.0-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-1.1.0-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-1.1.1-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-1.1.1-setup.exe .\SHA256SUMS
 ```
 
 How releases are made, signed and published is in

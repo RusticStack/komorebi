@@ -5,6 +5,42 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
+## [1.1.1] - 2026-11-16
+
+Komorebi 1.1.1 explains up front how to sign in to Gmail and other accounts
+that need an app password, and makes the Rest scene move smoothly. Your
+accounts, mail and settings carry over; nothing in your local data changes.
+
+### Added
+
+- **App passwords explained when you sign in.** For Google, Yahoo, AOL,
+  iCloud, Fastmail, Posteo and Yandex (and Zoho when two-step sign-in is
+  on), the password field asks for an app password, and a button opens the
+  provider's page to create one. Spaces in a pasted app password are
+  removed, and if the provider refuses the sign-in, Komorebi says what it
+  needs.
+
+### Changed
+
+- **A calmer Rest scene.** The Rest scene now moves smoothly, with no
+  stepping: glimmers on the lake fade in place instead of sliding across it
+  in streaks, and the fireflies, birds and mist glide. The lake now reflects
+  the ridges, the pines, the jetty, the lantern and the sun or moon.
+
+### Fixed
+
+- **Gmail's app password refusal.** When Gmail says an application-specific
+  password is required, Komorebi now reports a rejected password instead of
+  a general sign-in failure.
+- **The sun no longer jumps at sunrise** in the Rest scene.
+
+### Known limits
+
+- One-click "Sign in with Google" and "Sign in with Microsoft" are still not
+  in this version.
+- Google accounts that cannot create app passwords (Advanced Protection, or
+  sign-in with security keys only) can't be added yet.
+
 ## [1.1.0] - 2026-11-16
 
 Komorebi 1.1.0 puts pictures in your messages and signatures, gives the

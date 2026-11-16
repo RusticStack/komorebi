@@ -50,6 +50,8 @@ pub const ACTIONS: &[&str] = &[
     "ob-manual",
     "ob-providers",
     "ob-import",
+    "ob-sign-in-gmail",
+    "ob-sign-in-gmail-failed",
 ];
 
 /// What to snapshot.

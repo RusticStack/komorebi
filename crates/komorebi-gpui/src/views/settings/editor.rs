@@ -72,6 +72,8 @@ pub enum EditorEvent {
     Moved { id: i64, up: bool },
     /// Its icon was chosen or removed.
     IconChanged,
+    /// A provider's page (where an app password is made): the link prompt.
+    OpenLink(String),
 }
 
 /// Whether `a`'s servers are a preset's (no Find settings on its page, as
@@ -127,6 +129,8 @@ pub struct AccountEditor {
     scroll: ScrollHandle,
     name: Entity<InputState>,
     password: Entity<InputState>,
+    /// The password box's placeholder as last set.
+    password_placeholder: String,
     servers: Entity<ServerForm>,
     save_sent: bool,
     pins: FormPins,
@@ -249,6 +253,7 @@ impl AccountEditor {
             scroll: ScrollHandle::new(),
             name,
             password,
+            password_placeholder: String::new(),
             servers,
             check: CheckState::default(),
             after: None,
@@ -301,6 +306,11 @@ impl AccountEditor {
         &self.password
     }
 
+    /// The password box's placeholder.
+    pub fn password_placeholder(&self) -> &str {
+        &self.password_placeholder
+    }
+
     /// The name box.
     pub fn name_input(&self) -> &Entity<InputState> {
         &self.name
@@ -350,12 +360,39 @@ impl AccountEditor {
         cx.notify();
     }
 
+    /// The app-password help of the account's provider (Gmail and the
+    /// like), by its incoming server as saved.
+    pub fn app_password_help(&self) -> Option<providers::AppPassword> {
+        providers::app_password_for_imap(&self.old.imap.host)
+    }
+
+    /// Opens a provider's page: Settings' link prompt, then the browser.
+    fn open_page(
+        &self,
+        cx: &Context<Self>,
+    ) -> impl Fn(String, &mut Window, &mut App) + Clone + 'static {
+        let view = cx.entity().downgrade();
+        move |url, _, cx| {
+            let _ = view.update(cx, |_, cx| cx.emit(EditorEvent::OpenLink(url)));
+        }
+    }
+
+    /// The password typed, without the spaces of an app password's groups.
+    fn typed_password(&self, cx: &App) -> String {
+        let typed = self.password.read(cx).value().to_string();
+        if self.app_password_help().is_some_and(|h| h.always()) {
+            providers::clean_app_password(&typed)
+        } else {
+            typed
+        }
+    }
+
     /// The form as it stands, over the account's own values.
     fn form(&self, cx: &App) -> super::form::AccountForm {
         let f = self.servers.read(cx).fields(cx);
         super::form::AccountForm {
             name: self.name.read(cx).value().to_string(),
-            password: self.password.read(cx).value().to_string(),
+            password: self.typed_password(cx),
             imap_host: f.imap_host,
             imap_port: f.imap_port,
             imap_starttls: f.imap_starttls,
@@ -570,7 +607,7 @@ impl AccountEditor {
                 return;
             }
         };
-        let password = Some(self.password.read(cx).value().to_string()).filter(|p| !p.is_empty());
+        let password = Some(self.typed_password(cx)).filter(|p| !p.is_empty());
         let req = self.request(&edited, password, &services::get(cx));
         self.run(req, After::Say, cx);
     }
@@ -589,7 +626,7 @@ impl AccountEditor {
                 return;
             }
         };
-        let password = Some(self.password.read(cx).value().to_string()).filter(|p| !p.is_empty());
+        let password = Some(self.typed_password(cx)).filter(|p| !p.is_empty());
         if !account::needs_check(&self.old, &edited, password.is_some()) {
             self.finish_save(edited, None, cx);
             return;
@@ -955,7 +992,17 @@ impl AccountEditor {
     fn line_text(&self, line: &Line) -> String {
         match line {
             Line::Form(e) => text::form_error(*e),
-            Line::Check(f) => check::failure_text(f, None, &self.old.email),
+            // Gmail and the like: what they want, not a bare "rejected".
+            Line::Check(f) => match self
+                .app_password_help()
+                .filter(|_| check::rejected(&f.text))
+            {
+                Some(help) => {
+                    let (title, message) = super::app_password::refused(&help);
+                    format!("{title}. {message}")
+                }
+                None => check::failure_text(f, None, &self.old.email),
+            },
             Line::OfflineCheck => text::err_offline_check(),
             Line::OfflineCert => text::err_offline_cert(),
             Line::Unreadable(Unreadable::NoStartTls { host }) => {
@@ -1042,7 +1089,13 @@ impl AccountEditor {
         };
         let mut n = Notice::new("account-line", kind, self.line_text(line));
         if let Line::Check(f) = line {
-            if check::rejected(&f.text) {
+            let help = self.app_password_help();
+            if let Some(help) = help.filter(|_| check::rejected(&f.text)) {
+                n = n.action(
+                    super::app_password::create_button("account-line", &help, self.open_page(cx))
+                        .variant(Variant::OnInset),
+                );
+            } else if check::rejected(&f.text) {
                 n = n.action(
                     Button::new("account-set-username")
                         .label(tr!("Set username"))
@@ -1275,6 +1328,17 @@ impl Render for AccountEditor {
         let t = cx.tokens().clone();
         let c = t.color;
         let compact = window.viewport_size().width < px(layout::COMPACT_BELOW_W);
+        // Gmail and the like: the box says to paste the app password.
+        let placeholder = if self.app_password_help().is_some_and(|h| h.always()) {
+            super::app_password::placeholder()
+        } else {
+            String::new()
+        };
+        if self.password_placeholder != placeholder {
+            self.password_placeholder = placeholder.clone();
+            self.password
+                .update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
+        }
         let a = self.old.clone();
         let shown = if a.name.trim().is_empty() {
             a.email.clone()
@@ -1405,17 +1469,45 @@ impl Render for AccountEditor {
                 ),
                 cx,
             ))
-            .child(labelled(
-                tr!("Password"),
+            .child({
+                // Gmail and the like: the field is the app password, a line
+                // says why, and a button opens the page that makes one.
+                let help = self.app_password_help();
+                let label = match &help {
+                    Some(help) => super::app_password::field_label(help),
+                    None => tr!("Password"),
+                };
+                let hint = match &help {
+                    Some(help) => format!(
+                        "{} {}",
+                        super::app_password::needs(help),
+                        tr!("Leave empty to keep the current one")
+                    ),
+                    None => tr!("Leave empty to keep the current one"),
+                };
                 div()
-                    .rounded(px(radius::FULL))
-                    .when(self.rejected, |el| {
-                        el.border(px(layout::FOCUS_RING)).border_color(c.ink)
+                    .flex()
+                    .flex_col()
+                    .gap(px(space::SP_2))
+                    .child(labelled(
+                        label.clone(),
+                        div()
+                            .rounded(px(radius::FULL))
+                            .when(self.rejected, |el| {
+                                el.border(px(layout::FOCUS_RING)).border_color(c.ink)
+                            })
+                            .child(TextField::new(&self.password, label)),
+                        Some(hint.into()),
+                        cx,
+                    ))
+                    .when_some(help, |el, help| {
+                        el.child(super::app_password::links(
+                            "account",
+                            &help,
+                            self.open_page(cx),
+                        ))
                     })
-                    .child(TextField::new(&self.password, tr!("Password"))),
-                Some(tr!("Leave empty to keep the current one").into()),
-                cx,
-            ));
+            });
         let roles = (!self.roles.names.is_empty()).then(|| {
             (0..CHOOSABLE.len())
                 .map(|ix| self.role_card(ix, cx).into_any_element())

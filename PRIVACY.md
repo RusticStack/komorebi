@@ -252,7 +252,11 @@ They are never written to the cache, logs or the UI state, and the account
 form in Settings never shows a saved one. A new password typed there
 replaces the saved one only after it signs in to both servers. Removing an
 account deletes its saved password first; if Credential Manager can't be
-reached, the account is not removed.
+reached, the account is not removed. For a provider that wants an app
+password (Gmail and others), "Create app password" and "Turn on 2-Step
+Verification first" open the provider's own page in your browser, only when
+pressed and after the same confirm prompt as a link; Komorebi never fetches
+those pages itself.
 
 ## Certificates of your own server
 

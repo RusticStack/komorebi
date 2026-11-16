@@ -251,14 +251,16 @@ pub mod motion {
     /// The calm panel fades in when nothing is selected any more (Fluent's
     /// `fast`: a quick fade, no slide).
     pub const CALM_MS: u64 = 150;
-    /// The Rest scene's step: about 12 frames a second, only while it is on
-    /// screen in the active window and motion is allowed.
-    pub const SCENE_STEP_MS: u64 = 83;
+    /// The Rest scene's frame: 20 a second (every third refresh at 60 Hz),
+    /// drawn on the window's frame callbacks only while it is on screen in
+    /// the active window and motion is allowed. Its motion is slow and
+    /// mostly light (`sky.rs`): at this rate nothing moves a device pixel
+    /// or changes its light by 0.05 from one frame to the next, so a faster
+    /// rate would cost more and show nothing new.
+    pub const SCENE_FRAME_MS: u64 = 50;
     /// Under reduce motion (still frames) the scene is redrawn once a
     /// minute, for the sun or moon.
     pub const SCENE_MINUTE_MS: u64 = 60_000;
-    /// The path on the water is rolled again this often (500 to 800 ms).
-    pub const SCENE_PATH_MS: u64 = 650;
     /// A search of a large folder waits for this pause in typing (the
     /// Slint app's `SEARCH_DEBOUNCE`).
     pub const SEARCH_PAUSE_MS: u64 = 100;

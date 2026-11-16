@@ -1008,4 +1008,254 @@ mod port {
         cx.read(|cx| assert_eq!(f.view.read(cx).step(), Step::Done));
         assert_eq!(db.account_signatures(id).unwrap(), (Some(work), None));
     }
+
+    // ---- Gmail and the other app-password providers -------------------
+
+    /// The password the last check got (one test writes it).
+    static CHECKED: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+    fn pass_and_keep(
+        imap: &komorebi::providers::Server,
+        smtp: &komorebi::providers::Server,
+        pins: komorebi::mail::Pins,
+        logins: (&str, &str),
+        password: &str,
+        smtp_sign_in: bool,
+        report: &mut dyn FnMut(CheckStep),
+    ) -> Result<(), StepError> {
+        *CHECKED.lock().unwrap() = password.to_string();
+        pass_all(imap, smtp, pins, logins, password, smtp_sign_in, report)
+    }
+
+    /// The server refuses the sign-in (Gmail's answer to a usual password
+    /// is an [AUTHENTICATIONFAILED] or [ALERT] NO, a rejected sign-in).
+    fn refuse_sign_in(
+        imap: &komorebi::providers::Server,
+        _: &komorebi::providers::Server,
+        _: komorebi::mail::Pins,
+        logins: (&str, &str),
+        _: &str,
+        _: bool,
+        report: &mut dyn FnMut(CheckStep),
+    ) -> Result<(), StepError> {
+        use komorebi::mail::errors::{Class, Special};
+        report(CheckStep::Resolve);
+        report(CheckStep::Connect);
+        report(CheckStep::Secure);
+        Err(StepError {
+            step: CheckStep::ImapSignIn,
+            class: Class::Auth,
+            special: Special::None,
+            host: imap.host.clone(),
+            port: imap.port,
+            login: logins.0.to_string(),
+            source: anyhow::anyhow!("NO [ALERT] Application-specific password required (Failure)"),
+        })
+    }
+
+    fn at_sign_in(
+        cx: &mut TestAppContext,
+        name: &str,
+        verify: crate::views::settings::check::Verifier,
+        email: &str,
+    ) -> Fixture {
+        let svc = Services {
+            verify,
+            lookup: |_| Outcome::default(),
+            ..services::refusing()
+        };
+        let f = open(cx, name, svc, false);
+        f.set(cx, |v| v.email_input(), email);
+        f.act(cx, |v, w, cx| v.continue_email(w, cx));
+        cx.run_until_parked();
+        f
+    }
+
+    const GOOGLE_LINE: &str = "Google needs an app password instead of your usual one.";
+    const GOOGLE_REFUSED: &str =
+        "Google didn't accept that. It needs an app password, not your usual password.";
+
+    /// Gmail, before any try: the field is the app password, one line says
+    /// why, and the buttons open Google's pages (through the link prompt);
+    /// the spaces of Google's four groups are taken out before the check.
+    #[gpui::test]
+    fn gmail_asks_for_an_app_password_before_the_first_try(cx: &mut TestAppContext) {
+        let f = at_sign_in(cx, "ob-gmail", pass_and_keep, "ana.silva@gmail.com");
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.chip(), &flow::Chip::Preset(preset("gmail")));
+            assert_eq!(v.app_password_help().map(|h| h.brand), Some("Google"));
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "App password", Role::PasswordInput);
+            assert_named(window, GOOGLE_LINE, Role::Label);
+            assert_named(window, "Create app password", Role::Button);
+            assert_named(window, "Turn on 2-Step Verification first", Role::Button);
+            assert!(
+                !test_support::names(window)
+                    .iter()
+                    .any(|(_, n)| n == "Password"),
+                "no plain Password field"
+            );
+        });
+        in_window(cx, f.window, |window, cx| {
+            test_support::click_named(window, "Create app password", cx)
+        });
+        in_window(cx, f.window, |window, cx| {
+            test_support::click_named(window, "Turn on 2-Step Verification first", cx)
+        });
+        assert_eq!(
+            *f.events.borrow(),
+            [
+                OnboardingEvent::OpenLink("https://myaccount.google.com/apppasswords".into()),
+                OnboardingEvent::OpenLink(
+                    "https://myaccount.google.com/signinoptions/two-step-verification".into()
+                ),
+            ]
+        );
+        cx.read(|cx| {
+            assert_eq!(
+                f.view.read(cx).password_placeholder(),
+                "Paste your app password"
+            )
+        });
+        // Pasted as Google shows it: four groups of four.
+        f.set(cx, |v| v.password_input(), "abcd efgh ijkl mnop");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        assert_eq!(*CHECKED.lock().unwrap(), "abcdefghijklmnop");
+        cx.read(|cx| assert_eq!(f.view.read(cx).step(), Step::Yours));
+    }
+
+    /// A Google Workspace domain (found by its MX records) is Google's too.
+    #[gpui::test]
+    fn a_workspace_domain_asks_for_a_google_app_password(cx: &mut TestAppContext) {
+        fn hosted_by_google(_: &str) -> Outcome {
+            use komorebi::mail::discover::Source;
+            let i = komorebi::providers::index_of("google-workspace").unwrap();
+            Outcome {
+                found: discover::preset_servers(i),
+                sources: vec![Source::Mx],
+                refused: Vec::new(),
+                preset: Some(i),
+            }
+        }
+        let svc = Services {
+            verify: pass_all,
+            lookup: hosted_by_google,
+            ..services::refusing()
+        };
+        let f = open(cx, "ob-workspace", svc, false);
+        f.set(cx, |v| v.email_input(), "ana@example.pt");
+        f.act(cx, |v, w, cx| v.continue_email(w, cx));
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "App password", Role::PasswordInput);
+            assert_named(window, GOOGLE_LINE, Role::Label);
+            assert_named(window, "Create app password", Role::Button);
+        });
+    }
+
+    /// After a refused sign-in, Gmail says what it wants instead of a bare
+    /// "wrong password", and offers no Set username.
+    #[gpui::test]
+    fn a_refused_gmail_sign_in_asks_for_an_app_password(cx: &mut TestAppContext) {
+        let f = at_sign_in(
+            cx,
+            "ob-gmail-refused",
+            refuse_sign_in,
+            "ana.silva@gmail.com",
+        );
+        f.set(cx, |v| v.password_input(), "my usual password");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        cx.read(|cx| assert!(f.view.read(cx).failure().is_some()));
+        in_window(cx, f.window, |window, _| {
+            let names = test_support::names(window);
+            assert!(names.iter().any(|(_, n)| n == GOOGLE_REFUSED), "{names:?}");
+            assert!(
+                !names
+                    .iter()
+                    .any(|(_, n)| n.starts_with("That password didn't work"))
+            );
+            assert!(!names.iter().any(|(_, n)| n == "Set username"));
+            assert_named(window, "Create app password", Role::Button);
+        });
+    }
+
+    /// Zoho wants an app password only with two-step sign-in on: the usual
+    /// Password field and placeholder, the line and refusal say "if", and
+    /// what is typed is sent as typed.
+    #[gpui::test]
+    fn zoho_asks_for_an_app_password_only_with_two_step_sign_in(cx: &mut TestAppContext) {
+        let f = at_sign_in(cx, "ob-zoho", refuse_sign_in, "ana@zoho.com");
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(
+                v.app_password_help().map(|h| h.need),
+                Some(komorebi::providers::Need::WithTwoStep)
+            );
+            assert_eq!(v.password_placeholder(), "Password or app password");
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Password", Role::PasswordInput);
+            assert_named(
+                window,
+                "If two-step sign-in is on, Zoho needs an app password.",
+                Role::Label,
+            );
+            assert_named(window, "Create app password", Role::Button);
+            let names = test_support::names(window);
+            assert!(!names.iter().any(|(_, n)| n == "App password"));
+            assert!(
+                !names
+                    .iter()
+                    .any(|(_, n)| n == "Turn on 2-Step Verification first")
+            );
+        });
+        f.set(cx, |v| v.password_input(), "my usual password");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            let names = test_support::names(window);
+            assert!(
+                names.iter().any(|(_, n)| n
+                    == "Zoho didn't accept that. If two-step sign-in is on, it needs an app password."),
+                "{names:?}"
+            );
+        });
+    }
+
+    /// A provider without the flag: the usual Password field, no app
+    /// password button, and the usual words after a refusal, which already
+    /// mention two-step sign-in.
+    #[gpui::test]
+    fn a_usual_password_provider_keeps_its_words(cx: &mut TestAppContext) {
+        let f = at_sign_in(
+            cx,
+            "ob-purely-refused",
+            refuse_sign_in,
+            "ana@purelymail.com",
+        );
+        cx.read(|cx| assert_eq!(f.view.read(cx).app_password_help(), None));
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Password", Role::PasswordInput);
+            let names = test_support::names(window);
+            assert!(!names.iter().any(|(_, n)| n == "Create app password"));
+            assert!(!names.iter().any(|(_, n)| n == "App password"));
+        });
+        f.set(cx, |v| v.password_input(), "se cret");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            let names = test_support::names(window);
+            assert!(
+                names.iter().any(|(_, n)| n
+                    == "That password didn't work. Check it and try again. If your provider uses two-step sign-in, use an app password."),
+                "{names:?}"
+            );
+            assert!(!names.iter().any(|(_, n)| n.starts_with("Google didn't")));
+            assert_named(window, "Set username", Role::Button);
+        });
+    }
 }

@@ -13,6 +13,7 @@
 pub mod about;
 pub mod account;
 pub mod accounts;
+pub mod app_password;
 pub mod card;
 pub mod check;
 pub mod choices;
@@ -455,6 +456,10 @@ impl SettingsView {
             }
             EditorEvent::ManageSignatures => {
                 self.show(Section::Signatures, window, cx);
+                return;
+            }
+            EditorEvent::OpenLink(url) => {
+                cx.emit(SettingsEvent::OpenLink(url.clone()));
                 return;
             }
         }

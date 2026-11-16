@@ -5984,6 +5984,51 @@ MIME-Version: 1.0
         );
     }
 
+    /// A refused sign-in is a rejected password whatever the server words
+    /// it as; whether the app-password help follows is the provider's flag,
+    /// not the server's text.
+    #[test]
+    fn a_refused_sign_in_gets_the_app_password_help_by_provider() {
+        use crate::providers::{app_password, guess};
+        let refused = |answer: &'static str| {
+            let (seen, result) = check_plain(
+                vec![
+                    Step::Send("* OK fake IMAP ready\r\n"),
+                    Step::Expect("a1 LOGIN"),
+                    Step::Send(answer),
+                ],
+                SmtpEnd::Accept,
+            );
+            assert!(seen.is_empty(), "{seen:?}");
+            let e = result.unwrap_err();
+            assert_eq!(
+                (e.step, e.class),
+                (Check::ImapSignIn, Class::Auth),
+                "{answer}"
+            );
+            e.say()
+        };
+        let rejected = Say::Rejected {
+            host: "imap.example.com".into(),
+            login: "alice".into(),
+        };
+        // Gmail's answers to a usual password.
+        for answer in [
+            "{tag} NO [AUTHENTICATIONFAILED] Invalid credentials (Failure)\r\n",
+            "{tag} NO [ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833 (Failure)\r\n",
+            "{tag} NO [WEBALERT https://accounts.google.com/signin/continue] Web login required.\r\n",
+        ] {
+            assert_eq!(refused(answer), rejected, "{answer}");
+        }
+        // Flagged: Gmail gets the help; unflagged: Purelymail does not.
+        assert_eq!(
+            app_password(guess("alice@gmail.com")).map(|a| a.brand),
+            Some("Google")
+        );
+        assert_eq!(refused("{tag} NO LOGIN failed.\r\n"), rejected);
+        assert_eq!(app_password(guess("alice@purelymail.com")), None);
+    }
+
     #[test]
     fn a_rejected_smtp_password_fails_the_smtp_sign_in_step() {
         let (seen, result) = check_plain(list_and_logout(), SmtpEnd::RejectAuth);

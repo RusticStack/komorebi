@@ -513,15 +513,19 @@ fn item(
 }
 
 /// Rest: the scene fills the panel, with the calm line in its sky
-/// (`scene.rs`, its own view so its steps redraw it alone).
+/// (`scene.rs`). A cached view: its frames redraw it alone, the mail view
+/// and the window around it are replayed (GPUI's in-place splice).
 fn rest(view: &mut MailView, width: f32, cx: &mut Context<MailView>) -> AnyElement {
     let said = rest_words(view.mail.rest_line(), &view.mail);
     let scene = view
         .rest_scene
         .get_or_insert_with(|| cx.new(|_| scene::RestScene::new()))
         .clone();
-    scene.update(cx, |s, _| s.set(said.into(), width));
-    div().size_full().child(scene).into_any_element()
+    scene.update(cx, |s, cx| s.set(said.into(), width, cx));
+    div()
+        .size_full()
+        .child(scene.cached(gpui::StyleRefinement::default().size_full()))
+        .into_any_element()
 }
 
 #[cfg(test)]

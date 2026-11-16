@@ -71,6 +71,23 @@ Features in more detail:
     none (the MTA does, with its own configured name, often the MX host's):
     a provider whose id is in another domain shows no DMARC notice. Nothing
     is learned or guessed per account.
+- **Gmail and other accounts with two-step verification:** providers that
+  want an app password instead of the usual one (the `app_password` field
+  of their preset). Gmail, Google Workspace found by MX, Yahoo, AOL, iCloud,
+  Fastmail, Posteo and Yandex (`Need::Always`) get an "App password" box
+  ("Paste your app password") on Sign in and on the account's page, one
+  line saying why, and a **Create app password** button to the provider's
+  page (Google also gets **Turn on 2-Step Verification first**), opened
+  through the link prompt only when pressed. Spaces and line breaks are
+  taken out of what is typed or pasted for them (Google shows its 16
+  letters in groups of four); no length is enforced. A refused sign-in says
+  "Google didn't accept that. It needs an app password, not your usual
+  password." Zoho (`Need::WithTwoStep`) keeps the usual "Password" box,
+  says "If two-step sign-in is on, Zoho needs an app password." and, after
+  a refusal, "Zoho didn't accept that. If two-step sign-in is on, it needs
+  an app password." The message follows the provider's flag and a rejected
+  sign-in, not the server's wording; Gmail's `[ALERT]` and `[WEBALERT]`
+  refusals count as rejected passwords.
 - **Servers that do less:** a self-hosted server need not offer IDLE
   (Komorebi checks on the timer in Settings → General instead),
   CONDSTORE (flag changes are found by comparing the flags of the cached

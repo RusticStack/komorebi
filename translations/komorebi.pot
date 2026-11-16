@@ -1069,7 +1069,7 @@ msgstr ""
 msgid "Same as the mail password"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/editor.rs
+#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/app_password.rs crates/komorebi-gpui/src/views/settings/editor.rs
 msgid "Password"
 msgstr ""
 
@@ -2305,6 +2305,10 @@ msgstr ""
 msgid "Not filled in: the form changed while Komorebi looked."
 msgstr ""
 
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Enter your app password."
+msgstr ""
+
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/servers.rs
 msgid "Username"
 msgstr ""
@@ -3254,6 +3258,42 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/accounts.rs
 msgid "No accounts yet"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "App password"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "Paste your app password"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "{0} needs an app password instead of your usual one."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "If two-step sign-in is on, {0} needs an app password."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "{0} didn't accept that"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "It needs an app password, not your usual password."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "If two-step sign-in is on, it needs an app password."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "Create app password"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/app_password.rs
+msgid "Turn on 2-Step Verification first"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/check.rs

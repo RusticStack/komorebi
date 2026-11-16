@@ -262,6 +262,25 @@ impl MainWindow {
                     });
                 }
             }
+            // Sign in for a Gmail address, before and after a made-up
+            // refused sign-in (nothing is sent anywhere).
+            "ob-sign-in-gmail" | "ob-sign-in-gmail-failed" => {
+                if self.onboarding().is_none() {
+                    self.show_place(Place::Onboarding, window, cx);
+                }
+                if let Some(flow) = self.onboarding() {
+                    let failed = action == "ob-sign-in-gmail-failed";
+                    flow.update(cx, |v, cx| {
+                        v.start(window, cx);
+                        v.email_input()
+                            .update(cx, |s, cx| s.set_value("ana.silva@gmail.com", window, cx));
+                        v.continue_email(window, cx);
+                        if failed {
+                            v.sample_refused(cx);
+                        }
+                    });
+                }
+            }
             "ob-welcome" | "ob-email" | "ob-sign-in" | "ob-manual" | "ob-providers" => {
                 if self.onboarding().is_none() {
                     self.show_place(Place::Onboarding, window, cx);

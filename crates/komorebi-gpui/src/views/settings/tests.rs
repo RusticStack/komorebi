@@ -274,6 +274,73 @@ mod port {
         });
     }
 
+    /// A Gmail account's page: the field is the app password with Google's
+    /// line and buttons; a refused password says what Google wants, the
+    /// button opens its page (through Settings' link prompt), and the
+    /// spaces of the four groups never reach the check.
+    #[gpui::test]
+    fn a_gmail_account_page_asks_for_an_app_password(cx: &mut TestAppContext) {
+        static CHECKED: Mutex<String> = Mutex::new(String::new());
+        fn refuse_and_keep(
+            imap: &komorebi::providers::Server,
+            smtp: &komorebi::providers::Server,
+            pins: komorebi::mail::Pins,
+            logins: (&str, &str),
+            password: &str,
+            smtp_sign_in: bool,
+            report: &mut dyn FnMut(Step),
+        ) -> Result<(), StepError> {
+            *CHECKED.lock().unwrap() = password.to_string();
+            reject(imap, smtp, pins, logins, password, smtp_sign_in, report)
+        }
+        let f = open(cx, "settings-gmail", with(refuse_and_keep));
+        let db = f.db();
+        let mut a = db.accounts().unwrap()[0].clone();
+        a.imap.host = "imap.gmail.com".into();
+        a.smtp.host = "smtp.gmail.com".into();
+        db.update_account(&a).unwrap();
+        let editor = f.edit(cx);
+        cx.read(|cx| {
+            assert_eq!(
+                editor.read(cx).app_password_help().map(|h| h.brand),
+                Some("Google")
+            )
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "App password", Role::PasswordInput);
+            assert_named(window, "Turn on 2-Step Verification first", Role::Button);
+            assert_named(window, "Create app password", Role::Button);
+        });
+        let password = cx.read(|cx| editor.read(cx).password_input().clone());
+        cx.read(|cx| {
+            assert_eq!(
+                editor.read(cx).password_placeholder(),
+                "Paste your app password"
+            )
+        });
+        type_into(cx, f.window, &password, "abcd efgh ijkl mnop");
+        cx.update(|cx| editor.update(cx, |e, cx| e.test(cx)));
+        cx.run_until_parked();
+        assert_eq!(*CHECKED.lock().unwrap(), "abcdefghijklmnop");
+        in_window(cx, f.window, |window, cx| {
+            let all = names(window);
+            assert!(
+                all.iter().any(|(_, n)| n
+                    == "Google didn't accept that. It needs an app password, not your usual password."),
+                "{all:?}"
+            );
+            assert!(!all.iter().any(|(_, n)| n == "Set username"));
+            window.click("account-line-create-app-password", cx);
+        });
+        assert!(
+            f.events().contains(&SettingsEvent::OpenLink(
+                "https://myaccount.google.com/apppasswords".into()
+            )),
+            "{:?}",
+            f.events()
+        );
+    }
+
     /// Ports `test_connection_shows_its_steps_and_saves_nothing`.
     #[gpui::test]
     fn test_connection_shows_its_steps_and_saves_nothing(cx: &mut TestAppContext) {

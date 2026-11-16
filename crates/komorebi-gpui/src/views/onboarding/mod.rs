@@ -159,6 +159,8 @@ pub struct OnboardingView {
     offline: bool,
     servers: Entity<ServerForm>,
     password: Entity<InputState>,
+    /// The password box's placeholder as last set.
+    password_placeholder: String,
     user: Entity<InputState>,
     user_open: bool,
     missing: Missing,
@@ -351,6 +353,7 @@ impl OnboardingView {
             offline: false,
             servers,
             password,
+            password_placeholder: tr!("Password or app password"),
             user,
             user_open: false,
             missing: Missing::default(),
@@ -446,6 +449,46 @@ impl OnboardingView {
         self.missing
     }
 
+    /// The app-password help of the provider being signed in to (a preset
+    /// by the address's domain, its MX records or the list), when it wants
+    /// one; never on manual setup.
+    pub fn app_password_help(&self) -> Option<presets::AppPassword> {
+        if self.manual {
+            return None;
+        }
+        presets::app_password(self.provider)
+    }
+
+    /// Opens a provider's page: the shell's link prompt, then the browser.
+    fn open_page(
+        &self,
+        cx: &Context<Self>,
+    ) -> impl Fn(String, &mut Window, &mut App) + Clone + 'static {
+        let view = cx.entity().downgrade();
+        move |url, _, cx| {
+            let _ = view.update(cx, |_, cx| cx.emit(OnboardingEvent::OpenLink(url)));
+        }
+    }
+
+    /// A made-up refused sign-in, for the snapshot of the Sign in step
+    /// after a failure (`ob-sign-in-gmail-failed`; offline only).
+    pub fn sample_refused(&mut self, cx: &mut Context<Self>) {
+        let email = self.email.read(cx).value().trim().to_string();
+        let host = self
+            .provider
+            .and_then(|i| PRESETS.get(i))
+            .map_or("imap.example.com", |p| p.imap.0);
+        self.failure = Some(CheckFailure {
+            step: Some(komorebi::mail::errors::Step::ImapSignIn.index()),
+            text: check::CheckText::Say(komorebi::mail::errors::Say::Rejected {
+                host: host.to_string(),
+                login: email,
+            }),
+            review: None,
+        });
+        cx.notify();
+    }
+
     /// The account the flow added, if any.
     pub fn added(&self) -> Option<i64> {
         self.added.as_ref().map(|(id, _)| *id)
@@ -457,6 +500,11 @@ impl OnboardingView {
 
     pub fn password_input(&self) -> &Entity<InputState> {
         &self.password
+    }
+
+    /// The password box's placeholder.
+    pub fn password_placeholder(&self) -> &str {
+        &self.password_placeholder
     }
 
     pub fn name_input(&self) -> &Entity<InputState> {
@@ -858,7 +906,15 @@ impl OnboardingView {
             provider,
             name: String::new(),
             email: self.email.read(cx).value().trim().to_string(),
-            password: self.password.read(cx).value().to_string(),
+            password: {
+                let typed = self.password.read(cx).value().to_string();
+                // Google's 16 letters come as four groups with spaces.
+                if self.app_password_help().is_some_and(|h| h.always()) {
+                    presets::clean_app_password(&typed)
+                } else {
+                    typed
+                }
+            },
             imap_host: f.imap_host,
             imap_port: f.imap_port,
             imap_starttls: f.imap_starttls,
@@ -2212,17 +2268,27 @@ impl OnboardingView {
             return None;
         }
         let t = cx.tokens().clone();
+        // A provider that wants an app password: a refused sign-in says so
+        // (by the provider's flag, whatever the server's words were); the
+        // button to make one is under the field.
+        let mut app_password = None;
         let (title, message, detail, act) = if let Some(f) = &self.failure {
             let kind = check::error_kind(&f.text, f.review.is_some());
             let email = self.email.read(cx).value().trim().to_string();
             let long = check::failure_text(f, self.provider, &email);
+            if kind == Kind3::Rejected {
+                app_password = self.app_password_help();
+            }
             let (title, message) = match kind {
-                Kind3::Rejected => (
-                    tr!("That password didn't work"),
-                    tr!(
-                        "Check it and try again. If your provider uses two-step sign-in, use an app password."
+                Kind3::Rejected => match &app_password {
+                    Some(help) => crate::views::settings::app_password::refused(help),
+                    None => (
+                        tr!("That password didn't work"),
+                        tr!(
+                            "Check it and try again. If your provider uses two-step sign-in, use an app password."
+                        ),
                     ),
-                ),
+                },
                 Kind3::Unreachable => (
                     tr!("Can't reach your mail server"),
                     tr!("Check your internet connection, then try again."),
@@ -2268,7 +2334,10 @@ impl OnboardingView {
             Act::TryAgain => Some(("onboarding-try-again", tr!("Try again"))),
             Act::SetUpManually => Some(("onboarding-manual", tr!("Set up manually"))),
         };
-        if let Some((id, label)) = button {
+        // An app password's refusal: Create app password sits just above,
+        // under the field, and the sign-in is the address (Set username
+        // would not help), so the notice has no button of its own.
+        if let Some((id, label)) = button.filter(|_| app_password.is_none()) {
             n = n.action(
                 Button::new(id)
                     .label(label)
@@ -2453,12 +2522,46 @@ impl OnboardingView {
         // A provider Komorebi cannot sign in to yet: its explanation above,
         // no password to type.
         if !unsupported {
-            col = col.child(labelled(
-                tr!("Password"),
-                TextField::new(&self.password, tr!("Password")),
-                Some(password_note.into()),
-                cx,
-            ));
+            match self.app_password_help() {
+                // Gmail and the like: the field is the app password, a line
+                // says why, and a button opens the page that makes one.
+                Some(help) => {
+                    use crate::views::settings::app_password;
+                    let note = if self.missing.password && help.always() {
+                        tr!("Enter your app password.")
+                    } else if self.missing.password {
+                        tr!("Enter your password.")
+                    } else {
+                        app_password::needs(&help)
+                    };
+                    col = col.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(geo::LABEL_GAP))
+                            .child(labelled(
+                                app_password::field_label(&help),
+                                TextField::new(&self.password, app_password::field_label(&help)),
+                                None,
+                                cx,
+                            ))
+                            .child(app_password::line("onboarding", note, cx))
+                            .child(div().pt(px(space::SP_1)).child(app_password::links(
+                                "onboarding",
+                                &help,
+                                self.open_page(cx),
+                            ))),
+                    );
+                }
+                None => {
+                    col = col.child(labelled(
+                        tr!("Password"),
+                        TextField::new(&self.password, tr!("Password")),
+                        Some(password_note.into()),
+                        cx,
+                    ));
+                }
+            }
         }
         if !self.manual && self.user_open && !unsupported {
             col = col.child(labelled(
@@ -2735,6 +2838,17 @@ impl Render for OnboardingView {
         if let Some(name) = self.start_name.take() {
             self.name.update(cx, |s, cx| s.set_value(name, window, cx));
             self.focus_first(window, cx);
+        }
+        // Gmail and the like: the box says to paste the app password.
+        let placeholder = if self.app_password_help().is_some_and(|h| h.always()) {
+            crate::views::settings::app_password::placeholder()
+        } else {
+            tr!("Password or app password")
+        };
+        if self.password_placeholder != placeholder {
+            self.password_placeholder = placeholder.clone();
+            self.password
+                .update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
         }
         let t = cx.tokens().clone();
         let compact = window.viewport_size().width < px(layout::COMPACT_BELOW_W);

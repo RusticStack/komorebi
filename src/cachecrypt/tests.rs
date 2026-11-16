@@ -5,6 +5,14 @@ use rusqlite::OpenFlags;
 
 fn tmp(name: &str) -> PathBuf {
     let dir = crate::testdir::unique("komorebi-cc", name);
+    // Windows reuses process ids, so a folder left by an earlier run can
+    // carry the same name; start from an empty one so a test never opens
+    // an old cache.
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("clear {}: {e}", dir.display()),
+    }
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("cache.sqlite3")
 }

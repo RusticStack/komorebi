@@ -543,9 +543,17 @@ impl std::error::Error for TlsFailed {}
 /// A NO without a code is taken as a wrong password, unless its text says
 /// it is about connections or temporary (Dovecot's "Maximum number of
 /// connections from user+IP exceeded", "Temporary authentication failure").
+///
+/// An `[ALERT]` or `[WEBALERT …]` refusal is a rejection too, unless it says
+/// "for now": Gmail answers a usual password where an app password is needed
+/// with "[ALERT] Application-specific password required" and a sign-in it
+/// wants in the browser with "[WEBALERT url] Web login required".
 fn rejects_credentials(text: &str) -> bool {
     let upper = text.trim_start().to_ascii_uppercase();
     if upper.starts_with('[') {
+        if upper.starts_with("[ALERT]") || upper.starts_with("[WEBALERT") {
+            return !transient_text(&upper);
+        }
         return [
             "[AUTHENTICATIONFAILED]",
             "[AUTHORIZATIONFAILED]",
@@ -2767,6 +2775,16 @@ mod tests {
         assert!(!rejects_credentials("[UNAVAILABLE] Try again later"));
         assert!(!rejects_credentials("[INUSE] Mailbox in use"));
         assert!(!rejects_credentials("[LIMIT] Too many connections"));
+        // Gmail's refusals of a usual password where it wants an app one.
+        assert!(rejects_credentials(
+            "[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833 (Failure)"
+        ));
+        assert!(rejects_credentials(
+            "[WEBALERT https://accounts.google.com/signin/continue] Web login required."
+        ));
+        assert!(!rejects_credentials(
+            "[ALERT] Too many simultaneous connections. (Failure)"
+        ));
     }
 
     #[test]
