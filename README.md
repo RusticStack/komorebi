@@ -37,7 +37,7 @@ Read and write mail without getting in the way. No AI, no telemetry, no web engi
   on one development PC with a 2,000-message cache), and a cached folder
   listed in under 600 ms. Komorebi 1.0 draws its interface with GPUI, which
   keeps more memory in use while it idles than Komorebi 0.7 did; that is
-  accepted for 1.0, and reducing it is planned for 1.1.
+  accepted for now, and reducing it is planned for a later release.
 - **IMAP and SMTP** with a local SQLite cache and several accounts. A searchable
   list of 26 providers with their settings built in (Gmail, iCloud, Yahoo,
   Fastmail, Proton Mail through Bridge, Purelymail, Postale.io and more; each
@@ -48,13 +48,19 @@ Read and write mail without getting in the way. No AI, no telemetry, no web engi
   Microsoft sign-in, which Komorebi doesn't have.
 - **Reads HTML mail with its own layout engine.** There is no web engine, and
   remote content is never loaded unless you allow it.
-- **Writes formatted mail.** Fonts, colours, lists, tables, named signatures,
-  recipient chips, attachments and drafts.
+- **Writes formatted mail.** Fonts, colours, lists, tables, pictures in the
+  message, named signatures with pictures and tables, recipient chips,
+  attachments and drafts.
 - **Tabs and separate windows**, keyboard shortcuts, meeting invitations.
 - **Rules** that file and flag mail for you, with Copy as Sieve.
-- **Contacts** with groups and CardDAV. There is no calendar in 1.0: the one in
-  0.7 is left out for now and planned to return in 1.1 (an invitation in a
-  message still shows on a card, and Save .ics takes it to your calendar app).
+- **Folders from the sidebar:** create, rename and delete them on the server,
+  with an icon beside each account.
+- **Import from classic Outlook:** its accounts (never its passwords) and
+  signatures.
+- **Contacts** with groups and CardDAV. There is no calendar yet: the one in
+  0.7 is left out for now and planned to return in a later release (an
+  invitation in a message still shows on a card, and Save .ics takes it to
+  your calendar app).
 - **Notifications and tray mode**, both opt-in.
 - **Safe connections.** Certificate pinning (exact certificate, server key or
   issuing CA) and an optional encrypted cache.

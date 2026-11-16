@@ -125,6 +125,86 @@ fn lists_indent_and_enter_on_an_empty_item() {
     assert_eq!(e.format_at(0, 0).list, None);
 }
 
+/// A signature's layout table: logo and text on top, one cell across both
+/// columns under them, and a cell down two rows beside a pair.
+fn merged() -> Doc {
+    let span = |s: &str, colspan: u8, rowspan: u8| Cell {
+        colspan,
+        rowspan,
+        ..Cell::text(s)
+    };
+    Doc {
+        blocks: vec![
+            Block::Table(Table {
+                rows: vec![
+                    vec![Cell::text("Logo"), Cell::text("Name")],
+                    vec![span("Partners", 2, 0), Cell::text("hidden")],
+                    vec![span("Tall", 0, 2), Cell::text("x")],
+                    vec![Cell::text("hidden"), Cell::text("y")],
+                ],
+                borderless: true,
+                widths: vec![110, 0],
+            }),
+            Block::Para(Para::default()),
+        ],
+        ..Doc::default()
+    }
+    .normalized()
+}
+
+#[test]
+fn merged_cells_are_kept_moved_through_and_their_rows_kept() {
+    let doc = merged();
+    let Block::Table(t) = &doc.blocks[0] else {
+        panic!()
+    };
+    // The cells a span covers are emptied: they hold no line.
+    assert_eq!(t.rows[1][1].paras, Vec::<Para>::new());
+    assert_eq!(t.rows[3][0].paras, Vec::<Para>::new());
+    assert_eq!(
+        t.covered(),
+        [[false, false], [false, true], [false, false], [true, false]]
+    );
+    let mut e = Editor::new(doc.clone());
+    assert_eq!(e.text(), "Logo\nName\nPartners\nTall\nx\ny\n");
+    // Tab goes cell to cell past the covered ones, and out of the table.
+    assert_eq!(e.tab(5, 5, false), Some((10, 18)));
+    assert_eq!(e.tab(10, 10, false), Some((19, 23)));
+    assert_eq!(e.tab(19, 19, true), Some((10, 18)));
+    assert_eq!(e.tab(26, 26, false), Some((28, 28)));
+    // Typing in the merged cell, and undo.
+    type_at(&mut e, 18, "!");
+    assert_eq!(e.text(), "Logo\nName\nPartners!\nTall\nx\ny\n");
+    e.undo();
+    assert_eq!(e.doc(), &doc);
+    // Rows and columns stay: only the whole table can be deleted.
+    assert_eq!(TableOp::offered(true), &[TableOp::DeleteTable]);
+    assert!(e.format_at(10, 10).table_merged);
+    for op in [
+        TableOp::RowAbove,
+        TableOp::RowBelow,
+        TableOp::ColLeft,
+        TableOp::ColRight,
+        TableOp::DeleteRow,
+        TableOp::DeleteCol,
+    ] {
+        assert_eq!(e.table_op(10, op), None, "{op:?}");
+        assert_eq!(e.doc(), &doc, "{op:?}");
+    }
+    // Saved and opened again (a draft, a signature): the same table.
+    let saved = emit::html(&doc, emit::Mode::Draft);
+    assert!(
+        saved.contains("colspan=\"2\"") && saved.contains("rowspan=\"2\""),
+        "{saved}"
+    );
+    assert_eq!(import::strict(&saved).unwrap(), doc);
+    // Sent: the covered cells are not written.
+    let sent = emit::html(&doc, emit::Mode::Send);
+    assert_eq!(sent.matches("<td").count(), 6, "{sent}");
+    e.table_op(10, TableOp::DeleteTable).unwrap();
+    assert_eq!(e.text(), "");
+}
+
 #[test]
 fn tables_hold_cells_and_refuse_edits_across_their_edges() {
     let mut e = ed("before");
@@ -228,7 +308,7 @@ fn the_signature_goes_above_the_quote_and_is_swapped_whole() {
     let mut doc = Doc::from_plain("");
     doc.blocks.push(Block::Quote(quote()));
     let mut e = Editor::new(doc);
-    let sig = SignatureBlock::new(vec![Block::Para(Para::text("Ana"))], None, Some(7));
+    let sig = SignatureBlock::new(vec![Block::Para(Para::text("Ana"))], Some(7));
     assert!(e.set_signature(Some(sig.clone())));
     assert_eq!(e.text(), "\nAna\n\u{fffc}");
     assert!(e.signature().unwrap().is_untouched());
@@ -236,7 +316,7 @@ fn the_signature_goes_above_the_quote_and_is_swapped_whole() {
     type_at(&mut e, 4, " Silva");
     assert!(!e.signature().unwrap().is_untouched());
     // Another one replaces it whole; undo brings the edited one back.
-    let other = SignatureBlock::new(vec![Block::Para(Para::text("Bob"))], None, Some(8));
+    let other = SignatureBlock::new(vec![Block::Para(Para::text("Bob"))], Some(8));
     assert!(e.set_signature(Some(other)));
     assert_eq!(e.text(), "\nBob\n\u{fffc}");
     e.undo();
@@ -364,7 +444,6 @@ fn random_edits_keep_the_model_and_the_projection_in_step() {
             e.set_signature(Some(SignatureBlock::new(
                 vec![Block::Para(Para::text("Sig"))],
                 None,
-                None,
             )));
         }
         for _ in 0..120 {
@@ -469,10 +548,127 @@ fn a_fragment_is_the_selection_with_its_formatting() {
     let mut s = ed("hi");
     assert!(s.set_signature(Some(SignatureBlock::new(
         vec![Block::Para(Para::text("Ana"))],
-        None,
         None
     ))));
     let len = s.text().len();
     let f = s.fragment(0, len).unwrap();
     assert_eq!(super::emit::plain(&f).trim_end(), "hi");
+}
+
+// ---- pictures --------------------------------------------------------------
+
+fn picture(w: u32, h: u32) -> (InlineImage, ImageFile) {
+    let (file, iw, ih) = ImageFile::new(super::images::tests::png(w, h)).unwrap();
+    (InlineImage::new(file.cid(), iw, ih, "Step"), file)
+}
+
+#[test]
+fn a_picture_goes_in_the_text_and_undo_and_redo_take_it_out_and_back() {
+    let mut e = ed("Open Settings then");
+    let (img, file) = picture(1200, 800);
+    let at = "Open Settings ".len();
+    let caret = e.insert_image(at, at, img.clone(), file.clone()).unwrap();
+    assert_eq!(caret, at + OBJ.len_utf8());
+    assert_eq!(e.text(), "Open Settings \u{fffc}then");
+    assert_eq!(e.image_at(at).unwrap().cid, img.cid);
+    assert_eq!(e.image_at(at).unwrap().width, DEFAULT_IMAGE_W);
+    assert_eq!(e.image_offsets().len(), 1);
+    assert_eq!(e.shown_images(), vec![(img.cid.clone(), file.clone())]);
+    // Typing next to it never merges into it.
+    let c = type_at(&mut e, caret, "x");
+    assert_eq!(e.text(), "Open Settings \u{fffc}xthen");
+    assert_eq!(c, caret + 1);
+    e.undo();
+    e.undo();
+    assert_eq!(e.text(), "Open Settings then");
+    assert!(e.shown_images().is_empty());
+    // The bytes stay for redo.
+    assert!(e.images().contains(&img.cid));
+    e.redo();
+    assert_eq!(e.text(), "Open Settings \u{fffc}then");
+    assert_eq!(e.shown_images().len(), 1);
+    // Delete over it removes it, one step.
+    e.replace(at, at + 3, "", (at, at + 3)).unwrap();
+    assert_eq!(e.text(), "Open Settings then");
+    e.undo();
+    assert_eq!(e.image_offsets().len(), 1);
+}
+
+#[test]
+fn a_picture_is_resized_as_one_undo_step_per_burst() {
+    let mut e = ed("");
+    let (img, file) = picture(800, 400);
+    e.insert_image(0, 0, img.clone(), file).unwrap();
+    assert!(e.set_image(0, img.clone().sized(500), true));
+    assert!(e.set_image(0, img.clone().sized(300), true));
+    assert_eq!(e.image_at(0).unwrap().width, 300);
+    assert_eq!(e.image_at(0).unwrap().height(), 150);
+    // Alt text: its own step.
+    let mut named = e.image_at(0).unwrap().clone();
+    named.alt = "The Save button".into();
+    assert!(e.set_image(0, named, false));
+    e.undo();
+    assert_eq!(e.image_at(0).unwrap().alt, "Step");
+    assert_eq!(e.image_at(0).unwrap().width, 300);
+    // The two resizes undo together.
+    e.undo();
+    assert_eq!(e.image_at(0).unwrap().width, 600);
+    // No picture there: refused.
+    assert!(!e.set_image(1, img, false));
+}
+
+#[test]
+fn pictures_go_in_table_cells_and_bold_never_reaches_them() {
+    let mut e = ed("");
+    let caret = e.insert_table(0, 1, 2).unwrap();
+    let (img, file) = picture(100, 50);
+    let after = e.insert_image(caret, caret, img, file).unwrap();
+    type_at(&mut e, after, "Logo");
+    assert!(e.format_at(caret, caret).in_table);
+    let len = e.text().len();
+    assert!(e.format_chars(0, len, &CharOp::Bold));
+    let Block::Table(t) = &e.doc().blocks[0] else {
+        panic!("{:?}", e.doc())
+    };
+    let runs = &t.rows[0][0].paras[0].runs;
+    assert!(runs[0].image.is_some() && !runs[0].style.b, "{runs:?}");
+    assert!(runs[1].style.b);
+    // Saved and read back, the same.
+    let back = import::strict(&html(e.doc(), Mode::Draft)).unwrap();
+    assert_eq!(&back, e.doc());
+    // A picture cannot go in the stored quote.
+    let mut q = Editor::new(Doc {
+        blocks: vec![Block::Para(Para::default()), Block::Quote(quote())],
+        ..Doc::default()
+    });
+    let obj = q.text().find(OBJ).unwrap();
+    let (img, file) = picture(10, 10);
+    assert_eq!(q.insert_image(obj, obj, img, file), None);
+}
+
+#[test]
+fn copy_and_paste_carry_pictures() {
+    let mut e = ed("before  after");
+    let (img, file) = picture(64, 32);
+    e.insert_image(7, 7, img.clone(), file.clone()).unwrap();
+    let frag = e.fragment(0, e.text().len()).unwrap();
+    assert_eq!(frag.image_cids(), vec![img.cid.clone()]);
+    // The clipboard's HTML carries the bytes (data:), read back by the
+    // lossy import into another message.
+    let html = emit::html_with(&frag, Mode::Send, &|i| {
+        e.images().get(&i.cid).map(images::data_uri)
+    });
+    assert!(html.contains("src=\"data:image/png;base64,"));
+    let known = Images::default();
+    let none = |_: &std::path::Path| None;
+    let mut r = images::Resolver::new(&known, &none);
+    let pasted = import::lossy_with_images(&html, &mut |f| r.resolve(f)).unwrap();
+    assert_eq!(pasted.image_cids(), vec![img.cid.clone()]);
+    let mut other = ed("x");
+    other.add_images(&r.found);
+    other.paste(1, 1, pasted).unwrap();
+    assert_eq!(other.shown_images(), vec![(img.cid.clone(), file)]);
+    let shown = other.image_offsets();
+    assert_eq!(shown[0].1.width, 64);
+    assert_eq!(shown[0].1.alt, "Step");
 }

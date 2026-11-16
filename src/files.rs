@@ -334,10 +334,17 @@ pub fn cf_html_fragment(block: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(html).into_owned())
 }
 
-/// The HTML fragment on the clipboard (copied from a browser, Word or
-/// Outlook), if any; at most 2 MB.
+/// The largest CF_HTML block read: pictures copied with the HTML (as
+/// `data:` addresses) make it large.
+pub const MAX_CLIPBOARD_HTML: usize = 48 * 1024 * 1024;
+/// The largest bitmap read from the clipboard (a 4K screenshot as a DIB is
+/// about 33 MB).
+pub const MAX_CLIPBOARD_PICTURE: usize = 64 * 1024 * 1024;
+
+/// A clipboard format's block (`format` a standard one, or `name`
+/// registered), if it is there and at most `max` bytes.
 #[cfg(windows)]
-pub fn clipboard_html() -> Option<String> {
+fn clipboard_block(format: u32, name: Option<&str>, max: usize) -> Option<Vec<u8>> {
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
         RegisterClipboardFormatW,
@@ -350,13 +357,16 @@ pub fn clipboard_html() -> Option<String> {
             unsafe { CloseClipboard() };
         }
     }
-    let name: Vec<u16> = "HTML Format\0".encode_utf16().collect();
-    // SAFETY: `name` is NUL-terminated; the clipboard is opened and closed
+    let wide: Option<Vec<u16>> = name.map(|n| n.encode_utf16().chain([0]).collect());
+    // SAFETY: `wide` is NUL-terminated; the clipboard is opened and closed
     // (by `Close`) on this thread; the handle stays valid while it is open,
     // and the block is copied out between GlobalLock and GlobalUnlock,
     // within GlobalSize.
     unsafe {
-        let format = RegisterClipboardFormatW(name.as_ptr());
+        let format = match &wide {
+            Some(w) => RegisterClipboardFormatW(w.as_ptr()),
+            None => format,
+        };
         if format == 0
             || IsClipboardFormatAvailable(format) == 0
             || OpenClipboard(std::ptr::null_mut()) == 0
@@ -369,7 +379,7 @@ pub fn clipboard_html() -> Option<String> {
             return None;
         }
         let size = GlobalSize(handle);
-        if size > 2 * 1024 * 1024 {
+        if size > max {
             return None;
         }
         let ptr = GlobalLock(handle) as *const u8;
@@ -378,13 +388,130 @@ pub fn clipboard_html() -> Option<String> {
         }
         let block = std::slice::from_raw_parts(ptr, size).to_vec();
         GlobalUnlock(handle);
-        cf_html_fragment(&block)
+        Some(block)
     }
+}
+
+/// The HTML fragment on the clipboard (copied from a browser, Word or
+/// Outlook), if any; at most [`MAX_CLIPBOARD_HTML`].
+#[cfg(windows)]
+pub fn clipboard_html() -> Option<String> {
+    let block = clipboard_block(0, Some("HTML Format"), MAX_CLIPBOARD_HTML)?;
+    cf_html_fragment(&block)
 }
 
 #[cfg(not(windows))]
 pub fn clipboard_html() -> Option<String> {
     None
+}
+
+/// Whether the clipboard has HTML or a picture (a cheap check, the
+/// clipboard not opened): a formatted paste then reads them off the UI
+/// thread.
+#[cfg(windows)]
+pub fn clipboard_has_rich() -> bool {
+    use windows_sys::Win32::System::DataExchange::{
+        IsClipboardFormatAvailable, RegisterClipboardFormatW,
+    };
+    /// `CF_BITMAP`, `CF_DIB`, `CF_DIBV5`.
+    const BITMAPS: [u32; 3] = [2, 8, 17];
+    let named = ["HTML Format", "PNG"].map(|n| n.encode_utf16().chain([0]).collect::<Vec<u16>>());
+    // SAFETY: each name is NUL-terminated; neither call opens the clipboard.
+    unsafe {
+        named.iter().any(|n| {
+            let f = RegisterClipboardFormatW(n.as_ptr());
+            f != 0 && IsClipboardFormatAvailable(f) != 0
+        }) || BITMAPS.iter().any(|f| IsClipboardFormatAvailable(*f) != 0)
+    }
+}
+
+#[cfg(not(windows))]
+pub fn clipboard_has_rich() -> bool {
+    false
+}
+
+/// A picture on the clipboard (a screenshot, an image copied in an app).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardPicture {
+    /// The registered "PNG" format (browsers, Office, the Snipping Tool).
+    Png(Vec<u8>),
+    /// A device-independent bitmap (CF_DIBV5 or CF_DIB; Windows makes one
+    /// from a CF_BITMAP), as a BMP file ([`dib_to_bmp`]).
+    Bmp(Vec<u8>),
+}
+
+/// The picture on the clipboard, if any: its PNG when it has one, else its
+/// bitmap.
+#[cfg(windows)]
+pub fn clipboard_picture() -> Option<ClipboardPicture> {
+    /// `CF_DIB` and `CF_DIBV5` (their constants live in the Ole feature).
+    const CF_DIB: u32 = 8;
+    const CF_DIBV5: u32 = 17;
+    if let Some(png) = clipboard_block(0, Some("PNG"), MAX_CLIPBOARD_PICTURE) {
+        return Some(ClipboardPicture::Png(png));
+    }
+    let dib = clipboard_block(CF_DIBV5, None, MAX_CLIPBOARD_PICTURE)
+        .or_else(|| clipboard_block(CF_DIB, None, MAX_CLIPBOARD_PICTURE))?;
+    dib_to_bmp(&dib).map(ClipboardPicture::Bmp)
+}
+
+#[cfg(not(windows))]
+pub fn clipboard_picture() -> Option<ClipboardPicture> {
+    None
+}
+
+/// A packed DIB (a BITMAPINFOHEADER or a later header, the colour table or
+/// masks, the pixels) as a BMP file: the 14-byte file header in front,
+/// pointing at the pixels. `None` for a block too short or malformed.
+pub fn dib_to_bmp(dib: &[u8]) -> Option<Vec<u8>> {
+    let le32 = |at: usize| -> Option<u32> {
+        let s = dib.get(at..at.checked_add(4)?)?;
+        Some(u32::from_le_bytes([
+            *s.first()?,
+            *s.get(1)?,
+            *s.get(2)?,
+            *s.get(3)?,
+        ]))
+    };
+    let le16 = |at: usize| -> Option<u16> {
+        let s = dib.get(at..at.checked_add(2)?)?;
+        Some(u16::from_le_bytes([*s.first()?, *s.get(1)?]))
+    };
+    let header = usize::try_from(le32(0)?).ok()?;
+    if !(40..=124).contains(&header) || dib.len() < header {
+        return None;
+    }
+    let bits = le16(14)?;
+    let compression = le32(16)?;
+    let used = usize::try_from(le32(32)?).ok()?;
+    let palette = if used > 0 {
+        used
+    } else if bits <= 8 {
+        1usize << bits
+    } else {
+        0
+    };
+    // BI_BITFIELDS with the plain header: three masks follow it.
+    let masks = if header == 40 && compression == 3 {
+        12
+    } else {
+        0
+    };
+    let offset = 14usize
+        .checked_add(header)?
+        .checked_add(masks)?
+        .checked_add(palette.checked_mul(4)?)?;
+    let total = dib.len().checked_add(14)?;
+    if offset > total {
+        return None;
+    }
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&u32::try_from(total).ok()?.to_le_bytes());
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(&u32::try_from(offset).ok()?.to_le_bytes());
+    out.extend_from_slice(dib);
+    Some(out)
 }
 
 /// The CF_HTML header (Version 0.9, four ten-digit offsets).
@@ -505,6 +632,54 @@ pub fn set_clipboard_rich(_: &str, _: &str) -> bool {
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    /// A screenshot's CF_DIB (a 2 x 1, 32-bit BI_BITFIELDS bitmap, and a
+    /// 1 x 1, 8-bit one with its colour table) becomes a BMP whose header
+    /// points at its pixels.
+    #[test]
+    fn a_clipboard_bitmap_becomes_a_bmp_file() {
+        let header = |w: i32, h: i32, bits: u16, compression: u32, used: u32| {
+            let mut v = Vec::new();
+            v.extend(40u32.to_le_bytes());
+            v.extend(w.to_le_bytes());
+            v.extend(h.to_le_bytes());
+            v.extend(1u16.to_le_bytes());
+            v.extend(bits.to_le_bytes());
+            v.extend(compression.to_le_bytes());
+            v.extend([0; 12]);
+            v.extend(used.to_le_bytes());
+            v.extend(0u32.to_le_bytes());
+            v
+        };
+        let mut dib = header(2, 1, 32, 3, 0);
+        dib.extend([0, 0, 0xff, 0, 0, 0xff, 0, 0, 0xff, 0, 0, 0]);
+        dib.extend([1, 2, 3, 0, 4, 5, 6, 0]);
+        let bmp = dib_to_bmp(&dib).unwrap();
+        assert_eq!(&bmp[..2], b"BM");
+        assert_eq!(
+            u32::from_le_bytes(bmp[2..6].try_into().unwrap()) as usize,
+            bmp.len()
+        );
+        assert_eq!(
+            u32::from_le_bytes(bmp[10..14].try_into().unwrap()),
+            14 + 40 + 12
+        );
+        let mut pal = header(1, 1, 8, 0, 0);
+        pal.extend(vec![0; 256 * 4]);
+        pal.extend([0, 0, 0, 0]);
+        let bmp = dib_to_bmp(&pal).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(bmp[10..14].try_into().unwrap()),
+            14 + 40 + 1024
+        );
+        // Junk is refused.
+        assert!(dib_to_bmp(b"").is_none());
+        assert!(dib_to_bmp(&[9, 0, 0, 0]).is_none());
+        assert!(
+            dib_to_bmp(&header(1, 1, 8, 0, 0)).is_none(),
+            "no room for the palette"
+        );
+    }
 
     #[test]
     fn opening_refuses_what_runs_code_and_writes_nothing() {

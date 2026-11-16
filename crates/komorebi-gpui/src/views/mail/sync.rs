@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use komorebi::mail::errors::{Attention, Class, Problem};
-use komorebi::mail::{Event, Notice, Outcome};
+use komorebi::mail::{Event, FolderOp, FolderOutcome, Notice, Outcome};
 
 use super::model::AccountState;
 use crate::views::composer::Status as ComposerStatus;
@@ -114,6 +114,13 @@ pub enum Said {
     WhatsNew { version: String },
     /// A failure of the cache or the system, behind a lead-in sentence.
     Detail(String),
+    /// How a folder action ended (or that it waits for the server).
+    Folder {
+        email: String,
+        op: FolderOp,
+        name: String,
+        outcome: FolderOutcome,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -424,6 +431,23 @@ impl Sync {
                 false,
             ),
             Event::DraftCopyLeft(copy) => out.push(Reaction::DraftCopyLeft(copy)),
+            Event::FolderDone {
+                account_id,
+                op,
+                name,
+                outcome,
+            } => {
+                let error = !matches!(outcome, FolderOutcome::Done | FolderOutcome::Waiting);
+                self.say(
+                    Said::Folder {
+                        email: (env.email)(account_id),
+                        op,
+                        name,
+                        outcome,
+                    },
+                    error,
+                );
+            }
         }
         out
     }

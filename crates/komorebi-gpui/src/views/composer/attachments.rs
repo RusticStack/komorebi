@@ -1,8 +1,8 @@
 //! The draft's attachments (mockup `.att`): inset pills with the file's
-//! glyph, its name, its size and a remove button, and the counter
-//! ("Attachments 12 MB of 25 MB") once it nears the limit servers take
-//! (`compose::counter_level`: from 80 percent; over it Send says why). No
-//! hue: the counter turns ink and strong, the words say the rest.
+//! glyph, its name, its size and a remove button, and their total size
+//! ("Attachments: 12 MB"). Komorebi sets no limit on attachments: the
+//! total is information only, and the server's own refusal of a message
+//! too large for it is the one limit (`mail::smtp`).
 
 use gpui::{
     Context, ElementId, InteractiveElement as _, IntoElement, ParentElement, Role, SharedString,
@@ -41,8 +41,7 @@ impl ComposerView {
         let t = cx.tokens().clone();
         let c = t.color;
         let lang = komorebi_i18n::current();
-        let encoded = compose::encoded_size(compose::attachments_size(&d.attachments));
-        let level = compose::counter_level(encoded);
+        let total = compose::attachments_size(&d.attachments);
         let pills: Vec<_> = d
             .attachments
             .iter()
@@ -87,7 +86,7 @@ impl ComposerView {
             .collect();
         let total = text::attach_total(&text::size(
             lang,
-            usize::try_from(encoded).unwrap_or(usize::MAX),
+            usize::try_from(total).unwrap_or(usize::MAX),
         ));
         Some(
             div()
@@ -110,12 +109,8 @@ impl ComposerView {
                         .id("compose-attach-total")
                         .role(Role::Status)
                         .aria_label(SharedString::from(total.clone()))
-                        .typo(if level > 0 {
-                            &t.text.body_strong
-                        } else {
-                            &t.text.caption
-                        })
-                        .text_color(if level > 0 { c.ink } else { c.ink_3 })
+                        .typo(&t.text.caption)
+                        .text_color(c.ink_3)
                         .child(total)
                         .test_support(),
                 ),

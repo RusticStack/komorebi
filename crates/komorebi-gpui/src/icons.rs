@@ -164,6 +164,14 @@ icons! {
     IndentMore => "text_indent_increase_ltr";
     IndentLess => "text_indent_decrease_ltr";
     ClearFormat => "text_clear_formatting";
+    // The format bar's alignment box and font colour (1.0.3: Gmail's
+    // order). Justify has no 16 px drawing in 1.1.292: its 16 px file is
+    // the 20 px one, as Power's is.
+    AlignLeft => "text_align_left";
+    AlignCenter => "text_align_center";
+    AlignRight => "text_align_right";
+    AlignJustify => "text_align_justify";
+    TextColor => "text_color";
     Table => "table";
     Important => "important";
     ArrowDown => "arrow_down";

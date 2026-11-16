@@ -74,8 +74,10 @@ CREATE TABLE accounts (
 );
 
 -- Named signatures: formatted (the tagged HTML of `rich::html`, read back by
--- `rich::import::strict`) with their plain text, and at most one small
--- logo (a PNG or JPEG as picked, 200 KB at most). Plaintext, like the rest.
+-- `rich::import::strict`) with their plain text. Their pictures are in
+-- `signature_images`; `logo` and `logo_mime` held the one logo of before and
+-- are moved there when the cache opens (`migrate_logos`). Plaintext, like the
+-- rest.
 CREATE TABLE signatures (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -205,7 +207,8 @@ CREATE TABLE draft_attachments (
     mime TEXT NOT NULL DEFAULT '',
     size INTEGER NOT NULL,
     file TEXT NOT NULL,
-    -- Non-NULL: an inline part (a signature's logo), by Content-ID.
+    -- Non-NULL: a picture in the body (an inline part), by Content-ID; not
+    -- listed as an attachment.
     cid TEXT
 );
 CREATE INDEX draft_attachments_draft ON draft_attachments(draft_id);
@@ -1146,13 +1149,113 @@ fn server_copy(conn: &Connection, id: i64) -> rusqlite::Result<Option<ServerCopy
     .optional()
 }
 
-/// An attachment of a saved draft; its bytes are in the drafts folder.
+/// An attachment of a saved draft, or a picture in its body; its bytes are
+/// in the drafts folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DraftFile {
     pub id: i64,
     pub name: String,
     pub mime: String,
     pub size: i64,
+    /// A picture in the body: its Content-ID.
+    pub cid: Option<String>,
+}
+
+/// A copy of a draft's file still to be written: [`DraftCopy::write`] runs
+/// off the UI thread (the row is already recorded).
+#[derive(Debug, Clone)]
+pub struct DraftCopy {
+    pub path: PathBuf,
+    pub data: std::sync::Arc<[u8]>,
+    /// For the error message.
+    pub name: String,
+}
+
+impl DraftCopy {
+    pub fn write(&self) -> Result<()> {
+        let written = self
+            .path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&self.path, &self.data));
+        if let Err(e) = written {
+            std::fs::remove_file(&self.path).ok();
+            return Err(e).with_context(|| format!("saving a copy of {}", self.name));
+        }
+        Ok(())
+    }
+}
+
+/// Read a draft's copy at `path` back (on any thread), refusing one larger
+/// than `limit`.
+pub fn read_draft_copy(path: &Path, name: &str, limit: u64) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|f| f.take(limit.saturating_add(1)).read_to_end(&mut data))
+        .with_context(|| format!("reading the saved copy of {name}"))?;
+    if data.len() as u64 > limit {
+        anyhow::bail!("{name} is over the attachment limit");
+    }
+    Ok(data)
+}
+
+/// The schema of signature pictures: created when the cache opens, so the
+/// schema version stays as 0.7.0 wrote it.
+const SIGNATURE_IMAGES: &str = "
+CREATE TABLE IF NOT EXISTS signature_images (
+    signature_id INTEGER NOT NULL REFERENCES signatures(id) ON DELETE CASCADE,
+    cid TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    data BLOB NOT NULL,
+    PRIMARY KEY (signature_id, cid)
+);";
+
+/// The display width a signature's logo had (`rich::Logo` scaled to 400
+/// px at most): it keeps its look as a picture.
+const OLD_LOGO_W: u32 = 400;
+
+/// Each signature's logo moved into its content, as a picture in a
+/// paragraph of its own under the text (where the logo was drawn), its
+/// bytes into `signature_images`. Done once: the logo columns are cleared
+/// as each moves. A logo that cannot be read as a picture stays where it is.
+fn migrate_logos(conn: &Connection) -> Result<()> {
+    conn.execute_batch(SIGNATURE_IMAGES)
+        .context("creating signature pictures")?;
+    let olds: Vec<(i64, String, Vec<u8>)> = conn
+        .prepare("SELECT id, body_html, logo FROM signatures WHERE logo IS NOT NULL")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    if olds.is_empty() {
+        return Ok(());
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    for (id, html, logo) in olds {
+        let Some((file, w, h)) = rich::ImageFile::new(logo) else {
+            continue;
+        };
+        let cid = file.cid();
+        let mut doc = rich::from_stored(&html).unwrap_or_default();
+        let img = rich::InlineImage::new(cid.clone(), w, h, "")
+            .sized(u16::try_from(w.min(OLD_LOGO_W)).unwrap_or(rich::DEFAULT_IMAGE_W));
+        doc.blocks.push(rich::Block::Para(rich::Para {
+            runs: vec![rich::Run::picture(img, rich::Style::default())],
+            ..rich::Para::default()
+        }));
+        let (html, text) = signature_forms(&doc);
+        tx.execute(
+            "INSERT OR REPLACE INTO signature_images (signature_id, cid, mime, data)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, cid, file.mime, &file.data[..]],
+        )?;
+        tx.execute(
+            "UPDATE signatures SET body_html = ?2, body_text = ?3, logo = NULL, logo_mime = NULL
+             WHERE id = ?1",
+            params![id, html, text],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// One row of the Drafts view.
@@ -1265,8 +1368,8 @@ pub struct Signature {
     pub body_html: String,
     /// The plain text, generated from the blocks (no `-- ` line).
     pub body_text: String,
-    pub logo: Option<Vec<u8>>,
-    pub logo_mime: Option<String>,
+    /// The pictures it shows, by Content-ID.
+    pub images: rich::Images,
     pub created: i64,
     pub updated: i64,
 }
@@ -1277,32 +1380,27 @@ impl Signature {
         rich::from_stored(&self.body_html).unwrap_or_default()
     }
 
-    pub fn logo(&self) -> Option<rich::Logo> {
-        self.logo
-            .as_deref()
-            .and_then(|b| rich::Logo::from_bytes(b).ok())
-    }
-
     /// The block a message holds when this signature is put in: marked
-    /// untouched, `None` if the signature has no text and no logo.
+    /// untouched, `None` if the signature is empty. Its pictures are
+    /// [`Signature::images`] (copied into the draft with it).
     pub fn block(&self) -> Option<rich::SignatureBlock> {
         let blocks = self.doc().blocks;
-        let logo = self.logo().map(|l| l.reference());
         let empty = blocks
             .iter()
             .all(|b| matches!(b, rich::Block::Para(p) if p.is_empty()));
-        (!(empty && logo.is_none())).then(|| rich::SignatureBlock::new(blocks, logo, Some(self.id)))
+        (!empty).then(|| rich::SignatureBlock::new(blocks, Some(self.id)))
     }
 }
 
-/// A signature in a list: no logo bytes.
+/// A signature in a list: no picture bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignatureInfo {
     pub id: i64,
     pub name: String,
     /// The first line of its text, for the list.
     pub first_line: String,
-    pub has_logo: bool,
+    /// How many pictures it shows.
+    pub images: usize,
 }
 
 /// Why a signature was not saved.
@@ -1520,6 +1618,7 @@ impl Db {
                 contacts::CONTACTS
             ))
             .context("creating cache schema")?;
+            migrate_logos(&conn)?;
             return Ok(Self { conn, drafts: None });
         }
         if version == 1 {
@@ -1577,6 +1676,7 @@ impl Db {
                 "cache schema v{version} is not supported; delete the cache file to reset it"
             );
         }
+        migrate_logos(&conn)?;
         Ok(Self { conn, drafts: None })
     }
 
@@ -1704,6 +1804,8 @@ impl Db {
             .collect::<rusqlite::Result<_>>()?;
         self.conn
             .execute("DELETE FROM accounts WHERE id = ?1", [id])?;
+        // Its icon (`crate::favicon`).
+        self.delete_setting(&format!("account_icon.{id}"))?;
         for draft in drafts {
             self.remove_draft_folder(draft);
         }
@@ -1840,6 +1942,21 @@ impl Db {
             out.push((a, id, if name.is_empty() { addr } else { name }, subject));
         }
         Ok(out)
+    }
+
+    /// One setting's stored value (`None`: never set).
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT value FROM settings WHERE key = ?1")?
+            .query_row([key], |r| r.get(0))
+            .optional()?)
+    }
+
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
@@ -1994,6 +2111,51 @@ impl Db {
         let tx = self.write()?;
         for id in existing {
             tx.execute("DELETE FROM folders WHERE id = ?1", [id])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// A folder renamed on the server, `from` to `to`, with its subfolders
+    /// (the names under `from` and `delimiter`): the rows follow, so their
+    /// cached mail stays, and so do the account's rules that move mail
+    /// there. The next folder list sets the names shown.
+    pub fn rename_folders(
+        &self,
+        account_id: i64,
+        from: &str,
+        to: &str,
+        delimiter: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.write()?;
+        let mut pairs = vec![(from.to_string(), to.to_string(), false)];
+        if let Some(d) = delimiter.filter(|d| !d.is_empty()) {
+            pairs.push((format!("{from}{d}"), format!("{to}{d}"), true));
+        }
+        for (old, new, prefix) in pairs {
+            let (folders, rules) = if prefix {
+                (
+                    "UPDATE folders SET name = ?3 || substr(name, ?4)
+                     WHERE account_id = ?1 AND substr(name, 1, ?4 - 1) = ?2",
+                    "UPDATE rules SET move_to = ?3 || substr(move_to, ?4)
+                     WHERE account_id = ?1 AND substr(move_to, 1, ?4 - 1) = ?2",
+                )
+            } else {
+                (
+                    "UPDATE folders SET name = ?3 WHERE account_id = ?1 AND name = ?2 AND ?4 > 0",
+                    "UPDATE rules SET move_to = ?3 WHERE account_id = ?1 AND move_to = ?2 AND ?4 > 0",
+                )
+            };
+            let from_char = old.chars().count() as i64 + 1;
+            if !prefix {
+                // A row left with the new name (it can't be on the server).
+                tx.execute(
+                    "DELETE FROM folders WHERE account_id = ?1 AND name = ?2",
+                    params![account_id, new],
+                )?;
+            }
+            tx.execute(folders, params![account_id, old, new, from_char])?;
+            tx.execute(rules, params![account_id, old, new, from_char])?;
         }
         tx.commit()?;
         Ok(())
@@ -2681,11 +2843,12 @@ impl Db {
 
     // ---- signatures ----------------------------------------------------
 
-    /// All signatures by name, without their logos.
+    /// All signatures by name, without their pictures.
     pub fn signatures(&self) -> Result<Vec<SignatureInfo>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, name, body_text, logo IS NOT NULL FROM signatures
-             ORDER BY name COLLATE NOCASE, id",
+            "SELECT id, name, body_text,
+                (SELECT COUNT(*) FROM signature_images i WHERE i.signature_id = s.id)
+             FROM signatures s ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = stmt.query_map([], |r| {
             let text: String = r.get(2)?;
@@ -2698,17 +2861,17 @@ impl Db {
                     .find(|l| !l.is_empty())
                     .unwrap_or("")
                     .to_string(),
-                has_logo: r.get(3)?,
+                images: usize::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn signature(&self, id: i64) -> Result<Option<Signature>> {
-        Ok(self
+        let Some(mut sig) = self
             .conn
             .prepare_cached(
-                "SELECT id, name, body_html, body_text, logo, logo_mime, created, updated
+                "SELECT id, name, body_html, body_text, created, updated
                  FROM signatures WHERE id = ?1",
             )?
             .query_row([id], |r| {
@@ -2717,72 +2880,101 @@ impl Db {
                     name: r.get(1)?,
                     body_html: r.get(2)?,
                     body_text: r.get(3)?,
-                    logo: r.get(4)?,
-                    logo_mime: r.get(5)?,
-                    created: r.get(6)?,
-                    updated: r.get(7)?,
+                    images: rich::Images::default(),
+                    created: r.get(4)?,
+                    updated: r.get(5)?,
                 })
             })
-            .optional()?)
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT cid, data FROM signature_images WHERE signature_id = ?1")?;
+        let rows = stmt.query_map([id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        for row in rows {
+            let (cid, data) = row?;
+            if let Some((file, _, _)) = rich::ImageFile::new(data) {
+                sig.images.insert(cid, file);
+            }
+        }
+        Ok(Some(sig))
     }
 
-    /// Save a new signature: `doc`'s paragraphs and tables, and at most one
-    /// logo. Fails with a [`SignatureError`] for an empty or taken name.
-    pub fn add_signature(
-        &self,
-        name: &str,
+    /// A picture any signature holds, by Content-ID (a draft saved before
+    /// its pictures were saved with it: an old signature logo).
+    pub fn signature_image(&self, cid: &str) -> Result<Option<rich::ImageFile>> {
+        let data: Option<Vec<u8>> = self
+            .conn
+            .prepare_cached("SELECT data FROM signature_images WHERE cid = ?1 LIMIT 1")?
+            .query_row([cid], |r| r.get(0))
+            .optional()?;
+        Ok(data.and_then(|d| rich::ImageFile::new(d).map(|f| f.0)))
+    }
+
+    /// The pictures a signature shows, replacing those it had.
+    fn put_signature_images(
+        tx: &Connection,
+        id: i64,
         doc: &rich::Doc,
-        logo: Option<&rich::Logo>,
-    ) -> Result<i64> {
+        images: &rich::Images,
+    ) -> Result<()> {
+        tx.execute("DELETE FROM signature_images WHERE signature_id = ?1", [id])?;
+        for (cid, file) in images.subset(&doc.image_cids()) {
+            tx.execute(
+                "INSERT INTO signature_images (signature_id, cid, mime, data) VALUES (?1, ?2, ?3, ?4)",
+                params![id, cid, file.mime, &file.data[..]],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Save a new signature: `doc`'s paragraphs and tables, and the
+    /// pictures of `images` it shows. Fails with a [`SignatureError`] for an
+    /// empty or taken name.
+    pub fn add_signature(&self, name: &str, doc: &rich::Doc, images: &rich::Images) -> Result<i64> {
         let name = signature_name(name)?;
         let (html, text) = signature_forms(doc);
         let now = chrono::Utc::now().timestamp();
-        self.conn
-            .execute(
-                "INSERT INTO signatures (name, body_html, body_text, logo, logo_mime, created, updated)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-                params![
-                    name,
-                    html,
-                    text,
-                    logo.map(|l| l.bytes.as_slice()),
-                    logo.map(|l| l.mime),
-                    now
-                ],
-            )
-            .map_err(signature_write_error)?;
-        Ok(self.conn.last_insert_rowid())
+        let tx = self.write()?;
+        tx.execute(
+            "INSERT INTO signatures (name, body_html, body_text, created, updated)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![name, html, text, now],
+        )
+        .map_err(signature_write_error)?;
+        let id = tx.last_insert_rowid();
+        Self::put_signature_images(&tx, id, doc, images)?;
+        tx.commit()?;
+        Ok(id)
     }
 
-    /// Replace a signature's name, content and logo (`None` removes it).
+    /// Replace a signature's name, content and pictures.
     pub fn update_signature(
         &self,
         id: i64,
         name: &str,
         doc: &rich::Doc,
-        logo: Option<&rich::Logo>,
+        images: &rich::Images,
     ) -> Result<()> {
         let name = signature_name(name)?;
         let (html, text) = signature_forms(doc);
-        let n = self
-            .conn
+        let tx = self.write()?;
+        let n = tx
             .execute(
-                "UPDATE signatures SET name = ?2, body_html = ?3, body_text = ?4, logo = ?5,
-                    logo_mime = ?6, updated = ?7 WHERE id = ?1",
-                params![
-                    id,
-                    name,
-                    html,
-                    text,
-                    logo.map(|l| l.bytes.as_slice()),
-                    logo.map(|l| l.mime),
-                    chrono::Utc::now().timestamp()
-                ],
+                "UPDATE signatures SET name = ?2, body_html = ?3, body_text = ?4, logo = NULL,
+                    logo_mime = NULL, updated = ?5 WHERE id = ?1",
+                params![id, name, html, text, chrono::Utc::now().timestamp()],
             )
             .map_err(signature_write_error)?;
         if n == 0 {
             return Err(SignatureError::NotFound.into());
         }
+        Self::put_signature_images(&tx, id, doc, images)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -2875,53 +3067,23 @@ impl Db {
         }
     }
 
-    /// The pictures the signatures in `doc` show by `cid:`, read from the
-    /// stored signatures; one whose bytes no longer match the document's
-    /// mark (the signature's logo changed since) is left out.
-    pub fn inline_images(&self, doc: &rich::Doc) -> Result<Vec<smtp::InlineImage>> {
-        let mut out: Vec<smtp::InlineImage> = Vec::new();
-        for b in &doc.blocks {
-            let rich::Block::Signature(s) = b else {
-                continue;
-            };
-            let (Some(logo), Some(id)) = (s.logo, s.source) else {
-                continue;
-            };
-            let cid = logo.cid();
-            if out.iter().any(|i| i.cid == cid) {
-                continue;
-            }
-            if let Some(sig) = self.signature(id)?
-                && let (Some(data), Some(mime)) = (sig.logo, sig.logo_mime)
-                && rich::fnv(&data) == logo.hash
+    /// `images` with the pictures `doc` shows that it lacks looked up in
+    /// the stored signatures (a draft saved before its pictures were saved
+    /// with it).
+    pub fn with_signature_images(
+        &self,
+        doc: &rich::Doc,
+        images: &rich::Images,
+    ) -> Result<rich::Images> {
+        let mut out = images.clone();
+        for cid in doc.image_cids() {
+            if !out.contains(&cid)
+                && let Some(file) = self.signature_image(&cid)?
             {
-                out.push(smtp::InlineImage { cid, mime, data });
+                out.insert(cid, file);
             }
         }
         Ok(out)
-    }
-
-    /// What `doc` sends: the text/plain body, the text/html alternative when
-    /// the document needs one, and the logo images it shows. A logo whose
-    /// picture cannot be found is left out of the HTML rather than shown
-    /// broken.
-    pub fn send_parts(
-        &self,
-        doc: &rich::Doc,
-    ) -> Result<(String, Option<String>, Vec<smtp::InlineImage>)> {
-        let inline = self.inline_images(doc)?;
-        let mut doc = doc.clone();
-        for b in &mut doc.blocks {
-            if let rich::Block::Signature(s) = b
-                && let Some(l) = s.logo
-                && !inline.iter().any(|i| i.cid == l.cid())
-            {
-                s.logo = None;
-            }
-        }
-        let (plain, html) = rich::parts(&doc);
-        let inline = if html.is_some() { inline } else { Vec::new() };
-        Ok((plain, html, inline))
     }
 
     /// Typed signature text (the onboarding flow's Signature box) as a new
@@ -3043,7 +3205,7 @@ impl Db {
         let id = self.insert_draft(d)?;
         let filed = (|| -> Result<()> {
             for (name, mime, data) in files {
-                self.add_draft_file(id, name, mime, data)?;
+                self.add_draft_file(id, name, mime, data, None)?;
             }
             self.conn.execute(
                 "UPDATE drafts SET server_rev = rev, server_folder = ?2,
@@ -3182,20 +3344,42 @@ impl Db {
         })
     }
 
-    /// Copy an attachment into draft `draft_id`'s folder and record it.
+    /// Copy an attachment (or, with `cid`, a picture in the body) into draft
+    /// `draft_id`'s folder and record it.
     pub fn add_draft_file(
         &self,
         draft_id: i64,
         name: &str,
         mime: &str,
         data: &[u8],
+        cid: Option<&str>,
     ) -> Result<DraftFile> {
+        let (file, copy) = self.add_draft_row(draft_id, name, mime, data.into(), cid)?;
+        if let Err(e) = copy.write() {
+            self.remove_draft_file(draft_id, file.id).ok();
+            return Err(e);
+        }
+        Ok(file)
+    }
+
+    /// Record an attachment (or picture) of draft `draft_id` without
+    /// writing its copy: the copy to write comes back, for a thread that
+    /// is not the UI's ([`DraftCopy::write`]). Until it is written, the
+    /// draft reads back without that file (as one whose copy was lost).
+    pub fn add_draft_row(
+        &self,
+        draft_id: i64,
+        name: &str,
+        mime: &str,
+        data: std::sync::Arc<[u8]>,
+        cid: Option<&str>,
+    ) -> Result<(DraftFile, DraftCopy)> {
         let dir = self.draft_folder(draft_id)?;
         let tx = self.write()?;
         tx.execute(
-            "INSERT INTO draft_attachments (draft_id, name, mime, size, file)
-             VALUES (?1, ?2, ?3, ?4, '')",
-            params![draft_id, name, mime, data.len() as i64],
+            "INSERT INTO draft_attachments (draft_id, name, mime, size, file, cid)
+             VALUES (?1, ?2, ?3, ?4, '', ?5)",
+            params![draft_id, name, mime, data.len() as i64, cid],
         )?;
         let id = tx.last_insert_rowid();
         tx.execute(
@@ -3203,19 +3387,26 @@ impl Db {
             params![id, id.to_string()],
         )?;
         tx.execute("UPDATE drafts SET rev = rev + 1 WHERE id = ?1", [draft_id])?;
-        let path = dir.join(id.to_string());
-        let written = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, data));
-        if let Err(e) = written {
-            std::fs::remove_file(&path).ok();
-            return Err(e).with_context(|| format!("saving a copy of {name}"));
-        }
         tx.commit()?;
-        Ok(DraftFile {
+        let file = DraftFile {
             id,
             name: name.into(),
             mime: mime.into(),
             size: data.len() as i64,
-        })
+            cid: cid.map(str::to_string),
+        };
+        let copy = DraftCopy {
+            path: dir.join(id.to_string()),
+            data,
+            name: name.into(),
+        };
+        Ok((file, copy))
+    }
+
+    /// Where draft `draft_id`'s copy of `file` is (for a reader off the UI
+    /// thread). The path comes from the ids alone, never from a stored name.
+    pub fn draft_file_path(&self, draft_id: i64, file: &DraftFile) -> Result<PathBuf> {
+        Ok(self.draft_folder(draft_id)?.join(file.id.to_string()))
     }
 
     /// Drop one attachment of a draft and its copy.
@@ -3237,7 +3428,7 @@ impl Db {
     /// A draft's attachments, in the order they were added.
     pub fn draft_files(&self, draft_id: i64) -> Result<Vec<DraftFile>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, name, mime, size FROM draft_attachments WHERE draft_id = ?1 ORDER BY id",
+            "SELECT id, name, mime, size, cid FROM draft_attachments WHERE draft_id = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map([draft_id], |r| {
             Ok(DraftFile {
@@ -3245,6 +3436,7 @@ impl Db {
                 name: r.get(1)?,
                 mime: r.get(2)?,
                 size: r.get(3)?,
+                cid: r.get(4)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -3253,16 +3445,7 @@ impl Db {
     /// Read an attachment's copy back, refusing one larger than `limit`.
     /// The path comes from the ids alone, never from a stored name.
     pub fn read_draft_file(&self, draft_id: i64, file: &DraftFile, limit: u64) -> Result<Vec<u8>> {
-        use std::io::Read;
-        let path = self.draft_folder(draft_id)?.join(file.id.to_string());
-        let mut data = Vec::new();
-        std::fs::File::open(&path)
-            .and_then(|f| f.take(limit.saturating_add(1)).read_to_end(&mut data))
-            .with_context(|| format!("reading the saved copy of {}", file.name))?;
-        if data.len() as u64 > limit {
-            anyhow::bail!("{} is over the attachment limit", file.name);
-        }
-        Ok(data)
+        read_draft_copy(&self.draft_file_path(draft_id, file)?, &file.name, limit)
     }
 
     fn draft_folder(&self, draft_id: i64) -> Result<PathBuf> {
@@ -5238,10 +5421,10 @@ mod tests {
         assert_eq!(again.message_id, "<d1@example.com>");
 
         let a = db
-            .add_draft_file(id, "a.pdf", "application/pdf", b"%PDF")
+            .add_draft_file(id, "a.pdf", "application/pdf", b"%PDF", None)
             .unwrap();
         let b = db
-            .add_draft_file(id, "b.txt", "text/plain", b"bee")
+            .add_draft_file(id, "b.txt", "text/plain", b"bee", None)
             .unwrap();
         assert_eq!(db.draft_files(id).unwrap(), [a.clone(), b.clone()]);
         assert_eq!(b.size, 3);
@@ -5284,7 +5467,7 @@ mod tests {
         let mem = Db::in_memory().unwrap();
         let acc = account(&mem);
         let d = mem.insert_draft(&draft(acc)).unwrap();
-        assert!(mem.add_draft_file(d, "x", "", b"x").is_err());
+        assert!(mem.add_draft_file(d, "x", "", b"x", None).is_err());
         assert!(mem.draft_files(d).unwrap().is_empty());
     }
 
@@ -5303,9 +5486,9 @@ mod tests {
             .unwrap();
         let mine = db.insert_draft(&draft(acc)).unwrap();
         let theirs = db.insert_draft(&draft(other)).unwrap();
-        db.add_draft_file(mine, "a.txt", "text/plain", b"a")
+        db.add_draft_file(mine, "a.txt", "text/plain", b"a", None)
             .unwrap();
-        db.add_draft_file(theirs, "b.txt", "text/plain", b"b")
+        db.add_draft_file(theirs, "b.txt", "text/plain", b"b", None)
             .unwrap();
         let folder = |id: i64| drafts_dir(&tmp.0).join(id.to_string());
         assert!(folder(mine).exists());
@@ -5687,7 +5870,8 @@ example.com"
         let db = Db::open(&tmp.0).unwrap();
         let acc = account(&db);
         let id = db.insert_draft(&draft(acc)).unwrap();
-        db.add_draft_file(id, "a.txt", "text/plain", b"a").unwrap();
+        db.add_draft_file(id, "a.txt", "text/plain", b"a", None)
+            .unwrap();
         queue(&db, id, b"RAW");
         let folder = drafts_dir(&tmp.0).join(id.to_string());
         assert!(folder.exists());
@@ -5698,7 +5882,8 @@ example.com"
         // A worker's connection finds the same folder (a delivered send
         // deletes the row with it).
         let id = db.insert_draft(&draft(acc)).unwrap();
-        db.add_draft_file(id, "b.txt", "text/plain", b"b").unwrap();
+        db.add_draft_file(id, "b.txt", "text/plain", b"b", None)
+            .unwrap();
         let worker = Db::open_worker(&tmp.0).unwrap();
         worker.delete_draft(id).unwrap();
         assert!(!drafts_dir(&tmp.0).join(id.to_string()).exists());
@@ -5885,6 +6070,100 @@ example.com"
         rich::Doc::from_plain(text)
     }
 
+    fn no_images() -> rich::Images {
+        rich::Images::default()
+    }
+
+    /// `text`, then one paragraph per picture (placeholder PNG headers of
+    /// the sizes given, alt "Picture N"), and the pictures' bytes.
+    fn doc_with_pictures(text: &str, sizes: &[(u32, u32)]) -> (rich::Doc, rich::Images) {
+        let mut doc = text_doc(text);
+        let mut images = rich::Images::default();
+        for (i, &(w, h)) in sizes.iter().enumerate() {
+            let (file, _, _) = rich::ImageFile::new(png(w, h)).unwrap();
+            let cid = images.add(file);
+            doc.blocks.push(rich::Block::Para(rich::Para {
+                runs: vec![rich::Run::picture(
+                    rich::InlineImage::new(cid, w, h, format!("Picture {}", i + 1)),
+                    rich::Style::default(),
+                )],
+                ..rich::Para::default()
+            }));
+        }
+        (doc.normalized(), images)
+    }
+
+    #[test]
+    fn signature_logos_move_into_the_content_once_and_lose_nothing() {
+        let db = Db::in_memory().unwrap();
+        // Signatures as 1.0 saved them: text, and a logo in its own columns.
+        let wide = png(500, 100);
+        let small = png(120, 40);
+        let old = |name: &str, text: &str, logo: Option<&[u8]>| -> i64 {
+            let (html, text) = signature_forms(&text_doc(text));
+            db.conn
+                .execute(
+                    "INSERT INTO signatures (name, body_html, body_text, logo, logo_mime, created, updated)
+                     VALUES (?1, ?2, ?3, ?4, 'image/png', 1, 1)",
+                    params![name, html, text, logo],
+                )
+                .unwrap();
+            db.conn.last_insert_rowid()
+        };
+        let a = old("A", "Ana\nAna Ltd", Some(&wide));
+        let b = old("B", "Bea", Some(&small));
+        let c = old("C", "Caio", None);
+        // A logo that is not a picture (never written by Komorebi) stays.
+        let d = old("D", "Dora", Some(b"not a picture"));
+        let db = Db::init(db.conn).unwrap();
+
+        let sig = db.signature(a).unwrap().unwrap();
+        let doc = sig.doc();
+        // The text is as it was, then the logo in a paragraph of its own,
+        // as wide as it was shown (400 px at most) and with its bytes.
+        assert_eq!(rich::plain(&doc), "Ana\nAna Ltd\n[image]");
+        let imgs = doc.images();
+        assert_eq!(imgs.len(), 1);
+        let img = imgs[0];
+        assert_eq!(
+            (img.iw, img.ih, img.width, img.height()),
+            (500, 100, 400, 80)
+        );
+        assert_eq!(img.cid, format!("img-{:016x}@komorebi", rich::fnv(&wide)));
+        assert_eq!(&sig.images.get(&img.cid).unwrap().data[..], &wide[..]);
+        assert_eq!(sig.body_text, "Ana\nAna Ltd\n[image]");
+        let small_sig = db.signature(b).unwrap().unwrap();
+        assert_eq!(small_sig.doc().images()[0].width, 120);
+        assert_eq!(small_sig.images.len(), 1);
+        // Put in a message: the block shows it, untouched.
+        let block = sig.block().unwrap();
+        assert!(block.is_untouched() && block.source == Some(a));
+        // No logo: nothing changes.
+        let plain = db.signature(c).unwrap().unwrap();
+        assert!(plain.images.is_empty());
+        assert_eq!(plain.body_text, "Caio");
+        // The columns are cleared, so opening again moves nothing twice.
+        let left: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM signatures WHERE logo IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 1, "only the unreadable one stays");
+        assert!(db.signature(d).unwrap().unwrap().images.is_empty());
+        let db = Db::init(db.conn).unwrap();
+        assert_eq!(db.signature(a).unwrap().unwrap().doc(), doc);
+        assert_eq!(db.signatures().unwrap()[0].images, 1);
+        // A draft saved before, showing the old logo by its old mark,
+        // finds its picture in the stored signatures.
+        let found = db
+            .with_signature_images(&doc, &rich::Images::default())
+            .unwrap();
+        assert_eq!(found.len(), 1);
+    }
+
     #[test]
     fn migrates_v13_to_v14_signatures() {
         let db = Db::in_memory().unwrap();
@@ -5936,7 +6215,7 @@ example.com"
         let sig = db.signature(n.unwrap()).unwrap().unwrap();
         assert_eq!(sig.body_text, "Ana\n\nAna Ltd");
         assert_eq!(rich::plain(&sig.doc()), "Ana\n\nAna Ltd");
-        assert!(sig.logo.is_none());
+        assert!(sig.images.is_empty());
 
         // Markers became formatting once.
         let (n, _) = db.account_signatures(marked).unwrap();
@@ -6014,68 +6293,71 @@ example.com"
     fn signatures_are_named_unique_and_editable() {
         let db = Db::in_memory().unwrap();
         let formal = db
-            .add_signature("  Formal ", &text_doc("Ana\nAna Ltd"), None)
+            .add_signature("  Formal ", &text_doc("Ana\nAna Ltd"), &no_images())
             .unwrap();
-        db.add_signature("Short", &text_doc("A."), None).unwrap();
+        db.add_signature("Short", &text_doc("A."), &no_images())
+            .unwrap();
         let err = |r: Result<i64>| r.unwrap_err().downcast::<SignatureError>().unwrap();
         assert_eq!(
-            err(db.add_signature("formal", &text_doc("x"), None)),
+            err(db.add_signature("formal", &text_doc("x"), &no_images())),
             SignatureError::NameTaken
         );
         assert_eq!(
-            err(db.add_signature("  ", &text_doc("x"), None)),
+            err(db.add_signature("  ", &text_doc("x"), &no_images())),
             SignatureError::EmptyName
         );
         let list = db.signatures().unwrap();
         assert_eq!(
             list.iter()
-                .map(|s| (s.name.as_str(), s.first_line.as_str(), s.has_logo))
+                .map(|s| (s.name.as_str(), s.first_line.as_str(), s.images))
                 .collect::<Vec<_>>(),
-            [("Formal", "Ana", false), ("Short", "A.", false)]
+            [("Formal", "Ana", 0), ("Short", "A.", 0)]
         );
 
-        // Edit: rename, new text, add then remove a logo.
-        let logo = rich::Logo::from_bytes(&png(80, 30)).unwrap();
-        db.update_signature(formal, "Formal 2", &text_doc("Ana\nBoard"), Some(&logo))
+        // Edit: rename, new text, add then remove pictures.
+        let (doc, images) = doc_with_pictures("Ana\nBoard", &[(80, 30), (20, 20)]);
+        db.update_signature(formal, "Formal 2", &doc, &images)
             .unwrap();
         let sig = db.signature(formal).unwrap().unwrap();
         assert_eq!(
             (sig.name.as_str(), sig.body_text.as_str()),
-            ("Formal 2", "Ana\nBoard")
+            ("Formal 2", "Ana\nBoard\n[Picture 1]\n[Picture 2]")
         );
-        assert_eq!(sig.logo.as_deref(), Some(&logo.bytes[..]));
-        assert_eq!(sig.logo_mime.as_deref(), Some("image/png"));
-        assert_eq!(sig.logo().unwrap().reference(), logo.reference());
+        assert_eq!(sig.images, images);
+        assert_eq!(sig.doc().image_cids().len(), 2);
+        assert_eq!(db.signatures().unwrap()[0].images, 2);
         // Renaming to its own name (other case) is fine; to another's is not.
-        db.update_signature(formal, "FORMAL 2", &text_doc("Ana\nBoard"), Some(&logo))
+        db.update_signature(formal, "FORMAL 2", &doc, &images)
             .unwrap();
         assert_eq!(
-            db.update_signature(formal, "short", &text_doc("x"), None)
+            db.update_signature(formal, "short", &text_doc("x"), &no_images())
                 .unwrap_err()
                 .downcast::<SignatureError>()
                 .unwrap(),
             SignatureError::NameTaken
         );
         assert_eq!(
-            db.update_signature(999, "n", &text_doc("x"), None)
+            db.update_signature(999, "n", &text_doc("x"), &no_images())
                 .unwrap_err()
                 .downcast::<SignatureError>()
                 .unwrap(),
             SignatureError::NotFound
         );
-        db.update_signature(formal, "FORMAL 2", &text_doc("Ana"), None)
+        // Pictures the content no longer shows are not kept, even if given.
+        db.update_signature(formal, "FORMAL 2", &text_doc("Ana"), &images)
             .unwrap();
-        assert!(db.signature(formal).unwrap().unwrap().logo.is_none());
+        assert!(db.signature(formal).unwrap().unwrap().images.is_empty());
         // Only paragraphs and tables are kept in a signature.
         let mut doc = text_doc("kept");
         doc.blocks.push(rich::Block::Quote(
             rich::QuoteBlock::new("<p>q</p>", false).unwrap(),
         ));
-        db.update_signature(formal, "FORMAL 2", &doc, None).unwrap();
+        db.update_signature(formal, "FORMAL 2", &doc, &no_images())
+            .unwrap();
         assert_eq!(db.signature(formal).unwrap().unwrap().body_text, "kept");
         // Long names are cut.
         let long = db
-            .add_signature(&"n".repeat(500), &text_doc("x"), None)
+            .add_signature(&"n".repeat(500), &text_doc("x"), &no_images())
             .unwrap();
         assert_eq!(
             db.signature(long).unwrap().unwrap().name.chars().count(),
@@ -6089,10 +6371,10 @@ example.com"
         let a = account_named(&db, "a@example.com");
         let b = account_named(&db, "b@example.com");
         let fresh = db
-            .add_signature("Fresh", &text_doc("New mail"), None)
+            .add_signature("Fresh", &text_doc("New mail"), &no_images())
             .unwrap();
         let reply = db
-            .add_signature("Reply", &text_doc("Re: mail"), None)
+            .add_signature("Reply", &text_doc("Re: mail"), &no_images())
             .unwrap();
         // New accounts have none.
         assert_eq!(db.account_signatures(a).unwrap(), (None, None));
@@ -6159,46 +6441,67 @@ example.com"
     }
 
     #[test]
-    fn a_signature_block_knows_its_source_and_logo() {
+    fn a_signature_block_knows_its_source_and_pictures() {
         let db = Db::in_memory().unwrap();
-        let logo = rich::Logo::from_bytes(&png(500, 100)).unwrap();
-        assert_eq!((logo.width, logo.height), (400, 80));
-        let id = db
-            .add_signature("S", &text_doc("Ana"), Some(&logo))
-            .unwrap();
-        let block = db.signature(id).unwrap().unwrap().block().unwrap();
+        let (doc, images) = doc_with_pictures("Ana", &[(500, 100)]);
+        let id = db.add_signature("S", &doc, &images).unwrap();
+        let sig = db.signature(id).unwrap().unwrap();
+        let block = sig.block().unwrap();
         assert_eq!(block.source, Some(id));
         assert!(block.is_untouched());
-        assert_eq!(block.logo, Some(logo.reference()));
-        // An empty signature without a logo puts nothing in.
-        let empty = db.add_signature("E", &text_doc(""), None).unwrap();
+        assert_eq!(sig.images, images);
+        // An empty signature puts nothing in.
+        let empty = db.add_signature("E", &text_doc(""), &no_images()).unwrap();
         assert!(db.signature(empty).unwrap().unwrap().block().is_none());
-        // A logo alone is still a signature.
-        let only = db.add_signature("L", &text_doc(""), Some(&logo)).unwrap();
+        // A picture alone is still a signature.
+        let (only, images) = doc_with_pictures("", &[(10, 10)]);
+        let only = db.add_signature("L", &only, &images).unwrap();
         assert!(db.signature(only).unwrap().unwrap().block().is_some());
+        // Deleting a signature deletes its pictures.
+        db.delete_signature(only).unwrap();
+        let left: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM signature_images WHERE signature_id = ?1",
+                [only],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[test]
-    fn a_logo_message_is_sent_with_its_picture() {
+    fn a_message_is_sent_with_the_pictures_it_shows_and_no_others() {
         let db = Db::in_memory().unwrap();
-        let logo = rich::Logo::from_bytes(&png(120, 40)).unwrap();
-        let id = db
-            .add_signature("S", &text_doc("Ana"), Some(&logo))
-            .unwrap();
-        let block = db.signature(id).unwrap().unwrap().block().unwrap();
-        let mut doc = text_doc("Hello");
-        doc.blocks.push(rich::Block::Signature(block));
+        let (sig_doc, sig_images) = doc_with_pictures("Ana", &[(120, 40)]);
+        let id = db.add_signature("S", &sig_doc, &sig_images).unwrap();
+        let sig = db.signature(id).unwrap().unwrap();
+        let (mut doc, mut images) = doc_with_pictures("Hello", &[(300, 200)]);
+        doc.blocks
+            .push(rich::Block::Signature(sig.block().unwrap()));
+        let doc = doc.normalized();
+        // A picture added then deleted (still in the store for undo).
+        let (unused, _, _) = rich::ImageFile::new(png(7, 7)).unwrap();
+        let unused_cid = images.add(unused);
+        // The signature's pictures come with it into the message.
+        images.extend(&sig.images);
 
-        let (plain, html, inline) = db.send_parts(&doc).unwrap();
-        assert_eq!(plain, "Hello\n\n-- \nAna");
+        let (plain, html, inline) = rich::send_parts(&doc, &images);
+        assert_eq!(plain, "Hello\n[Picture 1]\n\n-- \nAna\n[Picture 1]");
         let html = html.unwrap();
-        assert_eq!(inline.len(), 1);
-        assert_eq!(inline[0].mime, "image/png");
-        assert_eq!(inline[0].data, logo.bytes);
-        assert!(html.contains(&format!("cid:{}", inline[0].cid)));
+        assert_eq!(inline.len(), 2);
+        assert!(inline.iter().all(|i| i.mime == "image/png"));
+        assert!(
+            !inline.iter().any(|i| i.cid == unused_cid),
+            "unreferenced: not sent"
+        );
+        for i in &inline {
+            assert!(html.contains(&format!("src=\"cid:{}\"", i.cid)));
+        }
+        assert!(html.contains("width=\"300\" height=\"200\" alt=\"Picture 1\""));
         assert!(!html.contains("data-") && !html.contains("<!--"));
 
-        // The MIME tree carries it as a related part.
+        // The MIME tree: related parts, inline, by Content-ID.
         let raw = smtp::build_raw(smtp::Outgoing {
             from_email: "me@example.com".into(),
             to: "you@example.com".into(),
@@ -6208,19 +6511,27 @@ example.com"
             ..Default::default()
         })
         .unwrap();
-        let text = String::from_utf8(raw).unwrap();
-        assert!(text.contains("multipart/related") && text.contains("Content-ID: <sig-"));
+        let text = String::from_utf8(raw.clone()).unwrap();
+        assert!(text.contains("multipart/related"), "{text}");
+        assert!(text.contains("Content-ID: <img-"), "{text}");
+        assert!(text.contains("Content-Disposition: inline"), "{text}");
+        // The app's own reader shows both and lists no attachment.
+        let body = crate::mail::mime::parse_body(&raw);
+        assert!(body.attachments.is_empty(), "{:?}", body.attachments);
+        assert!(body.text.contains("[Picture 1]"), "{}", body.text);
+        let shown = crate::mail::mime::parse_render_input(&raw);
+        assert_eq!(shown.inline.len(), 2);
+        let page = shown.html.unwrap();
+        for p in &shown.inline {
+            assert!(page.contains(&format!("cid:{}", p.cid)), "{}", p.cid);
+        }
 
-        // The logo was replaced since: the mark no longer matches, so the
-        // picture is dropped instead of being shown broken.
-        let other = rich::Logo::from_bytes(&png(10, 10)).unwrap();
-        db.update_signature(id, "S", &text_doc("Ana"), Some(&other))
-            .unwrap();
-        let (_, html, inline) = db.send_parts(&doc).unwrap();
-        assert!(inline.is_empty());
-        assert!(html.is_none_or(|h| !h.contains("<img")));
+        // A picture whose bytes are missing is left out, not shown broken.
+        let (_, html, inline) = rich::send_parts(&doc, &sig.images);
+        assert_eq!(inline.len(), 1);
+        assert_eq!(html.unwrap().matches("<img").count(), 1);
         // A message with no formatting sends no HTML and no picture.
-        let (plain, html, inline) = db.send_parts(&text_doc("plain")).unwrap();
+        let (plain, html, inline) = rich::send_parts(&text_doc("plain"), &images);
         assert_eq!((plain.as_str(), html, inline.len()), ("plain", None, 0));
     }
 
@@ -6734,7 +7045,9 @@ example.com"
         );
         assert!(db.drafts_to_upload(acc).unwrap().is_empty());
         // Attachments are changes too.
-        let file = db.add_draft_file(id, "a.txt", "text/plain", b"x").unwrap();
+        let file = db
+            .add_draft_file(id, "a.txt", "text/plain", b"x", None)
+            .unwrap();
         assert_eq!(to_upload(&db, acc, id), rev_of(&db, id));
         let rev = to_upload(&db, acc, id);
         db.record_server_copy(id, rev, Some(&copy(5))).unwrap();

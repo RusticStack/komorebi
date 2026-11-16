@@ -15,9 +15,10 @@
 //! text and formatting steps, [`MAX_UNDO`] deep) and for the view, which
 //! lays out only those blocks again ([`Editor::take_changes`]).
 
+use super::images::{ImageFile, Images};
 use super::model::*;
 
-/// The character that stands for an object (the quote, a logo).
+/// The character that stands for an object (the quote, a picture).
 pub const OBJ: char = '\u{FFFC}';
 /// Undo steps kept.
 pub const MAX_UNDO: usize = 200;
@@ -35,7 +36,6 @@ pub enum Flow {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Atom {
     Quote,
-    Logo,
 }
 
 /// Where a projection line comes from.
@@ -131,6 +131,8 @@ pub struct Change {
 enum StepKind {
     Typing,
     Deleting,
+    /// A picture's size changed with the keys.
+    Resize,
     Other,
 }
 
@@ -196,6 +198,26 @@ pub enum TableOp {
     DeleteTable,
 }
 
+impl TableOp {
+    /// The operations a table offers: one with merged cells, only Delete
+    /// table (its rows and columns are not inserted or deleted).
+    pub fn offered(merged: bool) -> &'static [TableOp] {
+        if merged {
+            &[TableOp::DeleteTable]
+        } else {
+            &[
+                TableOp::RowAbove,
+                TableOp::RowBelow,
+                TableOp::ColLeft,
+                TableOp::ColRight,
+                TableOp::DeleteRow,
+                TableOp::DeleteCol,
+                TableOp::DeleteTable,
+            ]
+        }
+    }
+}
+
 /// The formatting at the caret (or common to the selection), for the
 /// toolbar.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -212,12 +234,29 @@ pub struct Format {
     pub list: Option<ListKind>,
     pub quote: bool,
     pub in_table: bool,
+    /// The caret's table has merged cells.
+    pub table_merged: bool,
     /// The caret is in the signature.
     pub in_signature: bool,
+    /// The selection holds more than one font, size, colour or paragraph
+    /// alignment (the bar's boxes then show no single value; `font`,
+    /// `size`, `color` and `align` are those at the selection's start).
+    pub mixed: Mixed,
+}
+
+/// Which of a selection's values are not one (see [`Format::mixed`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mixed {
+    pub font: bool,
+    pub size: bool,
+    pub color: bool,
+    pub align: bool,
 }
 
 pub struct Editor {
     doc: Doc,
+    /// The pictures the document can show, by Content-ID.
+    images: Images,
     lines: Vec<Line>,
     text: String,
     undo: Vec<Step>,
@@ -304,7 +343,7 @@ impl Para {
                 continue;
             }
             match self.runs.last_mut() {
-                Some(last) if last.style == r.style => last.text.push_str(&r.text),
+                Some(last) if last.joins(&r) => last.text.push_str(&r.text),
                 _ => self.runs.push(r),
             }
         }
@@ -399,7 +438,14 @@ impl Para {
         let i = self.cut(a);
         let j = self.cut(b);
         for r in self.runs.iter_mut().take(j).skip(i) {
-            f(&mut r.style);
+            if r.image.is_some() {
+                // A picture takes only a link (`Doc::normalize`).
+                let mut st = r.style.clone();
+                f(&mut st);
+                r.style.link = st.link;
+            } else {
+                f(&mut r.style);
+            }
         }
         self.tidy();
     }
@@ -559,6 +605,7 @@ impl Editor {
         fix_structure(&mut doc);
         let mut e = Editor {
             doc,
+            images: Images::default(),
             lines: Vec::new(),
             text: String::new(),
             undo: Vec::new(),
@@ -573,6 +620,136 @@ impl Editor {
 
     pub fn doc(&self) -> &Doc {
         &self.doc
+    }
+
+    /// An editor of `doc` with the pictures it shows.
+    pub fn with_images(doc: Doc, images: Images) -> Editor {
+        let mut e = Editor::new(doc);
+        e.images = images;
+        e
+    }
+
+    /// The pictures the document can show (more than it shows: those an
+    /// undo would bring back stay).
+    pub fn images(&self) -> &Images {
+        &self.images
+    }
+
+    /// Pictures the document may show, added (a paste, a signature).
+    pub fn add_images(&mut self, images: &Images) {
+        self.images.extend(images);
+    }
+
+    /// The pictures the document shows, in order, each once.
+    pub fn shown_images(&self) -> Vec<(String, ImageFile)> {
+        self.images.subset(&self.doc.image_cids())
+    }
+
+    /// The picture whose object character starts at byte `offset` of the
+    /// projection.
+    pub fn image_at(&self, offset: usize) -> Option<&InlineImage> {
+        let (li, off) = self.locate(offset)?;
+        let p = para_of(&self.doc, self.lines.get(li)?.pos)?;
+        let mut at = 0usize;
+        for r in &p.runs {
+            if at == off {
+                return r.image.as_deref();
+            }
+            at = at.saturating_add(r.text.len());
+            if at > off {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Every picture's object character in the projection: (offset,
+    /// picture).
+    pub fn image_offsets(&self) -> Vec<(usize, &InlineImage)> {
+        let mut out = Vec::new();
+        for l in &self.lines {
+            let Some(p) = para_of(&self.doc, l.pos) else {
+                continue;
+            };
+            let mut at = l.start;
+            for r in &p.runs {
+                if let Some(i) = &r.image {
+                    out.push((at, &**i));
+                }
+                at = at.saturating_add(r.text.len());
+            }
+        }
+        out
+    }
+
+    /// Put picture `img` (bytes `file`) in at the selection `a..b` (which it
+    /// replaces): one undo step. The caret after it, or `None` where a
+    /// picture cannot go (the quote).
+    pub fn insert_image(
+        &mut self,
+        a: usize,
+        b: usize,
+        img: InlineImage,
+        file: ImageFile,
+    ) -> Option<usize> {
+        let (li, _) = self.locate(a.min(b))?;
+        if self.line(li)?.pos.atom.is_some() {
+            return None;
+        }
+        self.images.insert(img.cid.clone(), file);
+        let frag = Doc {
+            font: self.doc.font,
+            size: self.doc.size,
+            color: self.doc.color,
+            blocks: vec![Block::Para(Para {
+                runs: vec![Run::picture(img, Style::default())],
+                ..Para::default()
+            })],
+        };
+        self.paste(a, b, frag)
+    }
+
+    /// Replace the picture at byte `offset` with `img` (a new size, text or
+    /// file): one undo step; `burst` steps in a row (a drag, held keys)
+    /// undo as one. False if no picture starts there.
+    pub fn set_image(&mut self, offset: usize, img: InlineImage, burst: bool) -> bool {
+        let Some((li, off)) = self.locate(offset) else {
+            return false;
+        };
+        let Some(line) = self.line(li) else {
+            return false;
+        };
+        let sel = (offset, offset.saturating_add(OBJ.len_utf8()));
+        let snap = self.snap(line.pos.top(), line.pos.top());
+        let done = (|| {
+            let p = para_of_mut(&mut self.doc, line.pos)?;
+            let mut at = 0usize;
+            for r in &mut p.runs {
+                if at == off && r.image.is_some() {
+                    r.image = Some(Box::new(img));
+                    return Some(());
+                }
+                at = at.saturating_add(r.text.len());
+            }
+            None
+        })();
+        if done.is_none() {
+            self.rollback(snap);
+            return false;
+        }
+        let kind = if burst {
+            StepKind::Resize
+        } else {
+            StepKind::Other
+        };
+        // The step keeps the picture selected.
+        self.last_caret = Some(sel.1).filter(|_| burst);
+        let r = self.commit(snap, sel, Target::Offset(sel.1), kind);
+        if let Some(last) = self.undo.last_mut() {
+            last.sel_before = sel;
+            last.sel_after = sel;
+        }
+        r.is_some()
     }
 
     /// The projection the input proxy holds.
@@ -648,13 +825,6 @@ impl Editor {
                             }
                             Block::Signature(_) | Block::Quote(_) => {}
                         }
-                    }
-                    if s.logo.is_some() {
-                        let pos = Pos {
-                            atom: Some(Atom::Logo),
-                            ..Pos::para(f, s.blocks.len())
-                        };
-                        push(pos, &obj, lines, text);
                     }
                 }
                 Block::Quote(q) => {
@@ -746,6 +916,7 @@ impl Editor {
             || self.doc.text_bytes() > MAX_TEXT_BYTES
             || self.doc.blocks.len() > MAX_BLOCKS
             || too_many_runs(&self.doc)
+            || self.doc.images().len() > MAX_IMAGES
         {
             self.rollback(s);
             return None;
@@ -906,27 +1077,15 @@ impl Editor {
                 }
                 Some(insert_parts(&mut self.doc, pos, ao, parts, style))
             }
-            Some(atom) => {
+            Some(Atom::Quote) => {
                 let replace = bo > ao;
                 let at_start = ao == 0 && !replace;
                 let ins_empty = parts.iter().all(|s| s.is_empty()) && parts.len() <= 1;
                 if replace {
                     // The object itself is replaced: it goes.
-                    let (flow, at) = match atom {
-                        Atom::Quote => {
-                            self.doc.blocks.get(pos.item)?;
-                            self.doc.blocks.remove(pos.item);
-                            (Flow::Top, pos.item)
-                        }
-                        Atom::Logo => {
-                            let Some(Block::Signature(s)) = self.doc.blocks.get_mut(pos.top())
-                            else {
-                                return None;
-                            };
-                            s.logo = None;
-                            (pos.flow, s.blocks.len())
-                        }
-                    };
+                    self.doc.blocks.get(pos.item)?;
+                    self.doc.blocks.remove(pos.item);
+                    let (flow, at) = (Flow::Top, pos.item);
                     if ins_empty {
                         return Some(Target::Offset(l.start));
                     }
@@ -950,10 +1109,7 @@ impl Editor {
                     if ends_with_break {
                         parts.pop();
                     }
-                    let (flow, at) = match atom {
-                        Atom::Quote => (Flow::Top, pos.item),
-                        Atom::Logo => (pos.flow, pos.item),
-                    };
+                    let (flow, at) = (Flow::Top, pos.item);
                     let paras = paras_of(&parts, style);
                     let n = paras.len();
                     let v = flow_blocks_mut(&mut self.doc, flow)?;
@@ -961,15 +1117,9 @@ impl Editor {
                     v.splice(at..at, paras.into_iter().map(Block::Para));
                     if ends_with_break {
                         // The caret stays with the object.
-                        let obj = match atom {
-                            Atom::Quote => Pos {
-                                item: pos.item.saturating_add(n),
-                                ..pos
-                            },
-                            Atom::Logo => Pos {
-                                item: pos.item.saturating_add(n),
-                                ..pos
-                            },
+                        let obj = Pos {
+                            item: pos.item.saturating_add(n),
+                            ..pos
                         };
                         return Some(Target::Para(obj, 0));
                     }
@@ -1379,8 +1529,32 @@ impl Editor {
         f.size = st.size.unwrap_or(self.doc.size);
         f.color = st.color.or(self.doc.color);
         f.link = st.link;
+        if a != b {
+            let spans = self.para_spans(a, b);
+            let (doc, font, size, color) = (&self.doc, f.font, f.size, f.color);
+            let all = |g: &dyn Fn(&Style) -> bool| {
+                spans
+                    .iter()
+                    .all(|(p, x, y)| self.para(*p).is_none_or(|q| q.all(*x, *y, g)))
+            };
+            f.mixed.font = !all(&|s| s.font.unwrap_or(doc.font) == font);
+            f.mixed.size = !all(&|s| s.size.unwrap_or(doc.size) == size);
+            f.mixed.color = !all(&|s| s.color.or(doc.color) == color);
+            let mut aligns = spans
+                .iter()
+                .filter_map(|(p, _, _)| para_of(&self.doc, *p))
+                .map(|q| q.align);
+            if let Some(first) = aligns.next() {
+                f.mixed.align = aligns.any(|al| al != first);
+            }
+        }
         if let Some(l) = line {
             f.in_table = l.pos.cell.is_some();
+            f.table_merged = f.in_table
+                && matches!(
+                    flow_blocks(&self.doc, l.pos.flow).and_then(|b| b.get(l.pos.item)),
+                    Some(Block::Table(t)) if t.is_merged()
+                );
             f.in_signature = matches!(l.pos.flow, Flow::Sig(_));
             if let Some(p) = para_of(&self.doc, l.pos) {
                 f.align = p.align;
@@ -1436,11 +1610,19 @@ impl Editor {
             let cols = t.col_count();
             let rows = t.row_count();
             let idx = r.saturating_mul(cols).saturating_add(c);
+            let total = rows.saturating_mul(cols);
+            // The next cell that has text (a merged cell's covered ones
+            // have none).
+            let has_lines = |n: usize| {
+                let cell = n.checked_div(cols).zip(n.checked_rem(cols));
+                self.lines.iter().any(|x| {
+                    x.pos.flow == l.pos.flow && x.pos.item == l.pos.item && x.pos.cell == cell
+                })
+            };
             let next = if back {
-                idx.checked_sub(1)
+                (0..idx).rev().find(|n| has_lines(*n))
             } else {
-                idx.checked_add(1)
-                    .filter(|n| *n < rows.saturating_mul(cols))
+                (idx.saturating_add(1)..total).find(|n| has_lines(*n))
             };
             let Some(n) = next else {
                 // Past the last cell: the paragraph after the table.
@@ -1955,6 +2137,21 @@ fn too_many_runs(doc: &Doc) -> bool {
     blocks(&doc.blocks)
 }
 
+/// Every cell a paragraph, except those a merged cell covers (they hold
+/// none, so the caret never goes in them).
+fn fill_cells(t: &mut Table) {
+    let covered = t.covered();
+    for (row, cov) in t.rows.iter_mut().zip(covered) {
+        for (c, is_covered) in row.iter_mut().zip(cov) {
+            if is_covered {
+                c.paras.clear();
+            } else if c.paras.is_empty() {
+                c.paras.push(Para::default());
+            }
+        }
+    }
+}
+
 /// The shape the editor needs: a paragraph to type in at all, after every
 /// table and between two objects; every cell with a paragraph.
 fn fix_structure(doc: &mut Doc) {
@@ -1965,20 +2162,12 @@ fn fix_structure(doc: &mut Doc) {
     while i < doc.blocks.len() {
         let is_table = matches!(doc.blocks.get(i), Some(Block::Table(_)));
         if let Some(Block::Table(t)) = doc.blocks.get_mut(i) {
-            for c in t.rows.iter_mut().flatten() {
-                if c.paras.is_empty() {
-                    c.paras.push(Para::default());
-                }
-            }
+            fill_cells(t);
         }
         if let Some(Block::Signature(s)) = doc.blocks.get_mut(i) {
             for b in &mut s.blocks {
                 if let Block::Table(t) = b {
-                    for c in t.rows.iter_mut().flatten() {
-                        if c.paras.is_empty() {
-                            c.paras.push(Para::default());
-                        }
-                    }
+                    fill_cells(t);
                 }
             }
         }

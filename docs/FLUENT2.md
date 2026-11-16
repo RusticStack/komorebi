@@ -319,12 +319,16 @@ layer and cards: layer #f3f3f3 / #202020, card #ffffff / #2b2b2b.
 
 ## Signatures
 
-A signature is a named, formatted block (at most one small logo) that
+A signature is a named, formatted block (with tables and any number of
+pictures) that
 starts new mail and replies. Settings > Signatures lists them as Settings
 cards (name, one-line preview, Edit, Delete); deleting asks first and says
 which accounts use it. Each account picks two defaults, one for new messages
 and one for replies and forwards, from a ComboBox that lists None and the
 names. The composer's Signature dropdown replaces the block and can be
-undone. The editor is the composer's, with fewer commands (no table, no
-quote). Use theme tokens only, wrap rather than clip in Portuguese, and keep
+undone. The editor is the composer's, with the same bar less Quote, and
+More for tables and the selected picture. A selected picture shows an ink
+frame (the focus ring's 2 px) and four paper corner handles ringed in ink;
+files dragged over the text get a dashed ink frame and a wide caret where
+they go in, apart from the composer's "Drop to attach" wash. Use theme tokens only, wrap rather than clip in Portuguese, and keep
 text colours at the system text colour in high contrast.

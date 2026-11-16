@@ -53,7 +53,12 @@ fn gen_style(r: &mut Rng) -> Style {
         size: r
             .chance(5)
             .then(|| SizePt::new(SizePt::ALL[r.below(12)]).unwrap()),
-        color: r.chance(5).then(|| ColorId::ALL[r.below(10)]),
+        color: r.chance(5).then(|| match r.below(12) {
+            // An exact colour, sometimes one of the named ten's values.
+            10 => ColorId::Rgb(r.below(256) as u8, r.below(256) as u8, r.below(256) as u8),
+            11 => ColorId::Rgb(0x0F, 0x6C, 0xBD),
+            n => ColorId::ALL[n],
+        }),
         link: r.chance(8).then(|| {
             [
                 "https://example.org/",
@@ -69,7 +74,23 @@ fn gen_para(r: &mut Rng, cell: bool) -> Para {
     let n = r.below(5);
     let mut p = Para {
         runs: (0..n)
-            .map(|_| Run::styled(WORDS[r.below(WORDS.len())], gen_style(r)))
+            .map(|_| {
+                if r.chance(6) {
+                    // A picture, a link at most (`Doc::normalize`).
+                    let iw = 1 + r.below(3000) as u32;
+                    let ih = 1 + r.below(900) as u32;
+                    let img = InlineImage::new(
+                        format!("img-{:016x}@komorebi", r.next()),
+                        iw,
+                        ih,
+                        ["", "Step 1", "a \"q\" & <b>"][r.below(3)],
+                    )
+                    .sized(1 + r.below(2500) as u16);
+                    Run::picture(img, gen_style(r))
+                } else {
+                    Run::styled(WORDS[r.below(WORDS.len())], gen_style(r))
+                }
+            })
             .collect(),
         ..Para::default()
     };
@@ -100,10 +121,21 @@ fn gen_table(r: &mut Rng) -> Table {
                 (0..cols)
                     .map(|_| Cell {
                         paras: (0..1 + r.below(2)).map(|_| gen_para(r, true)).collect(),
+                        valign: [VAlign::Top, VAlign::Middle, VAlign::Bottom][r.below(3)],
+                        // Spans that may run off the grid or overlap: the
+                        // model trims them.
+                        colspan: if r.chance(4) { r.below(4) as u8 } else { 0 },
+                        rowspan: if r.chance(5) { r.below(4) as u8 } else { 0 },
                     })
                     .collect()
             })
             .collect(),
+        borderless: r.chance(2),
+        widths: if r.chance(2) {
+            (0..cols).map(|_| r.below(400) as u16).collect()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -113,8 +145,7 @@ fn gen_blocks(r: &mut Rng, top: bool) -> Vec<Block> {
             0 => Block::Table(gen_table(r)),
             1 if top => {
                 let inner = gen_blocks(r, false);
-                let logo = r.chance(2).then(|| LogoRef::of(b"png", 10, 20));
-                Block::Signature(SignatureBlock::new(inner, logo, r.chance(2).then_some(7)))
+                Block::Signature(SignatureBlock::new(inner, r.chance(2).then_some(7)))
             }
             2 if top => Block::Quote(
                 QuoteBlock::new(
@@ -190,7 +221,8 @@ fn strict_refuses_what_it_did_not_write() {
             "<div>hi",
             "<div><span style=\"font-family:Comic Sans\">hi</span>",
         ),
-        ok.replace("<div>hi", "<div><span style=\"color:#123456\">hi</span>"),
+        // Any exact colour is written now; a malformed one never is.
+        ok.replace("<div>hi", "<div><span style=\"color:#12345\">hi</span>"),
         ok.replace("<div>hi", "<div><a href=\"x\" target=\"_blank\">hi</a>"),
         ok.replace("<div>hi", "<div><div>hi</div>"),
         ok.replace("<div>hi", "<div><p>hi</p>"),
@@ -387,14 +419,13 @@ fn plain_signature_keeps_the_delimiter_line() {
             Block::Para(para("Ana")),
             Block::Para(para("ana@example.org")),
         ],
-        None,
         Some(1),
     );
     let doc = doc_of(vec![Block::Para(para("Hi")), Block::Signature(sig)]);
     assert_eq!(plain(&doc), "Hi\n\n-- \nAna\nana@example.org");
     let empty = doc_of(vec![
         Block::Para(para("Hi")),
-        Block::Signature(SignatureBlock::new(vec![], None, None)),
+        Block::Signature(SignatureBlock::new(vec![], None)),
     ]);
     assert_eq!(plain(&empty), "Hi");
     assert_eq!(emit::signature_text(&[Block::Para(para("Ana"))]), "Ana");
@@ -402,37 +433,94 @@ fn plain_signature_keeps_the_delimiter_line() {
 
 #[test]
 fn signature_untouched_mark() {
-    let mut sig = SignatureBlock::new(vec![Block::Para(para("Ana"))], None, Some(1));
+    let mut sig = SignatureBlock::new(vec![Block::Para(para("Ana"))], Some(1));
     assert!(sig.is_untouched());
     sig.blocks.push(Block::Para(para("more")));
     assert!(!sig.is_untouched());
     let doc = doc_of(vec![Block::Signature(SignatureBlock::new(
-        vec![Block::Para(para("Ana"))],
-        Some(LogoRef::of(b"x", 3, 4)),
+        vec![
+            Block::Para(para("Ana")),
+            Block::Para(pic_para("img-00000000000000aa@komorebi", 30, 40)),
+        ],
         None,
     ))]);
     let back = import::strict(&html(&doc, Mode::Draft)).unwrap();
     match back.blocks.first() {
-        Some(Block::Signature(s)) => assert!(s.is_untouched() && s.logo.is_some()),
+        Some(Block::Signature(s)) => assert!(s.is_untouched() && s.blocks.len() == 2),
         other => panic!("{other:?}"),
     }
 }
 
+fn pic_para(cid: &str, w: u32, h: u32) -> Para {
+    Para {
+        runs: vec![Run::picture(
+            InlineImage::new(cid, w, h, "Logo"),
+            Style::default(),
+        )],
+        ..Para::default()
+    }
+}
+
+/// A picture on a line of its own is sent with half a line above and below
+/// it, as the editor draws it; one beside text, one in a table cell and a
+/// draft's copy are not.
 #[test]
-fn logo_is_an_inline_cid_only_inside_a_signature() {
-    let logo = LogoRef::of(b"png-bytes", 120, 40);
-    let doc = doc_of(vec![Block::Signature(SignatureBlock::new(
-        vec![Block::Para(para("Ana"))],
-        Some(logo),
-        None,
-    ))]);
+fn a_block_picture_is_sent_with_room_around_it() {
+    let pad = "<div style=\"padding:.65em 0\"><img";
+    let block = doc_of(vec![
+        Block::Para(para("Open Settings:")),
+        Block::Para(pic_para("img-00000000000000ab@komorebi", 300, 200)),
+    ]);
+    assert!(html(&block, Mode::Send).contains(pad));
+    let draft = html(&block, Mode::Draft);
+    assert!(!draft.contains("padding"), "{draft}");
+    assert_eq!(import::strict(&draft).unwrap(), block);
+    let mut beside = pic_para("img-00000000000000ac@komorebi", 300, 200);
+    beside.runs.push(Run::styled(" Save", Style::default()));
+    let h = html(&doc_of(vec![Block::Para(beside)]), Mode::Send);
+    assert!(!h.contains("padding:.65em"), "{h}");
+}
+
+#[test]
+fn a_picture_is_sent_by_cid_with_its_size_and_text() {
+    let cid = "img-0123456789abcdef@komorebi";
+    let mut p = para("Step 1: ");
+    p.runs.push(Run::picture(
+        InlineImage::new(cid, 1200, 600, "The \"Save\" button").sized(300),
+        Style {
+            b: true,
+            link: Some("https://example.org/".into()),
+            ..Style::default()
+        },
+    ));
+    p.runs.push(Run::styled(" then OK", Style::default()));
+    let doc = doc_of(vec![Block::Para(p)]);
     let h = html(&doc, Mode::Send);
-    assert!(h.contains(&format!(
-        "<img src=\"cid:{}\" alt=\"\" width=\"120\" height=\"40\">",
-        logo.cid()
-    )));
+    assert!(
+        h.contains(&format!(
+            "<a href=\"https://example.org/\"><img src=\"cid:{cid}\" width=\"300\" height=\"150\" alt=\"The &quot;Save&quot; button\" style=\"{}\"></a>",
+            emit::IMG_STYLE
+        )),
+        "{h}"
+    );
+    // Bold does not reach a picture.
+    assert!(!h.contains("<b><img"), "{h}");
     assert_eq!(h.matches("<img").count(), 1);
+    assert!(!h.contains("data-iw"), "sent HTML has no editor marks: {h}");
     assert!(needs_html(&doc));
+    // Its text in the text part, the link's address after it.
+    assert_eq!(
+        plain(&doc),
+        "Step 1: [The \"Save\" button] (https://example.org/) then OK"
+    );
+    // In a draft it reads back exactly.
+    assert_eq!(import::strict(&html(&doc, Mode::Draft)).unwrap(), doc);
+    // A picture without text is "[image]" in the text part.
+    let mut bare = doc_of(vec![Block::Para(pic_para("img-1@komorebi", 5, 5))]);
+    if let Some(Block::Para(p)) = bare.blocks.first_mut() {
+        p.runs[0].image.as_mut().unwrap().alt.clear();
+    }
+    assert_eq!(plain(&bare), "[image]");
 }
 
 #[test]
@@ -518,6 +606,7 @@ fn caps_hold() {
         rows: (0..15)
             .map(|_| (0..15).map(|_| Cell::text("c")).collect())
             .collect(),
+        ..Table::default()
     };
     let doc = doc_of(vec![Block::Table(wide)]);
     match doc.blocks.first() {
@@ -527,7 +616,7 @@ fn caps_hold() {
     assert!(Table::new(11, 1).is_none() && Table::new(1, 0).is_none());
 
     // A nested signature in a signature is dropped.
-    let inner = SignatureBlock::new(vec![Block::Para(para("a"))], None, None);
+    let inner = SignatureBlock::new(vec![Block::Para(para("a"))], None);
     let sig = SignatureBlock {
         blocks: vec![Block::Signature(inner), Block::Para(para("b"))],
         ..SignatureBlock::default()
@@ -560,7 +649,11 @@ fn switching_to_plain_text_drops_formatting() {
         let doc = gen_doc(&mut r);
         let p = doc.to_plain();
         assert!(!needs_html(&p));
-        assert_eq!(plain(&p), plain(&doc).trim_end_matches('\n'));
+        // Trailing blank lines aside (an empty last paragraph).
+        assert_eq!(
+            plain(&p).trim_end_matches('\n'),
+            plain(&doc).trim_end_matches('\n')
+        );
     }
 }
 
@@ -632,7 +725,7 @@ fn font_size_and_colour_sets() {
         assert!(!f.stack().contains('"') && !f.stack().contains(';'));
     }
     for c in ColorId::ALL {
-        assert_eq!(ColorId::from_hex(c.hex()), Some(c));
+        assert_eq!(ColorId::from_hex(&c.hex()), Some(c));
     }
     assert_eq!(SizePt::DEFAULT.get(), 11);
     assert!(SizePt::new(13).is_none());
@@ -646,6 +739,18 @@ fn font_size_and_colour_sets() {
     assert_eq!(ColorId::nearest("#0f6cbd"), Some(ColorId::Blue));
     assert_eq!(ColorId::nearest("rgb(209, 52, 56)"), Some(ColorId::Red));
     assert_eq!(ColorId::nearest("url(javascript:x)"), None);
+    // Any other colour stays exactly as it was.
+    assert_eq!(
+        ColorId::nearest("#1F3864"),
+        Some(ColorId::Rgb(0x1F, 0x38, 0x64))
+    );
+    assert_eq!(ColorId::Rgb(0x1F, 0x38, 0x64).hex(), "#1F3864");
+    assert_eq!(
+        ColorId::from_hex("#1f3864"),
+        Some(ColorId::Rgb(0x1F, 0x38, 0x64))
+    );
+    assert_eq!(ColorId::from_hex("#0F6CBD"), Some(ColorId::Blue));
+    assert_eq!(ColorId::exact(0x0F, 0x6C, 0xBD), ColorId::Blue);
     assert_eq!(
         FontId::nearest("Helvetica, sans-serif"),
         Some(FontId::Arial)
@@ -1007,8 +1112,8 @@ fn a_server_drafts_copy_reads_back_as_the_same_document() {
         vec![
             Block::Para(para("Ana")),
             Block::Table(Table::new(2, 2).unwrap()),
+            Block::Para(pic_para("img-6c6f676f6c6f676f@komorebi", 40, 20)),
         ],
-        Some(LogoRef::of(b"logo", 40, 20)),
         Some(5),
     );
     let mut doc = gen_doc(&mut Rng(99));
@@ -1023,7 +1128,7 @@ fn a_server_drafts_copy_reads_back_as_the_same_document() {
             body: plain(&doc),
             body_html: Some(stored.clone()),
             inline: vec![smtp::InlineImage {
-                cid: LogoRef::of(b"logo", 40, 20).cid(),
+                cid: "img-6c6f676f6c6f676f@komorebi".into(),
                 mime: "image/png".into(),
                 data: b"logo".to_vec(),
             }],
@@ -1047,4 +1152,165 @@ fn a_server_drafts_copy_reads_back_as_the_same_document() {
     let foreign = "<div>Hi <b>there</b></div><ul><li>a</li></ul>";
     let d = from_stored(foreign).unwrap();
     assert_eq!(plain(&d), "Hi there\n- a");
+}
+
+// ---- pasted pictures and layout --------------------------------------------
+
+/// A signature as Outlook or a web page puts it on the clipboard: a layout
+/// table (logo block left, the text right), a row of partner logos under
+/// it, pictures as `data:` addresses and a file on this PC, one remote.
+/// Everything is made up (no real person or organisation); the pictures
+/// are generated placeholders.
+#[test]
+fn a_pasted_multi_picture_signature_keeps_its_layout() {
+    use images::tests::png;
+    let logo = ImageFile::new(png(240, 160)).unwrap().0;
+    let partner_a = ImageFile::new(png(180, 60)).unwrap().0;
+    let partner_b = ImageFile::new(png(120, 60)).unwrap().0;
+    let pasted = format!(
+        r##"<html><body><table border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+<tr>
+<td width="140" valign="top" style="width:105pt;padding:0 12px 0 0"><img src="{logo}" width="120" height="80" alt="Example Co logo"></td>
+<td valign="top" style="border-left:solid #1F4E79 1.0pt;padding:0 0 0 12px">
+<p style="margin:0"><b><span style="font-family:Arial;font-size:12pt;color:#1F4E79">Alex Example</span></b></p>
+<p style="margin:0"><span style="font-family:Arial;font-size:9pt;color:#595959">Product Lead</span></p>
+<p style="margin:0"><span style="font-size:9pt">+1 555 0100 &middot; <a href="https://example.org/">example.org</a></span></p>
+</td>
+</tr>
+<tr>
+<td colspan="2" style="padding-top:8px"><img src="file:///C:/Users/Someone/AppData/Local/Temp/msohtml1/01/clip_image003.png" width="90" alt="Partner A"> <img src="{b}" style="width:60px" alt="Partner B"> <img src="https://tracker.example/pixel.png" width="1" height="1"></td>
+</tr>
+</table></body></html>"##,
+        logo = images::data_uri(&logo),
+        b = images::data_uri(&partner_b),
+    );
+    let known = Images::default();
+    let disk = partner_a.data.to_vec();
+    let read = move |p: &std::path::Path| {
+        p.to_string_lossy()
+            .ends_with("clip_image003.png")
+            .then(|| disk.clone())
+    };
+    let mut r = images::Resolver::new(&known, &read);
+    let doc = import::lossy_with_images(&pasted, &mut |f| r.resolve(f)).unwrap();
+    // The three pictures that need no network, each once; the remote one
+    // is gone (never fetched).
+    assert_eq!(r.found.len(), 3);
+    assert!(r.found.contains(&logo.cid()) && r.found.contains(&partner_a.cid()));
+    let Some(Block::Table(t)) = doc.blocks.first() else {
+        panic!("{doc:#?}")
+    };
+    // Layout: two columns, no rules, the first 140 px wide, both on top.
+    assert_eq!((t.row_count(), t.col_count()), (2, 2));
+    assert!(t.borderless, "{t:#?}");
+    assert_eq!(t.widths.first().copied(), Some(140));
+    assert_eq!(t.rows[0][0].valign, VAlign::Top);
+    assert_eq!(t.rows[0][1].valign, VAlign::Top);
+    // The logo in the left cell at its given size.
+    let left = &t.rows[0][0].paras[0].runs;
+    let img = left[0].image.as_ref().unwrap();
+    assert_eq!(
+        (img.cid.as_str(), img.width, img.height()),
+        (logo.cid().as_str(), 120, 80)
+    );
+    assert_eq!(img.alt, "Example Co logo");
+    // The text on the right: its lines, bold name, font, size and colour
+    // to the nearest allowed, and the link.
+    let right = &t.rows[0][1];
+    let lines: Vec<String> = right.paras.iter().map(Para::plain_text).collect();
+    assert_eq!(
+        lines,
+        [
+            "Alex Example",
+            "Product Lead",
+            "+1 555 0100 \u{b7} example.org"
+        ]
+    );
+    let name = &right.paras[0].runs[0].style;
+    assert!(name.b);
+    assert_eq!(name.font, Some(FontId::Arial));
+    assert_eq!(name.size, SizePt::new(12));
+    // The author's colour exactly, not the nearest named one.
+    assert_eq!(name.color, Some(ColorId::Rgb(0x1F, 0x4E, 0x79)), "{name:?}");
+    let role = &right.paras[1].runs[0].style;
+    assert_eq!(role.size, SizePt::new(9));
+    let link = right.paras[2]
+        .runs
+        .iter()
+        .find(|r| r.style.link.is_some())
+        .unwrap();
+    assert_eq!(link.style.link.as_deref(), Some("https://example.org/"));
+    // The partner row: one cell across both columns, both logos side by
+    // side in it; the cell it covers holds nothing.
+    assert_eq!(t.rows[1][0].span(), (2, 1));
+    assert!(t.rows[1][1].paras.is_empty());
+    assert!(t.is_merged());
+    let row: Vec<&InlineImage> = t.rows[1][0]
+        .paras
+        .iter()
+        .flat_map(|p| &p.runs)
+        .filter_map(|r| r.image.as_deref())
+        .collect();
+    assert_eq!(row.len(), 2);
+    assert_eq!((row[0].alt.as_str(), row[0].width), ("Partner A", 90));
+    assert_eq!((row[1].alt.as_str(), row[1].width), ("Partner B", 60));
+    // As sent: a layout table (width attributes, no rules) and the
+    // pictures by cid with their sizes.
+    let sent = html_with_cids(&doc);
+    assert!(
+        sent.contains("<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\""),
+        "{sent}"
+    );
+    assert!(sent.contains("<td width=\"140\""), "{sent}");
+    assert!(sent.contains("<td colspan=\"2\""), "{sent}");
+    assert_eq!(sent.matches("<td").count(), 3, "{sent}");
+    assert!(sent.contains("color:#1F4E79"), "{sent}");
+    assert!(sent.contains("vertical-align:top"), "{sent}");
+    assert!(sent.contains(&format!(
+        "src=\"cid:{}\" width=\"120\" height=\"80\"",
+        logo.cid()
+    )));
+    assert!(!sent.contains("border:1px"), "{sent}");
+    // And kept exactly when saved.
+    assert_eq!(import::strict(&html(&doc, Mode::Draft)).unwrap(), doc);
+}
+
+fn html_with_cids(doc: &Doc) -> String {
+    html(doc, Mode::Send)
+}
+
+/// Word's and Gmail's usual markup: sizes to the nearest allowed, colours
+/// as they are, a bordered table keeps its rules, a percent width is taken
+/// of the table's (here 100%: of a typical message's 600 px).
+#[test]
+fn pasted_word_and_gmail_markup_maps_to_the_nearest_allowed() {
+    let pasted = r##"<div dir="ltr"><font face="Georgia" size="4" color="#cc0000">Big red</font> <span style="font-size:13.5pt;color:rgb(0,0,238)">blue</span></div>
+<table border="1" style="width:100%"><tr><td valign="middle" width="50%">a</td><td valign="bottom">b</td></tr></table>"##;
+    let doc = import::lossy(pasted).unwrap();
+    let Some(Block::Para(p)) = doc.blocks.first() else {
+        panic!("{doc:#?}")
+    };
+    let big = &p.runs[0].style;
+    assert_eq!(big.font, Some(FontId::Georgia));
+    assert!(big.size.is_some() && big.color.is_some(), "{big:?}");
+    let blue = &p.runs.last().unwrap().style;
+    assert!(blue.size.is_some() && blue.color.is_some(), "{blue:?}");
+    let t = doc
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Table(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!t.borderless);
+    assert_eq!(t.widths, [300, 0], "{t:?}");
+    assert_eq!(t.rows[0][0].valign, VAlign::Middle);
+    assert_eq!(t.rows[0][1].valign, VAlign::Bottom);
+    // Without a resolver (Edit quoted text, a foreign draft) no picture
+    // comes in, and nothing breaks.
+    let with_pic = format!("<p>x<img src=\"{}\">y</p>", "data:image/png;base64,AAAA");
+    let d = import::lossy(&with_pic).unwrap();
+    assert!(d.images().is_empty());
+    assert_eq!(plain(&d), "xy");
 }

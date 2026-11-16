@@ -178,8 +178,13 @@ pub enum EditorEvent {
     Changed,
     /// The caret or the selection moved (the format bar follows).
     Moved,
-    /// Ctrl+V with files on the clipboard: attach them.
+    /// Ctrl+V with files on the clipboard, or files dropped on the text,
+    /// that are not pictures it shows: attach them.
     PasteFiles(Vec<std::path::PathBuf>),
+    /// Files dragged onto the text (true) or off it.
+    DropOver(bool),
+    /// The page's height changed (an owner that sizes it to fit follows).
+    Resized,
 }
 
 /// One painted piece placed on the page (logical px).
@@ -202,10 +207,29 @@ struct Picture {
     ime: Option<(Rect, SharedString)>,
     /// "Write your message" on an empty message.
     placeholder: Option<(Rect, SharedString)>,
+    /// The selected picture's frame (its handles at the corners).
+    frame: Option<Rect>,
+    /// Image files dragged over the text: where they go in.
+    drop_caret: Option<Rect>,
     /// What screen readers get: the text, its lines near the view, the
     /// selection (`a11y.rs`).
     a11y: Rc<super::a11y::BodyText>,
 }
+
+/// A picture's corner held: the picture's offset, the pointer's x and the
+/// width when it was pressed, and which way widens it (+1 right corners).
+#[derive(Clone, Copy, Debug)]
+struct Resize {
+    at: usize,
+    x0: f32,
+    w0: f32,
+    dir: f32,
+}
+
+/// The side of a picture's corner handle (logical px).
+pub const HANDLE: f32 = 8.;
+/// Ctrl+] and Ctrl+[ on a selected picture: this much wider or narrower.
+pub const RESIZE_STEP: f32 = 0.1;
 
 /// The formatted body: an [`Editor`] while a formatted draft shows (none
 /// for a plain one), its picture, its caret and its composition.
@@ -227,10 +251,19 @@ pub struct RichEditor {
     /// Painted pieces by key, and the ones to release from the atlas.
     images: HashMap<u64, Arc<RenderImage>>,
     stale: Vec<Arc<RenderImage>>,
-    /// Stored quotes being laid out, by key; logo marks handed to the view.
+    /// Stored quotes being laid out, by key; pictures being decoded (or
+    /// that did not decode), by cid.
     quotes: HashSet<u64>,
-    logos: HashMap<u64, Arc<[u8]>>,
-    given: HashSet<u64>,
+    decoding: HashSet<String>,
+    /// A selected picture's corner being dragged.
+    resizing: Option<Resize>,
+    /// Pictures scaled down when put in: the file as it was (and its size)
+    /// by the cid of the one shown, for "Use original picture".
+    originals: HashMap<String, (model::ImageFile, u32, u32)>,
+    /// Dropped image files over the text (the drop shows where).
+    drop_over: bool,
+    /// The page height last told ([`EditorEvent::Resized`]).
+    told_height: f32,
     /// The page's width (logical px) and its scroll container.
     width: f32,
     scroll: ScrollHandle,
@@ -246,7 +279,8 @@ pub struct RichEditor {
 impl EventEmitter<EditorEvent> for RichEditor {}
 
 impl RichEditor {
-    /// `db` reads signature logos (none in tests that need none).
+    /// `db` reads the pictures of stored signatures a document shows and
+    /// does not hold (none in tests that need none).
     pub fn new(db: Option<Rc<Db>>, cx: &mut Context<Self>) -> Self {
         RichEditor {
             focus: cx.focus_handle(),
@@ -263,8 +297,11 @@ impl RichEditor {
             images: HashMap::new(),
             stale: Vec::new(),
             quotes: HashSet::new(),
-            logos: HashMap::new(),
-            given: HashSet::new(),
+            decoding: HashSet::new(),
+            resizing: None,
+            originals: HashMap::new(),
+            drop_over: false,
+            told_height: 0.,
             width: 0.,
             scroll: ScrollHandle::new(),
             bounds: Rc::new(Cell::new(None)),
@@ -286,11 +323,18 @@ impl RichEditor {
     /// one's picture is kept. The caret goes to `caret`.
     pub fn set_doc(&mut self, ed: Option<Editor>, caret: usize, cx: &mut Context<Self>) {
         self.ed = ed;
+        // A signature's pictures it shows and does not hold (one put in
+        // before pictures were saved with drafts): from the signatures.
+        if let (Some(db), Some(ed)) = (&self.db, self.ed.as_mut()) {
+            commands::missing_images(db, ed);
+        }
         self.view = None;
         self.marked = None;
         self.goal_x = None;
         self.quotes.clear();
-        self.given.clear();
+        self.decoding.clear();
+        self.resizing = None;
+        self.originals.clear();
         self.stale.extend(self.images.drain().map(|(_, i)| i));
         let len = self.ed.as_ref().map_or(0, |e| e.text().len());
         self.anchor = caret.min(len);
@@ -359,6 +403,12 @@ impl RichEditor {
 
     /// A toolbar button or a formatting key on the selection.
     pub fn act(&mut self, action: &Action, cx: &mut Context<Self>) {
+        match action {
+            Action::InsertPicture => return self.pick_pictures(cx),
+            // A selected picture: Ctrl+] and Ctrl+[ resize it.
+            Action::SizeStep(up) if self.step_picture(*up, cx) => return,
+            _ => {}
+        }
         let sel = (self.anchor, self.cursor);
         let Some(ed) = self.ed.as_mut() else {
             return;
@@ -618,7 +668,12 @@ impl RichEditor {
             return;
         };
         let rich = ed.fragment(a, b).is_some_and(|frag| {
-            let html = model::emit::html(&frag, model::Mode::Send);
+            // Pictures go with it as `data:` addresses: another app (and
+            // this one's paste) gets them without the network.
+            let images = ed.images();
+            let html = model::emit::html_with(&frag, model::Mode::Send, &|img| {
+                images.get(&img.cid).map(model::images::data_uri)
+            });
             let text = model::emit::plain(&frag);
             komorebi::files::set_clipboard_rich(text.trim_end_matches('\n'), &html)
         });
@@ -631,36 +686,84 @@ impl RichEditor {
         }
     }
 
-    /// Ctrl+V: files are attached by the owner; formatted text is pasted
-    /// as the model holds it (sanitized, then the lossy import); plain text
-    /// as typed.
+    /// Ctrl+V: copied picture files go in the text, other files are
+    /// attached by the owner; formatted text is pasted as the model holds
+    /// it (the lossy import, its pictures read from the HTML itself or
+    /// this PC, never the network); a copied bitmap goes in as a PNG; plain
+    /// text as typed. The import and the pictures are read on the
+    /// background executor.
     fn paste(&mut self, plain: bool, cx: &mut Context<Self>) {
         if !plain {
             let files = komorebi::files::clipboard_files();
             if !files.is_empty() {
-                cx.emit(EditorEvent::PasteFiles(files));
+                let (pics, rest) = super::pictures::split_paths(files);
+                if !rest.is_empty() {
+                    cx.emit(EditorEvent::PasteFiles(rest));
+                }
+                if !pics.is_empty() {
+                    self.insert_picture_files(pics, cx);
+                }
                 return;
             }
-            let frag = komorebi::files::clipboard_html()
-                .and_then(|h| komorebi::mail::compose_html::sanitize(&h))
-                .and_then(|h| model::import::lossy(&h));
-            let (a, c) = (self.anchor, self.cursor);
-            if let Some(frag) = frag
-                && let Some(caret) = self.ed.as_mut().and_then(|ed| ed.paste(a, c, frag))
-            {
-                self.anchor = caret;
-                self.cursor = caret;
-                self.reveal = true;
-                cx.emit(EditorEvent::Changed);
-                cx.emit(EditorEvent::Moved);
-                cx.notify();
+            if komorebi::files::clipboard_has_rich() && self.ed.is_some() {
+                self.paste_rich(cx);
                 return;
             }
         }
+        self.paste_text(cx);
+    }
+
+    fn paste_text(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|i| i.text()) {
             let (a, b) = self.ordered();
             self.edit(a, b, &text.replace("\r\n", "\n"), cx);
         }
+    }
+
+    fn paste_rich(&mut self, cx: &mut Context<Self>) {
+        let known = self
+            .ed
+            .as_ref()
+            .map(|ed| ed.images().clone())
+            .unwrap_or_default();
+        let read = cx.background_spawn(async move {
+            if let Some(html) = komorebi::files::clipboard_html() {
+                let file = |p: &std::path::Path| model::images::read_small_file(p);
+                let mut r = model::images::Resolver::new(&known, &file);
+                if let Some(doc) = model::import::lossy_with_images(&html, &mut |f| r.resolve(f)) {
+                    return Pasted::Doc(doc, r.found);
+                }
+            }
+            match komorebi::files::clipboard_picture().and_then(super::pictures::from_clipboard) {
+                Some(p) => Pasted::Picture(p),
+                None => Pasted::Nothing,
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let pasted = read.await;
+            let _ = this.update(cx, |this, cx| match pasted {
+                Pasted::Doc(frag, found) => {
+                    let (a, c) = (this.anchor, this.cursor);
+                    let caret = this.ed.as_mut().and_then(|ed| {
+                        ed.add_images(&found);
+                        ed.paste(a, c, frag)
+                    });
+                    if let Some(caret) = caret {
+                        this.anchor = caret;
+                        this.cursor = caret;
+                        this.reveal = true;
+                        cx.emit(EditorEvent::Changed);
+                        cx.emit(EditorEvent::Moved);
+                        cx.notify();
+                    } else {
+                        this.paste_text(cx);
+                    }
+                }
+                Pasted::Picture(p) => this.insert_pictures(vec![p], cx),
+                Pasted::Nothing => this.paste_text(cx),
+            });
+        })
+        .detach();
     }
 
     // ---- the picture ----------------------------------------------------
@@ -696,24 +799,15 @@ impl RichEditor {
             self.quotes.clear();
         }
         let engine = self.engine.get_or_insert_with(Engine::new);
-        // Signature logos, read from the cache once.
-        if let Some(db) = &self.db {
-            for (hash, bytes) in commands::logos(db, ed.doc(), &self.logos) {
-                self.logos.insert(hash, bytes);
-            }
-        }
-        for b in &ed.doc().blocks {
-            if let model::Block::Signature(s) = b
-                && let Some(l) = s.logo
-                && !self.given.contains(&l.hash)
-                && let Some(bytes) = self.logos.get(&l.hash)
-            {
-                view.set_logo(l.hash, bytes.clone());
-                self.given.insert(l.hash);
-            }
-        }
         view.sync(ed, engine);
-        view.prepare_logos(ed);
+        // Pictures shown and not decoded yet at this size: decoded on the
+        // background executor (never here), a waiting box meanwhile.
+        let pictures: Vec<_> = view
+            .picture_jobs(ed)
+            .into_iter()
+            .filter(|(cid, _)| self.decoding.insert(cid.clone()))
+            .filter_map(|(cid, want)| Some((ed.images().get(&cid)?.clone(), cid, want)))
+            .collect();
         let jobs: Vec<_> = view
             .quote_jobs(ed)
             .into_iter()
@@ -789,6 +883,9 @@ impl RichEditor {
         let placeholder = commands::is_blank(ed)
             .then(|| (caret, self.placeholder.clone()))
             .filter(|_| self.marked.is_none());
+        let frame =
+            selected_picture(ed, self.anchor, self.cursor).and_then(|at| view.image_rect(ed, at));
+        let drop_caret = self.drop_over.then_some(caret);
         let a11y = Rc::new(super::a11y::body_text(
             ed,
             view,
@@ -804,8 +901,17 @@ impl RichEditor {
             caret: Some(caret),
             ime,
             placeholder,
+            frame,
+            drop_caret,
             a11y,
         });
+        if (view.height() - self.told_height).abs() >= 0.5 {
+            self.told_height = view.height();
+            let me = cx.entity().downgrade();
+            cx.defer(move |cx| {
+                let _ = me.update(cx, |_, cx| cx.emit(EditorEvent::Resized));
+            });
+        }
         let stale = std::mem::take(&mut self.stale);
         if !stale.is_empty() {
             cx.defer(move |cx| {
@@ -817,6 +923,257 @@ impl RichEditor {
         for (key, html, width, dark) in jobs {
             self.lay_out_quote(key, html, width, dark, scale, cx);
         }
+        for (file, cid, want) in pictures {
+            self.decode_picture(file, cid, want, cx);
+        }
+    }
+
+    /// A picture's pixels at `want` device px wide, decoded on the
+    /// background executor. One that does not decode stays in `decoding`
+    /// (its waiting box stays; it is not tried again).
+    fn decode_picture(
+        &mut self,
+        file: model::ImageFile,
+        cid: String,
+        want: u32,
+        cx: &mut Context<Self>,
+    ) {
+        let task = cx.background_spawn(async move { commands::decode_picture(&file, want) });
+        cx.spawn(async move |this, cx| {
+            let Some(pix) = task.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.decoding.remove(&cid);
+                if let (Some(ed), Some(view)) = (this.ed.as_ref(), this.view.as_mut()) {
+                    view.set_picture(ed, &cid, pix, want);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    // ---- pictures ---------------------------------------------------------
+
+    /// The selected picture's offset: a selection of exactly one picture.
+    pub fn selected_picture(&self) -> Option<usize> {
+        selected_picture(self.ed.as_ref()?, self.anchor, self.cursor)
+    }
+
+    /// The selected picture's alt text, if a picture is selected.
+    pub fn picture_alt(&self) -> Option<String> {
+        let at = self.selected_picture()?;
+        Some(self.ed.as_ref()?.image_at(at)?.alt.clone())
+    }
+
+    /// Whether the selected picture was scaled down when put in (its
+    /// original can be used instead).
+    pub fn has_original(&self) -> bool {
+        self.selected_picture()
+            .and_then(|at| self.ed.as_ref()?.image_at(at))
+            .is_some_and(|img| self.originals.contains_key(&img.cid))
+    }
+
+    /// Change the selected picture (one undo step; `burst`: a run of
+    /// resizes is one step). False if none is selected.
+    fn change_picture(
+        &mut self,
+        burst: bool,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&model::InlineImage) -> model::InlineImage,
+    ) -> bool {
+        let Some(at) = self.selected_picture() else {
+            return false;
+        };
+        let Some(ed) = self.ed.as_mut() else {
+            return false;
+        };
+        let Some(img) = ed.image_at(at).map(f) else {
+            return false;
+        };
+        if !ed.set_image(at, img, burst) {
+            return false;
+        }
+        self.anchor = at;
+        self.cursor = at + model::edit::OBJ.len_utf8();
+        cx.emit(EditorEvent::Changed);
+        cx.emit(EditorEvent::Moved);
+        cx.notify();
+        true
+    }
+
+    /// The selected picture shown at `width` CSS px (its aspect kept).
+    pub fn resize_picture(&mut self, width: f32, burst: bool, cx: &mut Context<Self>) -> bool {
+        let w = width.round().clamp(1., f32::from(u16::MAX)) as u16;
+        self.change_picture(burst, cx, |img| img.sized(w))
+    }
+
+    /// Ctrl+] and Ctrl+[ on a selected picture: 10 % wider or narrower.
+    fn step_picture(&mut self, up: bool, cx: &mut Context<Self>) -> bool {
+        let Some(w) = self
+            .selected_picture()
+            .and_then(|at| self.ed.as_ref()?.image_at(at))
+            .map(|img| f32::from(img.width))
+        else {
+            return false;
+        };
+        let f = if up {
+            1. + RESIZE_STEP
+        } else {
+            1. - RESIZE_STEP
+        };
+        self.resize_picture(w * f, true, cx)
+    }
+
+    /// The selected picture at its own width (at most the default).
+    pub fn picture_own_size(&mut self, cx: &mut Context<Self>) -> bool {
+        self.change_picture(false, cx, |img| {
+            model::InlineImage::new(img.cid.clone(), img.iw, img.ih, img.alt.clone())
+        })
+    }
+
+    /// The selected picture's alt text (what the plain-text part and
+    /// screen readers get).
+    pub fn set_picture_alt(&mut self, alt: &str, cx: &mut Context<Self>) -> bool {
+        let alt = alt.trim().to_string();
+        self.change_picture(false, cx, |img| model::InlineImage { alt, ..img.clone() })
+    }
+
+    /// The selected picture's original file instead of the scaled-down
+    /// one (it keeps its shown width).
+    pub fn use_original(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(img) = self
+            .selected_picture()
+            .and_then(|at| self.ed.as_ref()?.image_at(at))
+            .cloned()
+        else {
+            return false;
+        };
+        let Some((file, iw, ih)) = self.originals.get(&img.cid).cloned() else {
+            return false;
+        };
+        let cid = file.cid();
+        if let Some(ed) = self.ed.as_mut() {
+            let mut one = model::Images::default();
+            one.insert(cid.clone(), file);
+            ed.add_images(&one);
+        }
+        self.change_picture(false, cx, |old| model::InlineImage {
+            cid,
+            iw,
+            ih,
+            ..old.clone()
+        })
+    }
+
+    /// Prepared pictures put in at the caret (or over the selection), one
+    /// after another; the caret goes after the last. The originals of the
+    /// scaled-down ones are kept for "Use original picture".
+    pub fn insert_pictures(
+        &mut self,
+        pics: Vec<super::pictures::Prepared>,
+        cx: &mut Context<Self>,
+    ) {
+        let (mut a, mut b) = self.ordered();
+        let mut put = false;
+        for p in pics {
+            let Some(ed) = self.ed.as_mut() else {
+                return;
+            };
+            let img = model::InlineImage::new(p.file.cid(), p.iw, p.ih, "");
+            if let Some(orig) = p.original {
+                self.originals.insert(img.cid.clone(), orig);
+            }
+            if let Some(caret) = ed.insert_image(a, b, img, p.file) {
+                (a, b) = (caret, caret);
+                put = true;
+            }
+        }
+        if put {
+            self.anchor = a;
+            self.cursor = b;
+            self.goal_x = None;
+            self.reveal = true;
+            cx.emit(EditorEvent::Changed);
+            cx.emit(EditorEvent::Moved);
+            cx.notify();
+        }
+    }
+
+    /// Picture files read and prepared on the background executor, then
+    /// put in at the caret. Files that are not pictures it can show are
+    /// handed back to the owner to attach.
+    pub fn insert_picture_files(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let read = cx.background_spawn(async move {
+            let mut pics = Vec::new();
+            let mut rest = Vec::new();
+            for p in paths {
+                match super::pictures::read(&p) {
+                    Some(pic) => pics.push(pic),
+                    None => rest.push(p),
+                }
+            }
+            (pics, rest)
+        });
+        cx.spawn(async move |this, cx| {
+            let (pics, rest) = read.await;
+            let _ = this.update(cx, |this, cx| {
+                this.insert_pictures(pics, cx);
+                if !rest.is_empty() {
+                    cx.emit(EditorEvent::PasteFiles(rest));
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// "Insert picture": the file picker, then the pictures at the caret.
+    pub fn pick_pictures(&mut self, cx: &mut Context<Self>) {
+        let answer = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = answer.await {
+                let _ = this.update(cx, |this, cx| this.insert_picture_files(paths, cx));
+            }
+        })
+        .detach();
+    }
+
+    /// Files dropped on the text: pictures go in where they were dropped;
+    /// the rest are attached (by the owner).
+    fn drop_paths(&mut self, paths: &gpui::ExternalPaths, cx: &mut Context<Self>) {
+        self.drop_over = false;
+        let (pics, rest) = super::pictures::split_paths(paths.paths().to_vec());
+        if !rest.is_empty() {
+            cx.emit(EditorEvent::PasteFiles(rest));
+        }
+        if !pics.is_empty() {
+            self.insert_picture_files(pics, cx);
+        }
+        cx.notify();
+    }
+
+    fn drag_over(&mut self, e: &gpui::DragMoveEvent<gpui::ExternalPaths>, cx: &mut Context<Self>) {
+        let over = e.bounds.contains(&e.event.position);
+        if over && let Some(at) = self.point_at(e.event.position) {
+            self.anchor = at;
+            self.cursor = at;
+        }
+        if over != self.drop_over {
+            self.drop_over = over;
+            cx.emit(EditorEvent::DropOver(over));
+        }
+        cx.notify();
+    }
+
+    /// Whether image files are being dragged over the text.
+    pub fn drop_over(&self) -> bool {
+        self.drop_over
     }
 
     /// A stored quote (full HTML, recursive layout) on a thread of its own;
@@ -889,12 +1246,50 @@ impl RichEditor {
         Some(view.hit(ed, x, y))
     }
 
+    /// A page point in logical px of the page.
+    fn page_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let b = self.bounds.get()?;
+        Some((
+            (position.x - b.left()).as_f32(),
+            (position.y - b.top()).as_f32(),
+        ))
+    }
+
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        self.goal_x = None;
+        // A selected picture's corner: resize it; a picture: select it.
+        if let Some((x, y)) = self.page_point(e.position)
+            && !e.modifiers.shift
+        {
+            if let Some(frame) = self.picture.frame
+                && let Some(dir) = handle_at(&frame, x, y)
+                && let Some(at) = self.selected_picture()
+            {
+                self.resizing = Some(Resize {
+                    at,
+                    x0: x,
+                    w0: frame.w,
+                    dir,
+                });
+                return;
+            }
+            let hit = match (self.ed.as_ref(), self.view.as_ref()) {
+                (Some(ed), Some(view)) => view.image_hit(ed, x, y),
+                _ => None,
+            };
+            if let Some(at) = hit {
+                self.anchor = at;
+                self.cursor = at + model::edit::OBJ.len_utf8();
+                self.drag_from = at;
+                cx.emit(EditorEvent::Moved);
+                cx.notify();
+                return;
+            }
+        }
         let Some(at) = self.point_at(e.position) else {
             return;
         };
-        self.goal_x = None;
         match (e.click_count, e.modifiers.shift) {
             (2, _) => {
                 if let (Some(ed), Some(view)) = (self.ed.as_ref(), self.view.as_ref()) {
@@ -916,6 +1311,23 @@ impl RichEditor {
 
     fn mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if e.pressed_button != Some(MouseButton::Left) {
+            self.resizing = None;
+            return;
+        }
+        if let Some(r) = self.resizing {
+            let Some((x, _)) = self.page_point(e.position) else {
+                return;
+            };
+            // The frame is drawn scaled to the page; the width is CSS px.
+            let shown = self.picture.frame.map_or(r.w0, |f| f.w).max(1.);
+            let css = self
+                .ed
+                .as_ref()
+                .and_then(|ed| ed.image_at(r.at))
+                .map_or(shown, |img| f32::from(img.width));
+            let ratio = css / shown;
+            let w = (r.w0 + (x - r.x0) * r.dir).max(1.) * ratio;
+            self.resize_picture(w, true, cx);
             return;
         }
         let Some(at) = self.point_at(e.position) else {
@@ -968,6 +1380,33 @@ impl RichEditor {
         let d = self.display();
         d.get(..b.min(d.len()))
             .map_or(0, |s| s.encode_utf16().count())
+    }
+}
+
+/// What a formatted paste read off the UI thread.
+enum Pasted {
+    Doc(model::Doc, model::Images),
+    Picture(super::pictures::Prepared),
+    Nothing,
+}
+
+/// The picture a selection `a..c` covers exactly, if any: its offset.
+fn selected_picture(ed: &Editor, a: usize, c: usize) -> Option<usize> {
+    let (lo, hi) = (a.min(c), a.max(c));
+    (hi - lo == model::edit::OBJ.len_utf8() && ed.image_at(lo).is_some()).then_some(lo)
+}
+
+/// The corner handle of `frame` under `(x, y)`, if any: +1 for the right
+/// corners (dragging right widens), -1 for the left.
+fn handle_at(frame: &Rect, x: f32, y: f32) -> Option<f32> {
+    let near = |cx: f32, cy: f32| (x - cx).abs() <= HANDLE && (y - cy).abs() <= HANDLE;
+    let (l, r, t, b) = (frame.x, frame.x + frame.w, frame.y, frame.y + frame.h);
+    if near(r, t) || near(r, b) {
+        Some(1.)
+    } else if near(l, t) || near(l, b) {
+        Some(-1.)
+    } else {
+        None
     }
 }
 
@@ -1150,6 +1589,10 @@ macro_rules! on {
 
 impl Render for RichEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The drag ended or left the window.
+        if self.drop_over && !cx.has_active_drag() {
+            self.drop_over = false;
+        }
         self.refresh(window, cx);
         let t = cx.tokens().clone();
         let (text, page, scale) = (
@@ -1177,7 +1620,20 @@ impl Render for RichEditor {
             .text_color(t.color.ink)
             .typo(&t.text.message)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
-            .on_mouse_move(cx.listener(Self::mouse_move));
+            .on_mouse_move(cx.listener(Self::mouse_move))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &gpui::MouseUpEvent, _, _| this.resizing = None),
+            )
+            // Image files dropped on the text go in where they are dropped
+            // (the caret shows where); other files are attached.
+            .on_drag_move(cx.listener(
+                |this, e: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| this.drag_over(e, cx),
+            ))
+            .on_drop(cx.listener(|this, paths: &gpui::ExternalPaths, _, cx| {
+                this.drop_paths(paths, cx);
+                cx.stop_propagation();
+            }));
         let el = on!(el, cx,
             Backspace => |this, _w, cx| this.delete_back(false, cx),
             DeleteWordLeft => |this, _w, cx| this.delete_back(true, cx),
@@ -1426,8 +1882,70 @@ impl Element for BodyElement {
                 window,
                 cx,
             );
-        } else if focused && let Some(c) = &self.picture.caret {
+        } else if let Some(c) = &self.picture.drop_caret {
+            // Where dropped pictures go in: a caret twice as wide.
+            let r = Rect {
+                w: geo::CARET_W * 2.,
+                ..*c
+            };
+            window.paint_quad(fill(at(&r), self.caret));
+        } else if focused
+            && self.picture.frame.is_none()
+            && let Some(c) = &self.picture.caret
+        {
             window.paint_quad(fill(at(c), self.caret));
+        }
+        if self.picture.drop_caret.is_some() {
+            // The text as a drop target: an ink frame round the page, apart
+            // from the composer's "Drop to attach" wash.
+            window.paint_quad(gpui::quad(
+                bounds,
+                px(crate::theme::radius::CARD),
+                gpui::transparent_black(),
+                px(crate::theme::layout::FOCUS_RING),
+                self.caret,
+                gpui::BorderStyle::Dashed,
+            ));
+        }
+        if let Some(f) = &self.picture.frame {
+            // The selected picture: an ink frame and four corner handles
+            // (paper squares ringed in ink), as in Outlook and Word.
+            let ring = crate::theme::layout::FOCUS_RING;
+            let framed = Rect {
+                x: f.x - ring,
+                y: f.y - ring,
+                w: f.w + ring * 2.,
+                h: f.h + ring * 2.,
+            };
+            window.paint_quad(gpui::quad(
+                at(&framed),
+                Pixels::ZERO,
+                gpui::transparent_black(),
+                px(ring),
+                self.caret,
+                gpui::BorderStyle::Solid,
+            ));
+            for (x, y) in [
+                (f.x, f.y),
+                (f.x + f.w, f.y),
+                (f.x, f.y + f.h),
+                (f.x + f.w, f.y + f.h),
+            ] {
+                let h = Rect {
+                    x: x - HANDLE / 2.,
+                    y: y - HANDLE / 2.,
+                    w: HANDLE,
+                    h: HANDLE,
+                };
+                window.paint_quad(gpui::quad(
+                    at(&h),
+                    Pixels::ZERO,
+                    self.paper,
+                    px(crate::theme::layout::HAIRLINE),
+                    self.caret,
+                    gpui::BorderStyle::Solid,
+                ));
+            }
         }
     }
 }
@@ -1728,5 +2246,173 @@ mod tests {
         assert_eq!(utf16_to_byte("a😀b", 1), 1);
         assert_eq!(utf16_to_byte("a😀b", 3), 5);
         assert_eq!(utf16_to_byte("a😀b", 9), 6);
+    }
+    /// A real PNG of `w` x `h` (a flat colour), prepared as a paste or a
+    /// drop prepares it.
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(w, h, image::Rgb([30, 90, 160]));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    fn redraw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+    }
+
+    /// The picture at `at` in window coordinates.
+    fn picture_bounds(view: &Entity<RichEditor>, at: usize, cx: &mut VisualTestContext) -> Rect {
+        view.read_with(cx, |v, _| {
+            let b = v.bounds.get().unwrap();
+            let r = v
+                .view
+                .as_ref()
+                .unwrap()
+                .image_rect(v.ed.as_ref().unwrap(), at)
+                .unwrap();
+            Rect {
+                x: b.left().as_f32() + r.x,
+                y: b.top().as_f32() + r.y,
+                ..r
+            }
+        })
+    }
+
+    /// Pictures go in the text at the caret, are decoded off the UI
+    /// thread, and a click selects one: its frame and handles show, a
+    /// corner drag and Ctrl+] resize it (one undo step each), Backspace
+    /// deletes it and Ctrl+Z brings it back. A large one is scaled down and
+    /// its original kept for "Use original picture".
+    #[gpui::test]
+    fn a_picture_goes_in_is_selected_resized_and_deleted(cx: &mut TestAppContext) {
+        let (view, cx) = setup(cx, "Step 1:");
+        cx.simulate_keystrokes("ctrl-end");
+        let small = super::super::pictures::prepare(png(200, 100)).unwrap();
+        let big = super::super::pictures::prepare(png(2400, 600)).unwrap();
+        assert_eq!((big.iw, big.ih), (1600, 400));
+        view.update(cx, |v, cx| v.insert_pictures(vec![small, big], cx));
+        let obj = model::edit::OBJ;
+        assert_eq!(text(&view, cx), format!("Step 1:{obj}{obj}"));
+        redraw(cx);
+        let cids: Vec<String> = view.read_with(cx, |v, _| {
+            v.editor()
+                .unwrap()
+                .image_offsets()
+                .iter()
+                .map(|(_, i)| i.cid.clone())
+                .collect()
+        });
+        assert_eq!(cids.len(), 2);
+        redraw(cx);
+        let decoded = view.read_with(cx, |v, _| {
+            cids.iter().all(|c| v.view.as_ref().unwrap().has_picture(c))
+        });
+        assert!(decoded, "both decoded for the view");
+        // A click on the first selects it; its frame shows.
+        let at = "Step 1:".len();
+        let r = picture_bounds(&view, at, cx);
+        let middle = point(px(r.x + r.w / 2.), px(r.y + r.h / 2.));
+        cx.simulate_mouse_down(middle, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_up(middle, MouseButton::Left, gpui::Modifiers::none());
+        redraw(cx);
+        assert_eq!(view.read_with(cx, |v, _| v.selected_picture()), Some(at));
+        assert!(view.read_with(cx, |v, _| v.picture.frame.is_some()));
+        assert!(
+            !view.read_with(cx, |v, _| v.has_original()),
+            "small: kept as it was"
+        );
+        let width = |cx: &mut VisualTestContext| {
+            view.read_with(cx, |v, _| v.editor().unwrap().image_at(at).unwrap().width)
+        };
+        assert_eq!(width(cx), 200);
+        // The bottom-right handle dragged 40 px right: wider, aspect kept.
+        let corner = point(px(r.x + r.w), px(r.y + r.h));
+        cx.simulate_mouse_down(corner, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_move(
+            point(px(r.x + r.w + 40.), px(r.y + r.h)),
+            Some(MouseButton::Left),
+            gpui::Modifiers::none(),
+        );
+        cx.simulate_mouse_up(
+            point(px(r.x + r.w + 40.), px(r.y + r.h)),
+            MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        let dragged = width(cx);
+        assert!(dragged > 220, "{dragged}");
+        // Ctrl+] makes it a tenth wider.
+        cx.simulate_keystrokes("ctrl-]");
+        let stepped = width(cx);
+        assert!(stepped > dragged, "{stepped} after {dragged}");
+        assert_eq!(
+            text(&view, cx),
+            format!("Step 1:{obj}{obj}"),
+            "no text changed"
+        );
+        // Backspace deletes it; Ctrl+Z puts it back, at its new width.
+        cx.simulate_keystrokes("backspace");
+        assert_eq!(text(&view, cx), format!("Step 1:{obj}"));
+        cx.simulate_keystrokes("ctrl-z");
+        assert_eq!(text(&view, cx), format!("Step 1:{obj}{obj}"));
+        assert_eq!(width(cx), stepped);
+        // The large one: its original can be used instead.
+        let at2 = at + obj.len_utf8();
+        view.update(cx, |v, cx| v.set_selection(at2, at2 + obj.len_utf8(), cx));
+        assert!(view.read_with(cx, |v, _| v.has_original()));
+        assert!(view.update(cx, |v, cx| v.use_original(cx)));
+        let iw = view.read_with(cx, |v, _| v.editor().unwrap().image_at(at2).unwrap().iw);
+        assert_eq!(iw, 2400);
+        // Alt text, for the plain-text part and screen readers.
+        assert!(view.update(cx, |v, cx| v.set_picture_alt(" The Save button ", cx)));
+        assert_eq!(
+            view.read_with(cx, |v, _| v.picture_alt()),
+            Some("The Save button".to_string())
+        );
+    }
+
+    /// Dropped or pasted files: the pictures go in the text (read on the
+    /// background executor), the rest come back to be attached; an SVG is
+    /// never shown.
+    #[gpui::test]
+    fn picture_files_go_in_the_text_and_others_are_attached(cx: &mut TestAppContext) {
+        let (view, cx) = setup(cx, "");
+        let dir = std::env::temp_dir().join(format!("komorebi-pictures-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pic = dir.join("screen.png");
+        std::fs::write(&pic, png(64, 48)).unwrap();
+        let svg = dir.join("logo.svg");
+        std::fs::write(&svg, "<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
+        let pdf = dir.join("notes.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4").unwrap();
+        let attached = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = attached.clone();
+        let _sub = cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, e: &EditorEvent, _| {
+                if let EditorEvent::PasteFiles(p) = e {
+                    seen.borrow_mut().extend(p.clone());
+                }
+            })
+        });
+        let (pics, rest) =
+            super::super::pictures::split_paths(vec![pic.clone(), svg.clone(), pdf.clone()]);
+        assert_eq!(pics, [pic]);
+        view.update(cx, |v, cx| v.insert_picture_files(pics, cx));
+        cx.run_until_parked();
+        assert_eq!(text(&view, cx), model::edit::OBJ.to_string());
+        assert_eq!(rest, [svg.clone(), pdf.clone()]);
+        // A file named like a picture that is not one comes back too.
+        let fake = dir.join("fake.png");
+        std::fs::write(&fake, b"not a picture").unwrap();
+        view.update(cx, |v, cx| v.insert_picture_files(vec![fake.clone()], cx));
+        cx.run_until_parked();
+        assert_eq!(*attached.borrow(), [fake]);
+        assert_eq!(text(&view, cx), model::edit::OBJ.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

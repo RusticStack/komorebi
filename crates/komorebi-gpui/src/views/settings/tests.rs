@@ -1071,8 +1071,8 @@ mod port {
         test_support::set_theme(cx, ThemeChoice::Light);
     }
 
-    /// A signature's page: the Slint app's reduced bar (Strikethrough, the
-    /// colour, the indents, Link, Clear formatting); Link's row refuses
+    /// A signature's page: the composer's bar less a quote and a table,
+    /// with Link (what does not fit is in More); Link's row refuses
     /// what is not a web or e-mail address and Esc closes the row first.
     #[gpui::test]
     fn a_signature_takes_a_link(cx: &mut TestAppContext) {
@@ -1085,17 +1085,45 @@ mod port {
         in_window(cx, f.window, |window, cx| {
             sigs.update(cx, |s, cx| s.open(None, window, cx));
         });
+        in_window(cx, f.window, |_, _| {});
+        cx.run_until_parked();
         in_window(cx, f.window, |window, _| {
+            // The composer's bar, shared (`format_bar.rs`), and Link.
             for name in [
-                "Strikethrough (Ctrl+Shift+X)",
-                "Font colour",
-                "Increase indent",
-                "Decrease indent",
+                "Font: Segoe UI",
+                "Font size: 11",
+                "Bold (Ctrl+B)",
+                "Font colour: Automatic",
+                "Alignment: Align left",
+                "Numbered list (Ctrl+Shift+7)",
                 "Link (Ctrl+K)",
-                "Clear formatting",
             ] {
                 assert_named(window, name, Role::Button);
             }
+            // The page is too narrow for the right end of the bar: what
+            // does not fit is in More.
+            let names = test_support::names(window);
+            let on_bar = |name: &str| {
+                names
+                    .iter()
+                    .any(|(r, n)| *r == Some(Role::Button) && n == name)
+            };
+            let more = on_bar("More options");
+            for name in [
+                "Strikethrough (Ctrl+Shift+X)",
+                "Increase indent",
+                "Decrease indent",
+                "Clear formatting",
+            ] {
+                assert!(on_bar(name) || more, "{name} is on the bar or in More");
+            }
+            // What a signature cannot hold is not on its bar.
+            assert!(
+                !test_support::names(window)
+                    .iter()
+                    .any(|(_, n)| n == "Quote" || n == "Insert table"),
+                "no quote or table on a signature's bar"
+            );
         });
         // Ctrl+K from the focused text reaches Settings' Link binding.
         let body = cx.read(|cx| sigs.read(cx).body().cloned().unwrap());
@@ -1185,5 +1213,77 @@ mod port {
             window.render_frame(cx);
             assert!(!window.has_active_dialog(cx), "one dialog at a time");
         });
+    }
+    /// The account's icon: an image chosen in its page shows (the shell
+    /// hears AccountsChanged), one that isn't a raster image is refused in
+    /// words, and Remove image takes it away.
+    #[gpui::test]
+    fn the_account_icon_can_be_chosen_and_removed(cx: &mut TestAppContext) {
+        use komorebi::favicon::{self, Origin};
+        let f = open(cx, "settings-icon", services::refusing());
+        let editor = f.edit(cx);
+        let dir = f.path.parent().unwrap().to_path_buf();
+        let png = dir.join("icon.png");
+        let px: Vec<u8> = (0..32 * 32).flat_map(|_| [20u8, 40, 60, 255]).collect();
+        std::fs::write(&png, favicon::encode_png(&px, 32, 32)).unwrap();
+        let svg = dir.join("icon.svg");
+        std::fs::write(&svg, br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#).unwrap();
+        in_window(cx, f.window, |window, cx| {
+            assert_named(
+                window,
+                &format!("Choose an image for {}", f.email),
+                Role::Button,
+            );
+            assert!(!has(
+                window,
+                &format!("Remove the image of {}", f.email),
+                Role::Button
+            ));
+            editor.update(cx, |e, cx| e.set_icon_from(&png, cx));
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            favicon::load(&f.db(), f.account).map(|k| k.origin),
+            Some(Origin::User)
+        );
+        assert!(f.events().contains(&SettingsEvent::AccountsChanged));
+        in_window(cx, f.window, |window, cx| {
+            window.render_frame(cx);
+            assert_named(
+                window,
+                &format!("Remove the image of {}", f.email),
+                Role::Button,
+            );
+            editor.update(cx, |e, cx| e.set_icon_from(&svg, cx));
+            assert_eq!(
+                editor.read(cx).icon_error(),
+                Some("That file isn't a PNG, ICO, JPEG, GIF or BMP image.")
+            );
+            editor.update(cx, |e, cx| e.remove_icon(cx));
+        });
+        cx.run_until_parked();
+        assert_eq!(favicon::load(&f.db(), f.account), None);
+    }
+
+    /// Privacy > Icons from mail domains: on by default; off is saved and
+    /// drops what was fetched.
+    #[gpui::test]
+    fn the_domain_icons_switch_is_on_by_default(cx: &mut TestAppContext) {
+        use komorebi::favicon;
+        let f = open(cx, "settings-icons-switch", services::refusing());
+        in_window(cx, f.window, |window, cx| {
+            f.view
+                .update(cx, |v, cx| v.show(Section::Privacy, window, cx));
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Icons from mail domains", Role::Switch);
+        });
+        assert!(favicon::enabled(&f.db()));
+        let fetched = favicon::decode(&favicon::encode_png(&[0, 0, 0, 255], 1, 1)).unwrap();
+        favicon::keep(&f.db(), f.account, Some(fetched), 1).unwrap();
+        cx.update(|cx| f.view.update(cx, |v, cx| v.set_account_icons(false, cx)));
+        assert!(!favicon::enabled(&f.db()));
+        assert_eq!(favicon::load(&f.db(), f.account), None);
+        assert!(f.events().contains(&SettingsEvent::AccountsChanged));
     }
 }

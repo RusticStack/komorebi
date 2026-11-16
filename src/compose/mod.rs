@@ -21,11 +21,13 @@ pub mod markup;
 pub mod quote;
 pub mod recipients;
 pub mod rich;
+pub mod sample;
 pub mod send;
 #[cfg(test)]
 mod tests;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::db::{self, Db};
@@ -40,10 +42,7 @@ pub use crate::tabs::DraftId;
 pub use address::{
     address_at, bare_address, caret_after_edit, complete_address, reply_recipients, typed_address,
 };
-pub use attach::{
-    AttachFail, AttachWhy, MAX_ATTACH_HARD, MAX_ATTACHMENTS_BYTES, attachments_size, counter_level,
-    encoded_size, read_attachment, read_files,
-};
+pub use attach::{AttachFail, AttachWhy, attachments_size, read_attachment, read_files};
 pub use quote::{
     FORWARDED, attribution, prefixed, quotable, quote, quote_block, signature_block,
     strip_signature, swap_signature, text_html,
@@ -217,6 +216,9 @@ pub struct Draft {
     /// it left: Ctrl+Z, or switching back while the text is unchanged,
     /// brings it back.
     pub unplain: Option<(Editor, String)>,
+    /// The pictures of the body saved with the draft: (Content-ID, its
+    /// `draft_attachments` row).
+    pub saved_images: Vec<(String, i64)>,
 }
 
 /// The lines a reply's or forward's quote starts with, in the language
@@ -665,9 +667,8 @@ impl Draft {
         {
             return Some(SendBlock::NoRecipient);
         }
-        if encoded_size(attachments_size(&self.attachments)) > MAX_ATTACHMENTS_BYTES {
-            return Some(SendBlock::AttachmentsOver);
-        }
+        // No size check: the server is the only judge of how big a
+        // message can be (`mail::smtp`'s "too large" refusal).
         None
     }
 
@@ -812,25 +813,12 @@ impl Draft {
         Ok(true)
     }
 
-    /// Add files read for this draft, within the hard limit (another read
-    /// may have finished first). The ones over it join `errors`. True if
-    /// any was added (save the draft then: the copies are made once).
-    pub fn add_attachments(&mut self, added: Vec<Attached>, errors: &mut Vec<AttachFail>) -> bool {
-        let mut total = attachments_size(&self.attachments);
-        let mut any = false;
-        for a in added {
-            let len = a.file.data.len() as u64;
-            if encoded_size(total + len) > MAX_ATTACH_HARD {
-                errors.push(AttachFail {
-                    name: a.file.filename.clone(),
-                    why: AttachWhy::TooBig,
-                });
-                continue;
-            }
-            total += len;
-            self.attachments.push(a);
-            any = true;
-        }
+    /// Add files read for this draft, whatever their size (Komorebi sets
+    /// no limit). True if any was added (save the draft then: the copies
+    /// are made once).
+    pub fn add_attachments(&mut self, added: Vec<Attached>) -> bool {
+        let any = !added.is_empty();
+        self.attachments.extend(added);
         self.touched |= any;
         self.dirty |= any;
         any
@@ -848,8 +836,6 @@ pub enum SendBlock {
     /// An address of this field (To, Cc or Bcc) is not valid.
     FixAddress(Field),
     NoRecipient,
-    /// The attachments are over what servers take.
-    AttachmentsOver,
 }
 
 /// What the send guards ask about.
@@ -1142,25 +1128,82 @@ pub enum Stored {
     Deleted(Option<db::ServerCopy>),
 }
 
+/// A copy of a draft's file to write off the UI thread ([`store_rows`]).
+#[derive(Debug, Clone)]
+pub struct FileJob {
+    pub draft: i64,
+    /// Its `draft_attachments` row.
+    pub file: i64,
+    pub copy: db::DraftCopy,
+}
+
+impl FileJob {
+    pub fn run(&self) -> anyhow::Result<()> {
+        self.copy.write()
+    }
+}
+
 /// Save `d`: a draft worth keeping is written (inserted, with copies of its
-/// attachments, the first time; then one UPDATE of its fields), and one that
-/// is not (emptied, or never changed by the user) loses its saved row.
-/// `email` is the From address its Message-ID is minted with.
+/// attachments and pictures, the first time; then one UPDATE of its
+/// fields), and one that is not (emptied, or never changed by the user)
+/// loses its saved row. `email` is the From address its Message-ID is
+/// minted with. The copies are written here: the app writes them off the
+/// UI thread instead ([`store_rows`]).
 pub fn store(db: &Db, d: &mut Draft, email: &str) -> anyhow::Result<Stored> {
+    let (stored, jobs) = store_rows(db, d, email)?;
+    for j in &jobs {
+        if let Err(e) = j.run() {
+            copy_failed(db, d, j);
+            return Err(e);
+        }
+    }
+    Ok(stored)
+}
+
+/// A copy that could not be written: its row goes, and the next save
+/// tries it again.
+pub fn copy_failed(db: &Db, d: &mut Draft, job: &FileJob) {
+    db.remove_draft_file(job.draft, job.file).ok();
+    if d.row == Some(job.draft) {
+        for a in &mut d.attachments {
+            if a.saved == Some(job.file) {
+                a.saved = None;
+            }
+        }
+        d.saved_images.retain(|(_, id)| *id != job.file);
+    }
+}
+
+/// [`store`] without writing the copies of new attachments and pictures:
+/// their rows are recorded and the copies come back, to be written off the
+/// UI thread (a large file never holds the window).
+pub fn store_rows(db: &Db, d: &mut Draft, email: &str) -> anyhow::Result<(Stored, Vec<FileJob>)> {
     if !d.keep() {
         d.dirty = false;
         d.saved_at = None;
         let Some(row) = d.row.take() else {
-            return Ok(Stored::Nothing);
+            return Ok((Stored::Nothing, Vec::new()));
         };
         for a in &mut d.attachments {
             a.saved = None;
         }
-        return Ok(Stored::Deleted(db.delete_draft(row)?));
+        d.saved_images.clear();
+        return Ok((Stored::Deleted(db.delete_draft(row)?), Vec::new()));
     }
-    let unsaved = d.attachments.iter().any(|a| a.saved.is_none());
+    let shown: Vec<(String, model::ImageFile)> = d
+        .rich
+        .as_ref()
+        .map(Editor::shown_images)
+        .unwrap_or_default();
+    let unsaved = d.attachments.iter().any(|a| a.saved.is_none())
+        || shown
+            .iter()
+            .any(|(c, _)| !d.saved_images.iter().any(|(s, _)| s == c))
+        || d.saved_images
+            .iter()
+            .any(|(s, _)| !shown.iter().any(|(c, _)| c == s));
     if d.row.is_some() && !d.dirty && !unsaved {
-        return Ok(Stored::Nothing);
+        return Ok((Stored::Nothing, Vec::new()));
     }
     if d.message_id.is_empty() {
         d.message_id = smtp::message_id(email);
@@ -1172,6 +1215,7 @@ pub fn store(db: &Db, d: &mut Draft, email: &str) -> anyhow::Result<Stored> {
             for a in &mut d.attachments {
                 a.saved = None;
             }
+            d.saved_images.clear();
             let row = db.insert_draft(&d.to_row(0))?;
             d.row = Some(row);
             (row, Stored::Inserted)
@@ -1184,42 +1228,138 @@ pub fn store(db: &Db, d: &mut Draft, email: &str) -> anyhow::Result<Stored> {
     };
     d.dirty = false;
     d.saved_at = Some(chrono::Utc::now().timestamp());
+    let mut jobs = Vec::new();
     for a in d.attachments.iter_mut().filter(|a| a.saved.is_none()) {
         let mime = smtp::content_type(&a.file.filename);
-        a.saved = Some(
-            db.add_draft_file(row, &a.file.filename, mime, &a.file.data)?
-                .id,
-        );
+        let (file, copy) = db.add_draft_row(
+            row,
+            &a.file.filename,
+            mime,
+            Arc::from(&a.file.data[..]),
+            None,
+        )?;
+        a.saved = Some(file.id);
+        jobs.push(FileJob {
+            draft: row,
+            file: file.id,
+            copy,
+        });
     }
-    Ok(stored)
+    // Pictures no longer shown go; new ones are saved.
+    let (keep, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut d.saved_images)
+        .into_iter()
+        .partition(|(s, _)| shown.iter().any(|(c, _)| c == s));
+    d.saved_images = keep;
+    for (_, id) in gone {
+        db.remove_draft_file(row, id).ok();
+    }
+    for (cid, f) in shown {
+        if d.saved_images.iter().any(|(s, _)| *s == cid) {
+            continue;
+        }
+        let (file, copy) =
+            db.add_draft_row(row, &f.file_name(&cid), f.mime, f.data.clone(), Some(&cid))?;
+        d.saved_images.push((cid, file.id));
+        jobs.push(FileJob {
+            draft: row,
+            file: file.id,
+            copy,
+        });
+    }
+    Ok((stored, jobs))
 }
 
-/// Load saved draft `row` with its attachments. Copies that can't be read
-/// are left out (and stay saved); their names come back.
+/// Load saved draft `row` with its attachments and pictures. Copies that
+/// can't be read are left out (and stay saved); their names come back.
 pub fn load(db: &Db, row: i64) -> anyhow::Result<Option<(Draft, Vec<String>)>> {
+    let Some(job) = load_job(db, row)? else {
+        return Ok(None);
+    };
+    Ok(Some(finish_load(db, job.run())))
+}
+
+/// What reading a saved draft needs: its row and where its copies are.
+/// [`LoadJob::run`] reads the copies (off the UI thread).
+pub struct LoadJob {
+    row: db::DraftRow,
+    files: Vec<(db::DraftFile, std::path::PathBuf)>,
+}
+
+/// A saved draft with its copies read.
+pub struct Loaded {
+    row: db::DraftRow,
+    attachments: Vec<Attached>,
+    images: Vec<(String, i64, Vec<u8>)>,
+    missing: Vec<String>,
+}
+
+/// The first step of [`load`] (quick: rows only).
+pub fn load_job(db: &Db, row: i64) -> anyhow::Result<Option<LoadJob>> {
     let Some(r) = db.draft(row)? else {
         return Ok(None);
     };
-    let mut attachments = Vec::new();
-    let mut missing = Vec::new();
-    let mut total = 0;
+    let mut files = Vec::new();
     for f in db.draft_files(row)? {
-        let limit = (MAX_ATTACH_HARD * 3 / 4).saturating_sub(total);
-        match db.read_draft_file(row, &f, limit) {
-            Ok(data) => {
-                total += data.len() as u64;
-                attachments.push(Attached {
-                    file: OutAttachment {
-                        filename: f.name,
-                        data,
-                    },
-                    saved: Some(f.id),
-                });
+        let path = db.draft_file_path(row, &f)?;
+        files.push((f, path));
+    }
+    Ok(Some(LoadJob { row: r, files }))
+}
+
+impl LoadJob {
+    /// Read the copies.
+    /// Whether it has copies to read (none: run it anywhere at once).
+    pub fn has_files(&self) -> bool {
+        !self.files.is_empty()
+    }
+
+    pub fn run(self) -> Loaded {
+        let mut attachments = Vec::new();
+        let mut images = Vec::new();
+        let mut missing = Vec::new();
+        for (f, path) in self.files {
+            // No limit: Komorebi sets none on attachments.
+            match db::read_draft_copy(&path, &f.name, u64::MAX) {
+                Ok(data) => match f.cid {
+                    Some(cid) => images.push((cid, f.id, data)),
+                    None => attachments.push(Attached {
+                        file: OutAttachment {
+                            filename: f.name,
+                            data,
+                        },
+                        saved: Some(f.id),
+                    }),
+                },
+                // A picture lost is left out of the message as it is
+                // shown (`rich::send_parts`); an attachment is named.
+                Err(_) if f.cid.is_some() => {}
+                Err(_) => missing.push(f.name),
             }
-            Err(_) => missing.push(f.name),
+        }
+        Loaded {
+            row: self.row,
+            attachments,
+            images,
+            missing,
         }
     }
-    Ok(Some((Draft::from_row(r, attachments), missing)))
+}
+
+/// The last step of [`load`]: the draft from what was read.
+pub fn finish_load(db: &Db, l: Loaded) -> (Draft, Vec<String>) {
+    let mut d = Draft::from_row(l.row, l.attachments);
+    let mut images = model::Images::default();
+    for (cid, id, data) in l.images {
+        if let Some((file, _, _)) = model::ImageFile::new(data) {
+            images.insert(cid.clone(), file);
+            d.saved_images.push((cid, id));
+        }
+    }
+    if let Some(ed) = &mut d.rich {
+        ed.add_images(&images);
+        self::rich::missing_images(db, ed);
+    }
+    (d, l.missing)
 }
 
 /// Whether an autosave also copies its draft to the server, the last copy
@@ -1251,8 +1391,12 @@ pub fn signature_for(db: &Db, account: i64, kind: Kind) -> Option<db::Signature>
 pub fn prepare(db: &Db, draft: &mut Draft, defaults: &ComposeDefaults) {
     // A new message starts formatted unless Settings says plain text.
     if draft.row.is_none() && draft.rich.is_none() && defaults.rich {
-        let sig = signature_for(db, draft.account_id, draft.kind).and_then(|s| s.block());
-        draft.make_rich(defaults.doc(), sig);
+        let sig = signature_for(db, draft.account_id, draft.kind);
+        draft.make_rich(defaults.doc(), sig.as_ref().and_then(db::Signature::block));
+        // The signature's pictures are copied into the draft with it.
+        if let (Some(s), Some(ed)) = (&sig, &mut draft.rich) {
+            ed.add_images(&s.images);
+        }
     }
     if draft.rich.is_none() {
         let block = signature_for(db, draft.account_id, draft.kind)

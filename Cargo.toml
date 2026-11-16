@@ -1,6 +1,6 @@
 [package]
 name = "komorebi"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
 description = "A small, fast, privacy-respecting email client for Windows"
 license = "GPL-3.0-or-later"
@@ -67,6 +67,9 @@ roxmltree = "=0.21.1"
 # pure Rust; no key generation or randomness in the app.
 ed25519-compact = { version = "2.6.0", default-features = false, features = ["std"] }
 sha2 = { version = "0.11.1", default-features = false }
+# Pictures pasted as data: addresses and copied out the same way (the
+# composer's clipboard). Already linked through lettre; the same version.
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 # Windows Credential Manager, the store `keyring` v4 used: pinned, so saved
@@ -99,7 +102,6 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Glob
 dev-env-password = []
 
 [dev-dependencies]
-base64 = "0.22"
 # examples/sign_update.rs keygen: a random seed (tests use fixed seeds).
 ed25519-compact = { version = "2.6.0", default-features = false, features = ["std", "random"] }
 

@@ -4,7 +4,7 @@
 //! replaces the signature in the message, even an edited one (Ctrl+Z puts
 //! it back in a formatted message): `Draft::pick_signature`.
 
-use gpui::{Context, IntoElement, Window};
+use gpui::{AnyElement, Context, FocusHandle, InteractiveElement as _, IntoElement as _, Window};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use komorebi::compose;
 
@@ -51,44 +51,58 @@ impl ComposerView {
         }
     }
 
-    pub(crate) fn signature_button(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// The Signature menu's button for the format bar, given its focus
+    /// handle there.
+    pub(crate) fn signature_button(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> impl FnOnce(FocusHandle) -> AnyElement + use<> {
         let list = self.db().signatures().unwrap_or_default();
         let current = self.current_signature(cx);
         let view = cx.entity().downgrade();
-        IconButton::new(
-            "compose-signature",
-            Icon::Signature,
-            text::words::signature(),
-        )
-        .small()
-        .dropdown_menu(move |m, _, cx| {
-            let mut m = menu::brand(m, cx);
-            for s in &list {
-                let (v, id) = (view.clone(), s.id);
-                m = m.item(
-                    PopupMenuItem::new(s.name.clone())
-                        .checked(current == Some(id))
+        move |focus| {
+            IconButton::new(
+                "compose-signature",
+                Icon::Signature,
+                text::words::signature(),
+            )
+            .small()
+            .track_focus(&focus)
+            .dropdown_menu(move |m, _, cx| {
+                let mut m = menu::brand(m, cx);
+                for s in &list {
+                    let (v, id) = (view.clone(), s.id);
+                    m = m.item(
+                        PopupMenuItem::new(s.name.clone())
+                            .checked(current == Some(id))
+                            .on_click(move |_, window, cx| {
+                                let _ = v.update(cx, |this, cx| {
+                                    this.pick_signature(Some(id), window, cx)
+                                });
+                            }),
+                    );
+                }
+                let none = view.clone();
+                let manage = view.clone();
+                m.item(
+                    PopupMenuItem::new(text::words::signature_none())
+                        .checked(current.is_none())
                         .on_click(move |_, window, cx| {
                             let _ =
-                                v.update(cx, |this, cx| this.pick_signature(Some(id), window, cx));
+                                none.update(cx, |this, cx| this.pick_signature(None, window, cx));
                         }),
-                );
-            }
-            let none = view.clone();
-            let manage = view.clone();
-            m.item(
-                PopupMenuItem::new(text::words::signature_none())
-                    .checked(current.is_none())
-                    .on_click(move |_, window, cx| {
-                        let _ = none.update(cx, |this, cx| this.pick_signature(None, window, cx));
-                    }),
-            )
-            .separator()
-            .item(
-                PopupMenuItem::new(text::words::manage_signatures()).on_click(move |_, _, cx| {
-                    let _ = manage.update(cx, |_, cx| cx.emit(ComposerEvent::ManageSignatures));
-                }),
-            )
-        })
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new(text::words::manage_signatures()).on_click(
+                        move |_, _, cx| {
+                            let _ =
+                                manage.update(cx, |_, cx| cx.emit(ComposerEvent::ManageSignatures));
+                        },
+                    ),
+                )
+            })
+            .into_any_element()
+        }
     }
 }

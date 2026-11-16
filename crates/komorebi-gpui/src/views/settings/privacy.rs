@@ -38,6 +38,16 @@ impl SettingsView {
         self.set_setting(Setting::DiagnosticsLog(on), cx);
     }
 
+    /// Account icons from the mail domains on or off. Off: nothing is asked
+    /// again and the fetched icons go (chosen images stay).
+    pub fn set_account_icons(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Err(e) = komorebi::favicon::set_enabled(&self.db, on) {
+            self.message = Some(Message::NotSaved(format!("{e:#}")));
+        }
+        cx.emit(SettingsEvent::AccountsChanged);
+        cx.notify();
+    }
+
     /// Open the folder of the log files in File Explorer.
     pub fn open_logs_folder(&self, cx: &mut Context<Self>) {
         if let Some(dir) = self
@@ -170,6 +180,20 @@ impl SettingsView {
                 ),
             );
         }
+        let icons_on = komorebi::favicon::enabled(&self.db);
+        let icons = Card::new("privacy-icons", tr!("Icons from mail domains"))
+            .note(tr!("An account without an image of its own shows its mail domain's icon. Komorebi asks the domain's own website for it when the account is added and about once a month, so that website sees your IP address; no other service is asked. Off: nothing is asked and the icons fetched are removed."))
+            .icon(Icon::Image)
+            .control(
+                Toggle::new("privacy-icons-toggle", tr!("Icons from mail domains"), icons_on)
+                    .state_label(tr!("On"), tr!("Off"))
+                    .on_change({
+                        let this = this.clone();
+                        move |on, _, cx| {
+                            let _ = this.update(cx, |this, cx| this.set_account_icons(on, cx));
+                        }
+                    }),
+            );
         let diag_on = komorebi::diag::enabled();
         let diag = Card::new("privacy-diag", tr!("Diagnostics log"))
             .note(tr!("Records only server commands, response codes and timings on this PC, never mail, addresses or passwords; nothing is sent."))
@@ -249,6 +273,8 @@ impl SettingsView {
             ))
             .child(group_head(tr!("Remote images"), cx))
             .child(images)
+            .child(group_head(tr!("Account icons"), cx))
+            .child(icons)
             .child(group_head(tr!("Diagnostics"), cx))
             .child(diag)
             .child(logs)

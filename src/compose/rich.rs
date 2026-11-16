@@ -4,7 +4,6 @@
 //! a formatted message starts from. Each app's editor owns its caret,
 //! picture and input; what a command does to the document is here.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::db::Db;
@@ -37,6 +36,8 @@ pub enum Action {
     ShowQuote,
     /// Turn a stored quote into text that can be edited.
     EditQuote,
+    /// "Insert picture": the app opens its file picker (nothing here).
+    InsertPicture,
 }
 
 /// What a command did: whether the document changed, and the selection
@@ -101,6 +102,7 @@ pub fn apply(ed: &mut Editor, (a, c): (usize, usize), action: &Action) -> Applie
             changed: ed.expand_quote(),
             sel: None,
         },
+        Action::InsertPicture => Applied::default(),
     }
 }
 
@@ -123,28 +125,29 @@ pub fn is_blank(ed: &Editor) -> bool {
     })
 }
 
-/// The pictures of the signature logos in `doc` not in `known` yet, read
-/// from the cache (a logo whose picture changed since is left out).
-pub fn logos(db: &Db, doc: &model::Doc, known: &HashMap<u64, Arc<[u8]>>) -> Vec<(u64, Arc<[u8]>)> {
-    let mut out = Vec::new();
-    for b in &doc.blocks {
-        let model::Block::Signature(s) = b else {
-            continue;
-        };
-        let (Some(l), Some(id)) = (s.logo, s.source) else {
-            continue;
-        };
-        if known.contains_key(&l.hash) || out.iter().any(|(h, _)| *h == l.hash) {
-            continue;
-        }
-        if let Ok(Some(sig)) = db.signature(id)
-            && let Some(bytes) = sig.logo
-            && model::fnv(&bytes) == l.hash
-        {
-            out.push((l.hash, Arc::from(bytes)));
-        }
+/// A picture of the document decoded (first frame of a GIF) and scaled
+/// down towards `width_px` device px, for the editor's view. Slow for a big
+/// file: never on the UI thread. `None` if it does not decode.
+pub fn decode_picture(file: &model::ImageFile, width_px: u32) -> Option<Arc<tiny_skia::Pixmap>> {
+    crate::mail::render::canvas::decode_image(&file.data, width_px.max(1)).map(Arc::new)
+}
+
+/// Put a stored signature in the message (`None`: take it out), its
+/// pictures copied in with it. True if anything changed.
+pub fn put_signature(ed: &mut Editor, sig: Option<&crate::db::Signature>) -> bool {
+    if let Some(s) = sig {
+        ed.add_images(&s.images);
     }
-    out
+    ed.set_signature(sig.and_then(crate::db::Signature::block))
+}
+
+/// The pictures a saved draft shows that were not saved with it (an old
+/// signature logo), from the stored signatures.
+pub fn missing_images(db: &Db, ed: &mut Editor) {
+    let doc = ed.doc().clone();
+    if let Ok(all) = db.with_signature_images(&doc, ed.images()) {
+        ed.add_images(&all);
+    }
 }
 
 /// A painted piece's pixels as straight (not premultiplied) BGRA, the

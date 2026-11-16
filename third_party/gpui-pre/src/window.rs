@@ -2905,6 +2905,13 @@ impl Window {
         self.rendered_frame.scene.quads.clone()
     }
 
+    /// KOMOREBI PATCH (hollow-crisp-shadow): returns the shadows in the most recently
+    /// rendered frame's scene, so tests can assert where a shadow paints.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn painted_shadows(&self) -> Vec<Shadow> {
+        self.rendered_frame.scene.shadows.clone()
+    }
+
     /// Returns the underlines in the most recently rendered frame's scene.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_underlines(&self) -> Vec<Underline> {
@@ -4636,6 +4643,28 @@ impl Window {
                 continue;
             }
             let shadow_bounds = (bounds + shadow.offset).dilate(shadow.spread_radius);
+            // KOMOREBI PATCH (hollow-crisp-shadow): a crisp (unblurred) drop shadow paints
+            // only outside the element, as a CSS box-shadow does. Drawn as a filled rect it
+            // showed through an element with no background of its own: a spread-shadow
+            // focus ring on a transparent field filled the whole field with the ring colour
+            // (ink), and the ink text on it disappeared. It goes out as an inset primitive,
+            // whose shader paints the outer shape minus a hole: the outer shape is the shadow
+            // rect, the hole is the element (snapped as its background quad is).
+            if shadow.blur_radius <= Pixels::ZERO {
+                self.next_frame.scene.insert_primitive(Shadow {
+                    order: 0,
+                    blur_radius: ScaledPixels(0.),
+                    bounds: self.snap_bounds(bounds),
+                    content_mask,
+                    corner_radii: element_corner_radii,
+                    color: shadow.color.opacity(opacity),
+                    element_bounds: self.cover_bounds(shadow_bounds),
+                    element_corner_radii: corner_radii.scale(scale_factor),
+                    inset: 1,
+                    pad: 0,
+                });
+                continue;
+            }
             self.next_frame.scene.insert_primitive(Shadow {
                 order: 0,
                 blur_radius: shadow.blur_radius.scale(scale_factor),

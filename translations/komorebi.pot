@@ -336,10 +336,6 @@ msgid "Add a recipient to send."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/composer/text.rs
-msgid "Attachments are over 25 MB; remove some to send."
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/composer/text.rs
 msgid "No subject, and the text mentions an attachment but nothing is attached."
 msgstr ""
 
@@ -364,15 +360,11 @@ msgid "Draft saved"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/composer/text.rs
-msgid "Attachments {0} of 25 MB"
+msgid "Attachments: {0}"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/composer/text.rs
 msgid "{0}: folders can't be attached"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/composer/text.rs
-msgid "{0}: over Komorebi's 100 MB attachment limit"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/composer/text.rs crates/komorebi-gpui/src/views/mail/sync_text.rs crates/komorebi-gpui/src/views/settings/text.rs
@@ -601,6 +593,38 @@ msgid "Insert table"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Insert picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Alt text…"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Alt text"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Make bigger (Ctrl+])"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Make smaller (Ctrl+[)"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Original size"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Use original picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
 msgid "Delete table"
 msgstr ""
 
@@ -689,6 +713,10 @@ msgstr ""
 msgid "Purple"
 msgstr ""
 
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Custom colour"
+msgstr ""
+
 #: crates/komorebi-gpui/src/views/composer/text.rs crates/komorebi-gpui/src/views/mail/text.rs
 msgid "High importance"
 msgstr ""
@@ -739,6 +767,39 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/composer/text.rs
 msgid "Justify"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Formatting"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Alignment"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgctxt "format value"
+msgid "Mixed"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Font size (Ctrl+[ or Ctrl+])"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Increase indent (Ctrl+M)"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Decrease indent (Ctrl+Shift+M)"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Quote (Ctrl+Shift+Q)"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/composer/text.rs
+msgid "Clear formatting (Ctrl+Space)"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/mail/text.rs
@@ -1082,6 +1143,103 @@ msgstr ""
 msgid "No address books were found at this address."
 msgstr ""
 
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Summary"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "{n} unread message"
+msgid_plural "{n} unread messages"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Newest unread"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Show all unread"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "{n} draft waiting"
+msgid_plural "{n} drafts waiting"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Show all drafts"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Read. Replied. Now rest."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Nothing new on this PC."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/calm.rs
+msgid "Nothing unread in {0}."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "There is already a folder with that name here."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "New folder"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "New subfolder"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgctxt "folder"
+msgid "Rename"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "Delete folder"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "Delete “{0}”?"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "The folder and the {n} message in it are deleted on the server."
+msgid_plural "The folder and the {n} messages in it are deleted on the server."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "The folder is deleted on the server."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "Its {n} subfolder goes with it."
+msgid_plural "Its {n} subfolders go with it."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "Messages in it don't go to Trash and can't be brought back."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "Folder name"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "New subfolder name"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folder_edit.rs
+msgid "New folder name"
+msgstr ""
+
 #: crates/komorebi-gpui/src/views/mail/folders.rs
 msgid ", level {0}"
 msgstr ""
@@ -1114,6 +1272,14 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/mail/folders.rs
 msgid "Folders (Open navigation)"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folders.rs
+msgid "New folder in {0}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/folders.rs
+msgid "New folder (Ctrl+Shift+N)"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/mail/menus.rs
@@ -1235,6 +1401,62 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/mail/sync_text.rs
 msgid "A message sent as Komorebi closed couldn't be prepared again; it is back in Drafts."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Type a name for the folder."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "That name is too long."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Folder names can't contain “{0}”."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "This server uses “{0}” to separate folders, so a name can't contain it."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Folder “{0}” created."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Folder renamed to “{0}”."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Folder “{0}” deleted."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "The server can't be reached now. The folder change is made when it is back."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "The server didn't create “{0}”: {1}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "The server didn't rename the folder to “{0}”: {1}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "The server didn't delete “{0}”: {1}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Couldn't create “{0}”: {1}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Couldn't rename the folder to “{0}”: {1}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/mail/sync_text.rs
+msgid "Couldn't delete “{0}”: {1}"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/mail/sync_text.rs crates/komorebi-gpui/src/views/settings/accounts.rs
@@ -1772,6 +1994,14 @@ msgstr ""
 msgid "Add your email account"
 msgstr ""
 
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/accounts.rs
+msgid "Import from Outlook"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Your accounts and signatures from classic Outlook on this PC."
+msgstr ""
+
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
 msgid "It takes about a minute."
 msgstr ""
@@ -1833,6 +2063,56 @@ msgid "Steps to add an account"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Looking for Outlook on this PC …"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "The new Outlook keeps your accounts and signatures online, so there's nothing on this PC to import. Add your account by its address instead."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "No Outlook accounts or signatures were found on this PC."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Komorebi found these in Outlook on this PC. Your passwords and mail aren't copied: you type each password once, and your mail downloads again from the server."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Already in Komorebi."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "A POP account in Outlook. Komorebi sets it up with IMAP."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/mod.rs
+msgid "Accounts"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Accounts in Outlook"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "{n} picture from the web isn't imported."
+msgid_plural "{n} pictures from the web aren't imported."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/mod.rs
+msgid "Signatures"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Signatures in Outlook"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Continue"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
 msgid "This account is already in Komorebi."
 msgstr ""
 
@@ -1846,10 +2126,6 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
 msgid "Email address"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/onboarding/mod.rs
-msgid "Continue"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
@@ -1994,6 +2270,18 @@ msgid "Saved in Windows Credential Manager, never in Komorebi's files."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Account {0} of {1} from Outlook."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Outlook used POP for this account. Komorebi uses IMAP, so check the settings."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "The server settings are Outlook's. Type your password to sign in."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
 msgid "Your provider's help pages list these. If you run your own server, use its IMAP and SMTP details."
 msgstr ""
 
@@ -2023,6 +2311,10 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
 msgid "The name you sign in with, if it isn't your email address."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+msgid "Skip this account"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/onboarding/mod.rs
@@ -2953,6 +3245,14 @@ msgid "Gmail, iCloud, Fastmail, Postale.io and more, or any IMAP and SMTP server
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/accounts.rs
+msgid "Your accounts and signatures from classic Outlook on this PC. Your mail downloads again from the server."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/accounts.rs
+msgid "Import"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/accounts.rs
 msgid "No accounts yet"
 msgstr ""
 
@@ -3005,6 +3305,46 @@ msgid "{0}, skipped"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Choose an image"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "That image is too large."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "That file isn't a PNG, ICO, JPEG, GIF or BMP image."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Your image is shown beside this account in the folder pane."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Without an image of its own the account shows its mail domain's icon or its provider's, if there is one (Settings > Privacy)."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Account icon"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Choose image"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Choose an image for {0}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Remove image"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
+msgid "Remove the image of {0}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/editor.rs
 msgid "Test connection"
 msgstr ""
 
@@ -3026,10 +3366,6 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/editor.rs
 msgid "Signature for new messages"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/mod.rs
-msgid "Accounts"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/editor.rs
@@ -3317,10 +3653,6 @@ msgid "Compose"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/mod.rs
-msgid "Signatures"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/mod.rs
 msgid "General"
 msgstr ""
 
@@ -3354,6 +3686,14 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/privacy.rs
 msgid "Forget all"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/privacy.rs
+msgid "Icons from mail domains"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/privacy.rs
+msgid "An account without an image of its own shows its mail domain's icon. Komorebi asks the domain's own website for it when the account is added and about once a month, so that website sees your IP address; no other service is asked. Off: nothing is asked and the icons fetched are removed."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/privacy.rs
@@ -3422,6 +3762,10 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/privacy.rs
 msgid "Remote images"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/privacy.rs
+msgid "Account icons"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/privacy.rs
@@ -3647,6 +3991,36 @@ msgstr ""
 #: crates/komorebi-gpui/src/views/settings/shortcuts.rs
 msgctxt "shortcut"
 msgid "Show / hide the folders"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/shortcuts.rs
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+N"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/shortcuts.rs
+msgctxt "shortcut"
+msgid "New folder"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/shortcuts.rs
+msgctxt "shortcut key"
+msgid "F2"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/shortcuts.rs
+msgctxt "shortcut"
+msgid "Rename the folder"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/shortcuts.rs
+msgctxt "shortcut key"
+msgid "Delete (in the folders)"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/shortcuts.rs
+msgctxt "shortcut"
+msgid "Delete the folder, after asking"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/shortcuts.rs
@@ -4129,31 +4503,11 @@ msgid "Your name, and what people should know about you"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/signatures.rs
-msgid "Add a logo"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/signatures.rs
 msgid "No signatures yet. Add one to use it in new mail and replies."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/signatures.rs
 msgid "Add signature"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/signatures.rs
-msgid "Remove logo"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/signatures.rs
-msgid "Add logo…"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/signatures.rs
-msgid "Logo"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/signatures.rs crates/komorebi-gpui/src/views/settings/text.rs
-msgid "The logo must be a PNG or JPEG file of 200 KB or less."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/text.rs
@@ -4398,6 +4752,10 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/text.rs
 msgid "A signature with this name already exists."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/text.rs
+msgid "A signature can hold PNG, JPEG, GIF and WebP pictures of 10 MB or less, not other files."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/text.rs

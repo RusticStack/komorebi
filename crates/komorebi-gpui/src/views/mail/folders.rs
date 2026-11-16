@@ -14,6 +14,7 @@ use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use komorebi_i18n::tr;
 
+use super::folder_edit::{self, Target};
 use super::nav::{NavItem, NavKind};
 use super::rows::DraggedRow;
 use super::{MailEvent, MailView, Place, menus, text};
@@ -41,7 +42,7 @@ const LINE_LEAD: f32 = space::SP_6;
 /// The place spot's left edge inside a line.
 const SPOT_LEFT: f32 = space::SP_2;
 /// From the icon's box to the label.
-const ICON_GAP: f32 = space::SP_3;
+pub(super) const ICON_GAP: f32 = space::SP_3;
 /// From the label to the count.
 const COUNT_GAP: f32 = space::SP_2;
 /// From the count to the fold slot.
@@ -274,6 +275,7 @@ pub fn render(
 ) -> AnyElement {
     let t = cx.tokens().clone();
     let nav = view.nav_items(rail);
+    let editing = view.folder_edit.as_ref().map(|e| e.target);
     // The keyboard's lines: the full pane's while it is open over the rail.
     let keyboard_here = !(rail && view.pane_open);
     let focused =
@@ -308,13 +310,52 @@ pub fn render(
             };
             if rail {
                 tile(item, at, badge, &t, cx)
+            } else if editing == Some(Target::Rename(folder_of(item.kind))) {
+                // Rename: the line is the field.
+                folder_edit::edit_line(view, item.level, LINE_LEAD, icon(item), &t, cx)
+                    .unwrap_or_else(|| line(item, at, &t, cx))
             } else if matches!(item.kind, NavKind::Account(_)) {
-                group(item, at, badge, &t, cx)
+                let add = view.mail.folder_menu(item.kind).is_some();
+                let icon = view
+                    .account_look(item.account)
+                    .map(|l| crate::views::account_icon::slot(l, window.scale_factor() >= 1.5, &t));
+                group(item, at, badge, add, icon, &t, cx)
             } else {
                 line(item, at, &t, cx)
             }
         })
         .collect();
+    // New folder: the field sits first under its parent's line.
+    let mut lines = lines;
+    if !rail
+        && let Some(Target::New { account, parent }) = editing
+        && let Some(at) = nav.items.iter().position(|item| match parent {
+            Some(p) => item.kind == NavKind::Folder(p),
+            None => item.kind == NavKind::Account(account),
+        })
+    {
+        let level = match parent {
+            Some(_) => nav.items[at].level + 1,
+            None => 0,
+        };
+        if let Some(field) = folder_edit::edit_line(view, level, LINE_LEAD, Icon::Folder, &t, cx) {
+            lines.insert(at + 1, field);
+        }
+    }
+    // The room under the lines: a right-click there offers New folder.
+    if !rail {
+        let entity = cx.entity().downgrade();
+        lines.push(
+            div()
+                .id("folders-room")
+                .flex_1()
+                .min_h(px(scaled::nav_item(&t)))
+                .context_menu(move |menu, window, cx| {
+                    menus::pane_menu(entity.clone(), menu, window, cx)
+                })
+                .into_any_element(),
+        );
+    }
     let width = if rail { layout::RAIL_W } else { layout::NAV_W };
     div()
         .id(if rail { "folder-rail" } else { "folder-pane" })
@@ -331,7 +372,9 @@ pub fn render(
             // While the full pane is open over the rail, it has the focus.
             let lines = div()
                 .id(if rail { "rail-lines" } else { "folders" })
-                .key_context(super::commands::NAV)
+                // While a name is typed, the field has the keys (Space,
+                // Home, End, Delete are the text's).
+                .when(editing.is_none(), |el| el.key_context(super::commands::NAV))
                 .role(Role::Tree)
                 .aria_label(text::folders())
                 .flex_1()
@@ -532,6 +575,14 @@ fn footer(rail: bool, open: Option<Place>, t: &Tokens, cx: &mut Context<MailView
         .into_any_element()
 }
 
+/// A folder line's folder (0 for other lines).
+fn folder_of(kind: NavKind) -> i64 {
+    match kind {
+        NavKind::Folder(id) => id,
+        _ => 0,
+    }
+}
+
 /// The folder a dragged message can be dropped on (folder lines only).
 fn drop_folder(kind: NavKind) -> Option<i64> {
     match kind {
@@ -684,6 +735,8 @@ fn group(
     item: &NavItem,
     at: Line,
     badge: Option<SharedString>,
+    add: bool,
+    icon: Option<AnyElement>,
     t: &Tokens,
     cx: &mut Context<MailView>,
 ) -> AnyElement {
@@ -696,6 +749,13 @@ fn group(
     let c = t.color;
     let kind = item.kind;
     let entity = cx.entity().downgrade();
+    // With an icon the line keeps the folder lines' columns: the icon in
+    // their icon box, the label on their labels' edge.
+    let lead = if icon.is_some() {
+        LINE_LEAD
+    } else {
+        GROUP_LEAD
+    };
     let element = div()
         .id(line_id(kind, false))
         .role(Role::TreeItem)
@@ -711,29 +771,40 @@ fn group(
         .flex_none()
         .items_center()
         .mt(px(space::SP_2))
-        .pl(px(GROUP_LEAD))
+        .pl(px(lead))
         .pr(px(LINE_END))
         .rounded(px(radius::FULL))
+        .group(ACCOUNT_GROUP)
         .typo(&t.text.caption_strong)
         .text_color(c.ink_3)
         .when(item.off, |el| el.opacity(crate::theme::motion::DISABLED))
         .when(ring, |el| el.shadow(focus_ring(t)))
         .when(cursor, |el| el.aria_active_descendant())
+        // The account's icon, when it has one (else the line as before).
+        .when_some(icon, |el, icon| {
+            el.child(div().flex_none().mr(px(ICON_GAP)).child(icon))
+        })
+        // The address in a tooltip on the name only, so the New folder
+        // button keeps its own.
         .child(
             div()
+                .id(ElementId::Name(
+                    format!("account-name-{}", item.account).into(),
+                ))
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
-                .child(item.label.clone()),
+                .child(item.label.clone())
+                .when(item.sub != item.label, |el| {
+                    el.brand_tooltip(item.sub.clone())
+                }),
         )
         .when(!item.expanded, |el| el.children(count(item, t)))
         .when(badge.is_some(), |el| el.child(caution(item.account, t, cx)))
+        .children(add.then(|| add_folder(item, ring, cx)).flatten())
         .child(fold_slot(item, true, t, cx))
-        .when(item.sub != item.label, |el| {
-            el.brand_tooltip(item.sub.clone())
-        })
         .on_click(cx.listener(move |this, _, window, cx| {
             this.nav_cursor = i;
             this.act(window, cx, |m| m.nav_toggle(kind));
@@ -749,6 +820,43 @@ fn group(
             menus::nav_menu(entity.clone(), kind, false, menu, window, cx)
         })
         .into_any_element()
+}
+
+/// The hover group of an account's line (its New folder button shows).
+const ACCOUNT_GROUP: &str = "account-line";
+
+/// An account line's New folder button: on hover, and while the keyboard
+/// is on the line (the tree is one tab stop: the menu and Ctrl+Shift+N
+/// reach it from the keys).
+fn add_folder(item: &NavItem, ring: bool, cx: &mut Context<MailView>) -> Option<AnyElement> {
+    let NavKind::Account(account) = item.kind else {
+        return None;
+    };
+    let name = tr!("New folder in {0}", item.label);
+    let button = IconButton::new(
+        ElementId::Name(format!("add-folder-{account}").into()),
+        Icon::Add,
+        name,
+    )
+    .small()
+    .no_tab_stop()
+    .tooltip(tr!("New folder (Ctrl+Shift+N)"))
+    .ml(px(FOLD_GAP))
+    .when(!ring, |el| {
+        el.invisible().group_hover(ACCOUNT_GROUP, |s| s.visible())
+    })
+    .on_click(cx.listener(move |this, _, window, cx| {
+        cx.stop_propagation();
+        this.start_folder_edit(
+            Target::New {
+                account,
+                parent: None,
+            },
+            window,
+            cx,
+        );
+    }));
+    Some(button.into_any_element())
 }
 
 /// A line's fold slot: the chevron of a parent line (a click folds or

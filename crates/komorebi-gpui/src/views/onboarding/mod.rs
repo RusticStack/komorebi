@@ -6,17 +6,26 @@
 //! Settings > Accounts > Add account opens the same flow at Your email
 //! ([`OnboardingView::adding`]).
 //!
+//! Import from Outlook (`Step::Import`, [`import`]): the accounts and
+//! signatures classic Outlook keeps on this PC, each with a checkbox. The
+//! welcome offers it when something was found; Settings > Accounts opens it
+//! directly ([`OnboardingView::importing`]). Continue saves the ticked
+//! signatures, then walks each ticked account through Sign in with its
+//! fields filled in, so only the password is typed.
+//!
 //! The lookup runs only on Continue, for a domain that is not a preset's,
 //! and never sends the password; offline (`KOMOREBI_OFFLINE`) the provider
 //! list shows at once (`providers`). Nothing here talks to a server but the check
 //! and the lookup, both through [`services`] so tests fake them.
 
 pub mod flow;
+pub mod import;
 pub mod providers;
 
 #[cfg(test)]
 mod tests;
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use gpui::{
@@ -30,6 +39,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use komorebi::db::Account;
 use komorebi::find::{Fields, merge};
 use komorebi::i18n::{LangSetting, resolve_here};
+use komorebi::import::outlook::{Found, FoundAccount, Kind as FoundKind};
 use komorebi::mail::discover::{self, Outcome};
 use komorebi::mail::pin::Kind;
 use komorebi::providers::{self as presets, PRESETS, Security, SignIn};
@@ -58,6 +68,7 @@ use crate::widgets::icon_button::IconButton;
 use crate::widgets::notice::{self, Notice};
 use crate::widgets::pane::ScrollArea;
 use crate::widgets::select::Dropdown;
+use crate::widgets::toggle::Checkbox;
 
 /// What the setup flow tells its owner (the shell on the first run,
 /// Settings for Add account).
@@ -80,6 +91,8 @@ pub enum OnboardingEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
     Welcome,
+    /// Import from Outlook: the list of what was found.
+    Import,
     Email,
     SignIn,
     Yours,
@@ -175,6 +188,22 @@ pub struct OnboardingView {
     download: Download,
     has_mail: bool,
     error: Option<String>,
+    /// What Outlook has on this PC (`None` while it is read).
+    outlook: Option<Found>,
+    _outlook_task: Option<Task<()>>,
+    import_accounts: Vec<import::AccountRow>,
+    import_signatures: Vec<import::SignatureRow>,
+    /// The ticked signatures being read (their picture files, off the UI
+    /// thread) before they are saved and the accounts' sign-ins start.
+    signatures_task: Option<Task<()>>,
+    /// The ticked accounts still to sign in to, after the one shown.
+    queue: VecDeque<FoundAccount>,
+    /// The account from Outlook on Sign in.
+    importing: Option<FoundAccount>,
+    /// Its place (from 1) and the count of ticked accounts.
+    import_place: (usize, usize),
+    /// The signatures imported (Outlook name, id), for the defaults.
+    imported: Vec<(String, i64)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -189,12 +218,37 @@ impl Focusable for OnboardingView {
 impl OnboardingView {
     /// The first run: the welcome, then the flow.
     pub fn new(db: Db, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::make(db, true, window, cx)
+        let mut this = Self::make(db, true, window, cx);
+        this.find_outlook(cx);
+        this
     }
 
     /// Settings > Accounts > Add account: the flow from Your email.
     pub fn adding(db: Db, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::make(db, false, window, cx)
+    }
+
+    /// Settings > Accounts > Import from Outlook: the flow from the list.
+    pub fn importing(db: Db, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self::make(db, false, window, cx);
+        this.step = Step::Import;
+        this.find_outlook(cx);
+        this
+    }
+
+    /// Read Outlook's accounts and signatures off the UI thread.
+    fn find_outlook(&mut self, cx: &mut Context<Self>) {
+        let find = services::get(cx).outlook;
+        let work = cx.background_executor().spawn(async move { find() });
+        self._outlook_task = Some(cx.spawn(async move |this, cx| {
+            let found = work.await;
+            // Findings already set (a snapshot's made-up ones) stay.
+            let _ = this.update(cx, |this, cx| {
+                if this.outlook.is_none() {
+                    this.set_outlook(found, cx);
+                }
+            });
+        }));
     }
 
     fn make(db: Db, first_run: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -321,6 +375,15 @@ impl OnboardingView {
             download: Download::None,
             has_mail: false,
             error: None,
+            outlook: None,
+            _outlook_task: None,
+            import_accounts: Vec::new(),
+            import_signatures: Vec::new(),
+            signatures_task: None,
+            queue: VecDeque::new(),
+            importing: None,
+            import_place: (0, 0),
+            imported: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -463,7 +526,7 @@ impl OnboardingView {
     /// Focus the step's first field.
     pub fn focus_first(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.step {
-            Step::Welcome | Step::Done => window.focus(&self.focus, cx),
+            Step::Welcome | Step::Import | Step::Done => window.focus(&self.focus, cx),
             Step::Email => self.email.update(cx, |s, cx| s.focus(window, cx)),
             Step::SignIn => {
                 if self.manual {
@@ -539,15 +602,23 @@ impl OnboardingView {
                 self.manual = false;
                 self.provider = None;
                 self.user_open = false;
-                self.go(Step::Email, window, cx);
+                // From Outlook: back to the list, the walk ended.
+                let to = if self.importing.take().is_some() {
+                    self.queue.clear();
+                    self.mark_existing();
+                    Step::Import
+                } else {
+                    Step::Email
+                };
+                self.go(to, window, cx);
                 true
             }
-            Step::Email if self.first_run => {
+            Step::Email | Step::Import if self.first_run => {
                 self.go(Step::Welcome, window, cx);
                 true
             }
             Step::Yours | Step::Done => true,
-            Step::Email | Step::Welcome => {
+            Step::Email | Step::Import | Step::Welcome => {
                 cx.emit(OnboardingEvent::Closed);
                 false
             }
@@ -965,9 +1036,19 @@ impl OnboardingView {
                 self.has_mail = false;
                 self.step = Step::Yours;
                 self.scroll.set_offset(point(px(0.), px(0.)));
+                // From Outlook: its sender name, and its default signatures
+                // when they were imported.
+                let outlook_name = self.importing.as_ref().map(|a| {
+                    import::apply_defaults(&self.db, id, a, &self.imported);
+                    a.display_name.trim().to_string()
+                });
                 // The name box is filled at the next render (it needs the
                 // window).
-                self.start_name = Some(flow::name_from_address(&new.email));
+                self.start_name = Some(
+                    outlook_name
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| flow::name_from_address(&new.email)),
+                );
                 cx.emit(OnboardingEvent::Added(id));
             }
             Err(e) => self.error = Some(text::not_saved(&format!("{e:#}"))),
@@ -1003,6 +1084,11 @@ impl OnboardingView {
                 self.error = Some(text::not_saved(&format!("{e:#}")));
             }
         }
+        // From Outlook: the next ticked account, then You're all set.
+        if self.importing.is_some() && self.error.is_none() {
+            self.next_import(window, cx);
+            return;
+        }
         self.go(Step::Done, window, cx);
     }
 
@@ -1014,6 +1100,8 @@ impl OnboardingView {
     /// Add another account: the flow again from Your email.
     pub fn add_another(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reset();
+        self.importing = None;
+        self.queue.clear();
         self.added = None;
         self.download = Download::None;
         self.has_mail = false;
@@ -1090,6 +1178,225 @@ impl OnboardingView {
             });
         }));
         cx.notify();
+    }
+
+    // ---- Import from Outlook ------------------------------------------
+
+    /// What Outlook has on this PC (`None` while it is read).
+    pub fn outlook(&self) -> Option<&Found> {
+        self.outlook.as_ref()
+    }
+
+    /// The list's account rows.
+    pub fn import_accounts(&self) -> &[import::AccountRow] {
+        &self.import_accounts
+    }
+
+    /// The list's signature rows.
+    pub fn import_signature_rows(&self) -> &[import::SignatureRow] {
+        &self.import_signatures
+    }
+
+    /// The account from Outlook on Sign in: it, its place (from 1) and the
+    /// count.
+    pub fn importing_account(&self) -> Option<(&FoundAccount, usize, usize)> {
+        let (place, total) = self.import_place;
+        self.importing.as_ref().map(|a| (a, place, total))
+    }
+
+    /// Outlook's accounts and signatures (read, or made up for a snapshot
+    /// or a test): the list's rows, addresses already here unticked.
+    pub fn set_outlook(&mut self, found: Found, cx: &mut Context<Self>) {
+        let existing: Vec<String> = self
+            .db
+            .accounts()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| a.email)
+            .collect();
+        let (accounts, signatures) = import::rows(&found, &existing);
+        self.import_accounts = accounts;
+        self.import_signatures = signatures;
+        self.outlook = Some(found);
+        cx.notify();
+    }
+
+    /// Mark the accounts added since the list was made (unticked).
+    fn mark_existing(&mut self) {
+        let existing: Vec<String> = self
+            .db
+            .accounts()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| a.email)
+            .collect();
+        for r in &mut self.import_accounts {
+            if komorebi::import::outlook::already_added(
+                &r.account.email,
+                existing.iter().map(String::as_str),
+            ) {
+                r.exists = true;
+                r.ticked = false;
+            }
+        }
+    }
+
+    /// Import from Outlook (the welcome's button).
+    pub fn open_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.go(Step::Import, window, cx);
+    }
+
+    /// Tick or untick a found account (one already here stays unticked).
+    pub fn tick_account(&mut self, ix: usize, on: bool, cx: &mut Context<Self>) {
+        if let Some(row) = self.import_accounts.get_mut(ix)
+            && !row.exists
+        {
+            row.ticked = on;
+            cx.notify();
+        }
+    }
+
+    /// Tick or untick a found signature.
+    pub fn tick_signature(&mut self, ix: usize, on: bool, cx: &mut Context<Self>) {
+        if let Some(row) = self.import_signatures.get_mut(ix) {
+            row.ticked = on;
+            cx.notify();
+        }
+    }
+
+    /// Whether anything is ticked (Continue is enabled).
+    pub fn import_ticked(&self) -> bool {
+        self.import_accounts.iter().any(|r| r.ticked)
+            || self.import_signatures.iter().any(|r| r.ticked)
+    }
+
+    /// Continue on the list: the ticked signatures are saved, then each
+    /// ticked account goes through Sign in, filled in.
+    pub fn continue_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Signatures still being read: this Continue is already under way.
+        if !self.import_ticked() || self.signatures_task.is_some() {
+            return;
+        }
+        let sigs: Vec<_> = self
+            .import_signatures
+            .iter()
+            .filter(|r| r.ticked)
+            .map(|r| r.signature.clone())
+            .collect();
+        self.queue = self
+            .import_accounts
+            .iter()
+            .filter(|r| r.ticked)
+            .map(|r| r.account.clone())
+            .collect();
+        self.import_place = (0, self.queue.len());
+        if sigs.is_empty() {
+            self.next_import(window, cx);
+            return;
+        }
+        // Saved once: a second Continue does not save them again.
+        for r in &mut self.import_signatures {
+            r.ticked = false;
+        }
+        // Their picture files are read and decoded off the UI thread; then
+        // they are saved, and the accounts' sign-ins start (an account's
+        // defaults need them).
+        let read = cx
+            .background_executor()
+            .spawn(async move { import::read_signatures(sigs) });
+        let handle = window.window_handle();
+        self.signatures_task = Some(cx.spawn(async move |this, cx| {
+            let read = read.await;
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.signatures_task = None;
+                    let saved = import::save_signatures(&this.db, read);
+                    this.imported.extend(saved);
+                    this.next_import(window, cx);
+                });
+            });
+        }));
+        cx.notify();
+    }
+
+    /// The next ticked account, or the end: You're all set when one was
+    /// added, else Your email (first run) or out (Settings).
+    fn next_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(next) = self.queue.pop_front() else {
+            self.importing = None;
+            if self.added.is_some() {
+                self.go(Step::Done, window, cx);
+            } else if self.first_run {
+                self.reset();
+                self.go(Step::Email, window, cx);
+            } else {
+                cx.emit(OnboardingEvent::Closed);
+            }
+            return;
+        };
+        self.import_place.0 += 1;
+        self.start_import_account(&next, window, cx);
+        self.importing = Some(next);
+    }
+
+    /// Sign in for an account from Outlook: its address, its provider or
+    /// its servers, its sign-in name.
+    fn start_import_account(
+        &mut self,
+        a: &FoundAccount,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // `added` stays: the last account added is the one You're all set
+        // names when the rest are skipped.
+        self.reset();
+        self.error = None;
+        self.email_problem = None;
+        self.manual = false;
+        self.provider = None;
+        self.user_open = false;
+        for s in [&self.password, &self.user, &self.name, &self.signature] {
+            s.update(cx, |s, cx| s.set_value("", window, cx));
+        }
+        let email = a.email.clone();
+        self.email
+            .update(cx, |s, cx| s.set_value(email.clone(), window, cx));
+        self.servers
+            .update(cx, |s, cx| s.set(&Fields::default(), window, cx));
+        self.domain = discover::parse_email(&email).map_or_else(String::new, |(_, d)| d);
+        self.picker.update(cx, |p, cx| p.reset(window, cx));
+        match import::prefill(a) {
+            import::Prefill::Preset(i) => {
+                self.take_preset(i, false, window, cx);
+                if let Some(user) = import::preset_user(a) {
+                    self.user.update(cx, |s, cx| s.set_value(user, window, cx));
+                    self.user_open = true;
+                }
+            }
+            import::Prefill::Manual(fields) => {
+                self.servers.update(cx, |s, cx| s.set(&fields, window, cx));
+                self.manual = true;
+            }
+            import::Prefill::Lookup => {
+                if services::get(cx).offline {
+                    self.offline = true;
+                    self.choosing = true;
+                } else {
+                    self.chip = Chip::Finding;
+                    self.find_settings(email, window, cx);
+                }
+            }
+        }
+        self.go(Step::SignIn, window, cx);
+    }
+
+    /// Skip this account (Sign in for an account from Outlook).
+    pub fn skip_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.importing.is_none() {
+            return;
+        }
+        self.check.cancel();
+        self.next_import(window, cx);
     }
 
     fn pick_language(&mut self, setting: LangSetting, cx: &mut Context<Self>) {
@@ -1207,13 +1514,36 @@ impl OnboardingView {
                     )
                     .child(self.render_values(cx))
                     .child(
-                        div().mt(px(geo::CTA_GAP)).flex().child(
-                            Button::new("welcome-start")
-                                .label(tr!("Add your email account"))
-                                .variant(Variant::Primary)
-                                .height(Height::Large)
-                                .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
-                        ),
+                        div()
+                            .mt(px(geo::CTA_GAP))
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(space::SP_2))
+                            .child(
+                                Button::new("welcome-start")
+                                    .label(tr!("Add your email account"))
+                                    .variant(Variant::Primary)
+                                    .height(Height::Large)
+                                    .on_click(
+                                        cx.listener(|this, _, window, cx| this.start(window, cx)),
+                                    ),
+                            )
+                            // Only when Outlook has something to offer.
+                            .when(self.outlook.as_ref().is_some_and(|f| !f.is_empty()), |el| {
+                                el.child(
+                                    Button::new("welcome-import")
+                                        .label(tr!("Import from Outlook"))
+                                        // The new Outlook keeps nothing on
+                                        // this PC: only the classic one.
+                                        .tooltip(tr!(
+                                            "Your accounts and signatures from classic Outlook on this PC."
+                                        ))
+                                        .height(Height::Large)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_import(window, cx)
+                                        })),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -1330,7 +1660,7 @@ impl OnboardingView {
         let t = cx.tokens().clone();
         let c = t.color;
         let current = match self.step {
-            Step::Welcome | Step::Email => 0,
+            Step::Welcome | Step::Import | Step::Email => 0,
             Step::SignIn => 1,
             _ => 2,
         };
@@ -1374,6 +1704,241 @@ impl OnboardingView {
                     .test_support()
             }))
             .test_support()
+    }
+
+    /// A line of the import list: its checkbox, then what it is, under the
+    /// label (`ob-import-<kind>-<ix>`).
+    fn import_row(
+        id: SharedString,
+        label: String,
+        lines: Vec<String>,
+        checked: bool,
+        disabled: bool,
+        on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
+        cx: &App,
+    ) -> gpui::AnyElement {
+        let t = cx.tokens().clone();
+        let c = t.color;
+        let name = if lines.is_empty() {
+            label.clone()
+        } else {
+            format!("{label}. {}", lines.join(" "))
+        };
+        div()
+            .id(id.clone())
+            .role(Role::ListItem)
+            .aria_label(name)
+            .py(px(space::SP_2))
+            .flex()
+            .flex_col()
+            .gap(px(space::SP_0_5))
+            .child(
+                Checkbox::new(SharedString::from(format!("{id}-check")), label, checked)
+                    .disabled(disabled)
+                    .on_change(on_change),
+            )
+            .children(lines.into_iter().map(move |line| {
+                div()
+                    .pl(px(layout::CHECK + space::SP_3))
+                    .typo(&t.text.caption)
+                    .text_color(c.ink_2)
+                    .child(line)
+            }))
+            .test_support()
+            .into_any_element()
+    }
+
+    fn render_import(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = cx.tokens().clone();
+        let c = t.color;
+        let weak = cx.entity().downgrade();
+        let heading = |id: &'static str, label: String| {
+            div()
+                .id(id)
+                .role(Role::Heading)
+                .aria_level(2)
+                .pt(px(space::SP_2))
+                .typo(&t.text.body_strong)
+                .text_color(c.ink)
+                .child(label)
+        };
+        let mut col = div().flex().flex_col().gap(px(geo::FIELD_GAP)).child(
+            div()
+                .id("onboarding-import-title")
+                .role(Role::Heading)
+                .aria_level(1)
+                .typo(&t.text.title)
+                .text_color(c.ink)
+                .child(tr!("Import from Outlook")),
+        );
+        let found = self.outlook.as_ref();
+        match found {
+            None => {
+                col = col.child(
+                    div()
+                        .id("onboarding-import-finding")
+                        .role(Role::Status)
+                        .typo(&t.text.body)
+                        .text_color(c.ink_2)
+                        .child(tr!("Looking for Outlook on this PC\u{a0}…")),
+                );
+            }
+            Some(f) if f.is_empty() => {
+                let line = if f.new_outlook_only {
+                    tr!(
+                        "The new Outlook keeps your accounts and signatures online, so there's nothing on this PC to import. Add your account by its address instead."
+                    )
+                } else {
+                    tr!("No Outlook accounts or signatures were found on this PC.")
+                };
+                col = col.child(Notice::new(
+                    "onboarding-import-none",
+                    notice::Kind::Info,
+                    line,
+                ));
+            }
+            Some(_) => {
+                col = col.child(
+                    div()
+                        .typo(&t.text.body)
+                        .text_color(c.ink_2)
+                        .child(tr!("Komorebi found these in Outlook on this PC. Your passwords and mail aren't copied: you type each password once, and your mail downloads again from the server.")),
+                );
+            }
+        }
+        if !self.import_accounts.is_empty() {
+            let rows = self.import_accounts.iter().enumerate().map(|(ix, r)| {
+                let a = &r.account;
+                let mut lines = Vec::new();
+                if !a.display_name.is_empty() {
+                    lines.push(a.display_name.clone());
+                }
+                if r.exists {
+                    lines.push(tr!("Already in Komorebi."));
+                } else if import::unsupported(a) {
+                    let name = match import::prefill(a) {
+                        import::Prefill::Preset(i) => PRESETS.get(i).map_or("", |p| p.name),
+                        _ => "",
+                    };
+                    lines.push(text::find_unsupported(name));
+                } else if a.kind == FoundKind::Pop {
+                    lines.push(tr!(
+                        "A POP account in Outlook. Komorebi sets it up with IMAP."
+                    ));
+                } else if let Some(s) = &a.incoming {
+                    lines.push(crate::text::host(&s.host));
+                }
+                let weak = weak.clone();
+                Self::import_row(
+                    SharedString::from(format!("ob-import-account-{ix}")),
+                    a.email.clone(),
+                    lines,
+                    r.ticked,
+                    r.exists,
+                    move |on, _, cx| {
+                        let _ = weak.update(cx, |v, cx| v.tick_account(ix, on, cx));
+                    },
+                    cx,
+                )
+                .into_any_element()
+            });
+            col = col
+                .child(heading("onboarding-import-accounts", tr!("Accounts")))
+                .child(
+                    div()
+                        .id("onboarding-import-account-list")
+                        .role(Role::List)
+                        .aria_label(tr!("Accounts in Outlook"))
+                        .flex()
+                        .flex_col()
+                        .children(rows.collect::<Vec<_>>())
+                        .test_support(),
+                );
+        }
+        if !self.import_signatures.is_empty() {
+            let rows = self.import_signatures.iter().enumerate().map(|(ix, r)| {
+                let s = &r.signature;
+                let mut lines = Vec::new();
+                let first = komorebi::mail::html::html_to_text(&s.html)
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or("")
+                    .to_string();
+                if !first.is_empty() {
+                    lines.push(first);
+                }
+                // Its pictures on this PC come with it; one on the web is
+                // never fetched.
+                let web = komorebi::import::outlook::web_pictures(&s.html);
+                if web > 0 {
+                    lines.push(komorebi_i18n::trn!(
+                        "{n} picture from the web isn't imported.",
+                        "{n} pictures from the web aren't imported.",
+                        web
+                    ));
+                }
+                let weak = weak.clone();
+                Self::import_row(
+                    SharedString::from(format!("ob-import-signature-{ix}")),
+                    s.name.clone(),
+                    lines,
+                    r.ticked,
+                    false,
+                    move |on, _, cx| {
+                        let _ = weak.update(cx, |v, cx| v.tick_signature(ix, on, cx));
+                    },
+                    cx,
+                )
+                .into_any_element()
+            });
+            col = col
+                .child(heading("onboarding-import-signatures", tr!("Signatures")))
+                .child(
+                    div()
+                        .id("onboarding-import-signature-list")
+                        .role(Role::List)
+                        .aria_label(tr!("Signatures in Outlook"))
+                        .flex()
+                        .flex_col()
+                        .children(rows.collect::<Vec<_>>())
+                        .test_support(),
+                );
+        }
+        let empty = found.is_some_and(Found::is_empty);
+        col.children(
+            self.error
+                .clone()
+                .map(|e| Notice::new("onboarding-import-error", notice::Kind::Error, e)),
+        )
+        .child(
+            div()
+                .pt(px(space::SP_6))
+                .flex()
+                .justify_between()
+                .gap(px(space::SP_2))
+                .child(
+                    Button::new("onboarding-import-back")
+                        .label(tr!("Back"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.back(window, cx);
+                        })),
+                )
+                .child(if empty {
+                    Button::new("onboarding-import-add")
+                        .label(tr!("Add your email account"))
+                        .variant(Variant::Primary)
+                        .on_click(cx.listener(|this, _, window, cx| this.start(window, cx)))
+                } else {
+                    Button::new("onboarding-import-continue")
+                        .label(tr!("Continue"))
+                        .variant(Variant::Primary)
+                        .disabled(!self.import_ticked())
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.continue_import(window, cx)),
+                        )
+                }),
+        )
     }
 
     fn render_email(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -1791,6 +2356,31 @@ impl OnboardingView {
                 .truncate()
                 .child(title),
         );
+        // An account from Outlook: where it is in the walk, and what Outlook
+        // had that Komorebi does differently.
+        let from_outlook = self.importing_account().map(|(a, place, total)| {
+            let mut line = tr!("Account {0} of {1} from Outlook.", place, total);
+            if a.kind == FoundKind::Pop {
+                line.push(' ');
+                line.push_str(&tr!(
+                    "Outlook used POP for this account. Komorebi uses IMAP, so check the settings."
+                ));
+            } else if self.manual {
+                line.push(' ');
+                line.push_str(&tr!(
+                    "The server settings are Outlook's. Type your password to sign in."
+                ));
+            }
+            line
+        });
+        let unsupported = from_outlook.is_some() && matches!(self.chip, Chip::Unsupported(_));
+        if let Some(line) = from_outlook.clone() {
+            col = col.child(Notice::new(
+                "onboarding-from-outlook",
+                notice::Kind::Info,
+                line,
+            ));
+        }
         if self.manual {
             col = col.child(
                 div()
@@ -1860,13 +2450,17 @@ impl OnboardingView {
                 cx,
             ));
         }
-        col = col.child(labelled(
-            tr!("Password"),
-            TextField::new(&self.password, tr!("Password")),
-            Some(password_note.into()),
-            cx,
-        ));
-        if !self.manual && self.user_open {
+        // A provider Komorebi cannot sign in to yet: its explanation above,
+        // no password to type.
+        if !unsupported {
+            col = col.child(labelled(
+                tr!("Password"),
+                TextField::new(&self.password, tr!("Password")),
+                Some(password_note.into()),
+                cx,
+            ));
+        }
+        if !self.manual && self.user_open && !unsupported {
             col = col.child(labelled(
                 tr!("Username"),
                 TextField::new(&self.user, tr!("Username")),
@@ -1890,11 +2484,34 @@ impl OnboardingView {
                             })),
                     )
                     .child(
-                        Button::new("onboarding-sign-in")
-                            .label(tr!("Sign in"))
-                            .variant(Variant::Primary)
-                            .disabled(busy || self.pending)
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                        div()
+                            .flex()
+                            .gap(px(space::SP_2))
+                            .when(from_outlook.is_some(), |el| {
+                                el.child(
+                                    Button::new("onboarding-skip-account")
+                                        .label(tr!("Skip this account"))
+                                        .variant(if unsupported {
+                                            Variant::Primary
+                                        } else {
+                                            Variant::Secondary
+                                        })
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.skip_import(window, cx)
+                                        })),
+                                )
+                            })
+                            .when(!unsupported, |el| {
+                                el.child(
+                                    Button::new("onboarding-sign-in")
+                                        .label(tr!("Sign in"))
+                                        .variant(Variant::Primary)
+                                        .disabled(busy || self.pending)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.submit(window, cx)
+                                        })),
+                                )
+                            }),
                     ),
             )
     }
@@ -2134,12 +2751,14 @@ impl Render for OnboardingView {
             return root.child(self.render_welcome(compact, cx)).test_support();
         }
         let page = match self.step {
+            Step::Import => self.render_import(cx).into_any_element(),
             Step::Email => self.render_email(cx).into_any_element(),
             Step::SignIn => self.render_sign_in(cx).into_any_element(),
             Step::Yours => self.render_yours(cx).into_any_element(),
             _ => self.render_done(cx).into_any_element(),
         };
-        let indicator = (self.step != Step::Done).then(|| self.render_steps_indicator(cx));
+        let indicator = (!matches!(self.step, Step::Done | Step::Import))
+            .then(|| self.render_steps_indicator(cx));
         root.child(
             ScrollArea::new("onboarding-scroll", &self.scroll).child(
                 div().w_full().flex().justify_center().child(

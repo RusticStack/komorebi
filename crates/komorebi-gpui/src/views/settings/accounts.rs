@@ -301,6 +301,18 @@ impl SettingsView {
                     })
                     .on_click(cx.listener(|this, _, window, cx| this.add_account(window, cx))),
             );
+        let import = Card::new("settings-import-outlook", tr!("Import from Outlook"))
+            .icon_as_spot(Icon::MoveTo)
+            .note(tr!(
+                "Your accounts and signatures from classic Outlook on this PC. Your mail downloads again from the server."
+            ))
+            .control(
+                Button::new("settings-import-outlook-button")
+                    .label(tr!("Import"))
+                    .name(tr!("Import from Outlook"))
+                    .variant(Variant::OnInset)
+                    .on_click(cx.listener(|this, _, window, cx| this.import_outlook(window, cx))),
+            );
         div()
             .flex()
             .flex_col()
@@ -316,6 +328,7 @@ impl SettingsView {
                 el.child(div().mt(px(space::SP_6)).children(cards))
             })
             .child(div().mt(px(space::SP_4)).child(add))
+            .child(div().mt(px(space::SP_2)).child(import))
     }
 
     /// The fix on an account's line: its page, with the password field

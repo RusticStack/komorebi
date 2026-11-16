@@ -21,14 +21,14 @@
 
 pub mod edit;
 pub mod emit;
+pub mod images;
 pub mod import;
-pub mod logo;
 pub mod model;
 pub mod ops;
 pub mod view;
 
 pub use emit::{Mode, html, needs_html, plain};
-pub use logo::{Logo, LogoError, MAX_LOGO_BYTES};
+pub use images::{ImageFile, Images};
 pub use model::*;
 
 /// The two parts of a message made from `doc`: the text/plain body and,
@@ -38,6 +38,34 @@ pub fn parts(doc: &Doc) -> (String, Option<String>) {
     let text = plain(doc);
     let html = needs_html(doc).then(|| html(doc, Mode::Send));
     (text, html)
+}
+
+/// What `doc` sends with its pictures `images`: the text/plain body (a
+/// picture is its alt text there), the text/html alternative when the
+/// document needs one, and the pictures that HTML shows, each once, in
+/// order (pictures it does not show are not sent). A picture whose bytes
+/// are missing is left out of both parts rather than shown broken.
+pub fn send_parts(
+    doc: &Doc,
+    images: &Images,
+) -> (String, Option<String>, Vec<crate::mail::smtp::InlineImage>) {
+    let mut doc = doc.clone();
+    doc.drop_images(&|cid| !images.contains(cid));
+    let (text, html) = parts(&doc);
+    let shown = if html.is_some() {
+        images
+            .subset(&doc.image_cids())
+            .into_iter()
+            .map(|(cid, f)| crate::mail::smtp::InlineImage {
+                cid,
+                mime: f.mime.to_string(),
+                data: f.data.to_vec(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    (text, html, shown)
 }
 
 /// A document read back from stored HTML: strictly when it carries

@@ -571,7 +571,9 @@ dead code.
 - **The focus ring is two crisp spread shadows** (paper 2 px, then ink to 4 px, no blur) set
   through GPUI's `focus_visible` style, rather than the critic's border wrapper: a wrapper
   cannot know that its child has keyboard focus, and `focus_visible` draws only for keyboard
-  focus. A zero-blur shadow takes GPUI's solid quad path, one quad each. Kit's own translucent
+  focus. GPUI draws the last shadow on top, so `focus_ring` lists the ink first and the paper
+  gap second; a zero-blur shadow paints outside its element only (KOMOREBI PATCH
+  hollow-crisp-shadow in gpui-pre), so a field with no fill keeps its text. Kit's own translucent
   ring is off (`Theme::focus_ring = false`).
 - **Menus have the 1 px `line` edge.** A paper menu over a paper pane disappears without an
   edge or a shadow, and the brand allows no shadow; BRAND.md's one edge colour is used. Owner

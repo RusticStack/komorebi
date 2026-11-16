@@ -76,6 +76,18 @@ pub fn rows() -> Vec<Row> {
             action: tr!("shortcut" => "Show / hide the folders"),
         },
         Row::Key {
+            keys: tr!("shortcut key" => "Ctrl+Shift+N"),
+            action: tr!("shortcut" => "New folder"),
+        },
+        Row::Key {
+            keys: tr!("shortcut key" => "F2"),
+            action: tr!("shortcut" => "Rename the folder"),
+        },
+        Row::Key {
+            keys: tr!("shortcut key" => "Delete (in the folders)"),
+            action: tr!("shortcut" => "Delete the folder, after asking"),
+        },
+        Row::Key {
             keys: tr!("shortcut key" => "Double-click, Shift+Enter"),
             action: tr!("shortcut" => "Open in new tab"),
         },

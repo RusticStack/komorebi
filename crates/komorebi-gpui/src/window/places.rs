@@ -171,7 +171,7 @@ impl MainWindow {
     ) {
         let section = match action {
             "settings-accounts" => Some(Section::Accounts),
-            "settings-signatures" => Some(Section::Signatures),
+            "settings-signatures" | "signature-pictures" => Some(Section::Signatures),
             "settings-rules" | "rule-edit" => Some(Section::Rules),
             "settings-general" => Some(Section::General),
             "settings-privacy" => Some(Section::Privacy),
@@ -191,6 +191,13 @@ impl MainWindow {
                 let rules = rules.clone();
                 let edit = action == "rule-edit";
                 rules.update(cx, |r, cx| r.sample(edit, window, cx));
+            }
+            // A pasted multi-picture signature in its page.
+            if action == "signature-pictures"
+                && let Some(settings) = self.settings()
+            {
+                let page = settings.read(cx).signatures().clone();
+                page.update(cx, |p, cx| p.sample(window, cx));
             }
             return;
         }
@@ -220,6 +227,40 @@ impl MainWindow {
             "compose" => {
                 self.show_mail_tab(window, cx);
                 self.with_mail(window, cx, crate::views::mail::MailView::new_mail);
+            }
+            // A new message holding a two-step how-to with two pictures
+            // (made up), the first selected for `compose-picture-selected`.
+            "compose-pictures" | "compose-picture-selected" => {
+                self.show_mail_tab(window, cx);
+                self.with_mail(window, cx, crate::views::mail::MailView::new_mail);
+                let select = action == "compose-picture-selected";
+                if let Some(mail) = &self.mail {
+                    let body = mail.read(cx).composer().read(cx).body.clone();
+                    body.update(cx, |b, cx| {
+                        let Some(mut ed) = b.take() else {
+                            return;
+                        };
+                        let first = komorebi::compose::sample::how_to(&mut ed);
+                        b.put(Some(ed));
+                        b.changed_outside(cx);
+                        if let Some(at) = first.filter(|_| select) {
+                            let end = at + komorebi::mail::rich::edit::OBJ.len_utf8();
+                            b.set_selection(at, end, cx);
+                        }
+                    });
+                }
+            }
+            // Import from Outlook with made-up findings, never this PC's.
+            "ob-import" => {
+                if self.onboarding().is_none() {
+                    self.show_place(Place::Onboarding, window, cx);
+                }
+                if let Some(flow) = self.onboarding() {
+                    flow.update(cx, |v, cx| {
+                        v.set_outlook(crate::views::onboarding::import::sample(), cx);
+                        v.open_import(window, cx);
+                    });
+                }
             }
             "ob-welcome" | "ob-email" | "ob-sign-in" | "ob-manual" | "ob-providers" => {
                 if self.onboarding().is_none() {

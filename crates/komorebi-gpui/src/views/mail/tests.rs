@@ -961,6 +961,9 @@ fn the_folder_pane_menu_and_rail_act_on_their_row(cx: &mut TestAppContext) {
         [
             ("Mark all as read".to_string(), true),
             ("Collapse all".to_string(), true),
+            ("New subfolder".to_string(), true),
+            ("Rename".to_string(), true),
+            ("Delete folder".to_string(), true),
             ("Hide folders".to_string(), true),
         ]
     );
@@ -987,6 +990,7 @@ fn the_folder_pane_menu_and_rail_act_on_their_row(cx: &mut TestAppContext) {
         [
             ("Mark all as read".to_string(), true),
             ("Collapse all folders".to_string(), true),
+            ("New folder".to_string(), true),
             ("Refresh".to_string(), true),
             ("Account settings".to_string(), true),
             ("Hide folders".to_string(), true),
@@ -2491,7 +2495,7 @@ fn sends_cut_short_by_the_last_exit_go_out_at_start(cx: &mut TestAppContext) {
     assert!(db.outbox_send(unbuilt).unwrap());
     let lost = draft("lost");
     let file = db
-        .add_draft_file(lost, "a.txt", "text/plain", b"a")
+        .add_draft_file(lost, "a.txt", "text/plain", b"a", None)
         .unwrap();
     assert!(db.outbox_send(lost).unwrap());
     std::fs::remove_file(
@@ -2670,4 +2674,104 @@ fn the_cached_panes_follow_the_language(cx: &mut TestAppContext) {
     let names = drawn_names(cx, window);
     assert!(names.contains(&"Novo correio".to_owned()), "{names:?}");
     assert!(!names.contains(&"New mail".to_owned()));
+}
+
+/// The calm panel (nothing selected): Today while the view has unread mail
+/// (its count, the newest four; a click opens one), the usual split once a
+/// message is open, Rest once nothing is unread; the drafts section only
+/// with a saved draft, and a click on one opens it in the composer.
+#[gpui_kit::test]
+fn nothing_selected_shows_today_or_rest(cx: &mut TestAppContext) {
+    let (f, db) = fixture("calm", &[]);
+    let check = f.cache.open();
+    let ids = f.ids.clone();
+    let (window, view) = open(cx, db);
+    let calm = |cx: &mut TestAppContext| view.read_with(cx, |v, _| v.calm_now);
+    let named = |cx: &mut TestAppContext, text: &str| {
+        in_window(cx, window, |w, _| {
+            test_support::names(w).iter().any(|(_, n)| n.contains(text))
+        })
+    };
+    let item = |prefix: &str, id: i64| gpui::ElementId::Name(format!("{prefix}-{id}").into());
+
+    // Today: six unread, the newest four named, no drafts section.
+    assert!(calm(cx));
+    in_window(cx, window, |w, _| {
+        assert_named(w, "Summary", Role::Pane);
+        assert_named(w, "6 unread messages", Role::Heading);
+        assert_named(w, "Newest unread", Role::List);
+        assert_named(w, "Show all unread", Role::Button);
+    });
+    let picks = view.read_with(cx, |v, _| {
+        v.calm
+            .as_ref()
+            .map(|(_, s)| s.picks.iter().map(|r| r.id).collect::<Vec<_>>())
+    });
+    assert_eq!(picks.as_deref(), Some(&ids[..4]), "the newest four");
+    for &id in &ids[..4] {
+        in_window(cx, window, |w, _| {
+            let row = w.find(item("calm-unread", id));
+            assert_eq!(row.role(), Some(Role::ListItem));
+        });
+    }
+    assert!(!named(cx, "drafts waiting"), "no drafts: no section");
+
+    // A click opens that message: the usual split.
+    in_window(cx, window, |w, cx| w.click(item("calm-unread", ids[1]), cx));
+    assert_eq!(open_id(cx, &view), Some(ids[1]));
+    assert!(!calm(cx));
+    assert!(!named(cx, "Summary"));
+
+    // Esc: nothing selected again, Today with one fewer unread.
+    focus_list(cx, window, &view);
+    keys(cx, window, &["escape"]);
+    assert_eq!(open_id(cx, &view), None);
+    assert!(calm(cx));
+    in_window(cx, window, |w, _| {
+        assert_named(w, "5 unread messages", Role::Heading);
+    });
+
+    // A saved draft: the section, and a click opens it in the composer.
+    let draft = check
+        .insert_draft(&komorebi::db::DraftRow {
+            account_id: f.account,
+            to: "ana@example.org".into(),
+            subject: "Dinner".into(),
+            body: "Hi".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    act(cx, window, &view, Mail::load_folders);
+    in_window(cx, window, |w, _| {
+        assert_named(w, "1 draft waiting", Role::Heading);
+        assert_named(w, "Drafts on this PC", Role::List);
+    });
+    in_window(cx, window, |w, cx| w.click(item("calm-draft", draft), cx));
+    assert!(view.read_with(cx, |v, cx| v.composer().read(cx).is_open()));
+    assert!(!calm(cx), "the composer takes the reading pane");
+    keys(cx, window, &["escape"]);
+
+    // Nothing unread: Rest, and its one line.
+    act(cx, window, &view, |m| {
+        m.select_all();
+        m.mark(Flag::Seen, true);
+        m.clear_selection();
+    });
+    if view.read_with(cx, |v, cx| v.composer().read(cx).is_open()) {
+        in_window(cx, window, |w, cx| {
+            view.update(cx, |v, cx| {
+                v.composer().update(cx, |c, cx| c.open(None, w, cx))
+            })
+        });
+    }
+    assert_eq!(read(cx, &view, Mail::view_unread), 0);
+    assert!(calm(cx));
+    // The inbox's line, the brand's.
+    assert_eq!(
+        read(cx, &view, Mail::rest_line),
+        super::calm::RestLine::Inbox
+    );
+    let line = read(cx, &view, |m| super::calm::rest_words(m.rest_line(), m));
+    in_window(cx, window, |w, _| assert_named(w, &line, Role::Label));
+    assert!(!named(cx, "unread messages"));
 }

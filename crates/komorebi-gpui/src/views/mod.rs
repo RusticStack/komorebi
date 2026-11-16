@@ -9,6 +9,7 @@
 
 use std::rc::Rc;
 
+pub mod account_icon;
 pub mod composer;
 pub mod contacts;
 pub mod mail;

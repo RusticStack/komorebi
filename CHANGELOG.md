@@ -5,6 +5,69 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
+## [1.1.0] - 2026-11-16
+
+Komorebi 1.1.0 puts pictures in your messages and signatures, gives the
+composer a fuller formatting bar, lets you manage folders from the sidebar
+and brings in your accounts and signatures from classic Outlook. Your
+accounts, mail and settings carry over. The cache gains a place for
+signature pictures and account icons; a signature logo from 1.0 moves into
+its signature as a picture under the text, where it was shown before.
+
+### Added
+
+- **Pictures in the message body.** Drop, paste or insert PNG, JPEG, GIF
+  and WebP pictures into a message, and make them bigger or smaller. They
+  travel inside the message itself, so recipients see them without loading
+  anything from the web.
+- **Signatures with pictures and tables.** A signature can hold pictures
+  and a layout table, and one pasted from Outlook or Word keeps its layout,
+  merged cells and colours.
+- **Folders from the sidebar.** Create, rename and delete folders on your
+  server from the folder pane: the + on an account's line, a folder's menu,
+  Ctrl+Shift+N, F2 and Delete. Deleting asks first and says what goes with
+  the folder.
+- **Account icons.** Each account shows an icon beside its name: the icon
+  of your mail domain's website, your provider's icon, or a picture you
+  choose on the account's page. Settings > Privacy > Icons from mail domains
+  turns the website icons off.
+- **Today and Rest.** With no message selected, the reading pane shows
+  Today, your newest unread mail and the drafts waiting, or, with nothing
+  unread, an animated Rest scene that follows your PC's clock from day to
+  night.
+- **Import from classic Outlook.** The welcome and Settings > Accounts offer
+  the accounts and signatures classic Outlook keeps on this PC. You type
+  each password once (Outlook's saved passwords are never read), and your
+  mail downloads again from the server. This has not yet been tested
+  against every Outlook version.
+
+### Changed
+
+- **A fuller formatting bar,** in the order Gmail uses: font, size, bold,
+  italic, underline, text colour, alignment, lists, indent, quote,
+  strikethrough, clear formatting and link. What doesn't fit moves into
+  More. The signature editor uses the same bar.
+- **No attachment size limit.** Komorebi no longer blocks large
+  attachments; only your mail server's own limit applies.
+- **Send waits for attachment copies.** Pressing Send just after adding a
+  file now waits for Komorebi's copy of it to finish, then sends the
+  message with the whole file.
+
+### Fixed
+
+- **Fields stay readable when focused.** Moving the keyboard focus to the
+  address or subject line no longer fills the whole row with the focus
+  colour (light in the dark theme, dark in the light theme), which hid the
+  text; the focus ring is drawn around the field again.
+
+### Known limits
+
+- Google and Microsoft sign-in are not in this version: Outlook.com and
+  Microsoft 365 accounts, including ones imported from Outlook, can't be
+  added yet.
+- Pictures that a pasted or imported signature links from the web are not
+  fetched, so they are left out.
+
 ## [1.0.2] - 2026-11-14
 
 Komorebi 1.0.2 is a polish release: the same features, drawn more carefully.

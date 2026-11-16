@@ -1,5 +1,5 @@
 //! What a snapshot does to the window between its first frame and the
-//! capture (`KOMOREBI_SNAPSHOT_FOCUS`, `_WALK`, `_SCROLL`, `_HOVER`;
+//! capture (`KOMOREBI_SNAPSHOT_FOCUS`, `_TYPE`, `_WALK`, `_SCROLL`, `_HOVER`;
 //! docs/GPUI-TESTING.md "Pixel snapshots"). Everything is input GPUI would
 //! get from the platform: keystrokes and mouse events dispatched to the
 //! window (`Window::dispatch_keystroke`, `dispatch_event`), so a key reaches
@@ -49,6 +49,16 @@ pub async fn run(
             if let Some(list) = &list {
                 window.focus(list, cx);
             }
+            for key in &keys {
+                press(window, key, cx);
+            }
+        });
+        wait(cx, SETTLE).await;
+    }
+    if !drive.typed.is_empty() {
+        // Where the focus is now: the list is not focused first.
+        let keys = drive.typed.clone();
+        step(handle, cx, move |window, cx| {
             for key in &keys {
                 press(window, key, cx);
             }

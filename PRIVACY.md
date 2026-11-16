@@ -14,7 +14,7 @@ when that development switch is set), except the passwords:
 
 | Where | What | Removed |
 |---|---|---|
-| `cache.sqlite3` (with `cache.sqlite3-wal` and `-shm`) | Accounts (no passwords), settings, folders, message headers and previews, downloaded messages, drafts, the Outbox, invitation answers, the address index, the image-sender list | With the file; per account when it is removed |
+| `cache.sqlite3` (with `cache.sqlite3-wal` and `-shm`) | Accounts (no passwords), settings, account icons (fetched or chosen, as small PNGs), folders, message headers and previews, downloaded messages, drafts, the Outbox, invitation answers, the address index, the image-sender list | With the file; per account when it is removed |
 | `cache.sqlite3`, rules tables | Your rules (names, conditions, actions) and the activity of automatic runs: time, rule name, the message's Message-ID, subject and sender, what was done and where to, at most 500 lines per account. Nothing of it leaves this computer; the diagnostics log gets counts only | With the file; per account when it is removed; Clear activity removes the activity |
 | `cache.drafts\<draft number>\` | Copies of a draft's attachments | With the draft |
 | `cache.sqlite3.key` (only for an encrypted cache) | The cache's key, protected by Windows (DPAPI) for your Windows user | With the cache, by Remove all data |
@@ -35,6 +35,22 @@ colour, light or dark apps, contrast theme colours, text size, animation
 effects and whether title bars show the accent (from your user's
 registry, `HKCU`, and Windows' system settings). It only reads them,
 keeps them in memory while it runs, and sends them nowhere.
+
+Import from Outlook (the welcome, Settings > Accounts): to offer
+classic Outlook's accounts and signatures, Komorebi reads Outlook's
+mail profiles in your user's registry (`HKCU\Software\Microsoft\Office`
+and `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Windows Messaging
+Subsystem\Profiles`: each account's address, name, server names, ports,
+security and user names, and its default signatures) and the signature
+files in `%APPDATA%\Microsoft\Signatures` (or its localised name), on
+this computer only. Outlook's saved passwords are never read: the value
+names that hold them are skipped before any data is asked for. It only
+reads, never changes Outlook's keys or files, and sends nothing; the
+first-run welcome reads them when it opens, to know whether to offer the
+import. What it found is kept in memory while the list shows. Only what
+you tick is written to the cache: the signatures when you press
+Continue, each account when you sign in to it. The new Outlook keeps its
+accounts and signatures online, so it has nothing here to read.
 
 Updates: when you press Check for updates in Settings > About, or once a
 day at most when "Check for updates automatically" is on, Komorebi makes
@@ -95,9 +111,15 @@ The cache lives at `%LOCALAPPDATA%\komorebi\cache.sqlite3` and holds:
 - Account settings: email address, display name, IMAP/SMTP host, port and
   security mode, the "save sent mail" choice, and the account's two signature choices
   (which named signature starts new mail, and which starts replies and
-  forwards). The named signatures themselves (text, formatting and an
-  optional small logo image) are stored in the cache too, and so is the
+  forwards). The named signatures themselves (text, formatting and the
+  pictures they hold) are stored in the cache too, and so is the
   formatted form of each draft (`drafts.body_rich`). All of it is plaintext.
+  Pictures put in a draft's text are copied with its attachments (below)
+  and sent with the message as inline parts; a picture's original file,
+  when it was scaled down on the way in, is kept in memory only.
+  Pasting never fetches anything: a pasted picture comes from the
+  clipboard, the HTML itself or a file on this PC, and one on the web is
+  left out.
 - App settings, as named values: the theme, the display language (System,
   English or Portuguese; Windows' display language is only read, never
   stored or sent), the check interval, the
@@ -353,6 +375,23 @@ Komorebi connects only to the servers you configure:
   answered). "Don't send a reply" sends nothing.
 - HTTPS to the image hosts of a message, only after you choose to load its
   remote images (see below).
+- Account icons, on by default (Settings > Privacy > Icons from mail
+  domains): for an account without an image of its own whose address is
+  not at a built-in provider's domain, one HTTPS request for
+  `https://<your mail domain>/` and at most four for the icon files it
+  names or `/favicon.ico`, only on that domain (and its subdomains): when
+  the account is added, then at most once every 30 days, never at each
+  start and never under `KOMOREBI_OFFLINE`. That web server sees your IP
+  address and the domain; no cookies, no Referer and no account details
+  are sent, with a generic User-Agent, 8-second limits, three redirects at
+  most and 256 KB per response. Only raster images are kept (SVG is
+  refused); the icon is decoded on this computer and kept in
+  `cache.sqlite3`. Turning the switch off makes no more requests and
+  removes the icons fetched. An image you choose for an account stays on
+  this computer.
+- Folder changes you make (New folder, Rename, Delete), as IMAP commands on
+  the same connection to your own server; out of reach, a change is tried
+  once more when a connection next works, as other actions are.
 
 Plaintext connections are refused. Komorebi makes no other network
 requests: no analytics and no remote fonts. The only other contact with

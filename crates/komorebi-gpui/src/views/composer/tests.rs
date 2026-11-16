@@ -637,7 +637,7 @@ mod port {
             let paths = ExternalPaths([f.path.clone()].into_iter().collect());
             window.dispatch_event(
                 FileDropEvent::Entered {
-                    position: point(px(400.), px(400.)),
+                    position: point(px(400.), px(20.)),
                     paths,
                 }
                 .to_platform_input(),
@@ -649,6 +649,21 @@ mod port {
         in_window(cx, f.window, |window, _| {
             assert_named(window, "Drop to attach", Role::Status);
         });
+        // Over the formatted text: pictures go in there, so the text is the
+        // target (its own frame) and "Drop to attach" steps aside.
+        in_window(cx, f.window, |window, cx| {
+            window.dispatch_event(
+                FileDropEvent::Pending {
+                    position: point(px(400.), px(400.)),
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        let on_text = f.view.read_with(cx, |v, cx| v.body.read(cx).drop_over());
+        assert!(on_text, "the text is the drop target");
+        assert!(!shown(cx), "two targets, told apart");
         in_window(cx, f.window, |window, cx| {
             window.dispatch_event(FileDropEvent::Exited.to_platform_input(), cx);
         });
@@ -911,7 +926,8 @@ mod port {
         });
         in_window(cx, f.window, |window, _| {
             assert_named(window, "notes.txt, 3 KB", Role::Group);
-            assert_named(window, "Attachments 4 KB of 25 MB", Role::Status);
+            // The files' total as they are (no "of 25 MB": no limit).
+            assert_named(window, "Attachments: 3 KB", Role::Status);
             assert_named(window, "Remove notes.txt", Role::Button);
         });
         let row = f
@@ -923,6 +939,51 @@ mod port {
         });
         cx.run_until_parked();
         assert!(f.db().draft_files(row).unwrap().is_empty());
+    }
+
+    /// Send pressed while a file just added is still being copied (off the
+    /// UI thread) waits for the copy, then goes, the copy whole.
+    #[gpui_kit::test]
+    fn a_send_waits_for_the_copies_still_being_written(cx: &mut TestAppContext) {
+        let f = open(cx, "attach-send", false);
+        f.act(cx, |v, _, _| v.set_undo_delay(Duration::from_secs(10)));
+        f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
+        f.typed(cx, "ana@example.org");
+        f.act(cx, |v, w, cx| v.focus_field(Field::Subject, w, cx));
+        f.typed(cx, "The file");
+        let id = f.view.read_with(cx, |v, _| v.drafts.active_id().unwrap());
+        let file = komorebi::compose::Attached::from(komorebi::mail::smtp::OutAttachment {
+            filename: "notes.txt".into(),
+            data: vec![7; 300_000],
+        });
+        // Added and sent at once, the executor not run between.
+        let view = f.view.clone();
+        in_window(cx, f.window, move |window, cx| {
+            view.update(cx, |v, cx| {
+                v.add_attachments(id, vec![file], Vec::new(), cx);
+                let row = v.drafts.active().and_then(|d| d.row).expect("saved");
+                assert!(v.writing(row), "its copy is being written");
+                v.send(false, window, cx);
+                assert!(v.composing(), "Send waits for the copy");
+            })
+        });
+        assert!(!f.saw(|e| matches!(e, ComposerEvent::Sending { .. })));
+        cx.run_until_parked();
+        let row = f
+            .events
+            .borrow()
+            .iter()
+            .find_map(|e| match e {
+                ComposerEvent::Sending { row, .. } => Some(*row),
+                _ => None,
+            })
+            .expect("sent once the copy was written");
+        assert!(!f.view.read_with(cx, |v, _| v.composing()));
+        let db = f.db();
+        let files = db.draft_files(row).unwrap();
+        assert_eq!(files.len(), 1);
+        let path = db.draft_file_path(row, &files[0]).unwrap();
+        assert_eq!(std::fs::metadata(path).unwrap().len(), 300_000);
     }
 
     /// Ports of `formatted_mail_goes_out_as_text_and_html_with_the_logo` and
@@ -1024,7 +1085,7 @@ mod port {
         let db = f.db();
         let doc =
             komorebi::compose::rich::doc_from_text("Seed\nACME", ComposeDefaults::default().doc());
-        let sig = db.add_signature("Work", &doc, None).unwrap();
+        let sig = db.add_signature("Work", &doc, &Default::default()).unwrap();
         db.set_account_signatures(f.account, Some(sig), Some(sig))
             .unwrap();
         f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
@@ -1174,19 +1235,27 @@ mod port {
         assert!(raw.contains("usual place"), "{raw}");
     }
 
-    /// The More menu's font, size and colour reach the selection (the
-    /// Slint toolbar's boxes).
+    /// The bar's font, size, colour and alignment boxes reach the
+    /// selection, and show what is there (the Slint toolbar's boxes).
     #[gpui_kit::test]
-    fn the_more_menu_sets_font_size_and_colour(cx: &mut TestAppContext) {
-        let f = open(cx, "more-menu", true);
+    fn the_bar_boxes_set_and_show_font_size_colour_and_alignment(cx: &mut TestAppContext) {
+        let f = open(cx, "bar-boxes", true);
         f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
         f.act(cx, |v, w, cx| v.focus_body(w, cx));
         f.typed(cx, "Colours");
         f.keys(cx, &["ctrl-a"]);
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Formatting", Role::Toolbar);
+            assert_named(window, "Font: Segoe UI", Role::Button);
+            assert_named(window, "Font size: 11", Role::Button);
+            assert_named(window, "Font colour: Automatic", Role::Button);
+            assert_named(window, "Alignment: Align left", Role::Button);
+        });
         for path in [
-            ["More options", "Font colour", "Blue"],
-            ["More options", "Font", "Georgia"],
-            ["More options", "Font size", "18"],
+            ["Font colour: Automatic", "Blue"],
+            ["Font: Segoe UI", "Georgia"],
+            ["Font size: 11", "18"],
+            ["Alignment: Align left", "Center"],
         ] {
             for name in path {
                 in_window(cx, f.window, |window, cx| click_named(window, name, cx));
@@ -1199,24 +1268,165 @@ mod port {
         assert_eq!(fmt.color, Some(komorebi::mail::rich::ColorId::Blue));
         assert_eq!(fmt.font, komorebi::mail::rich::FontId::Georgia);
         assert_eq!(fmt.size.get(), 18);
+        assert_eq!(fmt.align, komorebi::mail::rich::Align::Center);
+        // The boxes follow.
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Font: Georgia", Role::Button);
+            assert_named(window, "Font size: 18", Role::Button);
+            assert_named(window, "Font colour: Blue", Role::Button);
+            assert_named(window, "Alignment: Center", Role::Button);
+        });
     }
 
-    /// Port of `the_formatting_row_is_one_tab_stop` (row 155): Bold to Link
-    /// are one Tab stop, the one used last; Right moves along the row and
-    /// Space presses the button reached.
+    /// A selection with two fonts, sizes and alignments shows "Mixed" in
+    /// each box (no value), and a caret shows the one where it is.
+    #[gpui_kit::test]
+    fn a_mixed_selection_shows_mixed_boxes(cx: &mut TestAppContext) {
+        use komorebi::compose::rich::Action;
+        use komorebi::mail::rich::{Align, FontId, SizePt};
+        let f = open(cx, "bar-mixed", true);
+        f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
+        f.act(cx, |v, w, cx| v.focus_body(w, cx));
+        f.typed(cx, "One");
+        f.keys(cx, &["enter"]);
+        f.typed(cx, "Two");
+        f.keys(cx, &["home", "shift-end"]);
+        f.act(cx, |v, w, cx| {
+            v.format(Action::Font(FontId::Georgia), w, cx);
+            v.format(Action::Size(SizePt::new(18).unwrap()), w, cx);
+            v.format(Action::Align(Align::Right), w, cx);
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Font: Georgia", Role::Button);
+            assert_named(window, "Alignment: Align right", Role::Button);
+        });
+        f.keys(cx, &["ctrl-a"]);
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Font: Mixed", Role::Button);
+            assert_named(window, "Font size: Mixed", Role::Button);
+            assert_named(window, "Alignment: Mixed", Role::Button);
+            assert_named(window, "Font colour: Automatic", Role::Button);
+        });
+        // A caret in the first line: one value again.
+        f.keys(cx, &["ctrl-home"]);
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Font: Segoe UI", Role::Button);
+            assert_named(window, "Font size: 11", Role::Button);
+            assert_named(window, "Alignment: Align left", Role::Button);
+        });
+    }
+
+    /// The toggles show the format at the caret: Bold, a list and the
+    /// quote are pressed where they apply.
+    #[gpui_kit::test]
+    fn the_bar_toggles_follow_the_caret(cx: &mut TestAppContext) {
+        use gpui_kit::test::TestQueryExt as _;
+        use komorebi::compose::rich::Action;
+        let f = open(cx, "bar-toggles", true);
+        f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
+        f.act(cx, |v, w, cx| v.focus_body(w, cx));
+        f.keys(cx, &["ctrl-b"]);
+        f.typed(cx, "Loud");
+        f.act(cx, |v, w, cx| v.format(Action::Numbers, w, cx));
+        let toggled = |cx: &mut TestAppContext, name: &'static str| {
+            in_window(cx, f.window, move |window, _| {
+                window.find_by_label(name).checked()
+            })
+        };
+        assert_eq!(toggled(cx, "Bold (Ctrl+B)"), Some(true));
+        assert_eq!(toggled(cx, "Numbered list (Ctrl+Shift+7)"), Some(true));
+        assert_eq!(toggled(cx, "Bulleted list (Ctrl+Shift+8)"), Some(false));
+        assert_eq!(toggled(cx, "Italic (Ctrl+I)"), Some(false));
+    }
+
+    /// A narrow composer (a pop-out window made small) keeps the bar on one
+    /// line: what does not fit leaves it for More in the fixed order (Clear
+    /// formatting first), More lists it, and a pick there still works.
+    #[gpui_kit::test]
+    fn a_narrow_bar_overflows_into_more(cx: &mut TestAppContext) {
+        use super::super::format_bar::{self, Ctl};
+        let f = open(cx, "bar-narrow", true);
+        f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
+        f.act(cx, |v, w, cx| v.focus_body(w, cx));
+        f.typed(cx, "Narrow");
+        f.keys(cx, &["ctrl-a"]);
+        let on_bar = |cx: &mut TestAppContext, name: &'static str| {
+            in_window(cx, f.window, move |window, _| {
+                names(window)
+                    .iter()
+                    .any(|(r, n)| *r == Some(Role::Button) && n == name)
+            })
+        };
+        // Wide: every control is on the bar.
+        assert!(on_bar(cx, "Clear formatting"));
+        assert!(on_bar(cx, "Font: Segoe UI"));
+        cx.simulate_window_resize(f.window, gpui::size(gpui::px(360.), gpui::px(700.)));
+        cx.run_until_parked();
+        in_window(cx, f.window, |_, _| {});
+        cx.run_until_parked();
+        let room = f.view.read_with(cx, |v, _| v.fmt.room()).expect("measured");
+        assert!((room - (360. - 2. * crate::theme::composer::BAR_PAD_X)).abs() < 1.);
+        let shown = format_bar::fit(room, &Ctl::ALL, 2, true);
+        assert!(format_bar::bar_width(&shown, 3) <= room, "no clipping");
+        assert!(shown.contains(&Ctl::Bold), "{shown:?}");
+        assert!(!shown.contains(&Ctl::Clear), "{shown:?}");
+        assert!(!on_bar(cx, "Clear formatting"));
+        assert!(!on_bar(cx, "Font: Segoe UI"));
+        assert!(on_bar(cx, "Bold (Ctrl+B)"));
+        assert!(on_bar(cx, "Link (Ctrl+K)"));
+        assert!(on_bar(cx, "Signature"));
+        // The bar's buttons are what fits, then Link, Signature and More.
+        let count = f.view.read_with(cx, |v, _| v.fmt.count());
+        assert_eq!(count, shown.len() + 3);
+        // More holds what left: Clear formatting and the font box's menu.
+        in_window(cx, f.window, |window, cx| {
+            click_named(window, "More options", cx)
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Clear formatting", Role::MenuItem);
+            assert_named(window, "Font", Role::MenuItem);
+            assert_named(window, "Insert table", Role::MenuItem);
+        });
+        for name in ["Font", "Georgia"] {
+            in_window(cx, f.window, |window, cx| click_named(window, name, cx));
+            cx.run_until_parked();
+        }
+        let fmt = f
+            .view
+            .read_with(cx, |v, cx| v.body.read(cx).format().unwrap());
+        assert_eq!(fmt.font, komorebi::mail::rich::FontId::Georgia);
+        // Wide again: everything comes back.
+        cx.simulate_window_resize(f.window, gpui::size(gpui::px(1280.), gpui::px(800.)));
+        cx.run_until_parked();
+        in_window(cx, f.window, |_, _| {});
+        cx.run_until_parked();
+        assert!(on_bar(cx, "Clear formatting"));
+    }
+
+    /// Port of `the_formatting_row_is_one_tab_stop` (row 155): the bar is
+    /// one Tab stop, the one used last; Right moves along it and Space
+    /// presses the button reached.
     #[gpui_kit::test]
     fn the_formatting_row_is_one_tab_stop(cx: &mut TestAppContext) {
+        use super::super::format_bar::Ctl;
         let f = open(cx, "fmt-row", true);
         f.act(cx, |v, w, cx| v.compose_new(None, w, cx));
         f.act(cx, |v, w, cx| v.focus_body(w, cx));
         f.typed(cx, "Z");
-        let handles = f.view.read_with(cx, |v, _| v.fmt_focus.clone());
-        // Round the window with Tab: of the six buttons only one is reached.
+        let (handles, count) = f
+            .view
+            .read_with(cx, |v, _| (v.fmt.handles().to_vec(), v.fmt.count()));
+        // Every control, then Link, Signature and More.
+        assert_eq!(count, Ctl::ALL.len() + 3);
+        let bold = Ctl::ALL.iter().position(|c| *c == Ctl::Bold).unwrap();
+        let italic = bold + 1;
+        // Round the window with Tab: of the bar's buttons only one is reached.
         let reached = |cx: &mut TestAppContext| {
             let handles = handles.clone();
             in_window(cx, f.window, move |window, cx| {
                 let mut seen = Vec::new();
-                for _ in 0..40 {
+                for _ in 0..60 {
                     window.focus_next(cx);
                     if let Some(i) = handles.iter().position(|h| h.is_focused(window)) {
                         seen.push(i);
@@ -1226,28 +1436,35 @@ mod port {
             })
         };
         let seen = reached(cx);
-        assert!(!seen.is_empty(), "the row is reached");
-        assert!(seen.iter().all(|&i| i == 0), "only Bold: {seen:?}");
-        // Right from Bold: Italic, now the row's stop.
-        let bold = handles[0].clone();
-        in_window(cx, f.window, move |window, cx| window.focus(&bold, cx));
+        assert!(!seen.is_empty(), "the bar is reached");
+        assert!(seen.iter().all(|&i| i == 0), "only the font box: {seen:?}");
+        // Right from Bold: Italic, now the bar's stop.
+        let at_bold = handles[bold].clone();
+        in_window(cx, f.window, move |window, cx| window.focus(&at_bold, cx));
         f.keys(cx, &["right"]);
         assert!(in_window(cx, f.window, {
-            let italic = handles[1].clone();
-            move |window, _| italic.is_focused(window)
+            let h = handles[italic].clone();
+            move |window, _| h.is_focused(window)
         }));
-        assert_eq!(f.view.read_with(cx, |v, _| v.fmt_at), 1);
+        assert_eq!(f.view.read_with(cx, |v, _| v.fmt.at()), italic);
         let seen = reached(cx);
-        assert!(seen.iter().all(|&i| i == 1), "only Italic: {seen:?}");
-        // Left wraps from Bold to Link; End and Home go to the ends.
-        assert_eq!(toolbar::format_step("left", 0), Some(5));
-        assert_eq!(toolbar::format_step("right", 5), Some(0));
-        assert_eq!(toolbar::format_step("end", 2), Some(5));
-        assert_eq!(toolbar::format_step("home", 4), Some(0));
-        assert_eq!(toolbar::format_step("up", 1), None);
+        assert!(seen.iter().all(|&i| i == italic), "only Italic: {seen:?}");
+        // End reaches More, Home the font box, Left from it wraps to More.
+        let at_italic = handles[italic].clone();
+        in_window(cx, f.window, move |window, cx| window.focus(&at_italic, cx));
+        f.keys(cx, &["end"]);
+        assert!(in_window(cx, f.window, {
+            let h = handles[count - 1].clone();
+            move |window, _| h.is_focused(window)
+        }));
+        f.keys(cx, &["home", "left"]);
+        assert!(in_window(cx, f.window, {
+            let h = handles[count - 1].clone();
+            move |window, _| h.is_focused(window)
+        }));
         // Space on Italic: on for what is typed next, the body has the keys.
-        let italic = handles[1].clone();
-        in_window(cx, f.window, move |window, cx| window.focus(&italic, cx));
+        let at_italic = handles[italic].clone();
+        in_window(cx, f.window, move |window, cx| window.focus(&at_italic, cx));
         f.keys(cx, &["space"]);
         let (on, body) = f.view.read_with(cx, |v, cx| {
             (

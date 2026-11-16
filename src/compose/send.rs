@@ -55,21 +55,17 @@ pub fn short_subject(subject: &str, none: &str) -> String {
 }
 
 /// What draft `d` sends from `account`: a formatted draft its text and,
-/// when it needs one, an HTML alternative (with the signature logo); a
-/// plain-text draft its text only.
+/// when it needs one, an HTML alternative with the pictures it shows (a
+/// `multipart/related`); a plain-text draft its text only.
 pub fn outgoing(db: &Db, account: &db::Account, d: Draft) -> Outgoing {
     let (body, body_html, inline) = match &d.rich {
-        // A logo whose picture is gone is left out (`Db::send_parts`).
-        Some(ed) => db.send_parts(ed.doc()).unwrap_or_else(|_| {
-            let mut doc = ed.doc().clone();
-            for b in &mut doc.blocks {
-                if let model::Block::Signature(s) = b {
-                    s.logo = None;
-                }
-            }
-            let (text, html) = model::parts(&doc);
-            (text, html, Vec::new())
-        }),
+        // A picture whose bytes are gone is left out (`rich::send_parts`).
+        Some(ed) => {
+            let images = db
+                .with_signature_images(ed.doc(), ed.images())
+                .unwrap_or_else(|_| ed.images().clone());
+            model::send_parts(ed.doc(), &images)
+        }
         // Plain text is sent as plain text only, as typed: marks such as
         // `**bold**` or `- ` stay text, and no HTML quote goes with it.
         None => (d.full_body(), None, Vec::new()),

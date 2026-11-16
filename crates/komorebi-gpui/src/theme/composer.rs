@@ -20,7 +20,20 @@ pub const FIELD_GAP: f32 = 8.;
 pub const BAR_PAD_Y: f32 = 8.;
 pub const BAR_PAD_X: f32 = 22.;
 pub const BAR_GAP: f32 = 2.;
-pub const BAR_GROUP_GAP: f32 = 10.;
+/// Between the format bar's groups: a 1 px rule in the line colour, 16 px
+/// high, with 4 px of room on each side (Gmail's groups; the brand's one
+/// edge, no darker than a divider).
+pub const BAR_SEP_SPACE: f32 = 4.;
+pub const BAR_SEP_H: f32 = 16.;
+/// A rule's whole width on the bar: the line and its room.
+pub const BAR_SEP_W: f32 = super::layout::HAIRLINE + BAR_SEP_SPACE * 2.;
+/// The format bar's boxes, fixed so the bar's width is known before it is
+/// drawn (what does not fit goes to More): the font box (a long name ends
+/// in an ellipsis), the size box (two digits) and the alignment box (its
+/// glyph and chevron).
+pub const FONT_BOX_W: f32 = 120.;
+pub const SIZE_BOX_W: f32 = 52.;
+pub const ALIGN_BOX_W: f32 = 48.;
 /// The body: 10 px above, 28 px on the sides, at most 700 px of text.
 pub const BODY_PAD_Y: f32 = 10.;
 pub const BODY_MAX_W: f32 = 700.;

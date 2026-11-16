@@ -514,7 +514,7 @@ fn main() -> Result<()> {
     let sig = db.add_signature(
         "Avery",
         &Doc::from_plain("Avery Stone\nProduct lead, Example Studio"),
-        None,
+        &Default::default(),
     )?;
     db.set_account_signatures(account, Some(sig), Some(sig))?;
 

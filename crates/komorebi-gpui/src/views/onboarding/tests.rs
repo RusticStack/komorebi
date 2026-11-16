@@ -13,6 +13,7 @@ mod port {
 
     use gpui::{AnyWindowHandle, AppContext as _, Entity, Role, TestAppContext};
     use gpui_kit::component::input::InputState;
+    use gpui_kit::test::TestQueryExt as _;
     use komorebi::mail::discover::Outcome;
     use komorebi::mail::errors::{Step as CheckStep, StepError};
 
@@ -811,5 +812,200 @@ mod port {
         );
         assert!(!crate::views::updates::whats_new::due(&db));
         cx.read(|cx| assert_eq!(flow.read(cx).step(), Step::Yours));
+    }
+
+    // ---- Import from Outlook (made-up findings on example domains) -----
+
+    fn with_outlook() -> Services {
+        Services {
+            outlook: super::super::import::sample,
+            // Not `counted`: LOOKUPS is for the tests that count.
+            lookup: |_| Outcome::default(),
+            ..fakes()
+        }
+    }
+
+    /// The welcome offers the import only when Outlook had something.
+    #[gpui::test]
+    fn the_welcome_offers_the_import_only_with_findings(cx: &mut TestAppContext) {
+        let f = open(cx, "ob-import-none", fakes(), true);
+        cx.read(|cx| assert!(f.view.read(cx).outlook().is_some_and(|o| o.is_empty())));
+        in_window(cx, f.window, |window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(
+                gpui_kit::test::TestQueryExt::try_find_by_label(window, "Import from Outlook")
+                    .is_none()
+            );
+        });
+        let g = open(cx, "ob-import-some", with_outlook(), true);
+        in_window(cx, g.window, |window, _| {
+            assert_named(window, "Import from Outlook", Role::Button);
+        });
+    }
+
+    /// The list marks an address already here and leaves it unticked; the
+    /// ticked signatures are saved on Continue; a POP account is looked up
+    /// and an Exchange one shows why it can't be added, with Skip.
+    #[gpui::test]
+    fn the_import_list_marks_known_addresses_and_walks_the_ticked(cx: &mut TestAppContext) {
+        let f = open(cx, "ob-import-list", with_outlook(), true);
+        let known = komorebi::db::NewAccount {
+            email: "Ana.Silva@example.org".into(),
+            name: String::new(),
+            imap: komorebi::providers::Server {
+                host: "imap.example.org".into(),
+                port: 993,
+                security: komorebi::providers::Security::Tls,
+            },
+            smtp: komorebi::providers::Server {
+                host: "smtp.example.org".into(),
+                port: 465,
+                security: komorebi::providers::Security::Tls,
+            },
+            save_sent: true,
+            imap_user: String::new(),
+            smtp_user: String::new(),
+            smtp_no_auth: false,
+        };
+        f.db().add_account(&known).unwrap();
+        f.act(cx, |v, w, cx| {
+            v.set_outlook(super::super::import::sample(), cx);
+            v.open_import(w, cx);
+        });
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.step(), Step::Import);
+            let ticks: Vec<(bool, bool)> = v
+                .import_accounts()
+                .iter()
+                .map(|r| (r.exists, r.ticked))
+                .collect();
+            assert_eq!(ticks, [(true, false), (false, true), (false, true)]);
+            assert!(v.import_signature_rows().iter().all(|r| r.ticked));
+        });
+        in_window(cx, f.window, |window, cx| {
+            window.draw(cx).clear(cx);
+            assert_named(window, "ana@example.net", Role::CheckBox);
+            assert_named(window, "Work", Role::CheckBox);
+            assert_named(window, "Continue", Role::Button);
+        });
+        // The known address cannot be ticked.
+        f.act(cx, |v, _, cx| {
+            v.tick_account(0, true, cx);
+            v.tick_signature(1, false, cx);
+        });
+        cx.read(|cx| assert!(!f.view.read(cx).import_accounts()[0].ticked));
+        f.act(cx, |v, w, cx| v.continue_import(w, cx));
+        cx.run_until_parked();
+        let sigs = f.db().signatures().unwrap();
+        assert_eq!(
+            sigs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["Work"]
+        );
+        // The POP account: its address, looked up.
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.step(), Step::SignIn);
+            let (a, place, total) = v.importing_account().unwrap();
+            assert_eq!((a.email.as_str(), place, total), ("ana@example.net", 1, 2));
+            assert_eq!(
+                v.email_input().read(cx).value().to_string(),
+                "ana@example.net"
+            );
+            assert!(!v.manual());
+        });
+        in_window(cx, f.window, |window, cx| {
+            window.draw(cx).clear(cx);
+            // Below the provider list: present, maybe scrolled out of view.
+            assert_eq!(
+                window.find_by_label("Skip this account").role(),
+                Some(Role::Button)
+            );
+            assert_eq!(
+                window.find_by_label("Password").role(),
+                Some(Role::PasswordInput)
+            );
+        });
+        // The Exchange account: Microsoft 365, not supported, no password.
+        f.act(cx, |v, w, cx| v.skip_import(w, cx));
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.chip(), &flow::Chip::Unsupported(preset("microsoft365")));
+            assert_eq!(v.importing_account().map(|(_, p, _)| p), Some(2));
+        });
+        in_window(cx, f.window, |window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(gpui_kit::test::TestQueryExt::try_find_by_label(window, "Password").is_none());
+            // Below the provider list: present, maybe scrolled out of view.
+            assert_eq!(
+                window.find_by_label("Skip this account").role(),
+                Some(Role::Button)
+            );
+        });
+        // Nothing added and nothing left: Your email.
+        f.act(cx, |v, w, cx| v.skip_import(w, cx));
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.step(), Step::Email);
+            assert!(v.importing_account().is_none());
+        });
+        assert_eq!(f.db().accounts().unwrap().len(), 1);
+    }
+
+    /// An IMAP account fills manual setup with Outlook's servers; once
+    /// signed in, its name is Outlook's and its default signature the
+    /// imported one.
+    #[gpui::test]
+    fn an_imap_account_is_prefilled_and_takes_its_outlook_defaults(cx: &mut TestAppContext) {
+        let f = open(cx, "ob-import-imap", with_outlook(), false);
+        f.act(cx, |v, w, cx| {
+            v.set_outlook(super::super::import::sample(), cx);
+            v.open_import(w, cx);
+            v.tick_account(1, false, cx);
+            v.tick_account(2, false, cx);
+            v.tick_signature(1, false, cx);
+            v.continue_import(w, cx);
+        });
+        // The signature is read off the UI thread, then saved.
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.step(), Step::SignIn);
+            assert!(v.manual());
+            let fields = v.server_form().read(cx).fields(cx);
+            assert_eq!(
+                (
+                    fields.imap_host.as_str(),
+                    fields.imap_port.as_str(),
+                    fields.imap_starttls
+                ),
+                ("imap.example.org", "993", false)
+            );
+            assert_eq!(
+                (
+                    fields.smtp_host.as_str(),
+                    fields.smtp_port.as_str(),
+                    fields.smtp_starttls
+                ),
+                ("smtp.example.org", "587", true)
+            );
+        });
+        assert!(f.db().accounts().unwrap().is_empty(), "nothing written yet");
+        f.set(cx, |v| v.password_input(), "secret");
+        f.act(cx, |v, w, cx| v.submit(w, cx));
+        cx.run_until_parked();
+        let id = cx.read(|cx| f.view.read(cx).added()).expect("added");
+        in_window(cx, f.window, |_, _| {});
+        cx.read(|cx| {
+            let v = f.view.read(cx);
+            assert_eq!(v.step(), Step::Yours);
+            assert_eq!(v.name_input().read(cx).value().to_string(), "Ana Silva");
+        });
+        let db = f.db();
+        let work = db.signatures().unwrap()[0].id;
+        assert_eq!(db.account_signatures(id).unwrap(), (Some(work), None));
+        f.act(cx, |v, w, cx| v.personalise(false, w, cx));
+        cx.read(|cx| assert_eq!(f.view.read(cx).step(), Step::Done));
+        assert_eq!(db.account_signatures(id).unwrap(), (Some(work), None));
     }
 }

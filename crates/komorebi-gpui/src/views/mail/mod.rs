@@ -16,8 +16,12 @@
 //! state), `sync_text.rs` (its words), `status.rs` (the line as a notice
 //! in the list pane) and `outbox.rs` (the Outbox entry's pane).
 
+mod calm;
 pub mod commands;
 mod filters;
+mod folder_edit;
+#[cfg(test)]
+mod folder_edit_tests;
 mod folders;
 pub mod hub;
 mod list;
@@ -28,7 +32,9 @@ mod outbox;
 mod panes;
 mod reading;
 mod rows;
+mod scene;
 mod search;
+mod sky;
 pub mod status;
 pub mod sync;
 mod sync_tests;
@@ -228,6 +234,19 @@ pub struct MailView {
     /// the first render, and the shape this view last gave them.
     panes: Option<panes::Panes>,
     shape: panes::Shape,
+    /// The calm panel shows beside the wider list (nothing selected; the
+    /// last frame's `calm::mode`).
+    calm_now: bool,
+    /// The Today summary and what it was read for.
+    calm: Option<(calm::Key, calm::Summary)>,
+    /// The Rest scene's own view, made the first time Rest shows.
+    rest_scene: Option<gpui::Entity<scene::RestScene>>,
+    /// A folder's name typed in the pane (New folder, Rename).
+    folder_edit: Option<folder_edit::FolderEdit>,
+    /// Each account's icon (`views::account_icon`), read from the cache.
+    account_looks: crate::views::account_icon::Looks,
+    /// Accounts whose domain icon is being fetched.
+    icons_fetching: std::collections::HashSet<i64>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -304,11 +323,67 @@ impl MailView {
             place: None,
             panes: None,
             shape: panes::Shape::default(),
+            calm_now: false,
+            calm: None,
+            rest_scene: None,
+            folder_edit: None,
+            account_looks: Default::default(),
+            icons_fetching: Default::default(),
             _subscriptions: subscriptions,
         };
+        this.reload_icons();
+        this.fetch_due_icons(cx);
         this.follow_pill(false);
         this.take_sync_state(cx);
         this
+    }
+
+    /// The accounts' icons, read again (an icon chosen, removed, fetched;
+    /// the switch).
+    fn reload_icons(&mut self) {
+        self.account_looks =
+            crate::views::account_icon::looks(self.mail.db(), self.mail.accounts());
+    }
+
+    /// An account's icon, if it has one.
+    pub fn account_look(&self, account: i64) -> Option<&crate::views::account_icon::Look> {
+        self.account_looks.get(&account)
+    }
+
+    /// Ask the domains whose icon is due (an account just added, or not
+    /// asked for `favicon::REFRESH`), off the UI thread; what comes back
+    /// is kept and shown. Never under `KOMOREBI_OFFLINE` or with the switch
+    /// off (`favicon::due`), and never from the tests (no network there).
+    fn fetch_due_icons(&mut self, cx: &mut Context<Self>) {
+        if cfg!(test) {
+            return;
+        }
+        let now = chrono::Utc::now().timestamp();
+        let due: Vec<(i64, String)> = self
+            .mail
+            .accounts()
+            .iter()
+            .filter(|a| !self.icons_fetching.contains(&a.id))
+            .filter(|a| komorebi::favicon::due(self.mail.db(), a, now))
+            .filter_map(|a| komorebi::favicon::domain_to_ask(a).map(|d| (a.id, d)))
+            .collect();
+        for (account, domain) in due {
+            self.icons_fetching.insert(account);
+            let task = cx.background_spawn(async move {
+                komorebi::favicon::fetch(&domain, &komorebi::favicon::get)
+            });
+            cx.spawn(async move |this, cx| {
+                let found = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.icons_fetching.remove(&account);
+                    let now = chrono::Utc::now().timestamp();
+                    komorebi::favicon::keep(this.mail.db(), account, found, now).ok();
+                    this.reload_icons();
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
     }
 
     /// The caution badge's words for an account out of reach, if it is.
@@ -355,6 +430,8 @@ impl MailView {
             m.load_folders();
             m.reload_rows();
         });
+        self.reload_icons();
+        self.fetch_due_icons(cx);
         if let Ok(settings) = self.mail.db().settings() {
             self.reader
                 .update(cx, |r, _| r.set_mark_read(settings.mark_read));
@@ -1393,7 +1470,9 @@ impl MailView {
         let reading = composing
             || self.mail.open_id().is_some()
             || self.mail.selection().len() > 1
-            || self.outbox_open().is_some();
+            || self.outbox_open().is_some()
+            // The calm panel is the reading pane's stop while it shows.
+            || self.calm_now;
         let mail = self.place.is_none();
         [
             // The search shows once there is an account.
@@ -1452,9 +1531,29 @@ impl Render for MailView {
         } else {
             layout::LIST_W
         };
+        // Nothing selected: the list grows and the calm panel (Today or
+        // Rest) takes the rest of the room.
+        let calm_mode = if place_none {
+            calm::mode(&calm::Moment {
+                composing,
+                open: self.mail.open_id().is_some(),
+                selected: self.mail.selection().len(),
+                outbox: self.outbox_open().is_some(),
+                one_pane,
+                list_empty,
+                lists_messages: self.mail.lists_messages(),
+                searching: self.mail.searching(),
+                unread: self.mail.view_unread(),
+            })
+        } else {
+            calm::Mode::Split
+        };
+        self.calm_now = calm_mode != calm::Mode::Split;
+        let nav_w = if rail { layout::RAIL_W } else { layout::NAV_W };
+        let calm_w = layout::calm_w(width, nav_w);
         self.shape = panes::Shape {
             rail,
-            wide: !show_reader || one_pane,
+            wide: !show_reader || one_pane || self.calm_now,
             list_w,
         };
         let shape = self.shape;
@@ -1493,6 +1592,9 @@ impl Render for MailView {
             .on_action(cx.listener(Self::nav_expand))
             .on_action(cx.listener(Self::nav_collapse))
             .on_action(cx.listener(Self::nav_menu))
+            .on_action(cx.listener(Self::new_folder_key))
+            .on_action(cx.listener(Self::rename_folder_key))
+            .on_action(cx.listener(Self::delete_folder_key))
             .on_action(cx.listener(Self::close_pane_key))
             .on_action(cx.listener(Self::next_pane))
             .on_action(cx.listener(Self::previous_pane))
@@ -1517,7 +1619,11 @@ impl Render for MailView {
                 el.child(list.cached(shape.list_style()))
             })
             .when(place.is_none() && show_reader, |el| {
-                el.child(reading::render(self, composing, one_pane, window, cx))
+                if calm_mode == calm::Mode::Split {
+                    el.child(reading::render(self, composing, one_pane, window, cx))
+                } else {
+                    el.child(calm::render(self, calm_mode, calm_w, window, cx))
+                }
             })
             .children(place.map(|view| {
                 // The status line stays in sight over Settings and Contacts

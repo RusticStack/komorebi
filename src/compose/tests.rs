@@ -516,19 +516,34 @@ fn only_a_short_trailing_signature_is_stripped() {
     assert_eq!(strip_signature(&long), long);
 }
 
+/// Komorebi sets no attachment limit (owner decision, 2026-11-16): a file
+/// is read whole, however much is attached already, and no size stops
+/// Send. The server's "too large" refusal is the only limit.
 #[test]
-fn attachment_limit_is_checked_before_reading() {
+fn attachments_have_no_size_limit() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let len = std::fs::metadata(&path).unwrap().len();
-    let budget = MAX_ATTACH_HARD * 3 / 4;
-    assert_eq!(read_attachment(&path, 0).unwrap().len() as u64, len);
-    assert_eq!(
-        read_attachment(&path, budget - len).unwrap().len() as u64,
-        len
-    );
-    let err = read_attachment(&path, budget - len + 1).unwrap_err();
-    assert_eq!(err, AttachWhy::TooBig);
-    assert_eq!(encoded_size(3), 4);
+    assert_eq!(read_attachment(&path).unwrap().len() as u64, len);
+    let mut d = Draft {
+        to: "ana@example.org".into(),
+        ..Default::default()
+    };
+    let file = |len: usize| {
+        Attached::from(OutAttachment {
+            filename: "a.bin".into(),
+            data: vec![0; len],
+        })
+    };
+    // Past the old 25 MB send block and the old 100 MB (encoded) cap.
+    let big = 76 * 1024 * 1024;
+    assert!(d.add_attachments(vec![file(big)]));
+    assert!(d.add_attachments(vec![file(1)]));
+    assert_eq!(d.attachments.len(), 2);
+    assert_eq!(attachments_size(&d.attachments), big as u64 + 1);
+    assert_eq!(d.send_block(), None);
+    assert_eq!(d.check_send(true), SendCheck::Ready);
+    assert!(d.touched && d.dirty);
+    assert!(!d.add_attachments(Vec::new()), "nothing added");
 }
 
 #[test]
@@ -541,7 +556,7 @@ fn dropped_paths_attach_files_only() {
         dir.join("folder"),
         dir.join("missing.pdf"),
     ];
-    let (added, errors) = read_files(&paths, 0);
+    let (added, errors) = read_files(&paths);
     assert_eq!(added.len(), 1);
     assert_eq!(added[0].file.filename, "Relatório.txt");
     assert_eq!(added[0].file.data, "olá".as_bytes());
@@ -555,44 +570,7 @@ fn dropped_paths_attach_files_only() {
     );
     assert_eq!(errors[1].name, "missing.pdf");
     assert!(matches!(errors[1].why, AttachWhy::Io(_)), "{:?}", errors[1]);
-    // Counted against what is attached already.
-    let (added, errors) = read_files(&paths[..1], MAX_ATTACH_HARD * 3 / 4);
-    assert!(added.is_empty());
-    assert_eq!(errors[0].why, AttachWhy::TooBig);
     std::fs::remove_dir_all(&dir).ok();
-}
-
-#[test]
-fn attachment_counter_thresholds() {
-    let limit = MAX_ATTACHMENTS_BYTES;
-    assert_eq!(counter_level(0), 0);
-    assert_eq!(counter_level(limit * 4 / 5 - 1), 0);
-    assert_eq!(counter_level(limit * 4 / 5), 1);
-    assert_eq!(counter_level(limit), 1);
-    assert_eq!(counter_level(limit + 1), 2);
-    assert_eq!(counter_level(u64::MAX), 2);
-
-    // Over the limit, Send is off.
-    let mut d = Draft {
-        to: "ana@example.org".into(),
-        ..Default::default()
-    };
-    let file = |len: u64| {
-        Attached::from(OutAttachment {
-            filename: "a.bin".into(),
-            data: vec![0; len as usize],
-        })
-    };
-    d.attachments.push(file(limit * 3 / 4));
-    assert_eq!(d.send_block(), None);
-    d.attachments.push(file(3));
-    assert_eq!(d.send_block(), Some(SendBlock::AttachmentsOver));
-    // A read that finished late is held to the hard limit.
-    let mut errors = Vec::new();
-    assert!(!d.add_attachments(vec![file(MAX_ATTACH_HARD)], &mut errors));
-    assert_eq!(errors[0].why, AttachWhy::TooBig);
-    assert!(d.add_attachments(vec![file(1)], &mut errors));
-    assert!(d.touched && d.dirty);
 }
 
 #[test]
@@ -1030,6 +1008,42 @@ fn toolbar_actions_change_the_document_and_undo() {
     assert!(ed.format_at(0, 3).link.is_some());
 }
 
+/// The format bar's boxes: a selection with one font, size, colour and
+/// alignment shows them; one with two of any says it is mixed (the box
+/// then shows no single value), and a caret is never mixed.
+#[test]
+fn the_format_says_when_a_selection_is_mixed() {
+    use crate::mail::rich::{Align, ColorId, FontId, SizePt};
+    let mut ed = Editor::new(rich::doc_from_text(
+        "One\nTwo",
+        ComposeDefaults::default().doc(),
+    ));
+    let all = (0, ed.text().len());
+    let f = ed.format_at(all.0, all.1);
+    assert_eq!(f.mixed, Default::default(), "one of each");
+    let big = SizePt::new(18).unwrap();
+    assert!(rich::apply(&mut ed, (0, 3), &rich::Action::Font(FontId::Georgia)).changed);
+    assert!(rich::apply(&mut ed, (0, 3), &rich::Action::Size(big)).changed);
+    assert!(rich::apply(&mut ed, (0, 3), &rich::Action::Color(Some(ColorId::Blue))).changed);
+    assert!(rich::apply(&mut ed, (0, 3), &rich::Action::Align(Align::Center)).changed);
+    // The first paragraph alone: one of each, the new ones.
+    let f = ed.format_at(0, 3);
+    assert_eq!(f.mixed, Default::default());
+    assert_eq!(
+        (f.font, f.size, f.align),
+        (FontId::Georgia, big, Align::Center)
+    );
+    assert_eq!(f.color, Some(ColorId::Blue));
+    // Both paragraphs: everything is mixed.
+    let all = (0, ed.text().len());
+    let f = ed.format_at(all.0, all.1);
+    assert!(f.mixed.font && f.mixed.size && f.mixed.color && f.mixed.align);
+    // A caret is one place: never mixed.
+    let f = ed.format_at(1, 1);
+    assert_eq!(f.mixed, Default::default());
+    assert_eq!(f.font, FontId::Georgia);
+}
+
 #[test]
 fn another_account_swaps_an_untouched_signature() {
     let c = Cache::new("switch");
@@ -1054,7 +1068,9 @@ fn another_account_swaps_an_untouched_signature() {
         })
         .unwrap();
     let doc = rich::doc_from_text("Ana\nACME", ComposeDefaults::default().doc());
-    let sig = c.db.add_signature("Work", &doc, None).unwrap();
+    let sig =
+        c.db.add_signature("Work", &doc, &Default::default())
+            .unwrap();
     c.db.set_account_signatures(other, Some(sig), Some(sig))
         .unwrap();
     let plain = ComposeDefaults {
@@ -1094,4 +1110,115 @@ fn painted_pieces_go_to_straight_bgra() {
     assert_eq!((w, h), (2, 1));
     assert_eq!(&data[..4], &[0, 0, 255, 255], "BGRA order");
     assert_eq!(&data[4..], &[255, 0, 0, 128], "un-premultiplied");
+}
+
+/// A formatted draft with a picture and a large attachment: the rows are
+/// recorded at once and the copies written on another thread (as the app
+/// does, so a large file never holds the window); reading it back is done
+/// in steps, the slow one on another thread too. Pictures it no longer
+/// shows are not kept.
+#[test]
+fn pictures_and_attachments_are_saved_and_read_off_the_ui_thread() {
+    use crate::mail::rich::images::tests::png;
+    let c = Cache::new("pictures");
+    let mut d = typed(c.account);
+    d.make_rich(ComposeDefaults::default().doc(), None);
+    let (file, w, h) = model::ImageFile::new(png(800, 600)).unwrap();
+    let img = model::InlineImage::new(file.cid(), w, h, "Step 1");
+    let (gone, gw, gh) = model::ImageFile::new(png(10, 10)).unwrap();
+    {
+        let ed = d.rich.as_mut().unwrap();
+        let end = ed.text().len();
+        let after = ed
+            .insert_image(end, end, img.clone(), file.clone())
+            .unwrap();
+        // One added and taken out again: in memory for undo, never saved.
+        let i2 = model::InlineImage::new(gone.cid(), gw, gh, "");
+        let after2 = ed.insert_image(after, after, i2, gone.clone()).unwrap();
+        ed.replace(after, after2, "", (after, after2)).unwrap();
+        assert_eq!(ed.images().len(), 2);
+    }
+    let big = vec![3u8; 3 * 1024 * 1024];
+    d.attachments.push(
+        OutAttachment {
+            filename: "big.bin".into(),
+            data: big.clone(),
+        }
+        .into(),
+    );
+    let (stored, jobs) = store_rows(&c.db, &mut d, "me@example.org").unwrap();
+    assert_eq!(stored, Stored::Inserted);
+    assert_eq!(jobs.len(), 2, "the attachment and the one picture shown");
+    let row = d.row.unwrap();
+    let files = c.db.draft_files(row).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(
+        files
+            .iter()
+            .filter_map(|f| f.cid.as_deref())
+            .collect::<Vec<_>>(),
+        [img.cid.as_str()]
+    );
+    assert!(
+        jobs.iter().all(|j| !j.copy.path.exists()),
+        "not written yet"
+    );
+    std::thread::spawn(move || {
+        for j in &jobs {
+            j.run().unwrap();
+        }
+    })
+    .join()
+    .unwrap();
+
+    let job = load_job(&c.db, row).unwrap().unwrap();
+    let read = std::thread::spawn(move || job.run()).join().unwrap();
+    let (mut back, missing) = finish_load(&c.db, read);
+    assert!(missing.is_empty());
+    // The picture is not an attachment; the attachment is whole.
+    assert_eq!(back.attachments.len(), 1);
+    assert_eq!(back.attachments[0].file.data, big);
+    let ed = back.rich.as_ref().unwrap();
+    assert_eq!(ed.doc(), d.rich.as_ref().unwrap().doc());
+    assert_eq!(ed.shown_images(), vec![(img.cid.clone(), file.clone())]);
+    assert_eq!(back.saved_images.len(), 1);
+    // Unchanged: nothing written, nothing copied.
+    let (stored, jobs) = store_rows(&c.db, &mut back, "me@example.org").unwrap();
+    assert_eq!((stored, jobs.len()), (Stored::Nothing, 0));
+    // The picture deleted: its saved copy goes with the next save.
+    {
+        let ed = back.rich.as_mut().unwrap();
+        let at = ed.image_offsets()[0].0;
+        ed.replace(at, at + 3, "", (at, at + 3)).unwrap();
+    }
+    back.dirty = true;
+    assert_eq!(
+        store(&c.db, &mut back, "me@example.org").unwrap(),
+        Stored::Updated
+    );
+    let files = c.db.draft_files(row).unwrap();
+    assert!(files.iter().all(|f| f.cid.is_none()), "{files:?}");
+    assert!(back.saved_images.is_empty());
+}
+
+/// A copy that cannot be written loses its row, and the next save tries
+/// again.
+#[test]
+fn a_copy_that_fails_is_tried_again() {
+    let c = Cache::new("copy-fails");
+    let mut d = typed(c.account);
+    d.attachments.push(
+        OutAttachment {
+            filename: "a.txt".into(),
+            data: b"a".to_vec(),
+        }
+        .into(),
+    );
+    let (_, jobs) = store_rows(&c.db, &mut d, "me@example.org").unwrap();
+    assert_eq!(jobs.len(), 1);
+    copy_failed(&c.db, &mut d, &jobs[0]);
+    assert!(d.attachments[0].saved.is_none());
+    assert!(c.db.draft_files(d.row.unwrap()).unwrap().is_empty());
+    let (_, again) = store_rows(&c.db, &mut d, "me@example.org").unwrap();
+    assert_eq!(again.len(), 1);
 }

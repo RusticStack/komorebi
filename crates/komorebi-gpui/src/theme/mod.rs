@@ -22,6 +22,7 @@ pub mod feeds;
 pub mod kit;
 pub mod metrics;
 pub mod reader;
+pub mod scene;
 pub mod settings;
 pub mod text;
 

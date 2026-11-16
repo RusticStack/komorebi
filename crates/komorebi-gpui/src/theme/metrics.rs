@@ -132,6 +132,59 @@ pub mod layout {
     pub const HAIRLINE: f32 = 1.;
     pub const FOCUS_RING: f32 = 2.;
     pub const FOCUS_GAP: f32 = 2.;
+    /// The calm panel (nothing selected: the unread summary or the Rest
+    /// scene) takes this share of the room the list and it divide, on the
+    /// 4 px grid, between these widths; the list takes the rest, wider than
+    /// its usual [`LIST_W`]. 1280 px: list 620, panel 380; maximised at
+    /// 1920: list 1160, panel 480 (the 3x scene).
+    pub const CALM_SHARE: f32 = 0.38;
+    pub const CALM_W_MIN: f32 = 320.;
+    pub const CALM_W_MAX: f32 = 480.;
+    /// The Rest scene's art pixel is about this many logical px (a whole
+    /// number of device pixels: [`scene_scale`]).
+    pub const SCENE_ART_PX: f32 = 2.;
+    /// The calm line's room at each side in the Rest scene's sky.
+    pub const SCENE_LINE_INSET: f32 = super::space::SP_4;
+    /// Before its first paint the scene guesses the panel is the window's
+    /// height less the title bar and the gaps (the paint then corrects it).
+    pub const SCENE_GUESS_CHROME: f32 = TITLEBAR_H + super::space::PANE_GAP * 2.;
+
+    /// The Rest scene aims for about this many art pixels of height (the
+    /// near shore's tallest pine then rises past the middle of the panel)...
+    pub const SCENE_H_AIM: f32 = 380.;
+    /// ...and never gets narrower than this (the jetty's end stays in).
+    pub const SCENE_W_MIN: f32 = 156.;
+
+    /// The device pixels per art pixel of the Rest scene in a panel
+    /// `device_w` x `device_h` device pixels at `scale_factor`: at least
+    /// the whole number closest to [`SCENE_ART_PX`] logical px (2 at 100
+    /// percent, 3 at 150, 4 at 200); larger when that brings the scene's
+    /// height nearer [`SCENE_H_AIM`] (a tall panel: 3 at 1080 maximised),
+    /// as long as the scene stays [`SCENE_W_MIN`] wide.
+    pub fn scene_scale(scale_factor: f32, device_w: f32, device_h: f32) -> u32 {
+        let least = (SCENE_ART_PX * scale_factor).round().max(1.) as u32;
+        let most = ((device_w / SCENE_W_MIN).floor() as u32).max(least);
+        let off = |n: u32| ((device_h / n as f32).ceil() - SCENE_H_AIM).abs();
+        (least..=most)
+            .min_by(|a, b| off(*a).total_cmp(&off(*b)))
+            .unwrap_or(least)
+    }
+    /// The most unread messages and drafts the summary names.
+    pub const CALM_UNREAD_ROWS: usize = 4;
+    pub const CALM_DRAFT_ROWS: usize = 3;
+
+    /// The calm panel's width in a window `window_w` wide whose folder pane
+    /// (or rail) is `nav_w`: the list keeps at least [`LIST_W_COMPACT`].
+    pub fn calm_w(window_w: f32, nav_w: f32) -> f32 {
+        use super::space::PANE_GAP;
+        // The gaps: after the folder pane, between the list and the panel,
+        // and at the window's right edge.
+        let room = window_w - nav_w - PANE_GAP * 3.;
+        let share = (room * CALM_SHARE / 4.).round() * 4.;
+        share
+            .clamp(CALM_W_MIN, CALM_W_MAX)
+            .min((room - LIST_W_COMPACT).max(0.))
+    }
 }
 
 /// Heights that grow with Windows' text size (phase 2, for every lane): a
@@ -195,6 +248,17 @@ pub mod motion {
     pub const LOADER_MIN: f32 = 0.3;
     pub const LOADER_MAX: f32 = 1.0;
     pub const SENT_HOLD_MS: u64 = 2000;
+    /// The calm panel fades in when nothing is selected any more (Fluent's
+    /// `fast`: a quick fade, no slide).
+    pub const CALM_MS: u64 = 150;
+    /// The Rest scene's step: about 12 frames a second, only while it is on
+    /// screen in the active window and motion is allowed.
+    pub const SCENE_STEP_MS: u64 = 83;
+    /// Under reduce motion (still frames) the scene is redrawn once a
+    /// minute, for the sun or moon.
+    pub const SCENE_MINUTE_MS: u64 = 60_000;
+    /// The path on the water is rolled again this often (500 to 800 ms).
+    pub const SCENE_PATH_MS: u64 = 650;
     /// A search of a large folder waits for this pause in typing (the
     /// Slint app's `SEARCH_DEBOUNCE`).
     pub const SEARCH_PAUSE_MS: u64 = 100;
@@ -279,6 +343,21 @@ mod tests {
         // Each line still fits: the row holds its three lines and padding.
         let lines = large.text.body.line.as_f32() * 2. + large.text.preview.line.as_f32();
         assert!(scaled::message_row(&large) >= lines + 2. * scaled::ROW_PAD);
+    }
+
+    /// The calm panel's width at 1280, at the one-pane edge and maximised.
+    #[test]
+    fn the_calm_panel_takes_a_share_on_the_grid() {
+        assert_eq!(layout::calm_w(1280., layout::NAV_W), 380.);
+        assert_eq!(layout::calm_w(1920., layout::NAV_W), layout::CALM_W_MAX);
+        // The narrowest two-pane window (720, the rail): the list keeps its
+        // compact width.
+        let w = layout::calm_w(720., layout::RAIL_W);
+        assert_eq!(w, layout::CALM_W_MIN);
+        assert!(720. - layout::RAIL_W - 3. * space::PANE_GAP - w >= layout::LIST_W_COMPACT);
+        for x in [800., 1000., 1366., 1600., 2560.] {
+            assert_eq!(layout::calm_w(x, layout::NAV_W) % 4., 0., "{x}");
+        }
     }
 
     #[test]

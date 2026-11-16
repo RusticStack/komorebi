@@ -344,10 +344,25 @@ impl SettingsView {
 
     /// Add account: the setup flow from its email step, inside Settings.
     pub fn add_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_flow(false, window, cx);
+    }
+
+    /// Import from Outlook: the setup flow from its list, inside Settings.
+    pub fn import_outlook(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_flow(true, window, cx);
+    }
+
+    fn open_flow(&mut self, import: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.section = Section::Accounts;
         self.editor = None;
         let db = self.db.clone();
-        let flow = cx.new(|cx| OnboardingView::adding(db, window, cx));
+        let flow = cx.new(|cx| {
+            if import {
+                OnboardingView::importing(db, window, cx)
+            } else {
+                OnboardingView::adding(db, window, cx)
+            }
+        });
         self._subscriptions.push(cx.subscribe_in(
             &flow,
             window,
@@ -435,7 +450,9 @@ impl SettingsView {
                     on: *on,
                 }));
             }
-            EditorEvent::Moved { .. } => cx.emit(SettingsEvent::AccountsChanged),
+            EditorEvent::Moved { .. } | EditorEvent::IconChanged => {
+                cx.emit(SettingsEvent::AccountsChanged)
+            }
             EditorEvent::ManageSignatures => {
                 self.show(Section::Signatures, window, cx);
                 return;

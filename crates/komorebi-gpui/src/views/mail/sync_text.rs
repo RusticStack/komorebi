@@ -5,7 +5,8 @@
 //! already.
 
 use komorebi::mail::errors::Class;
-use komorebi::mail::{Notice, Outcome, Reason};
+use komorebi::mail::folders::BadName;
+use komorebi::mail::{FolderOp, FolderOutcome, Notice, Outcome, Reason};
 use komorebi_i18n::tr;
 
 use super::sync::{Said, StatusAction};
@@ -117,6 +118,70 @@ pub fn said(s: &Said) -> String {
             "A message sent as Komorebi closed couldn't be prepared again; it is back in Drafts."
         ),
         Said::WhatsNew { version } => crate::views::updates::text::whats_new(version),
+        Said::Folder {
+            email,
+            op,
+            name,
+            outcome,
+        } => account_line(email, &folder(*op, name, outcome)),
+    }
+}
+
+/// Why a typed name can't be a folder name.
+pub fn bad_name(b: &BadName) -> String {
+    match b {
+        BadName::Empty => tr!("Type a name for the folder."),
+        BadName::TooLong => tr!("That name is too long."),
+        BadName::Character(c) => tr!("Folder names can't contain \u{201c}{0}\u{201d}.", c),
+        BadName::Delimiter(d) => tr!(
+            "This server uses \u{201c}{0}\u{201d} to separate folders, so a name can't contain it.",
+            d
+        ),
+    }
+}
+
+/// How a folder action ended.
+pub fn folder(op: FolderOp, name: &str, outcome: &FolderOutcome) -> String {
+    match (outcome, op) {
+        (FolderOutcome::Done, FolderOp::Create) => {
+            tr!("Folder \u{201c}{0}\u{201d} created.", name)
+        }
+        (FolderOutcome::Done, FolderOp::Rename) => {
+            tr!("Folder renamed to \u{201c}{0}\u{201d}.", name)
+        }
+        (FolderOutcome::Done, FolderOp::Delete) => {
+            tr!("Folder \u{201c}{0}\u{201d} deleted.", name)
+        }
+        (FolderOutcome::Waiting, _) => {
+            tr!("The server can't be reached now. The folder change is made when it is back.")
+        }
+        (FolderOutcome::Refused(words), FolderOp::Create) => tr!(
+            "The server didn't create \u{201c}{0}\u{201d}: {1}",
+            name,
+            words
+        ),
+        (FolderOutcome::Refused(words), FolderOp::Rename) => tr!(
+            "The server didn't rename the folder to \u{201c}{0}\u{201d}: {1}",
+            name,
+            words
+        ),
+        (FolderOutcome::Refused(words), FolderOp::Delete) => tr!(
+            "The server didn't delete \u{201c}{0}\u{201d}: {1}",
+            name,
+            words
+        ),
+        (FolderOutcome::BadName(b), _) => bad_name(b),
+        (FolderOutcome::Failed(p), FolderOp::Create) => {
+            tr!("Couldn't create \u{201c}{0}\u{201d}: {1}", name, problem(p))
+        }
+        (FolderOutcome::Failed(p), FolderOp::Rename) => tr!(
+            "Couldn't rename the folder to \u{201c}{0}\u{201d}: {1}",
+            name,
+            problem(p)
+        ),
+        (FolderOutcome::Failed(p), FolderOp::Delete) => {
+            tr!("Couldn't delete \u{201c}{0}\u{201d}: {1}", name, problem(p))
+        }
     }
 }
 

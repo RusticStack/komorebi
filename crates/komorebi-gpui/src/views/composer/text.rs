@@ -40,7 +40,6 @@ pub fn send_block(b: SendBlock) -> String {
         SendBlock::FixAddress(Field::Cc) => tr!("Fix the Cc address to send."),
         SendBlock::FixAddress(_) => tr!("Fix the Bcc address to send."),
         SendBlock::NoRecipient => tr!("Add a recipient to send."),
-        SendBlock::AttachmentsOver => tr!("Attachments are over 25 MB; remove some to send."),
     }
 }
 
@@ -75,16 +74,16 @@ pub fn draft_saved() -> String {
     tr!("Draft saved")
 }
 
-/// The attachments counter.
+/// The attachments' total size (Komorebi sets no limit, so it is only
+/// information).
 pub fn attach_total(size: &str) -> String {
-    tr!("Attachments {0} of 25 MB", size)
+    tr!("Attachments: {0}", size)
 }
 
 /// One file that could not be attached.
 pub fn attach_fail(f: &AttachFail) -> String {
     match &f.why {
         AttachWhy::Folder => tr!("{0}: folders can't be attached", f.name),
-        AttachWhy::TooBig => tr!("{0}: over Komorebi's 100 MB attachment limit", f.name),
         AttachWhy::Io(why) => tr!("{0}: {1}", f.name, why),
     }
 }
@@ -292,6 +291,30 @@ pub mod words {
     pub fn insert_table() -> String {
         tr!("Insert table")
     }
+    pub fn insert_picture() -> String {
+        tr!("Insert picture")
+    }
+    pub fn picture() -> String {
+        tr!("Picture")
+    }
+    pub fn alt_text() -> String {
+        tr!("Alt text…")
+    }
+    pub fn alt_text_field() -> String {
+        tr!("Alt text")
+    }
+    pub fn picture_bigger() -> String {
+        tr!("Make bigger (Ctrl+])")
+    }
+    pub fn picture_smaller() -> String {
+        tr!("Make smaller (Ctrl+[)")
+    }
+    pub fn picture_own_size() -> String {
+        tr!("Original size")
+    }
+    pub fn use_original() -> String {
+        tr!("Use original picture")
+    }
     pub fn delete_table() -> String {
         tr!("Delete table")
     }
@@ -333,6 +356,7 @@ pub mod words {
             Some(ColorId::Teal) => tr!("Teal"),
             Some(ColorId::Blue) => tr!("Blue"),
             Some(ColorId::Purple) => tr!("Purple"),
+            Some(ColorId::Rgb(..)) => tr!("Custom colour"),
         }
     }
     pub fn high() -> String {
@@ -374,6 +398,36 @@ pub mod words {
     pub fn justify() -> String {
         tr!("Justify")
     }
+    /// The format bar as a whole (UI Automation's toolbar name).
+    pub fn formatting() -> String {
+        tr!("Formatting")
+    }
+    pub fn alignment() -> String {
+        tr!("Alignment")
+    }
+    /// A box's value when the selection holds more than one.
+    pub fn mixed() -> String {
+        tr!("format value" => "Mixed")
+    }
+    /// A box's accessible name: its title and the value it shows.
+    pub fn valued(title: &str, value: &str) -> String {
+        tr!("{0}: {1}", title, value)
+    }
+    pub fn font_size_tip() -> String {
+        tr!("Font size (Ctrl+[ or Ctrl+])")
+    }
+    pub fn indent_tip() -> String {
+        tr!("Increase indent (Ctrl+M)")
+    }
+    pub fn outdent_tip() -> String {
+        tr!("Decrease indent (Ctrl+Shift+M)")
+    }
+    pub fn quote_tip() -> String {
+        tr!("Quote (Ctrl+Shift+Q)")
+    }
+    pub fn clear_tip() -> String {
+        tr!("Clear formatting (Ctrl+Space)")
+    }
 }
 
 #[cfg(test)]
@@ -397,7 +451,7 @@ mod tests {
             );
             assert_eq!(guard(Guard::NoSubject), "This message has no subject.");
             assert_eq!(address_invalid("j@"), "“j@” is not a valid address");
-            assert_eq!(attach_total("3 MB"), "Attachments 3 MB of 25 MB");
+            assert_eq!(attach_total("3 MB"), "Attachments: 3 MB");
             let fail = AttachFail {
                 name: "a".into(),
                 why: AttachWhy::Folder,

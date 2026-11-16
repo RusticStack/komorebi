@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run --release --example seed -- <new.sqlite3> <count> [eml-dir] [--drafts] [--outbox] [--signature] [--html-reply]
-//!     [--accounts] [--folders N] [--fold a2,f117]
+//!     [--accounts] [--folders N] [--fold a2,f117] [--icons]
 //! $env:KOMOREBI_OFFLINE=1; $env:KOMOREBI_DB="<new.sqlite3>"; cargo run --release
 //! ```
 //!
@@ -36,7 +36,10 @@
 //! N more folders (depths 0 to 3, about a third with unread mail) to the
 //! seed account, for scrolling and folding at scale. `--fold a2,f117`
 //! saves those folded lines (the `nav_folded` setting); the ids of the
-//! accounts and of the folders with subfolders are printed.
+//! accounts and of the folders with subfolders are printed. `--icons` gives
+//! the first account a chosen image (a blue square) and, with `--accounts`,
+//! the last a dark mark on a clear ground (drawn on a backing in the dark
+//! theme); the middle one keeps none.
 
 use anyhow::{Context, Result, bail};
 use komorebi::db::{Db, DraftRow, NewAccount, NewHeader, Outbox};
@@ -48,7 +51,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 fn main() -> Result<()> {
-    let usage = "usage: seed <new.sqlite3> <count> [eml-dir] [--drafts] [--outbox] [--signature] [--html-reply] [--accounts] [--folders N] [--fold a2,f117]";
+    let usage = "usage: seed <new.sqlite3> <count> [eml-dir] [--drafts] [--outbox] [--signature] [--html-reply] [--accounts] [--folders N] [--fold a2,f117] [--icons]";
     let mut all: Vec<String> = std::env::args().skip(1).collect();
     // The flags with a value, taken out first.
     let mut value = |flag: &str| -> Result<Option<String>> {
@@ -72,10 +75,11 @@ fn main() -> Result<()> {
     let signature = all.iter().any(|a| a == "--signature");
     let html_reply = all.iter().any(|a| a == "--html-reply");
     let accounts = all.iter().any(|a| a == "--accounts");
+    let icons = all.iter().any(|a| a == "--icons");
     let mut args = all.into_iter().filter(|a| {
         !matches!(
             a.as_str(),
-            "--drafts" | "--outbox" | "--signature" | "--html-reply" | "--accounts"
+            "--drafts" | "--outbox" | "--signature" | "--html-reply" | "--accounts" | "--icons"
         )
     });
     let path = PathBuf::from(args.next().context(usage)?);
@@ -92,9 +96,13 @@ fn main() -> Result<()> {
         let long = db.add_signature(
             "Seed",
             &Doc::from_plain("Seed Account\nKomorebi test data"),
-            None,
+            &Default::default(),
         )?;
-        let short = db.add_signature("Seed (short)", &Doc::from_plain("Seed"), None)?;
+        let short = db.add_signature(
+            "Seed (short)",
+            &Doc::from_plain("Seed"),
+            &Default::default(),
+        )?;
         db.set_account_signatures(account, Some(long), Some(short))?;
     }
     let mut added = 0;
@@ -228,6 +236,9 @@ fn main() -> Result<()> {
     }
     if let Some(fold) = &fold {
         db.set_setting("nav_folded", fold)?;
+    }
+    if icons {
+        add_icons(&db)?;
     }
     if accounts || extra_folders > 0 || fold.is_some() {
         print_tree(&db)?;
@@ -460,6 +471,50 @@ fn print_tree(db: &Db) -> Result<()> {
                 println!("  f{}  {}", f.id, f.name);
             }
         }
+    }
+    Ok(())
+}
+
+/// `--icons`: a chosen image for the first account and, when there are
+/// more, a dark mark on a clear ground for the last.
+fn add_icons(db: &Db) -> Result<()> {
+    use komorebi::favicon;
+    let side = 32u32;
+    let square: Vec<u8> = (0..side * side)
+        .flat_map(|i| {
+            let (x, y) = (i % side, i / side);
+            let inside = (3..29).contains(&x) && (3..29).contains(&y);
+            if inside {
+                [0x1f, 0x6f, 0xd8, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+        })
+        .collect();
+    let mark: Vec<u8> = (0..side * side)
+        .flat_map(|i| {
+            let (x, y) = (i % side, i / side);
+            let bar = (6..12).contains(&x) || (20..26).contains(&x) || (6..12).contains(&y);
+            if bar && (4..28).contains(&y) {
+                [0x10, 0x10, 0x14, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+        })
+        .collect();
+    let all = db.accounts()?;
+    let now = chrono::Utc::now().timestamp();
+    let chosen = |id, px: &[u8]| {
+        favicon::choose(db, id, &favicon::encode_png(px, side, side), now)
+            .map_err(|r| anyhow::anyhow!("icon refused: {r:?}"))
+    };
+    if let Some(first) = all.first() {
+        chosen(first.id, &square)?;
+    }
+    if all.len() > 1
+        && let Some(last) = all.last()
+    {
+        chosen(last.id, &mark)?;
     }
     Ok(())
 }

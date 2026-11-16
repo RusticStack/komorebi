@@ -1033,28 +1033,28 @@ sub-page is gone; the account page (Edit) is unchanged.
 ### Composer toolbar
 
 A CommandBar (the pattern of "CommandBar / AppBarButton" above) in the
-composer, one Tab stop with arrow-key roving focus, never clipped. Groups,
-in order: font ComboBox (140) and size ComboBox (64); Bold, Italic,
-Underline, Strikethrough (ToggleButtons exposing `accessible-checked`);
-font colour (a SplitButton whose flyout is a 4x3 grid of named swatches,
-Automatic first); bulleted and numbered list, decrease and increase indent;
-alignment (a DropDownButton of four options); link, quote, table (a flyout
-with a 10x10 hover grid labelled "{} x {} table" plus Rows and Columns
-NumberBoxes for the keyboard); clear formatting. On the right: Signature (a
-DropDownButton), High and Low importance, and More (...), which holds
-Preview and "Switch to plain text" / "Switch to formatted text". Below
-1040 px (or a composer under 940 px, which covers Portuguese) the font
-group, the indents and the alignment move into More; under 700 px the
-importance toggles follow, and under 560 px Quote and Clear formatting,
-so the bar never clips. In plain mode only Signature, importance and More
-remain. Komorebi's font and size boxes are the std ComboBox, each its own
-Tab stop before the buttons' one; the Rows and Columns boxes are
-ComboBoxes of 1 to 10. With the caret in a table the Table button's menu
-offers insert row above and below, insert column left and right, and
-delete row, column and table. Swapping to plain text asks first in a
-ContentDialog and can be undone (Ctrl+Z, or switching back before
-typing). Colours follow the system text colour in high contrast.
-
+composer, one Tab stop with arrow-key roving focus (Left and Right along
+what is on the bar, wrapping; Home and End), never wrapped and never
+clipped. Since 1.0.3 it follows Gmail's order (`views/composer/format_bar.rs`,
+shared with the signature editor): the font box (120 px, the font at the
+caret) and the size box (52 px); Bold, Italic, Underline (toggles exposing
+their checked state) and the font colour (a menu, Automatic first); the
+alignment box (its glyph shows the alignment at the caret; left, centre,
+right and justify); numbered and bulleted list, decrease and increase
+indent; quote, strikethrough and clear formatting. Then Link, Signature (a
+DropDownButton) and More (...), which holds a table, High and Low
+importance, Preview, "Switch to plain text" / "Switch to formatted text"
+and Open in new window. 1 px rules in the line colour part the groups. A
+selection with two fonts, sizes, colours or alignments shows the box empty
+and names it "Mixed". When the composer is too narrow, controls leave the
+bar for the head of More in one fixed order: clear formatting,
+strikethrough, quote, increase and decrease indent, the alignment, size and
+font boxes, the colour, the lists, then Underline, Italic and Bold; Link,
+Signature and More stay. In plain mode only Signature and More remain. A
+signature's bar is the same less the quote and the table. With the caret in
+a table, More offers insert row above and below, insert column left and
+right, and delete row, column and table. Swapping to plain text can be
+undone (Ctrl+Z, or switching back before typing).
 ### RichEditBox mapping
 
 Komorebi has no RichEditBox: `RichBody` is a TextBox-framed control whose

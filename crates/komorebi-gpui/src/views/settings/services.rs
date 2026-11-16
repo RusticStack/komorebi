@@ -27,6 +27,9 @@ pub type StorePassword = fn(i64, &str) -> anyhow::Result<()>;
 /// Forgets an account's password.
 pub type ForgetPassword = fn(i64) -> anyhow::Result<()>;
 
+/// Reads what classic Outlook keeps on this PC (Import from Outlook).
+pub type FindOutlook = fn() -> komorebi::import::outlook::Found;
+
 /// The outside world of the account forms.
 #[derive(Clone, Copy)]
 pub struct Services {
@@ -36,6 +39,7 @@ pub struct Services {
     pub forget_password: ForgetPassword,
     pub probe: Probe,
     pub lookup: Lookup,
+    pub outlook: FindOutlook,
     /// `KOMOREBI_OFFLINE`: no check, lookup or probe is tried.
     pub offline: bool,
 }
@@ -57,6 +61,7 @@ pub fn real() -> Services {
         forget_password: komorebi::secrets::delete_password,
         probe: real_probe,
         lookup: real_lookup,
+        outlook: real_outlook,
         offline: komorebi::dev_var("KOMOREBI_OFFLINE").is_some(),
     }
 }
@@ -69,6 +74,15 @@ fn real_probe(server: &Server, kind: Kind) -> Result<(Vec<u8>, Option<Vec<u8>>),
 
 fn real_lookup(email: &str) -> Outcome {
     komorebi::mail::discover::discover(email, &komorebi::mail::discover::system_lookups())
+}
+
+/// Outlook's accounts and signatures. Nothing during a snapshot: it shows
+/// made-up ones (`ob-import`), never this PC's.
+fn real_outlook() -> komorebi::import::outlook::Found {
+    if komorebi::dev_var("KOMOREBI_SNAPSHOT").is_some() {
+        return komorebi::import::outlook::Found::default();
+    }
+    komorebi::import::outlook::discover()
 }
 
 /// Fakes that touch nothing and refuse what would need the outside world.
@@ -103,6 +117,7 @@ pub fn refusing() -> Services {
             })
         },
         lookup: |_| Outcome::default(),
+        outlook: komorebi::import::outlook::Found::default,
         offline: false,
     }
 }

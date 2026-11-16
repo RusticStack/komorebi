@@ -11,8 +11,9 @@
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement, Render, Role, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div, prelude::*, px, svg,
+    InteractiveElement as _, IntoElement, ParentElement, PathPromptOptions, Render, Role,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task,
+    Window, div, prelude::*, px, svg,
 };
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -69,6 +70,8 @@ pub enum EditorEvent {
     /// Move up (true) or Move down: the account's place in the folder pane
     /// and the lists changed.
     Moved { id: i64, up: bool },
+    /// Its icon was chosen or removed.
+    IconChanged,
 }
 
 /// Whether `a`'s servers are a preset's (no Find settings on its page, as
@@ -156,6 +159,8 @@ pub struct AccountEditor {
     /// The account's place among the accounts (index, count), for Move up
     /// and Move down.
     place: (usize, usize),
+    /// Why the image chosen for the account's icon was not taken.
+    icon_error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -229,6 +234,7 @@ impl AccountEditor {
             find_note: String::new(),
             find_stale: false,
             place,
+            icon_error: None,
             roles: RoleEdit::load(&db, account.id),
             signatures: db.signatures().unwrap_or_default(),
             pins: FormPins::for_account(&account),
@@ -656,6 +662,104 @@ impl AccountEditor {
             Err(e) => self.line = Some(Line::NotSaved(format!("{e:#}"))),
         }
         cx.notify();
+    }
+
+    /// Choose an image for the account's icon (a PNG, ICO, JPEG, GIF or BMP
+    /// file; it is made into a 40 px icon and kept in the cache).
+    pub fn choose_icon(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr!("Choose an image").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = paths.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| this.set_icon_from(&path, cx));
+            }
+        })
+        .detach();
+    }
+
+    /// The image at `path` as the account's icon, or why not.
+    pub fn set_icon_from(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let too_large =
+            std::fs::metadata(path).is_ok_and(|m| m.len() > komorebi::favicon::MAX_CHOSEN as u64);
+        let result = if too_large {
+            Err(komorebi::favicon::Refusal::TooLarge)
+        } else {
+            std::fs::read(path)
+                .map_err(|_| komorebi::favicon::Refusal::Undecodable)
+                .and_then(|bytes| {
+                    let now = chrono::Utc::now().timestamp();
+                    komorebi::favicon::choose(&self.db, self.old.id, &bytes, now)
+                })
+        };
+        self.icon_error = result.err().map(|r| match r {
+            komorebi::favicon::Refusal::TooLarge => tr!("That image is too large."),
+            _ => tr!("That file isn't a PNG, ICO, JPEG, GIF or BMP image."),
+        });
+        cx.emit(EditorEvent::IconChanged);
+        cx.notify();
+    }
+
+    /// Why the last image chosen was not taken.
+    pub fn icon_error(&self) -> Option<&str> {
+        self.icon_error.as_deref()
+    }
+
+    /// Remove the chosen image: the domain's or the provider's icon shows.
+    pub fn remove_icon(&mut self, cx: &mut Context<Self>) {
+        komorebi::favicon::remove(&self.db, self.old.id).ok();
+        self.icon_error = None;
+        cx.emit(EditorEvent::IconChanged);
+        cx.notify();
+    }
+
+    /// The account's icon card: the icon shown now, Choose image, and
+    /// Remove image while one is chosen.
+    fn icon_card(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let t = cx.tokens().clone();
+        let a = &self.old;
+        let chosen = komorebi::favicon::load(&self.db, a.id)
+            .is_some_and(|k| k.origin == komorebi::favicon::Origin::User);
+        let preview = crate::views::account_icon::look(&self.db, a)
+            .map(|l| crate::views::account_icon::slot(&l, window.scale_factor() >= 1.5, &t));
+        let note = match &self.icon_error {
+            Some(e) => e.clone(),
+            None if chosen => tr!("Your image is shown beside this account in the folder pane."),
+            None => tr!(
+                "Without an image of its own the account shows its mail domain's icon or its provider's, if there is one (Settings > Privacy)."
+            ),
+        };
+        Card::new("account-icon", tr!("Account icon"))
+            .icon(Icon::Image)
+            .note(note)
+            .control(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(space::SP_2))
+                    .children(preview)
+                    .child(
+                        Button::new("account-icon-choose")
+                            .label(tr!("Choose image"))
+                            .name(tr!("Choose an image for {0}", a.email))
+                            .variant(Variant::OnInset)
+                            .on_click(cx.listener(|this, _, _, cx| this.choose_icon(cx))),
+                    )
+                    .when(chosen, |el| {
+                        el.child(
+                            Button::new("account-icon-remove")
+                                .label(tr!("Remove image"))
+                                .name(tr!("Remove the image of {0}", a.email))
+                                .variant(Variant::OnInset)
+                                .on_click(cx.listener(|this, _, _, cx| this.remove_icon(cx))),
+                        )
+                    }),
+            )
     }
 
     /// Download again: asked first; the shell replaces the workers.
@@ -1414,6 +1518,7 @@ impl Render for AccountEditor {
                         .child(notify)
                         .child(group_head(tr!("account page group" => "Account"), cx))
                         .child(fields)
+                        .child(div().pt(px(space::SP_4)).child(self.icon_card(window, cx)))
                         .child(group_head(tr!("Signature"), cx))
                         .child(self.signature_card(false, cx))
                         .child(self.signature_card(true, cx))

@@ -374,8 +374,8 @@ pub fn sig_name_taken() -> String {
     tr!("A signature with this name already exists.")
 }
 
-pub fn sig_logo_refused() -> String {
-    tr!("The logo must be a PNG or JPEG file of 200 KB or less.")
+pub fn sig_picture_refused() -> String {
+    tr!("A signature can hold PNG, JPEG, GIF and WebP pictures of 10 MB or less, not other files.")
 }
 
 pub fn sig_none() -> String {

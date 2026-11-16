@@ -40,6 +40,25 @@ above them (Settings → Accounts → Add account opens the same steps):
 "You're all set" then shows the first download (newest mail first) until
 you press "Open your inbox", which opens the new Inbox.
 
+### Import from Outlook
+
+If classic Outlook is on this PC, the welcome also shows **Import from
+Outlook** (Settings → Accounts → Import from Outlook opens it at any
+time). It lists the accounts and signatures Outlook keeps on this PC, each
+with a checkbox; an address already in Komorebi is marked and can't be
+ticked. Your mail is not copied: it downloads again from the server.
+Continue saves the ticked signatures with their layout, colours and the
+pictures kept beside them on this PC (a picture Outlook links from the
+web is not fetched, and the list says so), then takes each ticked account through Sign in with everything
+filled in from Outlook, so you only type its password (Outlook's saved
+passwords are never read). A POP account is set up with IMAP from your
+provider's settings, to check; an Exchange, Microsoft 365 or Outlook.com
+account says it needs Microsoft sign-in, which Komorebi doesn't have yet.
+"Skip this account" goes to the next one. An added account gets the name
+Outlook used and Outlook's default signatures for new mail and replies.
+The new Outlook keeps everything online, so it has nothing on this PC to
+import.
+
 ## Install
 
 Download the latest release from the GitHub Releases page (Windows 10/11
@@ -70,8 +89,8 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-1.0.2-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-1.0.2-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-1.1.0-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-1.1.0-setup.exe .\SHA256SUMS
 ```
 
 How releases are made, signed and published is in
@@ -140,7 +159,10 @@ open; screen readers are told it too.
 | F6 / Shift+F6 | Next / previous pane: the title bar's search, folders, message list, reader (toolbar, composer or the selection's buttons) |
 | Space or Enter | Press the focused button or toggle |
 | Up / Down, Home / End, Enter or Space | Move through the folders and open one (while they have the focus; Left / Right fold an account) |
-| Shift+F10 or Menu | In the folders: the row's menu (Mark all as read and Collapse all; on an account also Refresh and Account settings; on a rail tile its Inbox, Sent and Archive) |
+| Shift+F10 or Menu | In the folders: the row's menu (Mark all as read and Collapse all; New subfolder, and Rename and Delete folder on a folder that isn't special; on an account also New folder, Refresh and Account settings; on a rail tile its Inbox, Sent and Archive) |
+| Ctrl+Shift+N | New folder: a name field in the folder pane, in the keyboard line's account (else the open folder's); Enter makes it on the server, Esc leaves it |
+| F2 | In the folders: rename the folder in place (not Inbox, Sent, Drafts, Trash, Junk or Archive) |
+| Delete (in the folders) | Delete the folder, after asking: it, its subfolders and their messages go on the server, not to Trash (never a special folder) |
 | Ctrl+R / Ctrl+Shift+R | Reply / Reply all |
 | Ctrl+Shift+F | Forward |
 | Ctrl+Shift+V | Move to: the Move list with its filter box focused (type to narrow it, Enter moves to the first folder listed) |

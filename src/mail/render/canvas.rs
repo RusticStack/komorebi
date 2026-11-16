@@ -52,6 +52,21 @@ impl Engine {
         width: f32,
         align: TextAlign,
     ) -> Layout<Brush> {
+        self.text_layout_boxed(text, base, spans, &[], width, align)
+    }
+
+    /// [`Engine::text_layout`] with boxes in the text flow (the editor's
+    /// pictures): each `(index, width, height)` is placed at that byte
+    /// offset, its id its place in `boxes`.
+    pub fn text_layout_boxed(
+        &mut self,
+        text: &str,
+        base: &Span<'_>,
+        spans: &[Span<'_>],
+        boxes: &[(usize, f32, f32)],
+        width: f32,
+        align: TextAlign,
+    ) -> Layout<Brush> {
         let mut end = text.len().min(MAX_LAYOUT_TEXT);
         while end > 0 && !text.is_char_boundary(end) {
             end = end.saturating_sub(1);
@@ -105,6 +120,18 @@ impl Engine {
                     r.clone(),
                 );
             }
+        }
+        for (i, &(index, w, h)) in boxes.iter().enumerate() {
+            if index > end || !text.is_char_boundary(index) {
+                continue;
+            }
+            b.push_inline_box(parley::InlineBox {
+                id: i as u64,
+                kind: parley::InlineBoxKind::InFlow,
+                index,
+                width: w.max(1.0),
+                height: h.max(1.0),
+            });
         }
         let mut layout = b.build(text);
         let width = if width.is_finite() {

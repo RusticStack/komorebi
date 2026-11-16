@@ -1,7 +1,8 @@
 //! The composer (phase 4; mockup `compose`): a view of the active draft of
 //! `komorebi::compose::Drafts`, the model both apps share. The header (the
 //! title, Attach, Discard, Send), the From, To, Cc, Bcc and Subject rows
-//! (recipients as chips, `recipients.rs`), the format bar (`toolbar.rs`),
+//! (recipients as chips, `recipients.rs`), the format bar (`toolbar.rs`,
+//! over the bar shared with the signature editor, `format_bar.rs`),
 //! the painted rich editor (`editor.rs`) or a plain-text body, the
 //! attachments (`attachments.rs`), the Signature menu (`signatures.rs`)
 //! and the caption under it all ("Draft saved 14:05").
@@ -20,6 +21,9 @@ pub mod a11y;
 pub mod attachments;
 pub mod controller;
 pub mod editor;
+pub mod format_bar;
+/// Pictures read and prepared for the formatted text.
+pub mod pictures;
 pub mod preview;
 pub mod recipients;
 mod sends;
@@ -41,7 +45,7 @@ use gpui::{
 };
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::input::{Enter, Escape, InputEvent, InputState, Textarea, TextareaState};
-use komorebi::compose::{ComposeDefaults, Drafts, Field, Guard, SendBlock};
+use komorebi::compose::{ComposeDefaults, DraftId, Drafts, Field, Guard, SendBlock};
 use komorebi::db::{self, Db};
 
 use self::editor::{EditorEvent, RichEditor};
@@ -185,6 +189,8 @@ pub struct ComposerView {
     subject: Entity<InputState>,
     link: Entity<InputState>,
     link_open: bool,
+    /// The link row edits the selected picture's alt text.
+    link_alt: bool,
     link_error: bool,
     /// The send guards' question, while it shows.
     guard: Option<Guard>,
@@ -201,6 +207,11 @@ pub struct ComposerView {
     last_edit: Instant,
     /// When each saved row was last copied to the server.
     server_saves: HashMap<i64, Instant>,
+    /// Saved drafts whose attachment and picture copies are being written
+    /// off the UI thread: by row, the draft, how many saves are writing,
+    /// a server copy asked for meanwhile (and whether at once), and whether
+    /// Send was pressed meanwhile (it goes once they are written).
+    writing: HashMap<i64, (DraftId, usize, Option<bool>, bool)>,
     /// The app's sends in their undo window (shared by every composer).
     sends: sends::Sends,
     /// Fields are being filled from the draft: their events are not edits.
@@ -224,10 +235,9 @@ pub struct ComposerView {
     own_place: bool,
     /// The composer is a composer window's (no Open in new window).
     windowed: bool,
-    /// The formatting row's buttons (Bold to Link): one Tab stop, the one
-    /// last used; Left and Right move along the row (`toolbar.rs`).
-    fmt_focus: Vec<FocusHandle>,
-    fmt_at: usize,
+    /// The format bar's buttons: one Tab stop, the one last used; Left and
+    /// Right move along the bar; and its measured width (`format_bar.rs`).
+    pub(crate) fmt: format_bar::BarState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -320,6 +330,7 @@ impl ComposerView {
             subject,
             link,
             link_open: false,
+            link_alt: false,
             link_error: false,
             guard: None,
             status: None,
@@ -329,6 +340,7 @@ impl ComposerView {
             autosave: None,
             last_edit: now,
             server_saves: HashMap::new(),
+            writing: HashMap::new(),
             sends,
             filling: false,
             focused_field: None,
@@ -339,10 +351,7 @@ impl ComposerView {
             drop_hover: false,
             own_place: false,
             windowed: false,
-            fmt_focus: (0..toolbar::FORMAT_BUTTONS)
-                .map(|_| cx.focus_handle())
-                .collect(),
-            fmt_at: 0,
+            fmt: format_bar::BarState::new(cx),
             _subscriptions: subscriptions,
         }
     }
@@ -740,7 +749,10 @@ impl Render for ComposerView {
         if !cx.has_active_drag() {
             self.drop_hover = false;
         }
-        let dropping = self.drop_hover.then(|| render_drop_overlay(&t));
+        // Over the formatted text, image files go in the text (the editor
+        // shows where); anywhere else they are attached.
+        let on_text = self.body.read(cx).drop_over();
+        let dropping = (self.drop_hover && !on_text).then(|| render_drop_overlay(&t));
         div()
             .id("composer")
             .key_context(CONTEXT)

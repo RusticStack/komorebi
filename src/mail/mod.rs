@@ -39,6 +39,9 @@ mod fake;
 mod fake_imapd;
 #[cfg(test)]
 pub(crate) mod fake_tls;
+#[cfg(test)]
+mod folder_tests;
+pub mod folders;
 pub mod html;
 pub mod ical;
 mod idle;
@@ -182,6 +185,39 @@ pub enum Event {
     /// A draft's new server copy replaced one saved from another account
     /// (its From changed): that account's worker should remove it.
     DraftCopyLeft(db::ServerCopy),
+    /// A folder action ([`Job::CreateFolder`], [`Job::RenameFolder`],
+    /// [`Job::DeleteFolder`]) ended, or waits for the server. On
+    /// [`FolderOutcome::Done`] a [`Event::FolderChanged`] came first.
+    FolderDone {
+        account_id: i64,
+        op: FolderOp,
+        /// The folder's name as the user knows it (as typed, or as shown).
+        name: String,
+        outcome: FolderOutcome,
+    },
+}
+
+/// What a folder action does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderOp {
+    Create,
+    Rename,
+    Delete,
+}
+
+/// How a folder action ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FolderOutcome {
+    Done,
+    /// The server can't be reached now: the action runs on the next
+    /// connection that works (as a message action does, [`Parked`]).
+    Waiting,
+    /// The server said no, in its own words.
+    Refused(String),
+    /// The name can't be used on this server (its delimiter, a character).
+    BadName(folders::BadName),
+    /// Anything else (the folder is gone, the cache failed).
+    Failed(Problem),
 }
 
 /// How a send ended. Only [`Outcome::Retry`] is ever sent again without
@@ -378,6 +414,24 @@ pub enum Job {
     DeleteDraft(db::ServerCopy),
     /// Sign in ahead of the first interactive action.
     Warm,
+    /// Create folder `name` (as typed) under folder `parent`, or at the top
+    /// of the account's folders, and subscribe to it (interactive worker;
+    /// the folder list is read again after).
+    CreateFolder {
+        parent: Option<i64>,
+        name: String,
+    },
+    /// Rename folder `folder_id` to `name` (as typed), under the same
+    /// parent; its subfolders and cached mail go with it.
+    RenameFolder {
+        folder_id: i64,
+        name: String,
+    },
+    /// Delete folder `folder_id`, its subfolders and all the mail in them,
+    /// on the server. Never a special folder.
+    DeleteFolder {
+        folder_id: i64,
+    },
 }
 
 pub struct Workers {
@@ -597,6 +651,14 @@ impl Job {
             | Job::Delete { folder_id, .. } => *folder_id,
             _ => 0,
         }
+    }
+
+    /// A folder action (create, rename, delete).
+    fn is_folder_action(&self) -> bool {
+        matches!(
+            self,
+            Job::CreateFolder { .. } | Job::RenameFolder { .. } | Job::DeleteFolder { .. }
+        )
     }
 
     /// The messages this job acts on, as (folder id, UID): every one is
@@ -889,6 +951,19 @@ impl Worker {
                     self.act(db, job, false);
                 }
             }
+            job @ (Job::CreateFolder { .. }
+            | Job::RenameFolder { .. }
+            | Job::DeleteFolder { .. }) => {
+                // Folder actions keep their order behind whatever waits.
+                if !self.parked.is_empty() {
+                    self.retry_parked(db);
+                }
+                if self.parked.is_empty() {
+                    self.act(db, job, false);
+                } else {
+                    self.park_folder_action(db, job);
+                }
+            }
             Job::Send { row } => self.send_row(db, row),
             Job::SaveDraft { row } => self.save_draft(db, row),
             Job::DeleteDraft(copy) => self.remove_draft_copy(db, copy),
@@ -913,6 +988,9 @@ impl Worker {
     /// count as done. Any other failure is reported and the cache brought
     /// back to the server's state ([`Worker::undo`]).
     fn act(&mut self, db: &mut Db, job: Job, retry: bool) {
+        if job.is_folder_action() {
+            return self.folder_act(db, job, retry);
+        }
         let result = self.try_act(db, &job);
         let e = match result {
             Ok(expunged) => {
@@ -969,6 +1047,143 @@ impl Worker {
             job,
             since: Instant::now(),
         });
+    }
+
+    /// The op and the name the user knows a folder action by (`None`: the
+    /// job is not one).
+    fn folder_label(&self, db: &Db, job: &Job) -> Option<(FolderOp, String)> {
+        let shown = |id: i64| {
+            db.folder(id)
+                .ok()
+                .flatten()
+                .map_or_else(String::new, |f| f.display)
+        };
+        Some(match job {
+            Job::CreateFolder { name, .. } => (FolderOp::Create, name.trim().to_string()),
+            Job::RenameFolder { name, .. } => (FolderOp::Rename, name.trim().to_string()),
+            Job::DeleteFolder { folder_id } => (FolderOp::Delete, shown(*folder_id)),
+            _ => return None,
+        })
+    }
+
+    /// Run a folder action, then read the folder list again. Out of reach,
+    /// it waits like a message action ([`Parked`], one more try on the next
+    /// connection that works); every end is told ([`Event::FolderDone`]).
+    fn folder_act(&mut self, db: &mut Db, job: Job, retry: bool) {
+        let Some((op, name)) = self.folder_label(db, &job) else {
+            return;
+        };
+        let outcome = match self.try_folder(db, &job) {
+            Ok(()) => FolderOutcome::Done,
+            Err(e) => {
+                if let Some(bad) = e.chain().find_map(|c| c.downcast_ref::<folders::BadName>()) {
+                    FolderOutcome::BadName(bad.clone())
+                } else if !retry
+                    && matches!(
+                        errors::classify(&e),
+                        Class::Offline | Class::TooManyConnections
+                    )
+                {
+                    return self.park_folder_action(db, job);
+                } else {
+                    match imap::failure(&e) {
+                        Some(imap::Failure::No(text) | imap::Failure::Bad(text)) => {
+                            FolderOutcome::Refused(server_words(&text))
+                        }
+                        _ => FolderOutcome::Failed(Problem::of(&e)),
+                    }
+                }
+            }
+        };
+        if outcome == FolderOutcome::Done {
+            (self.notify)(Event::FolderChanged { folder_id: None });
+        }
+        (self.notify)(Event::FolderDone {
+            account_id: self.account.id,
+            op,
+            name,
+            outcome,
+        });
+    }
+
+    /// Hold a folder action for the next connection that works, and say so.
+    fn park_folder_action(&mut self, db: &Db, job: Job) {
+        if let Some((op, name)) = self.folder_label(db, &job) {
+            (self.notify)(Event::FolderDone {
+                account_id: self.account.id,
+                op,
+                name,
+                outcome: FolderOutcome::Waiting,
+            });
+        }
+        self.park(job);
+    }
+
+    /// The server calls of a folder action, then the folder list read
+    /// again (on the same connection). Special folders are refused.
+    fn try_folder(&mut self, db: &Db, job: &Job) -> Result<()> {
+        let account = self.account.id;
+        let folder = |id: i64| -> Result<Folder> {
+            let f = db
+                .folder(id)?
+                .filter(|f| f.account_id == account)
+                .ok_or(errors::FolderGone)?;
+            Ok(f)
+        };
+        let known: Vec<String> = db
+            .folders()?
+            .into_iter()
+            .filter(|f| f.account_id == account)
+            .map(|f| f.name)
+            .collect();
+        let ordinary = |f: &Folder| -> Result<()> {
+            if f.role != Role::Other {
+                anyhow::bail!(
+                    "{} is a special folder: it can't be renamed or deleted",
+                    f.name
+                );
+            }
+            Ok(())
+        };
+        match job {
+            Job::CreateFolder { parent, name } => {
+                let parent = parent.map(folder).transpose()?;
+                self.with_imap(|imap, _| {
+                    let h = imap.hierarchy(&known)?;
+                    let full = h.child(parent.as_ref().map(|p| p.name.as_str()), name)?;
+                    imap.create_folder(&full)?;
+                    refresh_folders(imap, db, account).map(drop)
+                })
+            }
+            Job::RenameFolder { folder_id, name } => {
+                let f = folder(*folder_id)?;
+                ordinary(&f)?;
+                self.with_imap(|imap, _| {
+                    let h = imap.hierarchy(&known)?;
+                    let to = h.renamed(&f.name, name)?;
+                    if to != f.name {
+                        imap.rename_folder(&f.name, &to)?;
+                        db.rename_folders(account, &f.name, &to, h.delimiter.as_deref())?;
+                    }
+                    refresh_folders(imap, db, account).map(drop)
+                })
+            }
+            Job::DeleteFolder { folder_id } => {
+                let f = folder(*folder_id)?;
+                ordinary(&f)?;
+                self.with_imap(|imap, _| {
+                    let h = imap.hierarchy(&known)?;
+                    if let Some(d) = h.delimiter.as_deref() {
+                        for child in imap.subfolders(&f.name, d)? {
+                            imap.delete_folder(&child)?;
+                        }
+                    }
+                    imap.delete_folder(&f.name)?;
+                    refresh_folders(imap, db, account).map(drop)
+                })
+            }
+            _ => Ok(()),
+        }
     }
 
     /// The server calls of [`Worker::act`]: what a move or delete left
@@ -1034,7 +1249,18 @@ impl Worker {
                 if expired.is_empty() {
                     return;
                 }
+                let problem = Problem::of(&e);
                 self.fail(e);
+                for p in &expired {
+                    if let Some((op, name)) = self.folder_label(db, &p.job) {
+                        (self.notify)(Event::FolderDone {
+                            account_id: self.account.id,
+                            op,
+                            name,
+                            outcome: FolderOutcome::Failed(problem.clone()),
+                        });
+                    }
+                }
                 for p in expired {
                     self.undo(db, &p.job);
                     for key in p.job.message_keys() {
@@ -1317,19 +1543,38 @@ impl Worker {
             return Ok(());
         }
         let mut attachments = Vec::with_capacity(files.len());
+        let mut images = rich::Images::default();
         for f in files {
             let data = db.read_draft_file(row, &f, MAX_DRAFT_COPY_ATTACHMENTS as u64)?;
-            attachments.push(smtp::OutAttachment {
-                filename: f.name,
-                data,
-            });
+            match f.cid {
+                Some(cid) => {
+                    if let Some((file, _, _)) = rich::ImageFile::new(data) {
+                        images.insert(cid, file);
+                    }
+                }
+                None => attachments.push(smtp::OutAttachment {
+                    filename: f.name,
+                    data,
+                }),
+            }
         }
         // A formatted draft is saved as it is stored (tagged, so it reads
-        // back exactly), with its signature logo as the related part.
+        // back exactly), with the pictures it shows as related parts.
         let (body, body_html, inline) = match draft.body_rich.as_deref() {
             Some(stored) => {
                 let inline = match rich::import::strict(stored) {
-                    Some(doc) => db.inline_images(&doc)?,
+                    Some(doc) => {
+                        let images = db.with_signature_images(&doc, &images)?;
+                        images
+                            .subset(&doc.image_cids())
+                            .into_iter()
+                            .map(|(cid, f)| smtp::InlineImage {
+                                cid,
+                                mime: f.mime.to_string(),
+                                data: f.data.to_vec(),
+                            })
+                            .collect()
+                    }
                     None => Vec::new(),
                 };
                 (draft.body.clone(), Some(stored.to_string()), inline)
@@ -1939,6 +2184,16 @@ fn sync_delta(
         }
     }
     Ok(Some(out))
+}
+
+/// A server's NO or BAD text without its response code (`[CANNOT] ...`).
+fn server_words(text: &str) -> String {
+    let t = text.trim();
+    let words = t
+        .strip_prefix('[')
+        .and_then(|r| r.split_once(']'))
+        .map_or(t, |(_, rest)| rest.trim());
+    if words.is_empty() { t } else { words }.to_string()
 }
 
 /// Refresh an account's folder list from the server and return its folders

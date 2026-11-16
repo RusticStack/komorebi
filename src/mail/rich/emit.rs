@@ -26,12 +26,34 @@ pub(super) const QUOTE_CLOSE: &str = "<!--/komorebi:quote-->";
 const BLOCKQUOTE: &str =
     r#"<blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">"#;
 const TABLE: &str = r#"<table style="border-collapse:collapse">"#;
-const TD: &str = r#"<td style="border:1px solid #c8c8c8;padding:4px 8px;vertical-align:top">"#;
+/// A layout table: no rules, and no spacing Outlook would add.
+const TABLE_PLAIN: &str =
+    r#"<table border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse">"#;
+const TD_BORDER: &str = "border:1px solid #c8c8c8;";
+const TD_PAD: &str = "padding:4px 8px;vertical-align:";
+/// How a picture is drawn: its size from the `width` and `height`
+/// attributes (Outlook's Word engine reads only those), shrunk to fit a
+/// narrow screen where CSS works (Gmail, phones).
+pub(super) const IMG_STYLE: &str = "border:0;max-width:100%;height:auto";
+/// A block picture's line (pictures and no text, outside a table) when
+/// sent: half a text line above and below it, as in the editor.
+const BLOCK_PIC_PAD: &str = "padding:.65em 0";
 const HEAD: &str = "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"></head><body>";
 
-/// The full HTML document of `doc`.
+/// The full HTML document of `doc`, each picture shown by its `cid:`.
 pub fn html(doc: &Doc, mode: Mode) -> String {
+    html_with(doc, mode, &cid_src)
+}
+
+fn cid_src(i: &InlineImage) -> Option<String> {
+    Some(format!("cid:{}", i.cid))
+}
+
+/// [`html`] with each picture's source from `src` (`None`: the picture is
+/// left out), as the clipboard's copy shows them by `data:` address.
+pub fn html_with(doc: &Doc, mode: Mode, src: &dyn Fn(&InlineImage) -> Option<String>) -> String {
     let mut e = Emitter::new(mode);
+    e.src = src;
     e.out.push_str(HEAD);
     if mode == Mode::Draft {
         e.out.push_str(TAG);
@@ -43,7 +65,7 @@ pub fn html(doc: &Doc, mode: Mode) -> String {
     e.out.push_str("pt");
     if let Some(c) = doc.color {
         e.out.push_str(";color:");
-        e.out.push_str(c.hex());
+        e.out.push_str(&c.hex());
     }
     e.out.push_str("\">");
     for b in &doc.blocks {
@@ -67,7 +89,7 @@ fn block_needs(b: &Block) -> bool {
     match b {
         Block::Para(p) => para_needs(p),
         Block::Table(_) | Block::Quote(_) => true,
-        Block::Signature(s) => s.logo.is_some() || s.blocks.iter().any(block_needs),
+        Block::Signature(s) => s.blocks.iter().any(block_needs),
     }
 }
 
@@ -76,30 +98,51 @@ fn para_needs(p: &Para) -> bool {
         || p.indent > 0
         || p.list.is_some()
         || p.quote > 0
-        || p.runs.iter().any(|r| !r.style.is_plain())
+        || p.runs
+            .iter()
+            .any(|r| !r.style.is_plain() || r.image.is_some())
 }
 
 /// A hash of a signature's content: what [`SignatureBlock::is_untouched`]
 /// compares.
-pub fn signature_hash(blocks: &[Block], logo: Option<&LogoRef>) -> u64 {
+pub fn signature_hash(blocks: &[Block]) -> u64 {
     let mut e = Emitter::new(Mode::Draft);
     for b in blocks {
         e.block(b);
     }
     e.finish();
-    if let Some(l) = logo {
-        e.out.push_str(&l.cid());
-    }
     fnv(e.out.as_bytes())
 }
 
-struct Emitter {
+/// The `<img>` of a picture, its source `src` (a `cid:` address, or a
+/// `data:` one on the clipboard). [`Mode::Draft`] adds the picture's own
+/// size, which [`super::import::strict`] reads back.
+fn img_tag(i: &InlineImage, src: &str, mode: Mode, out: &mut String) {
+    out.push_str("<img src=\"");
+    escape(src, out);
+    out.push_str(&format!(
+        "\" width=\"{}\" height=\"{}\" alt=\"",
+        i.width,
+        i.height()
+    ));
+    escape(&i.alt, out);
+    out.push('"');
+    if mode == Mode::Draft {
+        out.push_str(&format!(" data-iw=\"{}\" data-ih=\"{}\"", i.iw, i.ih));
+    }
+    out.push_str(" style=\"");
+    out.push_str(IMG_STYLE);
+    out.push_str("\">");
+}
+
+struct Emitter<'a> {
     out: String,
     mode: Mode,
     /// Open lists, outermost first; each has its last `<li>` open.
     lists: Vec<ListKind>,
     /// Open blockquotes.
     quote: u8,
+    src: &'a dyn Fn(&InlineImage) -> Option<String>,
 }
 
 fn escape(s: &str, out: &mut String) {
@@ -114,13 +157,14 @@ fn escape(s: &str, out: &mut String) {
     }
 }
 
-impl Emitter {
-    fn new(mode: Mode) -> Emitter {
+impl<'a> Emitter<'a> {
+    fn new(mode: Mode) -> Emitter<'a> {
         Emitter {
             out: String::new(),
             mode,
             lists: Vec::new(),
             quote: 0,
+            src: &cid_src,
         }
     }
 
@@ -183,13 +227,20 @@ impl Emitter {
         }
     }
 
-    fn para_style(p: &Para) -> String {
+    /// `in_cell`: a table cell's paragraph (no block picture room there).
+    fn para_style(&self, p: &Para, in_cell: bool) -> String {
         let mut parts: Vec<String> = Vec::new();
         if p.align != Align::Left {
             parts.push(format!("text-align:{}", p.align.css()));
         }
         if p.indent > 0 {
             parts.push(format!("margin-left:{}px", u32::from(p.indent) * 40));
+        }
+        // A block picture's room above and below, as the editor draws it
+        // (`view::PIC_BLOCK_SPACE`). Only when sent: the editor gives it
+        // anyway, and a draft keeps the strict form it reads back.
+        if self.mode == Mode::Send && !in_cell && p.pictures_only() {
+            parts.push(BLOCK_PIC_PAD.to_string());
         }
         if parts.is_empty() {
             String::new()
@@ -202,7 +253,7 @@ impl Emitter {
         if p.quote != self.quote {
             self.set_quote(p.quote);
         }
-        let style = Self::para_style(p);
+        let style = self.para_style(p, false);
         match p.list {
             None => {
                 self.close_lists_to(0);
@@ -251,6 +302,23 @@ impl Emitter {
         // would drop it: at the edges and after another space.
         let mut prev_space = true;
         for r in &p.runs {
+            if let Some(img) = &r.image {
+                seen += 1;
+                prev_space = false;
+                if let Some(src) = (self.src)(img) {
+                    // A picture takes only its link (`Doc::normalize`).
+                    let st = Style {
+                        link: r.style.link.clone(),
+                        ..Style::default()
+                    };
+                    let close = self.open_run(&st);
+                    let mut tag = String::new();
+                    img_tag(img, &src, self.mode, &mut tag);
+                    self.out.push_str(&tag);
+                    self.out.push_str(&close);
+                }
+                continue;
+            }
             let close = self.open_run(&r.style);
             for c in r.text.chars() {
                 seen += 1;
@@ -327,13 +395,54 @@ impl Emitter {
     }
 
     fn table(&mut self, t: &Table) {
-        self.out.push_str(TABLE);
-        for row in &t.rows {
+        self.out
+            .push_str(if t.borderless { TABLE_PLAIN } else { TABLE });
+        let covered = t.covered();
+        for (ri, row) in t.rows.iter().enumerate() {
             self.out.push_str("<tr>");
-            for cell in row {
-                self.out.push_str(TD);
+            for (ci, cell) in row.iter().enumerate() {
+                // A merged cell's covered ones are not written: its
+                // colspan and rowspan take their place.
+                if covered
+                    .get(ri)
+                    .and_then(|r| r.get(ci))
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let (cs, rs) = cell.span();
+                // Its width: the columns it spans, when each has one.
+                let spanned: Vec<u16> = (ci..ci.saturating_add(cs))
+                    .map(|c| t.widths.get(c).copied().unwrap_or(0))
+                    .collect();
+                let w: u32 = if spanned.iter().all(|w| *w > 0) {
+                    spanned.iter().map(|w| u32::from(*w)).sum()
+                } else {
+                    0
+                };
+                self.out.push_str("<td");
+                if cs > 1 {
+                    self.out.push_str(&format!(" colspan=\"{cs}\""));
+                }
+                if rs > 1 {
+                    self.out.push_str(&format!(" rowspan=\"{rs}\""));
+                }
+                if w > 0 {
+                    self.out.push_str(&format!(" width=\"{w}\""));
+                }
+                self.out.push_str(" style=\"");
+                if !t.borderless {
+                    self.out.push_str(TD_BORDER);
+                }
+                self.out.push_str(TD_PAD);
+                self.out.push_str(cell.valign.css());
+                if w > 0 {
+                    self.out.push_str(&format!(";width:{w}px"));
+                }
+                self.out.push_str("\">");
                 for p in &cell.paras {
-                    let style = Self::para_style(p);
+                    let style = self.para_style(p, true);
                     self.out.push_str("<div");
                     self.out.push_str(&style);
                     self.out.push('>');
@@ -358,19 +467,12 @@ impl Emitter {
         }
         self.out.push('>');
         let mut inner = Emitter::new(self.mode);
+        inner.src = self.src;
         for b in &s.blocks {
             inner.block(b);
         }
         inner.finish();
         self.out.push_str(&inner.out);
-        if let Some(l) = &s.logo {
-            self.out.push_str(&format!(
-                "<img src=\"cid:{}\" alt=\"\" width=\"{}\" height=\"{}\">",
-                l.cid(),
-                l.width,
-                l.height
-            ));
-        }
         self.out.push_str("</div>");
     }
 }
@@ -490,10 +592,24 @@ impl Plain {
     }
 
     fn table(&mut self, t: &Table) {
+        let cell_text = |c: &Cell| {
+            let mut out = String::new();
+            for p in &c.paras {
+                let t = runs_plain(p);
+                if t.is_empty() {
+                    continue;
+                }
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str(&t);
+            }
+            out
+        };
         let rows: Vec<Vec<String>> = t
             .rows
             .iter()
-            .map(|r| r.iter().map(Cell::plain_text).collect())
+            .map(|r| r.iter().map(cell_text).collect())
             .collect();
         let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
         let widths: Vec<usize> = (0..cols)
@@ -529,6 +645,23 @@ impl Plain {
     }
 }
 
+/// A picture in the plain text: its alternative text in brackets.
+pub fn image_plain(i: &InlineImage) -> String {
+    if i.alt.is_empty() {
+        "[image]".to_string()
+    } else {
+        format!("[{}]", i.alt)
+    }
+}
+
+/// A run's text in the plain-text part (a picture's alternative text).
+fn run_plain(r: &Run, out: &mut String) {
+    match &r.image {
+        Some(i) => out.push_str(&image_plain(i)),
+        None => out.push_str(&r.text),
+    }
+}
+
 /// A paragraph's text, a link reading `label (address)` unless the label is
 /// the address.
 fn runs_plain(p: &Para) -> String {
@@ -537,7 +670,7 @@ fn runs_plain(p: &Para) -> String {
     while let Some(r) = p.runs.get(i) {
         match &r.style.link {
             None => {
-                out.push_str(&r.text);
+                run_plain(r, &mut out);
                 i += 1;
             }
             Some(url) => {
@@ -546,7 +679,7 @@ fn runs_plain(p: &Para) -> String {
                     if next.style.link.as_deref() != Some(url.as_str()) {
                         break;
                     }
-                    label.push_str(&next.text);
+                    run_plain(next, &mut label);
                     i += 1;
                 }
                 out.push_str(&label);

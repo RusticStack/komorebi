@@ -121,6 +121,9 @@ pub struct Button {
     /// A select's trigger: its expanded state follows its menu
     /// (`Some(open)`); `None` is a plain button.
     expands: Option<bool>,
+    /// The format bar's boxes: 8 px sides, a 4 px gap, and a label that
+    /// ends in an ellipsis in a button given a fixed width.
+    compact: bool,
     tooltip: Option<SharedString>,
     access: Option<Key>,
     on_click: Option<OnClick>,
@@ -139,6 +142,7 @@ impl Button {
             disabled: false,
             selected: false,
             expands: None,
+            compact: false,
             tooltip: None,
             access: None,
             on_click: None,
@@ -154,6 +158,13 @@ impl Button {
     /// marks it open through [`Selectable::open`]).
     pub fn expandable(mut self) -> Self {
         self.expands = Some(false);
+        self
+    }
+
+    /// The format bar's box (font, size, alignment): tight sides and a
+    /// label cut with an ellipsis when the button is given a width.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
         self
     }
 
@@ -271,11 +282,19 @@ impl RenderOnce for Button {
             .clone()
             .or_else(|| self.label.clone())
             .unwrap_or_default();
-        let pad_left = if self.icon.is_some() {
+        let pad_left = if self.compact {
+            space::SP_2
+        } else if self.icon.is_some() {
             self.height.icon_pad()
         } else {
             space::SP_4
         };
+        let (pad_right, gap) = if self.compact {
+            (space::SP_2, space::SP_1)
+        } else {
+            (space::SP_4, space::SP_2)
+        };
+        let compact = self.compact;
         let icon_size = self.height.icon();
         let mut el = self
             .base
@@ -287,13 +306,13 @@ impl RenderOnce for Button {
             .h(px(scaled::control(&t, self.height.px())))
             .min_w(px(scaled::control(&t, self.height.px())))
             .pl(px(pad_left))
-            .pr(px(space::SP_4))
+            .pr(px(pad_right))
             .flex()
             .flex_row()
             .flex_none()
             .items_center()
             .justify_center()
-            .gap(px(space::SP_2))
+            .gap(px(gap))
             .rounded(px(radius::FULL))
             .bg(fill)
             .text_color(fg)
@@ -308,7 +327,20 @@ impl RenderOnce for Button {
                         .text_color(fg),
                 )
             })
-            .when_some(self.label, |el, label| el.child(label))
+            .when_some(self.label, |el, label| {
+                if compact {
+                    el.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(label),
+                    )
+                } else {
+                    el.child(label)
+                }
+            })
             .when_some(self.trailing, |el, icon| {
                 el.child(
                     svg()

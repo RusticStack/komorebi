@@ -21,6 +21,7 @@ use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 
 use super::commands;
+use super::folder_edit::{self, Target};
 use super::nav::NavKind;
 use super::text::{self, Command};
 use super::triage::Flag;
@@ -52,6 +53,13 @@ pub enum NavRun {
     Refresh,
     AccountSettings,
     Fold,
+    /// New folder (an account line, the pane's empty room) or New
+    /// subfolder (a folder line): the name is typed in the pane.
+    NewFolder,
+    /// Rename the folder in place (F2).
+    RenameFolder,
+    /// Ask to delete the folder (Delete).
+    DeleteFolder,
 }
 
 /// One entry of a menu or a flyout.
@@ -312,6 +320,28 @@ pub fn nav_entries(view: &MailView, kind: NavKind, rail: bool) -> Vec<Vec<Entry>
         };
         main.push(nav(label, enabled, NavRun::Collapse));
     }
+    // Make, rename, delete: never a special folder's Rename or Delete.
+    let mut change = Vec::new();
+    if !rail && let Some(f) = view.mail.folder_menu(kind) {
+        let keyed = |label: String, keys: &str, run: NavRun| Entry {
+            keys: Some(keys.to_string()),
+            ..nav(label, true, run)
+        };
+        match kind {
+            NavKind::Account(_) => {
+                change.push(keyed(
+                    folder_edit::new_folder(),
+                    "Ctrl+Shift+N",
+                    NavRun::NewFolder,
+                ));
+            }
+            _ => change.push(nav(folder_edit::new_subfolder(), f.new, NavRun::NewFolder)),
+        }
+        if f.change {
+            change.push(keyed(folder_edit::rename(), "F2", NavRun::RenameFolder));
+            change.push(keyed(folder_edit::delete(), "Del", NavRun::DeleteFolder));
+        }
+    }
     let mut extra = Vec::new();
     if let Some(on) = menu.account {
         extra.push(nav(text::refresh(), on, NavRun::Refresh));
@@ -331,7 +361,7 @@ pub fn nav_entries(view: &MailView, kind: NavKind, rail: bool) -> Vec<Vec<Entry>
         };
         extra.push(nav(label, true, NavRun::Fold));
     }
-    vec![main, extra]
+    vec![main, change, extra]
 }
 
 /// The access key of an entry's command (`crate::access`): the same letter
@@ -479,6 +509,35 @@ pub fn nav_menu(
 ) -> PopupMenu {
     let groups = view
         .read_with(cx, |this, _| nav_entries(this, kind, rail))
+        .unwrap_or_default();
+    fill(menu, groups, view, None, cx)
+}
+
+/// The menu of the pane's room below its lines: New folder (in the open
+/// folder's account, else the first), while an account is on.
+pub fn pane_entries(view: &MailView) -> Vec<Vec<Entry>> {
+    if view.mail.new_folder_account(None).is_none() {
+        return Vec::new();
+    }
+    vec![vec![Entry {
+        label: folder_edit::new_folder(),
+        keys: Some("Ctrl+Shift+N".into()),
+        enabled: true,
+        checked: None,
+        level: 0,
+        run: Run::Nav(NavKind::AllInboxes, NavRun::NewFolder),
+    }]]
+}
+
+/// The pane's room below its lines, on a right-click.
+pub fn pane_menu(
+    view: WeakEntity<MailView>,
+    menu: PopupMenu,
+    _window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let groups = view
+        .read_with(cx, |this, _| pane_entries(this))
         .unwrap_or_default();
     fill(menu, groups, view, None, cx)
 }
@@ -753,6 +812,38 @@ impl MailView {
                 _ => cx.emit(MailEvent::Show(Place::Settings)),
             },
             NavRun::Fold => self.toggle_folders(window, cx),
+            NavRun::NewFolder => {
+                let target = match kind {
+                    NavKind::Folder(id) => self.mail.folder(id).map(|f| Target::New {
+                        account: f.account_id,
+                        parent: Some(id),
+                    }),
+                    NavKind::Account(account) => Some(Target::New {
+                        account,
+                        parent: None,
+                    }),
+                    _ => self
+                        .mail
+                        .new_folder_account(None)
+                        .map(|account| Target::New {
+                            account,
+                            parent: None,
+                        }),
+                };
+                if let Some(target) = target {
+                    self.start_folder_edit(target, window, cx);
+                }
+            }
+            NavRun::RenameFolder => {
+                if let NavKind::Folder(id) = kind {
+                    self.start_folder_edit(Target::Rename(id), window, cx);
+                }
+            }
+            NavRun::DeleteFolder => {
+                if let NavKind::Folder(id) = kind {
+                    self.ask_delete_folder(id, window, cx);
+                }
+            }
         }
     }
 }

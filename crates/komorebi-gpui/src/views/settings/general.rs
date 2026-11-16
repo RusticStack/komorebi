@@ -211,7 +211,7 @@ impl SettingsView {
                 this.set_compose_font(font, pt, color, cx);
             }
         }));
-        let colour_key = |c: Option<ColorId>| c.map_or("auto", ColorId::hex);
+        let colour_key = |c: Option<ColorId>| c.map_or_else(|| "auto".to_string(), ColorId::hex);
         let colour_box = Dropdown::new(
             "settings-font-colour",
             words::font_colour(),

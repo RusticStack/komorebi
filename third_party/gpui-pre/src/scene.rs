@@ -294,6 +294,9 @@ pub enum Primitive {
 impl Primitive {
     pub fn bounds(&self) -> &Bounds<ScaledPixels> {
         match self {
+            // KOMOREBI PATCH (hollow-crisp-shadow): an inset shadow is drawn over its
+            // element (`bounds` is its hole), so that is the area culled and ordered by.
+            Primitive::Shadow(shadow) if shadow.inset != 0 => &shadow.element_bounds,
             Primitive::Shadow(shadow) => &shadow.bounds,
             Primitive::Quad(quad) => &quad.bounds,
             Primitive::Path(path) => &path.bounds,

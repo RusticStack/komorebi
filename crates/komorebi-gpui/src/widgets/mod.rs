@@ -32,16 +32,19 @@ use gpui::{BoxShadow, Pixels, StyleRefinement, Styled, px};
 use crate::theme::{Tokens, layout};
 
 /// The keyboard focus ring: a 2 px paper gap, then a 2 px ink ring,
-/// following the element's corners. Two crisp spreads (no blur: GPUI's
-/// shader takes the solid path, one quad each), because the ring must sit
+/// following the element's corners. Two crisp spreads (no blur), because
+/// the ring must sit
 /// outside the element without moving it, and `focus_visible` styles are
-/// the only way to draw on keyboard focus alone.
+/// the only way to draw on keyboard focus alone. GPUI paints the shadows in
+/// order, the last on top (CSS puts the first on top), so the 4 px ink comes
+/// first and the 2 px paper gap over it; a crisp shadow paints outside the
+/// element only (KOMOREBI PATCH hollow-crisp-shadow in gpui-pre).
 pub fn focus_ring(t: &Tokens) -> Vec<BoxShadow> {
     let zero = Pixels::ZERO;
     vec![
-        BoxShadow::new(zero, zero, t.color.paper).spread_radius(px(layout::FOCUS_GAP)),
         BoxShadow::new(zero, zero, t.color.ink)
             .spread_radius(px(layout::FOCUS_GAP + layout::FOCUS_RING)),
+        BoxShadow::new(zero, zero, t.color.paper).spread_radius(px(layout::FOCUS_GAP)),
     ]
 }
 

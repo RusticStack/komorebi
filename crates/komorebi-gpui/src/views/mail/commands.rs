@@ -3,7 +3,7 @@
 //! (cookbook_actions).
 //!
 //! - The window's (`crate::tabs::CONTEXT`): New mail, Search, Go to the
-//!   Inbox, Refresh, Show or hide the folders. They work from anywhere in
+//!   Inbox, Refresh, Show or hide the folders, New folder. They work from anywhere in
 //!   the window, a text field included.
 //! - [`MESSAGES`], on the list and the reading pane (never the composer):
 //!   the commands on the open message or the selection (Ctrl+Q, Ctrl+U,
@@ -53,6 +53,9 @@ gpui::actions!(
         NavExpand,
         NavCollapse,
         NavMenu,
+        NewFolder,
+        RenameFolder,
+        DeleteFolder,
         ClosePane,
         FlyoutNext,
         FlyoutPrevious,
@@ -100,6 +103,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-shift-i", GoInbox, None),
         KeyBinding::new("f5", Refresh, window),
         KeyBinding::new("ctrl-shift-e", ToggleFolders, window),
+        // A new folder in the keyboard line's account (or the open
+        // folder's): Ctrl+Shift+N is free here (Ctrl+N is New mail).
+        KeyBinding::new("ctrl-shift-n", NewFolder, window),
         // F6 and Shift+F6: round the panes (search, folders, list, reader).
         KeyBinding::new("f6", NextPane, window),
         KeyBinding::new("shift-f6", PreviousPane, window),
@@ -151,6 +157,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("left", NavCollapse, nav),
         KeyBinding::new("shift-f10", NavMenu, nav),
         KeyBinding::new("menu", NavMenu, nav),
+        // F2 renames the folder line, Delete asks to delete it (Explorer).
+        KeyBinding::new("f2", RenameFolder, nav),
+        KeyBinding::new("delete", DeleteFolder, nav),
         // Esc closes the pane opened over the content from the rail.
         KeyBinding::new("escape", ClosePane, nav),
         KeyBinding::new("down", FlyoutNext, Some(FLYOUT)),

@@ -1135,9 +1135,6 @@ msgstr "Corrija o endereço em Cco para enviar."
 msgid "Add a recipient to send."
 msgstr "Adicione um destinatário para enviar."
 
-msgid "Attachments are over 25 MB; remove some to send."
-msgstr "Os anexos excedem 25 MB; remova alguns para enviar."
-
 msgid "No subject, and the text mentions an attachment but nothing is attached."
 msgstr "Sem assunto, e o texto menciona um anexo, mas não há nada anexado."
 
@@ -1171,14 +1168,11 @@ msgstr "Não foi possível carregar {0}; ficou de fora deste rascunho."
 msgid "Draft saved"
 msgstr "Rascunho guardado"
 
-msgid "Attachments {0} of 25 MB"
-msgstr "Anexos: {0} de 25 MB"
+msgid "Attachments: {0}"
+msgstr "Anexos: {0}"
 
 msgid "{0}: folders can't be attached"
 msgstr "{0}: as pastas não podem ser anexadas"
-
-msgid "{0}: over Komorebi's 100 MB attachment limit"
-msgstr "{0}: excede o limite de 100 MB de anexos do Komorebi"
 
 msgid "Certificate: pinned (SHA-256 {0})"
 msgstr "Certificado: fixado (SHA-256 {0})"
@@ -2388,18 +2382,6 @@ msgstr "Adicionar assinatura"
 msgid "Your name, and what people should know about you"
 msgstr "O seu nome e o que as pessoas devem saber sobre si"
 
-msgid "Logo"
-msgstr "Logótipo"
-
-msgid "Add logo…"
-msgstr "Adicionar logótipo…"
-
-msgid "Remove logo"
-msgstr "Remover logótipo"
-
-msgid "The logo must be a PNG or JPEG file of 200 KB or less."
-msgstr "O logótipo tem de ser um ficheiro PNG ou JPEG com 200 KB ou menos."
-
 msgid "Compose"
 msgstr "Escrever"
 
@@ -2490,6 +2472,9 @@ msgstr "Azul"
 
 msgid "Purple"
 msgstr "Roxo"
+
+msgid "Custom colour"
+msgstr "Cor personalizada"
 
 msgctxt "colour"
 msgid "Automatic"
@@ -2628,9 +2613,6 @@ msgstr "Dê um nome à assinatura."
 
 msgid "A signature with this name already exists."
 msgstr "Já existe uma assinatura com este nome."
-
-msgid "Add a logo"
-msgstr "Adicionar um logótipo"
 
 msgid "Reopen tabs at start"
 msgstr "Reabrir os separadores ao iniciar"
@@ -3582,3 +3564,294 @@ msgstr "{0} requer o início de sessão da Microsoft, que o Komorebi ainda não 
 
 msgid "Is your mail really at {0}? Go back and choose another provider."
 msgstr "O seu correio está mesmo em {0}? Volte atrás e escolha outro fornecedor."
+
+msgid "Formatting"
+msgstr "Formatação"
+
+msgid "Alignment"
+msgstr "Alinhamento"
+
+msgctxt "format value"
+msgid "Mixed"
+msgstr "Vários"
+
+msgid "Font size (Ctrl+[ or Ctrl+])"
+msgstr "Tamanho do tipo de letra (Ctrl+[ ou Ctrl+])"
+
+msgid "Increase indent (Ctrl+M)"
+msgstr "Aumentar avanço (Ctrl+M)"
+
+msgid "Decrease indent (Ctrl+Shift+M)"
+msgstr "Diminuir avanço (Ctrl+Shift+M)"
+
+msgid "Quote (Ctrl+Shift+Q)"
+msgstr "Citação (Ctrl+Shift+Q)"
+
+msgid "Clear formatting (Ctrl+Space)"
+msgstr "Limpar formatação (Ctrl+Espaço)"
+
+msgid "Insert picture"
+msgstr "Inserir imagem"
+
+msgid "Picture"
+msgstr "Imagem"
+
+msgid "Alt text…"
+msgstr "Texto alternativo…"
+
+msgid "Alt text"
+msgstr "Texto alternativo"
+
+msgid "Make bigger (Ctrl+])"
+msgstr "Aumentar (Ctrl+])"
+
+msgid "Make smaller (Ctrl+[)"
+msgstr "Reduzir (Ctrl+[)"
+
+msgid "Original size"
+msgstr "Tamanho original"
+
+msgid "Use original picture"
+msgstr "Usar a imagem original"
+
+msgid "A signature can hold PNG, JPEG, GIF and WebP pictures of 10 MB or less, not other files."
+msgstr "Uma assinatura pode ter imagens PNG, JPEG, GIF e WebP até 10 MB, mas não outros ficheiros."
+
+msgid "Summary"
+msgstr "Resumo"
+
+msgid "{n} unread message"
+msgid_plural "{n} unread messages"
+msgstr[0] "{n} mensagem não lida"
+msgstr[1] "{n} mensagens não lidas"
+
+msgid "Newest unread"
+msgstr "Não lidas mais recentes"
+
+msgid "Show all unread"
+msgstr "Mostrar todas as não lidas"
+
+msgid "{n} draft waiting"
+msgid_plural "{n} drafts waiting"
+msgstr[0] "{n} rascunho à espera"
+msgstr[1] "{n} rascunhos à espera"
+
+msgid "Show all drafts"
+msgstr "Mostrar todos os rascunhos"
+
+msgid "Read. Replied. Now rest."
+msgstr "Lido. Respondido. Agora descanse."
+
+msgid "Nothing new on this PC."
+msgstr "Nada de novo neste PC."
+
+msgid "Nothing unread in {0}."
+msgstr "Nada por ler em {0}."
+
+msgid "There is already a folder with that name here."
+msgstr "Já existe uma pasta com esse nome aqui."
+
+msgid "New folder"
+msgstr "Nova pasta"
+
+msgid "New subfolder"
+msgstr "Nova subpasta"
+
+msgctxt "folder"
+msgid "Rename"
+msgstr "Mudar o nome"
+
+msgid "Delete folder"
+msgstr "Eliminar pasta"
+
+msgid "Delete “{0}”?"
+msgstr "Eliminar “{0}”?"
+
+msgid "The folder and the {n} message in it are deleted on the server."
+msgid_plural "The folder and the {n} messages in it are deleted on the server."
+msgstr[0] "A pasta e a {n} mensagem que contém são eliminadas no servidor."
+msgstr[1] "A pasta e as {n} mensagens que contém são eliminadas no servidor."
+
+msgid "The folder is deleted on the server."
+msgstr "A pasta é eliminada no servidor."
+
+msgid "Its {n} subfolder goes with it."
+msgid_plural "Its {n} subfolders go with it."
+msgstr[0] "A {n} subpasta que contém também é eliminada."
+msgstr[1] "As {n} subpastas que contém também são eliminadas."
+
+msgid "Messages in it don't go to Trash and can't be brought back."
+msgstr "As mensagens não vão para Itens eliminados e não podem ser recuperadas."
+
+msgid "Folder name"
+msgstr "Nome da pasta"
+
+msgid "New subfolder name"
+msgstr "Nome da nova subpasta"
+
+msgid "New folder name"
+msgstr "Nome da nova pasta"
+
+msgid "New folder in {0}"
+msgstr "Nova pasta em {0}"
+
+msgid "New folder (Ctrl+Shift+N)"
+msgstr "Nova pasta (Ctrl+Shift+N)"
+
+msgid "Type a name for the folder."
+msgstr "Escreva um nome para a pasta."
+
+msgid "That name is too long."
+msgstr "Esse nome é demasiado longo."
+
+msgid "Folder names can't contain “{0}”."
+msgstr "Os nomes das pastas não podem conter “{0}”."
+
+msgid "This server uses “{0}” to separate folders, so a name can't contain it."
+msgstr "Este servidor usa “{0}” para separar pastas, por isso um nome não o pode conter."
+
+msgid "Folder “{0}” created."
+msgstr "Pasta “{0}” criada."
+
+msgid "Folder renamed to “{0}”."
+msgstr "O nome da pasta passou a ser “{0}”."
+
+msgid "Folder “{0}” deleted."
+msgstr "Pasta “{0}” eliminada."
+
+msgid "The server can't be reached now. The folder change is made when it is back."
+msgstr "Não é possível contactar o servidor agora. A alteração da pasta é feita quando voltar."
+
+msgid "The server didn't create “{0}”: {1}"
+msgstr "O servidor não criou “{0}”: {1}"
+
+msgid "The server didn't rename the folder to “{0}”: {1}"
+msgstr "O servidor não mudou o nome da pasta para “{0}”: {1}"
+
+msgid "The server didn't delete “{0}”: {1}"
+msgstr "O servidor não eliminou “{0}”: {1}"
+
+msgid "Couldn't create “{0}”: {1}"
+msgstr "Não foi possível criar “{0}”: {1}"
+
+msgid "Couldn't rename the folder to “{0}”: {1}"
+msgstr "Não foi possível mudar o nome da pasta para “{0}”: {1}"
+
+msgid "Couldn't delete “{0}”: {1}"
+msgstr "Não foi possível eliminar “{0}”: {1}"
+
+msgid "Choose an image"
+msgstr "Escolher uma imagem"
+
+msgid "That image is too large."
+msgstr "Essa imagem é demasiado grande."
+
+msgid "That file isn't a PNG, ICO, JPEG, GIF or BMP image."
+msgstr "Esse ficheiro não é uma imagem PNG, ICO, JPEG, GIF ou BMP."
+
+msgid "Your image is shown beside this account in the folder pane."
+msgstr "A sua imagem é mostrada junto a esta conta no painel de pastas."
+
+msgid "Without an image of its own the account shows its mail domain's icon or its provider's, if there is one (Settings > Privacy)."
+msgstr "Sem uma imagem própria, a conta mostra o ícone do seu domínio de correio ou o do seu fornecedor, se existir (Definições > Privacidade)."
+
+msgid "Account icon"
+msgstr "Ícone da conta"
+
+msgid "Choose image"
+msgstr "Escolher imagem"
+
+msgid "Choose an image for {0}"
+msgstr "Escolher uma imagem para {0}"
+
+msgid "Remove image"
+msgstr "Remover imagem"
+
+msgid "Remove the image of {0}"
+msgstr "Remover a imagem de {0}"
+
+msgid "Icons from mail domains"
+msgstr "Ícones dos domínios de correio"
+
+msgid "An account without an image of its own shows its mail domain's icon. Komorebi asks the domain's own website for it when the account is added and about once a month, so that website sees your IP address; no other service is asked. Off: nothing is asked and the icons fetched are removed."
+msgstr "Uma conta sem imagem própria mostra o ícone do seu domínio de correio. O Komorebi pede-o ao site do próprio domínio quando a conta é adicionada e cerca de uma vez por mês, por isso esse site vê o seu endereço IP; nenhum outro serviço é contactado. Desativado: nada é pedido e os ícones obtidos são removidos."
+
+msgid "Account icons"
+msgstr "Ícones das contas"
+
+msgctxt "shortcut key"
+msgid "Ctrl+Shift+N"
+msgstr "Ctrl+Shift+N"
+
+msgctxt "shortcut"
+msgid "New folder"
+msgstr "Nova pasta"
+
+msgctxt "shortcut key"
+msgid "F2"
+msgstr "F2"
+
+msgctxt "shortcut"
+msgid "Rename the folder"
+msgstr "Mudar o nome da pasta"
+
+msgctxt "shortcut key"
+msgid "Delete (in the folders)"
+msgstr "Delete (nas pastas)"
+
+msgctxt "shortcut"
+msgid "Delete the folder, after asking"
+msgstr "Eliminar a pasta, depois de perguntar"
+
+msgid "Import from Outlook"
+msgstr "Importar do Outlook"
+
+msgid "Import"
+msgstr "Importar"
+
+msgid "Your accounts and signatures from classic Outlook on this PC. Your mail downloads again from the server."
+msgstr "As suas contas e assinaturas do Outlook clássico neste PC. O seu correio é transferido novamente do servidor."
+
+msgid "Your accounts and signatures from classic Outlook on this PC."
+msgstr "As suas contas e assinaturas do Outlook clássico neste PC."
+
+msgid "Account {0} of {1} from Outlook."
+msgstr "Conta {0} de {1} do Outlook."
+
+msgid "Outlook used POP for this account. Komorebi uses IMAP, so check the settings."
+msgstr "O Outlook usava POP nesta conta. O Komorebi usa IMAP, por isso verifique as definições."
+
+msgid "The server settings are Outlook's. Type your password to sign in."
+msgstr "As definições do servidor são as do Outlook. Introduza a palavra-passe para iniciar sessão."
+
+msgid "Skip this account"
+msgstr "Ignorar esta conta"
+
+msgid "Looking for Outlook on this PC …"
+msgstr "A procurar o Outlook neste PC …"
+
+msgid "The new Outlook keeps your accounts and signatures online, so there's nothing on this PC to import. Add your account by its address instead."
+msgstr "O novo Outlook guarda as suas contas e assinaturas online, por isso não há nada neste PC para importar. Em vez disso, adicione a conta pelo endereço."
+
+msgid "No Outlook accounts or signatures were found on this PC."
+msgstr "Não foram encontradas contas nem assinaturas do Outlook neste PC."
+
+msgid "Komorebi found these in Outlook on this PC. Your passwords and mail aren't copied: you type each password once, and your mail downloads again from the server."
+msgstr "O Komorebi encontrou isto no Outlook neste PC. As palavras-passe e o correio não são copiados: introduza cada palavra-passe uma vez e o correio é transferido novamente do servidor."
+
+msgid "Already in Komorebi."
+msgstr "Já está no Komorebi."
+
+msgid "A POP account in Outlook. Komorebi sets it up with IMAP."
+msgstr "Uma conta POP no Outlook. O Komorebi configura-a com IMAP."
+
+msgid "Accounts in Outlook"
+msgstr "Contas no Outlook"
+
+msgid "Signatures in Outlook"
+msgstr "Assinaturas no Outlook"
+
+msgid "{n} picture from the web isn't imported."
+msgid_plural "{n} pictures from the web aren't imported."
+msgstr[0] "{n} imagem da Web não é importada."
+msgstr[1] "{n} imagens da Web não são importadas."

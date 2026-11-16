@@ -156,6 +156,10 @@ pub struct State {
     pub refuse_login: bool,
     /// The greeting to send (`* OK ...` unless a test plays another).
     pub greeting: String,
+    /// CREATE, RENAME and DELETE answered `NO` with this text.
+    pub refuse_folders: Option<String>,
+    /// The folders SUBSCRIBE added (UNSUBSCRIBE takes them away).
+    pub subscribed: BTreeSet<String>,
 }
 
 impl State {
@@ -203,6 +207,8 @@ impl FakeImapd {
             refuse_copy_to: None,
             refuse_login: false,
             greeting: "* OK fake IMAP ready".into(),
+            refuse_folders: None,
+            subscribed: BTreeSet::new(),
         }));
         let shared = state.clone();
         thread::spawn(move || {
@@ -288,6 +294,23 @@ fn in_set(set: &str, uid: u32, max: u32) -> bool {
     })
 }
 
+/// A LIST pattern (`*` anything, `%` anything but the delimiter) over a name.
+fn matches_pattern(pattern: &str, name: &str, delimiter: &str) -> bool {
+    fn go(p: &[char], n: &[char], d: char) -> bool {
+        match p.split_first() {
+            None => n.is_empty(),
+            Some(('*', rest)) => (0..=n.len()).any(|i| go(rest, &n[i..], d)),
+            Some(('%', rest)) => (0..=n.len())
+                .take_while(|&i| i == 0 || n[i - 1] != d)
+                .any(|i| go(rest, &n[i..], d)),
+            Some((c, rest)) => n.first() == Some(c) && go(rest, &n[1..], d),
+        }
+    }
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    go(&p, &n, delimiter.chars().next().unwrap_or('/'))
+}
+
 fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -338,6 +361,66 @@ fn serve(stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()> {
                     profile.capabilities()
                 );
             }
+            "CREATE" | "DELETE" | "RENAME" => {
+                let name = args.first().cloned().unwrap_or_default();
+                let exists = |st: &State, n: &str| st.boxes.iter().any(|b| b.name == n);
+                let d = profile.delimiter;
+                if let Some(text) = st.refuse_folders.clone() {
+                    reply += &format!("{tag} NO {text}\r\n");
+                } else if sub == "CREATE" {
+                    if exists(&st, &name) {
+                        reply += &format!("{tag} NO [ALREADYEXISTS] already there\r\n");
+                    } else {
+                        let next = st.boxes.iter().map(|b| b.uidvalidity).max().unwrap_or(0) + 1;
+                        let mut b = MailBox::new(&name, "");
+                        b.uidvalidity = next;
+                        st.boxes.push(b);
+                        reply += &format!("{tag} OK CREATE completed\r\n");
+                    }
+                } else if !exists(&st, &name) {
+                    reply += &format!("{tag} NO [NONEXISTENT] no such folder\r\n");
+                } else if sub == "DELETE" {
+                    if name.eq_ignore_ascii_case("INBOX") {
+                        reply += &format!("{tag} NO [CANNOT] the inbox stays\r\n");
+                    } else if st
+                        .boxes
+                        .iter()
+                        .any(|b| b.name.starts_with(&format!("{name}{d}")))
+                    {
+                        reply += &format!("{tag} NO [INUSE] it has subfolders\r\n");
+                    } else {
+                        st.boxes.retain(|b| b.name != name);
+                        if selected.as_deref() == Some(name.as_str()) {
+                            selected = None;
+                        }
+                        reply += &format!("{tag} OK DELETE completed\r\n");
+                    }
+                } else {
+                    let to = args.get(1).cloned().unwrap_or_default();
+                    if exists(&st, &to) {
+                        reply += &format!("{tag} NO [ALREADYEXISTS] already there\r\n");
+                    } else {
+                        let under = format!("{name}{d}");
+                        for b in &mut st.boxes {
+                            if b.name == name {
+                                b.name = to.clone();
+                            } else if let Some(rest) = b.name.strip_prefix(&under) {
+                                b.name = format!("{to}{d}{rest}");
+                            }
+                        }
+                        reply += &format!("{tag} OK RENAME completed\r\n");
+                    }
+                }
+            }
+            "SUBSCRIBE" | "UNSUBSCRIBE" => {
+                let name = args.first().cloned().unwrap_or_default();
+                if sub == "SUBSCRIBE" {
+                    st.subscribed.insert(name);
+                } else {
+                    st.subscribed.remove(&name);
+                }
+                reply += &format!("{tag} OK {sub} completed\r\n");
+            }
             "LOGIN" => {
                 if st.refuse_login {
                     reply += &format!("{tag} NO [AUTHENTICATIONFAILED] bad credentials\r\n");
@@ -352,7 +435,16 @@ fn serve(stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()> {
                 return Ok(());
             }
             "LIST" => {
-                for b in &st.boxes {
+                let pattern = args.get(1).cloned().unwrap_or_else(|| "*".into());
+                if pattern.is_empty() {
+                    // The delimiter and the root (RFC 3501 §6.3.8).
+                    reply += &format!("* LIST (\\Noselect) {} \"\"\r\n", quoted(profile.delimiter));
+                }
+                for b in st
+                    .boxes
+                    .iter()
+                    .filter(|b| matches_pattern(&pattern, &b.name, profile.delimiter))
+                {
                     let mut attrs = Vec::new();
                     if b.noselect {
                         attrs.push("\\Noselect");

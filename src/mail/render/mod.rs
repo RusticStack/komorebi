@@ -26,7 +26,7 @@ pub mod canvas;
 mod css;
 pub(crate) mod dom;
 mod float;
-mod img;
+pub(crate) mod img;
 mod layout;
 pub mod links;
 mod paint;

@@ -6,6 +6,7 @@
 //! on (a tagged reply with another command's tag, a tagged OK to IDLE).
 
 use super::errors::Step as CheckStep;
+use super::folders::Hierarchy;
 use super::mime::{HEADER_FIELDS, parse_header};
 use crate::db::{self, NewHeader};
 use crate::diag;
@@ -1358,6 +1359,118 @@ impl Imap {
         }
         self.run("APPEND", |s| s.append_with_flags(folder, raw, &[flag]))
             .with_context(|| format!("saving a copy to {folder}"))
+    }
+
+    /// How folder names nest here: the hierarchy delimiter (`LIST "" ""`,
+    /// RFC 3501 §6.3.8) and where top-level folders go, judged from the
+    /// account's folder names (`known`, server names): `INBOX.` when every
+    /// folder but the inbox is under it, as on Courier (the crate's parser
+    /// can't read a NAMESPACE reply, RFC 2342).
+    pub fn hierarchy(&mut self, known: &[String]) -> Result<Hierarchy> {
+        self.leave_folder()?;
+        self.drain_unsolicited();
+        let names = self.run("LIST", |s| s.list(Some(""), None))?;
+        let delimiter = names
+            .iter()
+            .find_map(|n| n.delimiter())
+            .filter(|d| !d.is_empty())
+            .map(str::to_string);
+        self.drain_unsolicited();
+        Ok(Hierarchy::judged(delimiter, known))
+    }
+
+    /// The names under `folder` (its subfolders at every depth, selectable
+    /// or not), deepest first.
+    pub fn subfolders(&mut self, folder: &str, delimiter: &str) -> Result<Vec<String>> {
+        self.leave_folder()?;
+        self.drain_unsolicited();
+        let pattern = quote(&format!("{folder}{delimiter}*"))?;
+        let names = self.run("LIST", |s| s.list(Some(""), Some(&pattern)))?;
+        let mut out: Vec<String> = names
+            .iter()
+            .map(|n| n.name().to_string())
+            .filter(|n| n != folder && n.starts_with(folder))
+            .collect();
+        out.sort_by_key(|n| std::cmp::Reverse(n.matches(delimiter).count()));
+        Ok(out)
+    }
+
+    /// CREATE a folder, then SUBSCRIBE to it (a server that refuses the
+    /// subscription still made the folder). A folder that is already there
+    /// (`[ALREADYEXISTS]`, RFC 5530: a retried CREATE) counts as made.
+    pub fn create_folder(&mut self, name: &str) -> Result<()> {
+        self.writable()?;
+        self.leave_folder()?;
+        let quoted = quote(name)?;
+        match self.run("CREATE", |s| {
+            s.run_command_and_check_ok(format!("CREATE {quoted}"))
+        }) {
+            Ok(()) => {}
+            Err(imap::Error::No(text))
+                if response_code(&text).as_deref() == Some("ALREADYEXISTS") => {}
+            Err(e) => return Err(e).with_context(|| format!("creating {name}")),
+        }
+        self.subscribe(name, true);
+        Ok(())
+    }
+
+    /// RENAME a folder (its subfolders go with it, RFC 3501 §6.3.5) and move
+    /// the subscription. A folder already renamed (a retried RENAME: the old
+    /// name is gone and the new one is there) counts as renamed.
+    pub fn rename_folder(&mut self, from: &str, to: &str) -> Result<()> {
+        self.writable()?;
+        self.leave_folder()?;
+        let (q_from, q_to) = (quote(from)?, quote(to)?);
+        if let Err(e) = self.run("RENAME", |s| {
+            s.run_command_and_check_ok(format!("RENAME {q_from} {q_to}"))
+        }) {
+            let done = matches!(e, imap::Error::No(_))
+                && self.list_folders().is_ok_and(|names| {
+                    names.iter().any(|f| f.name == to) && !names.iter().any(|f| f.name == from)
+                });
+            if !done {
+                return Err(e).with_context(|| format!("renaming {from}"));
+            }
+        }
+        self.subscribe(from, false);
+        self.subscribe(to, true);
+        Ok(())
+    }
+
+    /// DELETE a folder (never one that is selected: it is left first) and
+    /// drop its subscription. One that is already gone counts as deleted.
+    pub fn delete_folder(&mut self, name: &str) -> Result<()> {
+        self.writable()?;
+        let quoted = quote(name)?;
+        self.leave_folder()?;
+        // Without UNSELECT the folder may still be selected: open the
+        // Inbox instead (a server may refuse to delete the open folder).
+        if self.in_folder && self.selected.as_ref().is_none_or(|(s, _)| s == name) {
+            self.select("INBOX")?;
+        }
+        match self.run("DELETE", |s| {
+            s.run_command_and_check_ok(format!("DELETE {quoted}"))
+        }) {
+            Ok(()) => {}
+            Err(imap::Error::No(text))
+                if response_code(&text).as_deref() == Some("NONEXISTENT") => {}
+            Err(e) => return Err(e).with_context(|| format!("deleting {name}")),
+        }
+        self.subscribe(name, false);
+        Ok(())
+    }
+
+    /// SUBSCRIBE (or UNSUBSCRIBE) a folder; a refusal changes nothing that
+    /// matters here (the folder list is LIST, not LSUB).
+    fn subscribe(&mut self, name: &str, on: bool) {
+        let Ok(quoted) = quote(name) else {
+            return;
+        };
+        let verb = if on { "SUBSCRIBE" } else { "UNSUBSCRIBE" };
+        self.run(verb, |s| {
+            s.run_command_and_check_ok(format!("{verb} {quoted}"))
+        })
+        .ok();
     }
 
     pub fn logout(mut self) {

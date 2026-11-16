@@ -22,13 +22,14 @@ pub struct OutAttachment {
     pub data: Vec<u8>,
 }
 
-/// An image the HTML part shows by `cid:` (a signature's logo), sent in a
+/// A picture the HTML part shows by `cid:` (in the text, a table or a
+/// signature), sent in a
 /// `multipart/related` with the HTML.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineImage {
     /// The Content-ID, without angle brackets or `cid:`.
     pub cid: String,
-    /// `image/png` or `image/jpeg`.
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
     pub mime: String,
     pub data: Vec<u8>,
 }

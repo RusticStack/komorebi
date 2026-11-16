@@ -22,6 +22,18 @@ pub const MAX_TABLE: usize = 10;
 pub const MAX_QUOTE_BYTES: usize = 1024 * 1024;
 /// A link address.
 pub const MAX_LINK_BYTES: usize = 2048;
+/// Pictures in one document.
+pub const MAX_IMAGES: usize = 200;
+/// A picture's display width, in CSS px.
+pub const MIN_IMAGE_W: u16 = 8;
+pub const MAX_IMAGE_W: u16 = 2000;
+/// The width a picture is put in at, at most (CSS px): what reads well
+/// in a message without scrolling sideways.
+pub const DEFAULT_IMAGE_W: u16 = 600;
+/// A picture's alternative text.
+pub const MAX_ALT_BYTES: usize = 512;
+/// A Content-ID.
+pub const MAX_CID_BYTES: usize = 128;
 
 /// The ten email-safe font stacks. The label is the first name of the stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -175,9 +187,10 @@ impl Default for SizePt {
     }
 }
 
-/// The ten named colours (Fluent's shared colours). "Automatic" is `None`
-/// where a colour is optional: no colour is sent, so the recipient's dark
-/// mode still works.
+/// A text colour: one of the ten named colours the colour menu offers
+/// (Fluent's shared colours), or any other sRGB colour exactly as pasted
+/// content had it. "Automatic" is `None` where a colour is optional: no
+/// colour is sent, so the recipient's dark mode still works.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorId {
     Black,
@@ -190,6 +203,9 @@ pub enum ColorId {
     Teal,
     Blue,
     Purple,
+    /// Not one of the named ten (never one of their values: see
+    /// [`ColorId::exact`]).
+    Rgb(u8, u8, u8),
 }
 
 impl ColorId {
@@ -207,8 +223,18 @@ impl ColorId {
     ];
 
     /// The `#RRGGBB` value sent.
-    pub fn hex(self) -> &'static str {
-        match self {
+    pub fn hex(self) -> String {
+        match self.named_hex() {
+            Some(h) => h.to_string(),
+            None => {
+                let (r, g, b) = self.rgb();
+                format!("#{r:02X}{g:02X}{b:02X}")
+            }
+        }
+    }
+
+    fn named_hex(self) -> Option<&'static str> {
+        Some(match self {
             ColorId::Black => "#000000",
             ColorId::Grey => "#595959",
             ColorId::DarkRed => "#A4262C",
@@ -219,7 +245,17 @@ impl ColorId {
             ColorId::Teal => "#038387",
             ColorId::Blue => "#0F6CBD",
             ColorId::Purple => "#8764B8",
-        }
+            ColorId::Rgb(..) => return None,
+        })
+    }
+
+    /// The named colour with this value, else the value itself.
+    pub fn exact(r: u8, g: u8, b: u8) -> ColorId {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|c| c.rgb() == (r, g, b))
+            .unwrap_or(ColorId::Rgb(r, g, b))
     }
 
     /// The English name (the UI translates it).
@@ -235,47 +271,38 @@ impl ColorId {
             ColorId::Teal => "Teal",
             ColorId::Blue => "Blue",
             ColorId::Purple => "Purple",
+            ColorId::Rgb(..) => "Custom colour",
         }
     }
 
     pub fn rgb(self) -> (u8, u8, u8) {
-        parse_hex(self.hex()).unwrap_or((0, 0, 0))
+        match self {
+            ColorId::Rgb(r, g, b) => (r, g, b),
+            c => c.named_hex().and_then(parse_hex).unwrap_or((0, 0, 0)),
+        }
     }
 
-    /// The colour with exactly this `#RRGGBB` value.
+    /// The colour with exactly this `#RRGGBB` value (a named one when it
+    /// is one's).
     pub fn from_hex(s: &str) -> Option<ColorId> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|c| c.hex().eq_ignore_ascii_case(s))
+        if s.len() != 7 {
+            return None;
+        }
+        let (r, g, b) = parse_hex(s)?;
+        Some(Self::exact(r, g, b))
     }
 
-    /// The closest named colour to a pasted CSS colour, or `None`
-    /// (Automatic) for a colour that is black, white or too far from every
-    /// name: plain text colour is the recipient's to choose.
+    /// A pasted CSS colour as it was, or `None` (Automatic) for one that is
+    /// near black or white: plain text colour is the recipient's to choose,
+    /// so their dark mode still works.
     pub fn nearest(css: &str) -> Option<ColorId> {
         let (r, g, b) = parse_css_color(css)?;
         let lum = u32::from(r) + u32::from(g) + u32::from(b);
         if lum <= 3 * 40 || lum >= 3 * 235 {
             return None;
         }
-        let mut best = None;
-        let mut gap = u32::MAX;
-        for c in Self::ALL {
-            let (cr, cg, cb) = c.rgb();
-            let d = sq(r, cr) + sq(g, cg) + sq(b, cb);
-            if d < gap {
-                gap = d;
-                best = Some(c);
-            }
-        }
-        best.filter(|_| gap <= 120 * 120)
+        Some(Self::exact(r, g, b))
     }
-}
-
-fn sq(a: u8, b: u8) -> u32 {
-    let d = u32::from(a.abs_diff(b));
-    d * d
 }
 
 fn parse_hex(s: &str) -> Option<(u8, u8, u8)> {
@@ -382,10 +409,74 @@ impl Style {
     }
 }
 
+/// A picture in the text: its bytes live with the draft or the signature
+/// (`draft_attachments` and `signature_images`, by Content-ID); this names
+/// it and says how it is shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineImage {
+    /// The Content-ID, without `cid:` or angle brackets ([`image_cid`]).
+    pub cid: String,
+    /// The picture's own size in pixels.
+    pub iw: u32,
+    pub ih: u32,
+    /// Shown this wide (CSS px), the height following the aspect ratio.
+    pub width: u16,
+    /// What the plain-text part and screen readers get.
+    pub alt: String,
+}
+
+impl InlineImage {
+    /// A picture of `iw` x `ih` pixels put in at its own width, at most
+    /// [`DEFAULT_IMAGE_W`].
+    pub fn new(cid: impl Into<String>, iw: u32, ih: u32, alt: impl Into<String>) -> InlineImage {
+        let width = u16::try_from(iw.min(u32::from(DEFAULT_IMAGE_W))).unwrap_or(DEFAULT_IMAGE_W);
+        InlineImage {
+            cid: cid.into(),
+            iw: iw.max(1),
+            ih: ih.max(1),
+            width: width.clamp(MIN_IMAGE_W, MAX_IMAGE_W),
+            alt: alt.into(),
+        }
+    }
+
+    /// The height shown, from the width and the aspect ratio (CSS px).
+    pub fn height(&self) -> u16 {
+        let h = u64::from(self.width) * u64::from(self.ih.max(1)) / u64::from(self.iw.max(1));
+        u16::try_from(h.max(1)).unwrap_or(u16::MAX)
+    }
+
+    /// The same picture shown `width` CSS px wide (clamped).
+    pub fn sized(&self, width: u16) -> InlineImage {
+        InlineImage {
+            width: width.clamp(MIN_IMAGE_W, MAX_IMAGE_W),
+            ..self.clone()
+        }
+    }
+
+    /// Whether `cid` is a Content-ID this module writes or reads back: a
+    /// short run of letters, digits and `-._@`.
+    pub fn valid_cid(cid: &str) -> bool {
+        !cid.is_empty()
+            && cid.len() <= MAX_CID_BYTES
+            && cid
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'@'))
+    }
+}
+
+/// The Content-ID of a picture's bytes: named by their hash, so the same
+/// picture put in twice (or pasted again) is stored and sent once.
+pub fn image_cid(bytes: &[u8]) -> String {
+    format!("img-{:016x}@komorebi", fnv(bytes))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
+    /// A picture's run holds one object character ([`super::edit::OBJ`]).
     pub text: String,
     pub style: Style,
+    /// A picture in the text (its link, if any, is the style's).
+    pub image: Option<Box<InlineImage>>,
 }
 
 impl Run {
@@ -393,6 +484,7 @@ impl Run {
         Run {
             text: text.into(),
             style: Style::default(),
+            image: None,
         }
     }
 
@@ -400,6 +492,49 @@ impl Run {
         Run {
             text: text.into(),
             style,
+            image: None,
+        }
+    }
+
+    /// A picture, in `style` (a link around it).
+    pub fn picture(image: InlineImage, style: Style) -> Run {
+        Run {
+            text: super::edit::OBJ.to_string(),
+            style,
+            image: Some(Box::new(image)),
+        }
+    }
+
+    /// Whether this run can take `other`'s text (same style, no picture).
+    pub fn joins(&self, other: &Run) -> bool {
+        self.image.is_none() && other.image.is_none() && self.style == other.style
+    }
+}
+
+/// Where a cell's content sits vertically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VAlign {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+
+impl VAlign {
+    pub fn css(self) -> &'static str {
+        match self {
+            VAlign::Top => "top",
+            VAlign::Middle => "middle",
+            VAlign::Bottom => "bottom",
+        }
+    }
+
+    pub fn from_css(s: &str) -> Option<VAlign> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "top" | "baseline" | "text-top" => Some(VAlign::Top),
+            "middle" | "center" => Some(VAlign::Middle),
+            "bottom" | "text-bottom" => Some(VAlign::Bottom),
+            _ => None,
         }
     }
 }
@@ -430,6 +565,16 @@ impl Para {
         }
     }
 
+    /// A line of its own for pictures: one or more, with no text beside
+    /// them but spaces (a block picture, given room above and below).
+    pub fn pictures_only(&self) -> bool {
+        self.runs.iter().any(|r| r.image.is_some())
+            && self
+                .runs
+                .iter()
+                .all(|r| r.image.is_some() || r.text.trim().is_empty())
+    }
+
     /// The paragraph's text without formatting.
     pub fn plain_text(&self) -> String {
         self.runs.iter().map(|r| r.text.as_str()).collect()
@@ -440,16 +585,31 @@ impl Para {
     }
 }
 
-/// A table cell: paragraphs of text (no lists, quotes or indent).
+/// A table cell: paragraphs of text and pictures (no lists, quotes or
+/// indent).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Cell {
     pub paras: Vec<Para>,
+    pub valign: VAlign,
+    /// Columns and rows it spans to the right and down (0 and 1: none).
+    /// The cells it covers stay in the grid with no paragraphs.
+    pub colspan: u8,
+    pub rowspan: u8,
 }
 
 impl Cell {
+    /// The columns and rows it spans, each at least 1.
+    pub fn span(&self) -> (usize, usize) {
+        (
+            usize::from(self.colspan.max(1)),
+            usize::from(self.rowspan.max(1)),
+        )
+    }
+
     pub fn text(s: &str) -> Cell {
         Cell {
             paras: vec![Para::text(s)],
+            ..Cell::default()
         }
     }
 
@@ -465,34 +625,43 @@ impl Cell {
     }
 }
 
-/// A rectangular table up to 10 x 10, no merged cells, no nesting.
+/// A rectangular table up to 10 x 10, no nesting. A cell may span columns
+/// and rows ([`Cell::colspan`], [`Cell::rowspan`]); the grid stays whole,
+/// the cells it covers empty (no paragraphs, so no text lines).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Table {
     pub rows: Vec<Vec<Cell>>,
+    /// A layout table (a signature's): no rules between the cells.
+    pub borderless: bool,
+    /// Column widths in CSS px (0: shared out); empty: all shared out.
+    pub widths: Vec<u16>,
 }
 
-/// A signature's logo: the picture's bytes live with the signature (its
-/// row, or the draft's inline attachment); this names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LogoRef {
-    /// FNV-1a of the image bytes.
-    pub hash: u64,
-    pub width: u16,
-    pub height: u16,
-}
-
-impl LogoRef {
-    /// The Content-ID the logo is sent under (`cid:` without the scheme).
-    pub fn cid(&self) -> String {
-        format!("sig-{:016x}@komorebi", self.hash)
+impl Table {
+    /// Which cells another cell's span covers, row by row.
+    pub fn covered(&self) -> Vec<Vec<bool>> {
+        let mut out: Vec<Vec<bool>> = self.rows.iter().map(|r| vec![false; r.len()]).collect();
+        for (r, row) in self.rows.iter().enumerate() {
+            for (c, cell) in row.iter().enumerate() {
+                if out.get(r).and_then(|x| x.get(c)).copied().unwrap_or(true) {
+                    continue;
+                }
+                let (cs, rs) = cell.span();
+                for (dr, line) in out.iter_mut().skip(r).take(rs).enumerate() {
+                    for (dc, flag) in line.iter_mut().skip(c).take(cs).enumerate() {
+                        if dr > 0 || dc > 0 {
+                            *flag = true;
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
-    pub fn of(bytes: &[u8], width: u16, height: u16) -> LogoRef {
-        LogoRef {
-            hash: fnv(bytes),
-            width,
-            height,
-        }
+    /// Whether any cell spans more than one column or row.
+    pub fn is_merged(&self) -> bool {
+        self.rows.iter().flatten().any(|c| c.span() != (1, 1))
     }
 }
 
@@ -502,17 +671,15 @@ impl LogoRef {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SignatureBlock {
     pub blocks: Vec<Block>,
-    pub logo: Option<LogoRef>,
     pub source: Option<i64>,
     pub untouched_hash: u64,
 }
 
 impl SignatureBlock {
     /// A signature block with its untouched mark set to its content.
-    pub fn new(blocks: Vec<Block>, logo: Option<LogoRef>, source: Option<i64>) -> SignatureBlock {
+    pub fn new(blocks: Vec<Block>, source: Option<i64>) -> SignatureBlock {
         let mut s = SignatureBlock {
             blocks,
-            logo,
             source,
             untouched_hash: 0,
         };
@@ -521,7 +688,7 @@ impl SignatureBlock {
     }
 
     pub fn content_hash(&self) -> u64 {
-        super::emit::signature_hash(&self.blocks, self.logo.as_ref())
+        super::emit::signature_hash(&self.blocks)
     }
 
     pub fn is_untouched(&self) -> bool {
@@ -634,18 +801,52 @@ impl Doc {
         blocks(&self.blocks)
     }
 
-    /// Whether the document is empty: no text, table, logo or quote.
+    /// Whether the document is empty: no text, picture, table or quote.
     pub fn is_blank(&self) -> bool {
         self.blocks.iter().all(|b| match b {
             Block::Para(p) => p.is_empty(),
-            Block::Signature(s) => {
-                s.logo.is_none()
-                    && s.blocks
-                        .iter()
-                        .all(|b| matches!(b, Block::Para(p) if p.is_empty()))
-            }
+            Block::Signature(s) => s
+                .blocks
+                .iter()
+                .all(|b| matches!(b, Block::Para(p) if p.is_empty())),
             _ => false,
         })
+    }
+
+    /// Every picture in the document, in order (signature and cells
+    /// included).
+    pub fn images(&self) -> Vec<&InlineImage> {
+        fn blocks<'a>(bs: &'a [Block], out: &mut Vec<&'a InlineImage>) {
+            for b in bs {
+                match b {
+                    Block::Para(p) => para(p, out),
+                    Block::Table(t) => {
+                        for p in t.rows.iter().flatten().flat_map(|c| &c.paras) {
+                            para(p, out);
+                        }
+                    }
+                    Block::Signature(s) => blocks(&s.blocks, out),
+                    Block::Quote(_) => {}
+                }
+            }
+        }
+        fn para<'a>(p: &'a Para, out: &mut Vec<&'a InlineImage>) {
+            out.extend(p.runs.iter().filter_map(|r| r.image.as_deref()));
+        }
+        let mut out = Vec::new();
+        blocks(&self.blocks, &mut out);
+        out
+    }
+
+    /// The Content-IDs the document shows, each once, in order.
+    pub fn image_cids(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for i in self.images() {
+            if !out.contains(&i.cid) {
+                out.push(i.cid.clone());
+            }
+        }
+        out
     }
 
     /// The canonical form every function here produces and expects:
@@ -657,6 +858,7 @@ impl Doc {
         let mut budget = Budget {
             text: MAX_TEXT_BYTES,
             blocks: MAX_BLOCKS,
+            images: MAX_IMAGES,
         };
         let defaults = (self.font, self.size, self.color);
         let blocks = std::mem::take(&mut self.blocks);
@@ -674,6 +876,7 @@ type Defaults = (FontId, SizePt, Option<ColorId>);
 struct Budget {
     text: usize,
     blocks: usize,
+    images: usize,
 }
 
 fn norm_blocks(blocks: Vec<Block>, d: Defaults, budget: &mut Budget, top: bool) -> Vec<Block> {
@@ -721,12 +924,49 @@ fn norm_table(t: Table, d: Defaults, budget: &mut Budget) -> Option<Table> {
     if rows.is_empty() || cols == 0 {
         return None;
     }
+    let nrows = rows.len();
     for row in &mut rows {
         row.truncate(cols);
         while row.len() < cols {
             row.push(Cell::default());
         }
-        for cell in row.iter_mut() {
+    }
+    // Spans kept inside the grid and off other cells' spans; the cells a
+    // span covers are emptied.
+    let mut taken = vec![vec![false; cols]; nrows];
+    for (r, row) in rows.iter_mut().enumerate() {
+        for (c, cell) in row.iter_mut().enumerate() {
+            if taken
+                .get(r)
+                .and_then(|x| x.get(c))
+                .copied()
+                .unwrap_or(false)
+            {
+                *cell = Cell::default();
+                continue;
+            }
+            let free = |taken: &Vec<Vec<bool>>, rr: usize, cc: usize| {
+                !taken
+                    .get(rr)
+                    .and_then(|x| x.get(cc))
+                    .copied()
+                    .unwrap_or(true)
+            };
+            let mut cs = usize::from(cell.colspan.max(1)).min(cols - c);
+            while cs > 1 && !(c..c + cs).all(|cc| free(&taken, r, cc)) {
+                cs -= 1;
+            }
+            let mut rs = usize::from(cell.rowspan.max(1)).min(nrows - r);
+            while rs > 1 && !(r..r + rs).all(|rr| (c..c + cs).all(|cc| free(&taken, rr, cc))) {
+                rs -= 1;
+            }
+            for line in taken.iter_mut().skip(r).take(rs) {
+                for flag in line.iter_mut().skip(c).take(cs) {
+                    *flag = true;
+                }
+            }
+            cell.colspan = if cs > 1 { cs as u8 } else { 0 };
+            cell.rowspan = if rs > 1 { rs as u8 } else { 0 };
             let mut paras = std::mem::take(&mut cell.paras);
             paras.truncate(1024);
             for p in &mut paras {
@@ -738,7 +978,63 @@ fn norm_table(t: Table, d: Defaults, budget: &mut Budget) -> Option<Table> {
             cell.paras = paras;
         }
     }
-    Some(Table { rows })
+    // A column's width is written on a cell of its own, so a column only
+    // merged cells start in has none.
+    let own: Vec<bool> = (0..cols)
+        .map(|c| {
+            rows.iter().any(|row| {
+                row.get(c)
+                    .is_some_and(|x| x.colspan <= 1 && !x.paras.is_empty())
+            })
+        })
+        .collect();
+    let mut widths: Vec<u16> = t
+        .widths
+        .into_iter()
+        .take(cols)
+        .zip(&own)
+        .map(|(w, o)| if *o { w.min(MAX_IMAGE_W) } else { 0 })
+        .collect();
+    if widths.iter().all(|w| *w == 0) {
+        widths.clear();
+    } else {
+        widths.resize(cols, 0);
+    }
+    Some(Table {
+        rows,
+        borderless: t.borderless,
+        widths,
+    })
+}
+
+/// A picture as the model keeps it: a Content-ID it can write, its sizes
+/// in range, its alternative text one line. `None`: dropped.
+fn norm_image(mut i: InlineImage) -> Option<InlineImage> {
+    if !InlineImage::valid_cid(&i.cid) || i.iw == 0 || i.ih == 0 {
+        return None;
+    }
+    i.iw = i.iw.min(1 << 16);
+    i.ih = i.ih.min(1 << 16);
+    i.width = i.width.clamp(MIN_IMAGE_W, MAX_IMAGE_W);
+    let mut alt: String = i
+        .alt
+        .chars()
+        .map(|c| {
+            if c.is_control() || c == '\u{a0}' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .filter(|c| *c != super::edit::OBJ)
+        .collect();
+    let trimmed = alt.trim();
+    if trimmed.len() != alt.len() {
+        alt = trimmed.to_string();
+    }
+    cap_str(&mut alt, MAX_ALT_BYTES);
+    i.alt = alt;
+    Some(i)
 }
 
 fn norm_para(p: &mut Para, d: Defaults, budget: &mut Budget, in_cell: bool) {
@@ -756,6 +1052,30 @@ fn norm_para(p: &mut Para, d: Defaults, budget: &mut Budget, in_cell: bool) {
         if budget.text == 0 {
             break;
         }
+        if let Some(img) = r.image.take() {
+            if budget.images == 0 || budget.text < 3 {
+                continue;
+            }
+            let Some(img) = norm_image(*img) else {
+                continue;
+            };
+            budget.images -= 1;
+            budget.text -= 3;
+            r.text = super::edit::OBJ.to_string();
+            r.image = Some(Box::new(img));
+            // A picture takes only a link from the text's formatting.
+            r.style = Style {
+                link: r
+                    .style
+                    .link
+                    .take()
+                    .and_then(|l| link_target(&l))
+                    .filter(|l| l.len() <= MAX_LINK_BYTES),
+                ..Style::default()
+            };
+            out.push(r);
+            continue;
+        }
         let mut text = clean_text(&r.text);
         cap_str(&mut text, budget.text);
         if text.is_empty() {
@@ -769,6 +1089,11 @@ fn norm_para(p: &mut Para, d: Defaults, budget: &mut Budget, in_cell: bool) {
         if r.style.size == Some(d.1) {
             r.style.size = None;
         }
+        // A named colour's value is that name, never `Rgb`.
+        r.style.color = r.style.color.map(|c| {
+            let (cr, cg, cb) = c.rgb();
+            ColorId::exact(cr, cg, cb)
+        });
         if r.style.color.is_some() && r.style.color == d.2 {
             r.style.color = None;
         }
@@ -779,7 +1104,7 @@ fn norm_para(p: &mut Para, d: Defaults, budget: &mut Budget, in_cell: bool) {
             .and_then(|l| link_target(&l))
             .filter(|l| l.len() <= MAX_LINK_BYTES);
         match out.last_mut() {
-            Some(last) if last.style == r.style => last.text.push_str(&r.text),
+            Some(last) if last.joins(&r) => last.text.push_str(&r.text),
             _ => out.push(r),
         }
     }
@@ -787,14 +1112,19 @@ fn norm_para(p: &mut Para, d: Defaults, budget: &mut Budget, in_cell: bool) {
     p.runs = out;
 }
 
-/// Control characters out (a line break belongs to the paragraph
-/// structure), no-break spaces as spaces.
+/// Control characters and object characters out (a line break belongs to
+/// the paragraph structure, an object character to a picture), no-break
+/// spaces as spaces.
 fn clean_text(s: &str) -> String {
-    if !s.chars().any(|c| c.is_control() || c == '\u{a0}') {
+    let obj = super::edit::OBJ;
+    if !s
+        .chars()
+        .any(|c| c.is_control() || c == '\u{a0}' || c == obj)
+    {
         return s.to_string();
     }
     s.chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && *c != obj)
         .map(|c| if c == '\u{a0}' { ' ' } else { c })
         .collect()
 }

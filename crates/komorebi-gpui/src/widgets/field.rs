@@ -54,6 +54,9 @@ pub enum FieldLook {
     Underline { label: SharedString },
     /// The title bar's search pill: paper on canvas, 32 px.
     Search,
+    /// An inset pill in a 32 px line (a folder's name typed in the folder
+    /// pane).
+    Inline,
 }
 
 /// A single-line text field over a Kit `InputState` the caller owns.
@@ -65,6 +68,8 @@ pub struct TextField {
     leading: Option<Icon>,
     trailing: Option<SharedString>,
     on_nav: Option<OnNav>,
+    /// Only Enter and Escape go to `on_nav` (the caret keeps the rest).
+    edit_keys: bool,
     disabled: bool,
 }
 
@@ -78,6 +83,7 @@ impl TextField {
             leading: None,
             trailing: None,
             on_nav: None,
+            edit_keys: false,
             disabled: false,
         }
     }
@@ -102,6 +108,14 @@ impl TextField {
     /// Hands the list keys to `f` instead of the caret.
     pub fn navigation(mut self, f: impl Fn(Nav, &mut Window, &mut App) + 'static) -> Self {
         self.on_nav = Some(Rc::new(f));
+        self
+    }
+
+    /// Hands Enter and Escape to `f` (commit, cancel); the caret keeps
+    /// the arrows, Home and End (a name typed in place).
+    pub fn edit_keys(mut self, f: impl Fn(Nav, &mut Window, &mut App) + 'static) -> Self {
+        self.on_nav = Some(Rc::new(f));
+        self.edit_keys = true;
         self
     }
 
@@ -144,6 +158,7 @@ impl RenderOnce for TextField {
                 FieldLook::Pill => layout::CONTROL_H_LG,
                 FieldLook::Underline { .. } => layout::FIELD_H,
                 FieldLook::Search => layout::SEARCH_H,
+                FieldLook::Inline => layout::CONTROL_H,
             },
         );
         let mut row = div()
@@ -158,6 +173,11 @@ impl RenderOnce for TextField {
         row = match &self.look {
             FieldLook::Pill => row
                 .px(px(space::SP_3))
+                .rounded(px(radius::FULL))
+                .bg(c.inset)
+                .when(ring, |el| el.shadow(focus_ring(&t))),
+            FieldLook::Inline => row
+                .px(px(space::SP_2))
                 .rounded(px(radius::FULL))
                 .bg(c.inset)
                 .when(ring, |el| el.shadow(focus_ring(&t))),
@@ -204,6 +224,12 @@ impl RenderOnce for TextField {
                 )
             });
         match self.on_nav {
+            Some(nav) if self.edit_keys => take!(row, nav, Escape => Nav::Escape)
+                .capture_action(move |_: &Enter, window, cx| {
+                    nav(Nav::Enter, window, cx);
+                    cx.stop_propagation();
+                })
+                .into_any_element(),
             Some(nav) => take!(row, nav,
                 MoveUp => Nav::Up, MoveDown => Nav::Down, MovePageUp => Nav::PageUp,
                 MovePageDown => Nav::PageDown, MoveHome => Nav::Home, MoveEnd => Nav::End,
@@ -454,6 +480,109 @@ mod tests {
                         .look(FieldLook::Underline { label: "To".into() }),
                 )
         }
+    }
+
+    struct Recipients {
+        to: Entity<InputState>,
+    }
+
+    impl Render for Recipients {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().p(px(space::SP_4)).child(
+                ChipField::new(&self.to, "To")
+                    .id("to")
+                    .error(Some("not an address".into())),
+            )
+        }
+    }
+
+    /// Whether `shadow` paints at `p` (scaled px), as the renderer draws it:
+    /// a drop shadow fills its rect, an inset one its element minus its rect
+    /// (corners ignored: `p` is far from them).
+    fn paints(shadow: &gpui::Shadow, p: gpui::Point<gpui::ScaledPixels>) -> bool {
+        let mask = shadow.content_mask.bounds;
+        if !mask.contains(&p) {
+            return false;
+        }
+        if shadow.inset == 0 {
+            shadow.bounds.contains(&p)
+        } else {
+            shadow.element_bounds.contains(&p) && !shadow.bounds.contains(&p)
+        }
+    }
+
+    /// The owner's bug: typing in the composer's To field (keyboard focus)
+    /// drew the focus ring's ink over the whole row, light in dark mode and
+    /// dark in light mode, and the ink text vanished. The ring is two crisp
+    /// spread shadows on a row with no background; it must paint outside
+    /// the row only, never under the text.
+    fn the_ring_stays_outside_a_typed_in_field(cx: &mut TestAppContext, dark: bool) {
+        let (window, view) = test_support::open(cx, |window, cx| Recipients {
+            to: cx.new(|cx| InputState::new(window, cx)),
+        });
+        if dark {
+            cx.update(|cx| {
+                crate::theme::install(
+                    crate::theme::ThemeInput::new(
+                        komorebi::db::ThemeChoice::Dark,
+                        komorebi::theme::SystemTheme::default(),
+                    ),
+                    cx,
+                );
+            });
+        }
+        let to = view.read_with(cx, |v, _| v.to.clone());
+        cx.update_window(window.into(), |_, window, cx| {
+            let handle = to.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+            window.input("aaasdasdAaaa", cx);
+            window.draw(cx).clear(cx);
+            let ink = cx.tokens().color.ink;
+            let shadows = window.painted_shadows();
+            assert!(
+                shadows.iter().any(|s| s.color == ink),
+                "the keyboard focus draws the ink ring: {shadows:?}"
+            );
+            let text = window.find_by_label("To").bounds();
+            let centre = text.center().scale(window.scale_factor());
+            for s in &shadows {
+                assert!(
+                    !paints(s, centre),
+                    "a shadow paints under the typed text (dark {dark}): {s:?}"
+                );
+            }
+            // Outside the row: the 2 px paper gap, then the 2 px ink ring
+            // (the shadows are in the order they are drawn, the last on top).
+            let row = shadows
+                .iter()
+                .find(|s| s.color == ink)
+                .expect("the ink ring")
+                .bounds;
+            let scale = window.scale_factor();
+            let top = |dx: f32| {
+                let p = gpui::point(row.left() - gpui::ScaledPixels(dx * scale), row.center().y);
+                shadows.iter().rev().find(|s| paints(s, p)).map(|s| s.color)
+            };
+            let paper = cx.tokens().color.paper;
+            assert_eq!(top(1.), Some(paper), "the gap next to the row");
+            assert_eq!(top(3.), Some(ink), "the ring outside the gap");
+            assert_eq!(top(5.), None, "nothing past the ring");
+        })
+        .expect("type");
+        assert_eq!(
+            to.read_with(cx, |s, _| s.value().to_string()),
+            "aaasdasdAaaa"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn the_ring_stays_outside_a_typed_in_field_in_dark_mode(cx: &mut TestAppContext) {
+        the_ring_stays_outside_a_typed_in_field(cx, true);
+    }
+
+    #[gpui_kit::test]
+    fn the_ring_stays_outside_a_typed_in_field_in_light_mode(cx: &mut TestAppContext) {
+        the_ring_stays_outside_a_typed_in_field(cx, false);
     }
 
     #[gpui_kit::test]

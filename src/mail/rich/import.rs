@@ -7,13 +7,28 @@
 //! CF_HTML, "Edit quoted text", a draft another client saved): it is
 //! sanitized first, then mapped to what the model can hold (bold, italic,
 //! underline, strikethrough, the nearest font, size and colour, lists,
-//! quotes, simple tables, links, alignment, indent) and drops the rest,
-//! every image included.
+//! quotes, tables with their merged cells, column widths (px, or percent
+//! of the table's width), vertical alignment and borders, pictures, links,
+//! alignment, indent) and drops the rest. A picture is kept only when
+//! [`lossy_with_images`] is given a resolver that has its bytes without the
+//! network ([`super::images::Resolver`]).
+//!
+//! Text colours are kept exactly, except near black or white (Automatic).
+//!
+//! What a pasted document can lose (the model cannot hold it): tables
+//! nested in a cell (each nested row becomes one line of the cell), more
+//! than 10 rows or columns, cell padding and spacing (the editor's and the
+//! sent cell padding stand in, so pictures in neighbouring cells never
+//! touch) and background colours, border colours and single-side borders,
+//! line height and letter spacing, any font or size outside the closed sets
+//! (the nearest is taken), headings (bold text), floats, and remote
+//! pictures (never fetched).
 //!
 //! The tokenizer is the reader's (`render::dom`): linear, with node and
 //! depth caps. Nothing here fetches anything.
 
-use super::emit::{QUOTE_CLOSE, QUOTE_OPEN, TAG};
+use super::emit::{IMG_STYLE, QUOTE_CLOSE, QUOTE_OPEN, TAG};
+use super::images::Found;
 use super::link_target;
 use super::model::*;
 use crate::mail::compose_html;
@@ -22,8 +37,15 @@ use dom::{Dom, Id, Kind};
 
 /// Nesting followed before the rest is read as text.
 const MAX_WALK_DEPTH: usize = 64;
+/// The width in CSS px a percent column width is taken of when its table
+/// gives none: a typical message's.
+const PERCENT_OF: f32 = 600.0;
 /// Stored quotes in one document.
 const MAX_QUOTES: usize = 8;
+/// A picture's place in pasted HTML while it is sanitized: these two
+/// private-use characters around its index.
+const MARK_OPEN: char = '\u{E000}';
+const MARK_CLOSE: char = '\u{E001}';
 
 /// Read Komorebi's own stored HTML back into the document it came from.
 pub fn strict(html: &str) -> Option<Doc> {
@@ -46,7 +68,7 @@ pub fn strict(html: &str) -> Option<Doc> {
         strict: true,
         quotes,
         bad: false,
-        logo: None,
+        pictures: Vec::new(),
     };
     let mut doc = Doc::default();
     let mut base = Ctx::new(true);
@@ -70,17 +92,31 @@ pub fn strict(html: &str) -> Option<Doc> {
     Some(doc)
 }
 
-/// Read any HTML into the model, keeping what it can hold. `None` if
-/// nothing readable is left (or the HTML is too large to sanitize).
+/// Read any HTML into the model, keeping what it can hold, pictures left
+/// out. `None` if nothing readable is left (or the HTML is too large to
+/// sanitize).
 pub fn lossy(html: &str) -> Option<Doc> {
-    let clean = compose_html::sanitize(html)?;
+    lossy_with_images(html, &mut |_| None)
+}
+
+/// [`lossy`], each `<img>` kept where `resolve` gives it (pasted HTML:
+/// a picture whose bytes are on this PC or in the HTML itself).
+pub fn lossy_with_images(
+    html: &str,
+    resolve: &mut dyn FnMut(&Found) -> Option<InlineImage>,
+) -> Option<Doc> {
+    if html.len() > MAX_PASTE_BYTES {
+        return None;
+    }
+    let (marked, pictures) = mark_images(html, resolve);
+    let clean = compose_html::sanitize(&marked)?;
     let dom = dom::parse(&clean);
     let mut w = Walk {
         dom: &dom,
         strict: false,
         quotes: Vec::new(),
         bad: false,
-        logo: None,
+        pictures,
     };
     let mut sink = Sink::new(true);
     w.kids(dom::ROOT, &Ctx::new(false), &mut sink);
@@ -91,6 +127,147 @@ pub fn lossy(html: &str) -> Option<Doc> {
     };
     doc.normalize();
     (!doc.blocks.is_empty() && !doc.is_blank()).then_some(doc)
+}
+
+/// Pasted HTML with `data:` pictures may be this large before they are
+/// taken out.
+const MAX_PASTE_BYTES: usize = 48 * 1024 * 1024;
+
+/// Each `<img>` of `html` replaced by a mark the sanitizer keeps as text
+/// (an index between [`MARK_OPEN`] and [`MARK_CLOSE`]) when `resolve` gives
+/// its picture, else dropped; the pictures by index. Marks already in the
+/// text are taken out first, so pasted text cannot forge one.
+fn mark_images(
+    html: &str,
+    resolve: &mut dyn FnMut(&Found) -> Option<InlineImage>,
+) -> (String, Vec<InlineImage>) {
+    let mut out = String::with_capacity(html.len().min(MAX_HTML_BYTES));
+    let mut pictures = Vec::new();
+    let mut rest = html;
+    loop {
+        let Some(at) = find_img(rest) else {
+            push_unmarked(rest, &mut out);
+            break;
+        };
+        push_unmarked(rest.get(..at).unwrap_or(""), &mut out);
+        let tail = rest.get(at..).unwrap_or("");
+        let end = tag_end(tail).unwrap_or(tail.len());
+        let tag = tail.get(..end).unwrap_or("");
+        rest = tail.get(end..).unwrap_or("");
+        if pictures.len() >= MAX_IMAGES {
+            continue;
+        }
+        let found = img_found(tag);
+        if let Some(img) = found.and_then(|f| resolve(&f)) {
+            out.push(MARK_OPEN);
+            out.push_str(&pictures.len().to_string());
+            out.push(MARK_CLOSE);
+            pictures.push(img);
+        }
+    }
+    (out, pictures)
+}
+
+fn push_unmarked(s: &str, out: &mut String) {
+    if s.contains([MARK_OPEN, MARK_CLOSE]) {
+        out.extend(s.chars().filter(|c| *c != MARK_OPEN && *c != MARK_CLOSE));
+    } else {
+        out.push_str(s);
+    }
+}
+
+/// The byte offset of the next `<img` tag (any case).
+fn find_img(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while let Some(off) = b.get(i..)?.iter().position(|&c| c == b'<') {
+        let at = i + off;
+        let name = b.get(at + 1..at + 4)?;
+        let next = b.get(at + 4).copied().unwrap_or(b'>');
+        if name.eq_ignore_ascii_case(b"img")
+            && (next.is_ascii_whitespace() || next == b'>' || next == b'/')
+        {
+            return Some(at);
+        }
+        i = at + 1;
+    }
+    None
+}
+
+/// The length of the tag at the start of `s`, up to its `>` outside quotes.
+fn tag_end(s: &str) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    for (i, &c) in s.as_bytes().iter().enumerate() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == b'"' || c == b'\'' => quote = Some(c),
+            None if c == b'>' => return Some(i + 1),
+            None => {}
+        }
+    }
+    None
+}
+
+/// What an `<img>` tag says about its picture: its source, width and
+/// alternative text.
+fn img_found(tag: &str) -> Option<Found> {
+    let dom = dom::parse(tag);
+    let id = dom
+        .children(dom::ROOT)
+        .iter()
+        .copied()
+        .find(|&c| dom.tag(c) == "img")?;
+    let src = dom.attr(id, "src")?.trim().to_string();
+    let css_w = dom
+        .attr(id, "style")
+        .and_then(|s| css_decl(s, "width"))
+        .and_then(css_px);
+    let width = dom
+        .attr(id, "width")
+        .and_then(|w| {
+            w.trim()
+                .strip_suffix("px")
+                .unwrap_or(w.trim())
+                .parse::<f32>()
+                .ok()
+        })
+        .or(css_w)
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .map(|w| w.round() as u32);
+    Some(Found {
+        src,
+        width,
+        alt: dom.attr(id, "alt").unwrap_or_default().to_string(),
+    })
+}
+
+/// The value of the last `name` declaration of a `style` attribute.
+fn css_decl<'s>(css: &'s str, name: &str) -> Option<&'s str> {
+    css.split(';')
+        .filter_map(|d| d.split_once(':'))
+        .filter(|(p, _)| p.trim().eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.trim().trim_end_matches("!important").trim())
+        .next_back()
+}
+
+/// A CSS length in px (`px`, `pt`, or a bare number); `None` for percent
+/// and anything else.
+fn css_px(v: &str) -> Option<f32> {
+    let v = v.trim().to_ascii_lowercase();
+    if let Some(n) = v.strip_suffix("px") {
+        return n.trim().parse().ok();
+    }
+    if let Some(n) = v.strip_suffix("pt") {
+        return n.trim().parse::<f32>().ok().map(|pt| pt * 96.0 / 72.0);
+    }
+    if let Some(n) = v.strip_suffix("in") {
+        return n.trim().parse::<f32>().ok().map(|i| i * 96.0);
+    }
+    if let Some(n) = v.strip_suffix("cm") {
+        return n.trim().parse::<f32>().ok().map(|c| c * 96.0 / 2.54);
+    }
+    v.parse().ok()
 }
 
 /// Replace each stored quote with a placeholder element and return them.
@@ -242,12 +419,21 @@ impl Sink {
         }
         let p = self.cur.get_or_insert_with(|| ctx.para());
         match p.runs.last_mut() {
-            Some(last) if last.style == ctx.style => last.text.push_str(&buf),
-            _ => p.runs.push(Run {
-                text: buf,
-                style: ctx.style.clone(),
-            }),
+            Some(last) if last.image.is_none() && last.style == ctx.style => {
+                last.text.push_str(&buf)
+            }
+            _ => p.runs.push(Run::styled(buf, ctx.style.clone())),
         }
+    }
+
+    /// A picture in the paragraph being filled (its link from `ctx`).
+    fn push_image(&mut self, img: InlineImage, ctx: &Ctx) {
+        let style = Style {
+            link: ctx.style.link.clone(),
+            ..Style::default()
+        };
+        let p = self.cur.get_or_insert_with(|| ctx.para());
+        p.runs.push(Run::picture(img, style));
     }
 
     /// In lossy mode, the trailing collapsed space and empty runs go.
@@ -293,8 +479,8 @@ struct Walk<'a> {
     strict: bool,
     quotes: Vec<QuoteBlock>,
     bad: bool,
-    /// The logo found inside the signature being read.
-    logo: Option<LogoRef>,
+    /// Lossy: the pasted pictures, by the index their marks hold.
+    pictures: Vec<InlineImage>,
 }
 
 impl Walk<'_> {
@@ -363,7 +549,30 @@ impl Walk<'_> {
                     self.bad = true;
                     return;
                 }
-                sink.push_text(t, ctx);
+                if self.strict || !t.contains(MARK_OPEN) {
+                    sink.push_text(t, ctx);
+                    return;
+                }
+                // Pasted pictures, at their marks.
+                let mut rest = t.as_str();
+                while let Some(at) = rest.find(MARK_OPEN) {
+                    sink.push_text(rest.get(..at).unwrap_or(""), ctx);
+                    let after = rest.get(at + MARK_OPEN.len_utf8()..).unwrap_or("");
+                    let Some(end) = after.find(MARK_CLOSE) else {
+                        rest = after;
+                        continue;
+                    };
+                    let picture = after
+                        .get(..end)
+                        .and_then(|n| n.parse::<usize>().ok())
+                        .and_then(|n| self.pictures.get(n))
+                        .cloned();
+                    if let Some(img) = picture {
+                        sink.push_image(img, ctx);
+                    }
+                    rest = after.get(end + MARK_CLOSE.len_utf8()..).unwrap_or("");
+                }
+                sink.push_text(rest, ctx);
             }
             Some(Kind::Elem { tag, .. }) => self.elem(id, tag, ctx, sink),
             None => {}
@@ -539,10 +748,23 @@ impl Walk<'_> {
                 self.kids(id, &c, sink);
                 sink.flush();
             }
+            // A table in a cell (no nesting in the model): each of its rows
+            // one line of the cell, its cells side by side.
             "table" if ctx.in_cell && !self.strict => {
                 sink.flush();
                 self.kids(id, ctx, sink);
                 sink.flush();
+            }
+            "tr" if ctx.in_cell && !self.strict => {
+                sink.flush();
+                self.kids(id, ctx, sink);
+                sink.flush();
+            }
+            "td" | "th" if ctx.in_cell && !self.strict => {
+                if sink.cur.as_ref().is_some_and(|p| !p.runs.is_empty()) {
+                    sink.push_text(" ", ctx);
+                }
+                self.kids(id, ctx, sink);
             }
             "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" if !self.strict => {
                 sink.flush();
@@ -551,7 +773,9 @@ impl Walk<'_> {
             }
             "table" => {
                 if self.strict
-                    && (ctx.inline_only || ctx.in_cell || !self.attrs_only(id, &["style"]))
+                    && (ctx.inline_only
+                        || ctx.in_cell
+                        || !self.attrs_only(id, &["style", "border", "cellpadding", "cellspacing"]))
                 {
                     self.bad = true;
                     return;
@@ -579,24 +803,65 @@ impl Walk<'_> {
                     None => self.bad = true,
                 }
             }
-            "img" if self.strict => {
-                if !ctx.in_sig || !self.attrs_only(id, &["src", "alt", "width", "height"]) {
-                    self.bad = true;
-                    return;
+            "img" if self.strict && ctx.inline_only => {
+                let num = |k: &str| dom.attr(id, k).and_then(|v| v.parse::<u32>().ok());
+                let img = (|| {
+                    if !self.attrs_only(
+                        id,
+                        &[
+                            "src", "width", "height", "alt", "data-iw", "data-ih", "style",
+                        ],
+                    ) || dom.attr(id, "style") != Some(IMG_STYLE)
+                    {
+                        return None;
+                    }
+                    let cid = dom.attr(id, "src")?.strip_prefix("cid:")?;
+                    let width = u16::try_from(num("width")?).ok()?;
+                    let img = InlineImage {
+                        cid: cid.to_string(),
+                        iw: num("data-iw")?,
+                        ih: num("data-ih")?,
+                        width,
+                        alt: dom.attr(id, "alt")?.to_string(),
+                    };
+                    (InlineImage::valid_cid(cid)
+                        && img.height() == u16::try_from(num("height")?).ok()?)
+                    .then_some(img)
+                })();
+                match img {
+                    Some(img) => sink.push_image(img, ctx),
+                    None => self.bad = true,
                 }
+            }
+            // A signature logo as Komorebi 1.0.2 and before wrote it, at the
+            // end of the signature: the same picture, now in a paragraph of
+            // its own (its Content-ID names the same bytes, `image_cid`).
+            "img" if self.strict && ctx.in_sig => {
                 let logo = (|| {
-                    let cid = dom.attr(id, "src")?.strip_prefix("cid:sig-")?;
-                    let hex = cid.strip_suffix("@komorebi")?;
+                    if !self.attrs_only(id, &["src", "alt", "width", "height"]) {
+                        return None;
+                    }
+                    let hex = dom
+                        .attr(id, "src")?
+                        .strip_prefix("cid:sig-")?
+                        .strip_suffix("@komorebi")?;
                     let hash = u64::from_str_radix(hex, 16).ok()?;
-                    Some(LogoRef {
-                        hash,
-                        width: dom.attr(id, "width")?.parse().ok()?,
-                        height: dom.attr(id, "height")?.parse().ok()?,
-                    })
+                    let w: u32 = dom.attr(id, "width")?.parse().ok()?;
+                    let h: u32 = dom.attr(id, "height")?.parse().ok()?;
+                    Some(InlineImage::new(
+                        format!("img-{hash:016x}@komorebi"),
+                        w,
+                        h,
+                        "",
+                    ))
                 })();
                 match logo {
-                    Some(l) if self.logo.is_none() => self.logo = Some(l),
-                    _ => self.bad = true,
+                    Some(img) => {
+                        sink.flush();
+                        sink.push_image(img, ctx);
+                        sink.flush();
+                    }
+                    None => self.bad = true,
                 }
             }
             "head" | "title" | "script" | "style" | "meta" | "link" | "img" | "svg" | "object"
@@ -670,13 +935,10 @@ impl Walk<'_> {
         c.in_sig = true;
         c.depth = ctx.depth;
         let mut inner = Sink::new(false);
-        self.logo = None;
         self.kids(id, &c, &mut inner);
         inner.flush();
-        let logo = self.logo.take();
         sink.blocks.push(Block::Signature(SignatureBlock {
             blocks: inner.blocks,
-            logo,
             source,
             untouched_hash: hash,
         }));
@@ -707,11 +969,60 @@ impl Walk<'_> {
                 return None;
             }
         }
-        for tr in trs.into_iter().take(MAX_TABLE) {
+        // Borders: strict, as written (`border="0"` on a layout table);
+        // pasted, any `border` attribute or declaration that draws one.
+        let draws = |css: Option<&str>| {
+            css.and_then(|s| css_decl(s, "border")).is_some_and(|v| {
+                let v = v.to_ascii_lowercase();
+                !(v.contains("none") || v.starts_with('0') || v.contains("hidden"))
+            })
+        };
+        let mut bordered = if self.strict {
+            dom.attr(id, "border") != Some("0")
+        } else {
+            dom.attr(id, "border")
+                .and_then(|b| b.trim().parse::<u32>().ok())
+                .is_some_and(|b| b > 0)
+                || draws(dom.attr(id, "style"))
+        };
+        // Percent widths are taken against the table's own width in px, or
+        // a typical message's width.
+        let table_w = dom
+            .attr(id, "width")
+            .and_then(|w| css_px(w.trim()))
+            .or_else(|| {
+                dom.attr(id, "style")
+                    .and_then(|s| css_decl(s, "width"))
+                    .and_then(css_px)
+            })
+            .filter(|w| w.is_finite() && *w > 0.0)
+            .unwrap_or(PERCENT_OF);
+        let strict = self.strict;
+        let length = |v: &str| -> Option<f32> {
+            let v = v.trim();
+            match v.strip_suffix('%') {
+                Some(p) if !strict => p.trim().parse::<f32>().ok().map(|p| p * table_w / 100.0),
+                Some(_) => None,
+                None => css_px(v.strip_suffix("px").map_or(v, |n| n.trim())),
+            }
+        };
+        let span = |v: Option<&str>, room: usize| -> usize {
+            v.and_then(|s| s.trim().parse::<usize>().ok())
+                .unwrap_or(1)
+                .clamp(1, room.max(1))
+        };
+        // Cells placed on a grid: each in the first slot of its row a span
+        // from above has not taken.
+        let mut grid: Vec<Vec<Option<Cell>>> = Vec::new();
+        let mut taken = [[false; MAX_TABLE]; MAX_TABLE];
+        let mut widths = [0u16; MAX_TABLE];
+        for (r, tr) in trs.into_iter().take(MAX_TABLE).enumerate() {
             if !self.attrs_only(tr, &[]) {
                 return None;
             }
-            let mut row = Vec::new();
+            let row_valign = dom.attr(tr, "valign").and_then(VAlign::from_css);
+            let mut row: Vec<Option<Cell>> = Vec::new();
+            let mut col = 0usize;
             for &td in dom.children(tr) {
                 match dom.tag(td) {
                     "td" | "th" => {}
@@ -720,18 +1031,68 @@ impl Walk<'_> {
                         continue;
                     }
                 }
-                if row.len() >= MAX_TABLE {
+                while taken
+                    .get(r)
+                    .and_then(|x| x.get(col))
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    col = col.saturating_add(1);
+                }
+                if col >= MAX_TABLE {
                     self.fail();
                     break;
                 }
-                if !self.attrs_only(td, &["style"]) {
+                if !self.attrs_only(td, &["style", "width", "colspan", "rowspan"]) {
                     return None;
+                }
+                let span_c = span(dom.attr(td, "colspan"), MAX_TABLE - col);
+                let span_r = span(dom.attr(td, "rowspan"), MAX_TABLE - r);
+                for line in taken.iter_mut().skip(r).take(span_r) {
+                    for flag in line.iter_mut().skip(col).take(span_c) {
+                        *flag = true;
+                    }
+                }
+                let css = dom.attr(td, "style");
+                if !self.strict && draws(css) {
+                    bordered = true;
+                }
+                let valign = css
+                    .and_then(|s| css_decl(s, "vertical-align"))
+                    .and_then(VAlign::from_css)
+                    .or_else(|| dom.attr(td, "valign").and_then(VAlign::from_css))
+                    .or(row_valign)
+                    .unwrap_or(if self.strict {
+                        VAlign::Top
+                    } else {
+                        // A browser centres a cell's content by default.
+                        VAlign::Middle
+                    });
+                let w = dom
+                    .attr(td, "width")
+                    .and_then(length)
+                    .or_else(|| css.and_then(|s| css_decl(s, "width")).and_then(length))
+                    .filter(|w| w.is_finite() && *w > 0.0)
+                    .map_or(0, |w| w.round().min(f32::from(MAX_IMAGE_W)) as u16);
+                // A column's width from a cell of its own (a merged cell's
+                // is shared by the columns it spans).
+                if span_c == 1
+                    && let Some(slot) = widths.get_mut(col)
+                    && *slot == 0
+                {
+                    *slot = w;
                 }
                 let mut c = Ctx::new(false);
                 c.in_cell = true;
                 c.depth = ctx.depth + 1;
                 if !self.strict {
                     c.style = ctx.style.clone();
+                    if let Some(css) = css {
+                        self.style(css, &mut c, StyleKind::Block);
+                    }
+                    if let Some(a) = dom.attr(td, "align").and_then(Align::from_css) {
+                        c.align = a;
+                    }
                 }
                 let mut cs = Sink::new(!self.strict);
                 self.kids(td, &c, &mut cs);
@@ -744,16 +1105,51 @@ impl Walk<'_> {
                         _ => None,
                     })
                     .collect();
-                row.push(Cell { paras });
+                if row.len() <= col {
+                    row.resize_with(col.saturating_add(1), || None);
+                }
+                if let Some(slot) = row.get_mut(col) {
+                    *slot = Some(Cell {
+                        paras,
+                        valign,
+                        colspan: if span_c > 1 { span_c as u8 } else { 0 },
+                        rowspan: if span_r > 1 { span_r as u8 } else { 0 },
+                    });
+                }
+                col = col.saturating_add(span_c);
                 if self.bad {
                     return None;
                 }
             }
-            if !row.is_empty() {
-                rows.push(row);
-            }
+            grid.push(row);
         }
-        (!rows.is_empty()).then_some(Table { rows })
+        // Rows a span reaches past the last `tr` are not added; a row with
+        // no cell of its own and none reaching it is dropped.
+        let cols = taken
+            .iter()
+            .take(grid.len())
+            .filter_map(|line| line.iter().rposition(|t| *t))
+            .max()
+            .map_or(0, |c| c.saturating_add(1));
+        for (r, row) in grid.into_iter().enumerate() {
+            let reached = taken.get(r).is_some_and(|line| line.iter().any(|t| *t));
+            if row.iter().all(Option::is_none) && !reached {
+                continue;
+            }
+            let mut out: Vec<Cell> = row.into_iter().map(Option::unwrap_or_default).collect();
+            out.resize_with(cols.max(out.len()), Cell::default);
+            rows.push(out);
+        }
+        let widths: Vec<u16> = if widths.iter().all(|w| *w == 0) {
+            Vec::new()
+        } else {
+            widths.iter().take(cols).copied().collect()
+        };
+        (!rows.is_empty()).then_some(Table {
+            rows,
+            borderless: !bordered,
+            widths,
+        })
     }
 
     /// Apply the declarations of a `style` attribute. Strict: only the

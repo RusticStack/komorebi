@@ -24,7 +24,29 @@ Features in more detail:
   Microsoft sign-in. A custom domain hosted by a listed provider is
   recognised from its MX records (only a listed provider can be chosen
   this way; the MX host itself never fills a field). "Add provider" gives
-  manual settings for any IMAP/SMTP server (TLS or STARTTLS only). What
+  manual settings for any IMAP/SMTP server (TLS or STARTTLS only). Import
+  from Outlook (`src/import/outlook.rs`, the setup flow's list) offers
+  classic Outlook's accounts and signatures from this PC: accounts from its
+  mail profiles (`HKCU\Software\Microsoft\Office\16.0` and `15.0\Outlook\Profiles`,
+  and the Windows Messaging Subsystem profiles of Outlook 2010 and older;
+  values `Email`, `Display Name`, `Account Name`, `IMAP Server`,
+  `POP3 Server`, `SMTP Server`, their `Port`, `Use SSL`,
+  `Secure Connection` and `User`, `SMTP Use Auth`, `New Signature`,
+  `Reply-Forward Signature`, as REG_SZ, REG_BINARY UTF-16 or REG_DWORD;
+  password values are never read), signatures from
+  `%APPDATA%\Microsoft\Signatures` (or the localised name Office records),
+  decoded from their declared charset, with their `<name>_files` (or
+  localised) picture folders. An IMAP account fills manual setup with
+  Outlook's servers, a provider's address its preset, a POP account the
+  usual lookup, an Exchange, Microsoft 365 or Outlook.com account the
+  Microsoft preset with its "needs Microsoft sign-in" note. Each account is
+  added only once its password signs in; its name and default signatures
+  come from Outlook. A signature keeps its layout table, merged cells and
+  colours, and the pictures in its picture folder, read off the UI thread
+  and kept in the signature (`outlook::to_signature`); a picture linked
+  from the web is never fetched, and the list counts it. The new
+  Outlook keeps its settings online: the list then says there is nothing
+  local to import. What
   is known about Purelymail and Postale.io, the providers Komorebi was
   built and tested on, and what is not (nothing below is assumed):
   - *Sent copy:* SMTP never copies to Sent by itself, so "save a copy to
@@ -99,6 +121,36 @@ Features in more detail:
   to be reviewed again when the server renews it. Enter in the password
   field adds the account, Esc goes back. Not yet validated against a real
   self-hosted server.
+- **Folders made from the folder pane:** New folder from the + on an
+  account's line (it shows on hover and on the keyboard's line), from the
+  account line's menu, from a right-click in the pane's empty room, or
+  Ctrl+Shift+N (in the keyboard line's account, else the open folder's);
+  New subfolder, Rename (F2) and Delete folder (Delete) in a folder's menu.
+  The name is typed in a field in the tree where the folder will be: Enter
+  makes it, Esc leaves it, and a name that can't be used is said under the
+  field (empty, too long, `*` or `%`, the server's hierarchy delimiter, or
+  a name already beside it). Delete asks first and says what goes: the
+  folder, its subfolders and the messages in them, deleted on the server,
+  not moved to Trash. Inbox, Sent, Drafts, Trash, Junk and Archive are never
+  renamed or deleted. The server's delimiter and its `INBOX.` prefix (when
+  every folder is under the inbox) are followed, names go in modified
+  UTF-7, a new folder is subscribed to, a rename keeps the cached mail and
+  the rules that move mail there, and the folder list is read again after.
+  Out of reach, the change waits for the next connection like other
+  actions; a refusal is said on the status line in the server's words.
+- **Account icons:** beside an account's name in the folder pane and on
+  its settings page. In order: an image chosen on the account's page
+  (Account icon: Choose image, Remove image; PNG, ICO, JPEG, GIF or BMP,
+  kept as a 40 px PNG in the cache), else the icon of the mail domain's own
+  website (`<link rel="icon">`, `apple-touch-icon`, then `/favicon.ico`;
+  the size nearest above 40 px, for a 20 px slot at 200%), else the bundled
+  icon of the account's provider (by its address's domain or its IMAP
+  server), else none (the line looks as it always did). The domain is asked
+  when the account is added and then at most every 30 days, never for a
+  built-in provider's own domain and never under `KOMOREBI_OFFLINE`; see
+  PRIVACY.md. Settings > Privacy > Icons from mail domains turns it off and
+  removes what was fetched. A dark mark on a clear ground sits on a
+  neutral round backing in the dark theme.
 - **Multiple accounts**, each with its own folders, plus a combined
   "All inboxes" view. With no account yet, the window says what is needed
   and its Add account opens the form at once (New mail shows once there is
@@ -228,7 +280,8 @@ Features in more detail:
   headers and Copy all), Copy Message-ID (`<id@host>`, also shown in the
   original view), and Forward as attachment (a new message with the
   original attached whole as `<subject>.eml`, type message/rfc822, as it
-  was received with all its header fields; the usual size limit applies).
+  was received with all its header fields; only the server's own size limit
+  applies).
   A message not downloaded yet is fetched first ("Fetching message…").
 - **Sender notice:** one quiet line above the message says when to look
   twice at the sender, with at most two reasons: your own server recorded
@@ -282,12 +335,21 @@ Features in more detail:
   attach from the dialog, drop files from Explorer on the window while the
   composer shows (it gets an accent border), or copy them in Explorer and
   press Ctrl+V in the composer (text still pastes as text). Files are read
-  off the UI thread, folders are refused, and the 100 MB limit holds. A line
-  above the attachments counts their size as sent ("Attachments 18.4 MB of
-  25 MB"); it turns amber from 80% and red over 25 MB, when Send is off.
-  Signatures are named and kept in one list (Settings > Signatures; the
-  text is formatted, with at most one small logo sent as an embedded
-  `cid:` part). Each account has two defaults, one for new messages and one
+  off the UI thread and folders are refused. Komorebi sets no size limit on
+  attachments: a line under them shows their total ("Attachments: 18.4 MB"),
+  and the account's server is the only judge; when it refuses a message as too
+  large (SMTP 552 or 5.3.4), the Outbox says the message is too large for it.
+  Signatures are named and kept in one list (Settings > Signatures). A
+  signature is written in the composer's own editor, with the same format
+  bar (less Quote), tables and pictures: a logo beside the name in a table,
+  a row of partner logos under it, as many as it needs and of any size up
+  to 10 MB each. A signature pasted from Outlook or a web page keeps its
+  layout table (merged cells, column widths in px or percent, vertical
+  alignment, no rules), pictures, fonts, sizes, its colours exactly and
+  its links as far as the document can hold them. Its pictures are saved
+  with it and copied into
+  the draft when it goes in. Signatures saved by an earlier version keep
+  their logo: it becomes a picture at the end of the signature. Each account has two defaults, one for new messages and one
   for replies and forwards, either of which can be None (the account's
   page has a box for each, and Manage signatures). The default goes under
   your text after a blank line (the plain-text part has the standard `-- `
@@ -297,8 +359,9 @@ Features in more detail:
   replied to is left out of the quote.
   Drafts are saved on this computer two seconds after you stop typing, and
   at once when the composer closes (Esc), another message takes its place,
-  the From account changes or the window closes; attachments are copied
-  when added. Starting another message (a reply, a `mailto:` link, or New
+  the From account changes or the window closes; attachments and pictures
+  are copied when added, off the UI thread (and read back off it when a
+  draft opens), so a large file never holds the window. Starting another message (a reply, a `mailto:` link, or New
   mail) keeps the draft in progress; New mail always starts a blank
   message. "Drafts on this PC", always in the navigation with its count
   (named apart from the account's own Drafts folder), lists the
@@ -344,12 +407,19 @@ Features in more detail:
 - **Formatting and HTML replies:** the composer formats text with its own
   document model: a short list of email-safe fonts and sizes, bold, italic,
   underline, strikethrough, ten named colours (or Automatic, which sends no
-  colour so the recipient's dark mode still works), bulleted and numbered
-  lists, indent, alignment, links (http, https and mailto), quotes and
-  simple tables (up to 10 by 10, text only). A formatted message goes out as
+  colour so the recipient's dark mode still works; any other colour pasted
+  text had is kept exactly, sent as it was and drawn in the dark theme by
+  the reader's rule: unchanged at 4.5:1 contrast or more, else moved in
+  lightness), bulleted and numbered lists, indent, alignment, links (http,
+  https and mailto), quotes and tables (up to 10 by 10, with column widths,
+  vertical alignment and pictures in cells; a table pasted with no borders
+  stays borderless, and pasted merged cells stay merged: such a table keeps
+  its rows and columns, only Delete table changes it), and pictures in the
+  text (a picture taller than the text has a line's leading above and
+  below it). A formatted message goes out as
   text/plain plus a generated text/html alternative (the plain part reads
-  `label (url)` for links, `- ` and `1. ` for lists, `> ` for quotes, and
-  aligned columns for tables); a message with no formatting goes out as
+  `label (url)` for links, `- ` and `1. ` for lists, `> ` for quotes,
+  `[alt text]` for a picture, and aligned columns for tables); a message with no formatting goes out as
   plain text only, exactly as typed, and any message can be switched to
   plain text. A plain-text message is sent as text/plain only (marks such
   as `**` or `- ` stay text, and a reply quotes with `> ` lines). A
@@ -357,23 +427,50 @@ Features in more detail:
   HTML below your text, with its images (inline ones too), remote styles,
   scripts and forms removed; a forward shows the original's From, Sent, To
   and Subject above it. Nothing is ever loaded from the network. Web fonts,
-  a free colour picker, highlight, headings, images in the body and HTML
-  source editing do not exist (see docs/SCOPE.md). The body is
+  a free colour picker, highlight, headings and HTML source editing do not
+  exist (see docs/SCOPE.md).
+  **Pictures in the text** (PNG, JPEG, GIF, WebP; never SVG), for a
+  step-by-step how-to or a signature: Insert picture on the format bar (or
+  in More when the bar is narrow) opens the file picker; picture files
+  dropped on the text go in where they are dropped (the text shows an ink
+  frame and the caret where they go, while the rest of the composer says
+  "Drop to attach"; other files dropped on the text are attached); Ctrl+V
+  puts in copied picture files, a screenshot or copied bitmap (as PNG), and
+  the pictures of pasted HTML that are in the HTML itself (`data:`) or on
+  this PC; a picture on the web is never fetched and is left out. A
+  picture wider than 1600 px is scaled to 1600 px when it goes in (a JPEG
+  stays JPEG at quality 85, others become PNG, a GIF is kept as it is);
+  More > Picture > Use original picture puts the file back as it was. A
+  picture is drawn at its width, never wider than the text; a click selects
+  it (an ink frame with corner handles): drag a corner to resize it, its
+  aspect kept, or press Ctrl+] and Ctrl+[ (also in More > Picture, with
+  Original size and Alt text…); Delete or Backspace removes it; each is one
+  undo step. Pictures are decoded off the UI thread. A picture is sent once
+  per message as an inline part (`multipart/related`, `Content-ID`,
+  `Content-Disposition: inline`) shown by `<img src="cid:…" width height
+  alt>`; one no longer in the text is not sent. Copy puts pictures on the
+  clipboard inside the HTML (`data:`), so they paste into other apps. The body is
   Komorebi's own painted page (the reader's text engine): it shows the
   formatting as you type, with only the paragraph you change laid out
   again, while a hidden text field underneath keeps the caret, the keyboard
   layouts and IME, the clipboard's text and what screen readers read.
   Pasted HTML (from a browser, Word or Outlook) keeps only what the
-  document can hold; Ctrl+Shift+V pastes plain text. The toolbar's font,
-  size, indent and alignment move into **More** below 1040 px (and Quote,
-  Clear formatting and the importance toggles when the composer is
-  narrower still), so it never clips. **More** also holds **Preview** (the
+  document can hold; Ctrl+Shift+V pastes plain text. The format bar follows
+  Gmail's order: the font and size boxes (showing the font and size at the
+  caret, empty for a selection that mixes them), Bold, Italic, Underline,
+  the font colour, the alignment box, the numbered and bulleted lists,
+  decrease and increase indent, quote, strikethrough and clear formatting,
+  then Link, the Signature menu and **More**. When the composer is too narrow
+  the controls leave the bar for the top of **More** from the right end (clear
+  formatting first), then the boxes, with Bold, Italic and Underline last, so
+  the bar never wraps or clips. A signature's editor has the same bar, less
+  quote and table. **More** also holds a table, **Preview** (the
   message as the recipient gets it) and **Switch to plain text** /
   **Switch to formatted text**; switching to plain text asks first, and
   Ctrl+Z (or switching back before typing) brings the formatting back.
   Settings > General > Compose sets whether new messages start formatted
   or as plain text, and their font, size and colour. **High importance**
-  and **Low importance**, after the Signature menu, send the message with
+  and **Low importance**, in More, send the message with
   `Importance: high` / `low` and `X-Priority: 1` / `5` (one at most;
   neither for normal mail); the choice is saved with the draft.
 - **Replies and forwards:** the quote is folded behind **Show quoted

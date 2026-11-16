@@ -30,9 +30,12 @@ pub const EXIT_REFUSED: u8 = 2;
 pub const ACTIONS: &[&str] = &[
     "shell",
     "compose",
+    "compose-pictures",
+    "compose-picture-selected",
     "settings-accounts",
     "settings-account",
     "settings-signatures",
+    "signature-pictures",
     "settings-rules",
     "settings-general",
     "settings-privacy",
@@ -46,6 +49,7 @@ pub const ACTIONS: &[&str] = &[
     "ob-sign-in",
     "ob-manual",
     "ob-providers",
+    "ob-import",
 ];
 
 /// What to snapshot.
@@ -71,7 +75,7 @@ pub struct Request {
     /// caption (the client area has no title bar to check).
     pub system_title_bar: bool,
     /// What happens in the window between its first frame and the capture
-    /// (`KOMOREBI_SNAPSHOT_FOCUS`, `_WALK`, `_SCROLL`, `_HOVER`).
+    /// (`KOMOREBI_SNAPSHOT_FOCUS`, `_TYPE`, `_WALK`, `_SCROLL`, `_HOVER`).
     pub drive: Drive,
 }
 
@@ -82,6 +86,10 @@ pub struct Request {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Drive {
     pub focus: Option<Focus>,
+    /// `KOMOREBI_SNAPSHOT_TYPE=<text>`: then these keystrokes where the
+    /// focus is (after the focus switch, or where the view put it): letters,
+    /// digits and spaces as typed, `|` a Tab ([`parse_typed`]).
+    pub typed: Vec<String>,
     /// `KOMOREBI_SNAPSHOT_WALK=n`: then open the next n messages (at most
     /// 1000), 250 ms apart, to measure memory after a reading session.
     pub walk: u32,
@@ -121,7 +129,8 @@ pub enum Focus {
 }
 
 /// A key a snapshot presses (`l` Left, `r` Right, `u` Up, `d` Down, `e`
-/// Enter, `n` PageDown, `p` PageUp, `h` Home, `z` End, `f` F6, `t` Tab).
+/// Enter, `n` PageDown, `p` PageUp, `h` Home, `z` End, `f` F6, `t` Tab,
+/// `2` F2, `x` Delete, `m` Shift+F10, `w` Ctrl+Shift+N).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
     Left,
@@ -135,6 +144,10 @@ pub enum Key {
     End,
     F6,
     Tab,
+    F2,
+    Delete,
+    Menu,
+    NewFolder,
 }
 
 impl Key {
@@ -151,6 +164,10 @@ impl Key {
             'z' => Key::End,
             'f' => Key::F6,
             't' => Key::Tab,
+            '2' => Key::F2,
+            'x' => Key::Delete,
+            'm' => Key::Menu,
+            'w' => Key::NewFolder,
             _ => return None,
         })
     }
@@ -169,6 +186,10 @@ impl Key {
             Key::End => "end",
             Key::F6 => "f6",
             Key::Tab => "tab",
+            Key::F2 => "f2",
+            Key::Delete => "delete",
+            Key::Menu => "shift-f10",
+            Key::NewFolder => "ctrl-shift-n",
         }
     }
 }
@@ -293,6 +314,10 @@ pub fn parse(
         focus: get("KOMOREBI_SNAPSHOT_FOCUS")
             .map(|s| parse_focus(&s))
             .transpose()?,
+        typed: get("KOMOREBI_SNAPSHOT_TYPE")
+            .map(|s| parse_typed(&s))
+            .transpose()?
+            .unwrap_or_default(),
         walk: match get("KOMOREBI_SNAPSHOT_WALK") {
             None => 0,
             Some(s) => s
@@ -317,6 +342,12 @@ pub fn parse(
             .map(|s| parse_hover(&s))
             .transpose()?,
     };
+    // `KOMOREBI_SNAPSHOT_CLOCK=HH:MM[+S]` pins the Rest scene's clock (read by
+    // the scene itself, `views::mail::sky::snapshot_clock`); refused here
+    // when malformed, like every switch.
+    if let Some(clock) = get("KOMOREBI_SNAPSHOT_CLOCK") {
+        parse_clock(&clock)?;
+    }
     // One row opened: the list and the reading pane both have content.
     let panes = action == "shell"
         && get("KOMOREBI_SNAPSHOT_SELECT").is_some_and(|rows| rows.trim().parse::<usize>().is_ok());
@@ -330,6 +361,41 @@ pub fn parse(
         system_title_bar,
         drive,
     }))
+}
+
+/// The most seconds `KOMOREBI_SNAPSHOT_CLOCK` moves the Rest scene's
+/// motion on.
+const MAX_SCENE_SECONDS: f32 = 3600.;
+
+/// `KOMOREBI_SNAPSHOT_CLOCK=HH:MM[+S]`: the local time the Rest scene
+/// shows, as minutes after midnight, and how many seconds into its motion
+/// (`+S`, such as `21:00+7.5`; 0 without it), so one scene can be captured
+/// at several moments.
+pub fn parse_clock(s: &str) -> Result<(u32, f32), String> {
+    let bad = || {
+        format!(
+            "KOMOREBI_SNAPSHOT_CLOCK={s}: expected HH:MM or HH:MM+S, such as 21:00 or 21:00+7.5"
+        )
+    };
+    let (clock, seconds) = match s.trim().split_once('+') {
+        Some((clock, secs)) => {
+            let secs = secs.trim().parse::<f32>().map_err(|_| bad())?;
+            if !(0. ..=MAX_SCENE_SECONDS).contains(&secs) {
+                return Err(bad());
+            }
+            (clock, secs)
+        }
+        None => (s.trim(), 0.),
+    };
+    let (h, m) = clock.trim().split_once(':').ok_or_else(bad)?;
+    let (h, m) = (
+        h.parse::<u32>().map_err(|_| bad())?,
+        m.parse::<u32>().map_err(|_| bad())?,
+    );
+    if h > 23 || m > 59 {
+        return Err(bad());
+    }
+    Ok((h * 60 + m, seconds))
 }
 
 /// The most messages `KOMOREBI_SNAPSHOT_WALK` opens.
@@ -381,6 +447,28 @@ fn parse_focus(s: &str) -> Result<Focus, String> {
         ["press", k] => Ok(Focus::Press(keys(k)?)),
         _ => Err(bad()),
     }
+}
+
+/// `KOMOREBI_SNAPSHOT_TYPE`: the keystrokes that type `s` (a-z, A-Z, 0-9
+/// and space; `|` is a Tab), at most [`MAX_STEPS`].
+fn parse_typed(s: &str) -> Result<Vec<String>, String> {
+    let bad = || {
+        format!(
+            "KOMOREBI_SNAPSHOT_TYPE={s}: expected up to {MAX_STEPS} of a-z, A-Z, 0-9, space and | (Tab)"
+        )
+    };
+    let keys: Option<Vec<String>> = s
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' => Some(c.to_string()),
+            'A'..='Z' => Some(format!("shift-{}", c.to_ascii_lowercase())),
+            ' ' => Some("space".to_owned()),
+            '|' => Some("tab".to_owned()),
+            _ => None,
+        })
+        .collect();
+    keys.filter(|k| !k.is_empty() && k.len() <= MAX_STEPS)
+        .ok_or_else(bad)
 }
 
 /// `KOMOREBI_SNAPSHOT_HOVER`: `x,y[:press|:click]` or
@@ -855,6 +943,26 @@ mod tests {
         assert!(parse_env(&[("KOMOREBI_SNAPSHOT_CHECK", "1")]).is_err());
     }
 
+    /// `KOMOREBI_SNAPSHOT_CLOCK` pins the Rest scene's time; a bad one is
+    /// refused like any switch.
+    #[test]
+    fn the_clock_switch_is_hours_and_minutes() {
+        assert_eq!(parse_clock("21:00"), Ok((21 * 60, 0.)));
+        assert_eq!(parse_clock("00:30"), Ok((30, 0.)));
+        assert_eq!(parse_clock("21:00+7.5"), Ok((21 * 60, 7.5)));
+        assert!(parse_clock("24:00").is_err());
+        assert!(parse_clock("9").is_err());
+        assert!(parse_clock("21:00+").is_err());
+        assert!(parse_clock("21:00+-3").is_err());
+        assert!(parse_clock("21:00+9999").is_err());
+        let mut pairs = SAFE.to_vec();
+        pairs.push(("KOMOREBI_SNAPSHOT_CLOCK", "05:30"));
+        assert!(parse_env(&pairs).is_ok());
+        let mut pairs = SAFE.to_vec();
+        pairs.push(("KOMOREBI_SNAPSHOT_CLOCK", "noon"));
+        assert!(parse_env(&pairs).unwrap_err().contains("HH:MM"));
+    }
+
     #[test]
     fn the_switches_of_0_7_carry_over() {
         let mut pairs = SAFE.to_vec();
@@ -927,11 +1035,39 @@ mod tests {
             focus("press:ttnpzhf").keystrokes(),
             ["tab", "tab", "pagedown", "pageup", "end", "home", "f6"]
         );
+        assert_eq!(
+            focus("nav:0:d2xmw").keystrokes(),
+            [
+                "shift-f6",
+                "down",
+                "f2",
+                "delete",
+                "shift-f10",
+                "ctrl-shift-n"
+            ]
+        );
         for bad in [
-            "", "nav:x", "nav:1:q", "tab", "tab:1000", "press:", "press:x", "side",
+            "", "nav:x", "nav:1:q", "tab", "tab:1000", "press:", "press:q", "side",
         ] {
             let r = drive(&[("KOMOREBI_SNAPSHOT_FOCUS", bad)]);
             assert!(r.unwrap_err().contains("KOMOREBI_SNAPSHOT_FOCUS"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_type_switch_names_the_keys_it_types() {
+        let typed = |v: &str| drive(&[("KOMOREBI_SNAPSHOT_TYPE", v)]).map(|d| d.typed);
+        assert_eq!(
+            typed("aB1 |").unwrap(),
+            ["a", "shift-b", "1", "space", "tab"]
+        );
+        assert!(drive(&[]).unwrap().typed.is_empty());
+        let long = "a".repeat(MAX_STEPS + 1);
+        for bad in ["a@b", "é", long.as_str()] {
+            assert!(
+                typed(bad).unwrap_err().contains("KOMOREBI_SNAPSHOT_TYPE"),
+                "{bad}"
+            );
         }
     }
 

@@ -965,28 +965,60 @@ fn signatures_are_made_renamed_and_deleted_in_settings(cx: &mut TestAppContext) 
     assert!(names(cx).is_empty());
 }
 
-/// Port of `a_logo_over_200_kb_is_refused`: the file is checked before it is
-/// read (more than 200 KB is too large), and the page says so; a small
-/// picture that is neither PNG nor JPEG is refused by the library's check.
+/// Was `a_logo_over_200_kb_is_refused`: the one-logo limit and the 200 KB
+/// cap are gone. A signature holds as many pictures as it needs in its
+/// text, a large one too, saved with it and back when it is opened; a file
+/// that is not a picture is refused and said.
 #[gpui_kit::test]
-fn a_logo_over_200_kb_is_refused(cx: &mut TestAppContext) {
-    use crate::views::settings::signatures::{SigError, read_logo};
-    use komorebi::mail::rich::{LogoError, MAX_LOGO_BYTES};
-    let (cache, window, page) = signatures("port-logo", cx);
-    let big = cache.dir().join("big.png");
-    std::fs::write(&big, vec![0u8; MAX_LOGO_BYTES + 1]).expect("write the file");
-    let refused = read_logo(&big);
-    assert!(matches!(refused, Err(LogoError::TooLarge)));
-    let not_a_picture = cache.dir().join("small.png");
-    std::fs::write(&not_a_picture, b"not a picture").expect("write the file");
-    assert!(read_logo(&not_a_picture).is_err());
+fn a_signature_holds_several_pictures_of_any_size(cx: &mut TestAppContext) {
+    use crate::views::composer::editor::EditorEvent;
+    use crate::views::composer::pictures;
+    use crate::views::settings::signatures::SigError;
+    // Noise does not compress: a PNG well over the old 200 KB.
+    let noise = |w: u32, h: u32| {
+        let mut seed = 2_463_534_242_u32;
+        let img = image::RgbImage::from_fn(w, h, |_, _| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let [a, b, c, _] = seed.to_le_bytes();
+            image::Rgb([a, b, c])
+        });
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .expect("encode");
+        out
+    };
+    let (_cache, window, page) = signatures("port-pictures", cx);
     cx.update_window(window, |_, w, cx| {
-        page.update(cx, |p, cx| p.open(None, w, cx))
+        page.update(cx, |p, cx| p.open(None, w, cx));
+        let input = page.read(cx).name_input().expect("open").clone();
+        input.update(cx, |s, cx| s.set_value("Logos", w, cx));
     })
     .expect("open");
-    page.update(cx, |p, cx| p.set_logo(refused, cx));
+    let big = pictures::prepare(noise(420, 420)).expect("a picture");
+    assert!(big.file.data.len() > 200 * 1024, "{}", big.file.data.len());
+    let small = pictures::prepare(noise(40, 20)).expect("a picture");
+    let body = page.read_with(cx, |p, _| p.body().cloned()).expect("open");
+    body.update(cx, |b, cx| b.insert_pictures(vec![big, small], cx));
+    // Not a picture: said, nothing put in.
+    body.update(cx, |_, cx| {
+        cx.emit(EditorEvent::PasteFiles(vec!["a.pdf".into()]))
+    });
     assert_eq!(
         page.read_with(cx, |p, _| p.error().cloned()),
-        Some(SigError::LogoRefused)
+        Some(SigError::PictureRefused)
     );
+    page.update(cx, |p, cx| p.save(cx));
+    assert!(!page.read_with(cx, |p, _| p.editing()));
+    let sig = page.read_with(cx, |p, _| p.list()[0].clone());
+    assert_eq!((sig.name.as_str(), sig.images), ("Logos", 2));
+    cx.update_window(window, |_, w, cx| {
+        page.update(cx, |p, cx| p.open(Some(sig.id), w, cx))
+    })
+    .expect("open");
+    let body = page.read_with(cx, |p, _| p.body().cloned()).expect("open");
+    let shown = body.read_with(cx, |b, _| b.editor().map(|e| e.shown_images().len()));
+    assert_eq!(shown, Some(2));
 }

@@ -3,7 +3,7 @@ name = "komorebi-gpui"
 # Komorebi 1.0 on GPUI (docs/GPUI-MIGRATION.md). The release version is
 # this one and the library's (the root package) together; the installer, the
 # exe's version resource and About read it.
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
 description = "Komorebi 1.0: the GPUI user interface over the komorebi library"
 license = "GPL-3.0-or-later"
@@ -61,8 +61,12 @@ png = "=0.18.1"
 # (cookbook_async). The copy GPUI links.
 futures = "=0.3.34"
 # The reader's tiles and the composer's painted pages as GPUI images
-# (`image::Frame`), and the gallery's PNG shots. The copy GPUI links.
-image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# (`image::Frame`), and the gallery's PNG shots. The copy GPUI links. The
+# composer's pictures: a large one scaled down when put in (re-encoded as
+# JPEG or PNG), a pasted bitmap (CF_DIB, as BMP) saved as PNG. Each of
+# these decoders and encoders is already linked through GPUI's own image
+# features; naming them here adds no crate.
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 # The reader's dates and the invite card's "now" (the library's own copy
 # and features).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

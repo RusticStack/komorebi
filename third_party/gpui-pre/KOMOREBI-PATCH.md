@@ -124,6 +124,23 @@ size. Layout output is unchanged.
 (about 150 allocations per frame).
 **Change.** `SmallVec<[TextRun; 1]>`.
 
+## hollow-crisp-shadow (`window.rs`)
+
+**Problem.** A drop shadow was drawn as a filled rounded rect under the element, so on an
+element with no background of its own it showed through the whole element. Komorebi's focus
+ring is two crisp spread shadows (paper, then ink); on the composer's address and subject rows
+(no fill) the keyboard focus, which typing sets, filled the row with ink (light in dark mode,
+dark in light mode) and the ink text vanished. A CSS box-shadow paints outside the border box
+only.
+**Change.** `paint_drop_shadows`: a drop shadow with no blur goes out as an inset-type
+`Shadow` primitive whose outer shape (`element_bounds`) is the shadow rect and whose hole
+(`bounds`) is the element, snapped as its background quad is; the shaders already paint an
+inset primitive as the outer shape minus the hole. Blurred drop shadows are unchanged.
+`scene.rs`: `Primitive::bounds` of an inset shadow is its `element_bounds`, the area the
+shaders draw it over, so culling and draw order see the whole ring (it was the hole). Plus
+`Window::painted_shadows` (test-support), as `painted_quads`, for the regression test
+`widgets::field::tests::the_ring_stays_outside_a_typed_in_field_*` in the app.
+
 ## Measured gains (release, 2,000-message cache, harness `scripts/opt-ab.ps1`, 15 rounds)
 
 Allocations (counting allocator, `scripts/opt-prof.ps1`, median of 3 runs), baseline -> all six:

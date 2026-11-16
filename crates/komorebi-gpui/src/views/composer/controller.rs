@@ -154,12 +154,37 @@ impl ComposerView {
             let _ = other.update(cx, |_, cx| cx.emit(ComposerEvent::Raise));
             return;
         }
-        match compose::load(&self.db, row) {
-            Ok(Some((draft, missing))) => {
+        // The row here, the copies of its attachments and pictures read on
+        // the background executor (a large file never holds the window);
+        // a draft with none opens at once.
+        match compose::load_job(&self.db, row) {
+            Ok(Some(job)) if !job.has_files() => {
+                let (draft, missing) = compose::finish_load(&self.db, job.run());
                 self.start(draft, window, cx);
                 if !missing.is_empty() {
                     self.say(Status::LeftOut(missing.join(", ")), cx);
                 }
+            }
+            Ok(Some(job)) => {
+                let read = cx.background_spawn(async move { job.run() });
+                let window = window.window_handle();
+                cx.spawn(async move |this, cx| {
+                    let loaded = read.await;
+                    let _ = window.update(cx, |_, window, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            // Opened meanwhile (a second click): once only.
+                            if let Some(id) = this.drafts.find_row(row) {
+                                return this.resume(id, window, cx);
+                            }
+                            let (draft, missing) = compose::finish_load(&this.db, loaded);
+                            this.start(draft, window, cx);
+                            if !missing.is_empty() {
+                                this.say(Status::LeftOut(missing.join(", ")), cx);
+                            }
+                        });
+                    });
+                })
+                .detach();
             }
             Ok(None) => {
                 self.say(Status::DraftGone, cx);
@@ -410,6 +435,9 @@ impl ComposerView {
             }
             EditorEvent::Moved => cx.notify(),
             EditorEvent::PasteFiles(paths) => self.attach_paths(paths.clone(), cx),
+            // The composer's "Drop to attach" steps aside for the text.
+            EditorEvent::DropOver(_) => cx.notify(),
+            EditorEvent::Resized => {}
         }
     }
 
@@ -567,6 +595,14 @@ impl ComposerView {
     /// Save draft `id` now. False (with the error said) if that failed;
     /// the draft stays in memory either way.
     pub(crate) fn save_draft(&mut self, id: DraftId, cx: &mut Context<Self>) -> bool {
+        self.store_draft(id, false, cx)
+    }
+
+    /// Save draft `id`: its row at once, the copies of its attachments and
+    /// pictures written on the background executor (a large file never
+    /// holds the window), or here with `wait` (it is being sent, or the
+    /// window is closing). False (with the error said) if that failed.
+    fn store_draft(&mut self, id: DraftId, wait: bool, cx: &mut Context<Self>) -> bool {
         let Some(account) = self.drafts.get(id).map(|d| d.account_id) else {
             return true;
         };
@@ -577,11 +613,22 @@ impl ComposerView {
             .map(|a| a.email.clone())
             .unwrap_or_default();
         let db = self.db.clone();
-        let Some((stored, reply_to)) =
-            self.lend_id(id, cx, |d| (compose::store(&db, d, &email), d.reply_to))
-        else {
+        let Some((stored, reply_to)) = self.lend_id(id, cx, |d| {
+            let stored = if wait {
+                compose::store(&db, d, &email).map(|s| (s, Vec::new()))
+            } else {
+                compose::store_rows(&db, d, &email)
+            };
+            (stored, d.reply_to)
+        }) else {
             return true;
         };
+        let stored = stored.map(|(s, jobs)| {
+            if !jobs.is_empty() {
+                self.write_copies(id, jobs, cx);
+            }
+            s
+        });
         match stored {
             Ok(Stored::Nothing) => true,
             Ok(Stored::Updated) => {
@@ -618,8 +665,56 @@ impl ComposerView {
         }
     }
 
+    /// A save's copies written on the background executor. One that fails
+    /// loses its row (the next save writes it again) and is said; a server
+    /// copy asked for meanwhile goes once they are all written.
+    fn write_copies(&mut self, id: DraftId, jobs: Vec<compose::FileJob>, cx: &mut Context<Self>) {
+        let Some(row) = jobs.first().map(|j| j.draft) else {
+            return;
+        };
+        self.writing.entry(row).or_insert((id, 0, None, false)).1 += 1;
+        let task = cx.background_spawn(async move {
+            jobs.into_iter()
+                .filter_map(|j| j.run().err().map(|e| (j, format!("{e:#}"))))
+                .collect::<Vec<_>>()
+        });
+        cx.spawn(async move |this, cx| {
+            let failed = task.await;
+            let _ = this.update(cx, |this, cx| {
+                let db = this.db.clone();
+                for (j, _) in &failed {
+                    this.lend_id(id, cx, |d| compose::copy_failed(&db, d, j));
+                }
+                if let Some((_, e)) = failed.first() {
+                    this.say(Status::CouldNotSave(e.clone()), cx);
+                }
+                let done = this.writing.get_mut(&row).and_then(|w| {
+                    w.1 = w.1.saturating_sub(1);
+                    (w.1 == 0).then_some((w.2, w.3))
+                });
+                if let Some((wanted, send)) = done {
+                    this.writing.remove(&row);
+                    if send {
+                        // Send was pressed meanwhile: it goes now (a copy
+                        // that failed is written again by its save).
+                        this.send_saved(id, cx);
+                    } else if let Some(now) = wanted {
+                        this.save_to_server(id, now, cx);
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Whether draft row `row`'s copies are still being written.
+    pub fn writing(&self, row: i64) -> bool {
+        self.writing.contains_key(&row)
+    }
+
     /// Have the sync worker copy draft `id`'s saved row to the server's
     /// Drafts; unless `now`, only if the last copy was asked for 30 s ago.
+    /// While its copies are being written, it goes once they are.
     pub(crate) fn save_to_server(&mut self, id: DraftId, now: bool, cx: &mut Context<Self>) {
         let Some((row, account)) = self
             .drafts
@@ -628,6 +723,10 @@ impl ComposerView {
         else {
             return;
         };
+        if let Some(w) = self.writing.get_mut(&row) {
+            w.2 = Some(w.2.unwrap_or(false) || now);
+            return;
+        }
         let at = cx.background_executor().now();
         if !now && !compose::server_save_due(self.server_saves.get(&row).copied(), at) {
             return;
@@ -691,7 +790,7 @@ impl ComposerView {
     pub fn save_all(&mut self, cx: &mut Context<Self>) -> bool {
         let mut all = true;
         for id in self.drafts.ids() {
-            all &= self.save_draft(id, cx);
+            all &= self.store_draft(id, true, cx);
         }
         all
     }
@@ -780,7 +879,8 @@ impl ComposerView {
             return None;
         }
         let id = self.drafts.active_id()?;
-        let saved = self.save_draft(id, cx);
+        // Written here: the other composer reads the copies at once.
+        let saved = self.store_draft(id, true, cx);
         let keep = self.lend_id(id, cx, |d| d.keep()).unwrap_or(false);
         let row = self.drafts.get(id).and_then(|d| d.row);
         if !keep {
@@ -877,7 +977,6 @@ impl ComposerView {
                 cx.notify();
                 return self.focus_field(Field::To, window, cx);
             }
-            SendCheck::Blocked(block) => return self.say(Status::SendBlocked(block), cx),
             SendCheck::Ask(guard) => {
                 self.guard = Some(guard);
                 return cx.notify();
@@ -888,6 +987,26 @@ impl ComposerView {
         let Some(id) = self.drafts.active_id() else {
             return;
         };
+        // Saved as it stands, even a reply sent just as it was filled in.
+        if let Some(d) = self.drafts.get_mut(id) {
+            d.touched = true;
+            d.dirty = true;
+        }
+        // Copies of its files still being written (an attachment added a
+        // moment ago): it goes once they are, as a server copy does.
+        if let Some(row) = self.drafts.get(id).and_then(|d| d.row)
+            && let Some(w) = self.writing.get_mut(&row)
+        {
+            w.3 = true;
+            return;
+        }
+        self.send_saved(id, cx);
+    }
+
+    /// Send draft `id`, its checks passed and no copy of its files still
+    /// being written: saved as it stands, moved to the outbox, the
+    /// composer closed.
+    fn send_saved(&mut self, id: DraftId, cx: &mut Context<Self>) {
         let Some(account) = self
             .drafts
             .get(id)
@@ -896,12 +1015,12 @@ impl ComposerView {
         else {
             return self.say(Status::NoAccount, cx);
         };
-        // Saved as it stands, even a reply sent just as it was filled in.
         if let Some(d) = self.drafts.get_mut(id) {
             d.touched = true;
             d.dirty = true;
         }
-        if !self.save_draft(id, cx) {
+        // Written here: the outbox reads the copies.
+        if !self.store_draft(id, true, cx) {
             return;
         }
         let Some(row) = self.drafts.get(id).and_then(|d| d.row) else {
@@ -912,10 +1031,13 @@ impl ComposerView {
             Ok(false) => return self.say(Status::DraftGone, cx),
             Err(e) => return self.say(Status::Error(format!("{e:#}")), cx),
         }
+        // The body is this draft's only while it is the one shown (Send may
+        // have waited for its copies while another was opened).
+        let shown = self.drafts.active_id() == Some(id);
         let Some(mut d) = self.drafts.remove(id) else {
             return;
         };
-        if let Some(ed) = self.body.update(cx, |b, _| b.take()) {
+        if shown && let Some(ed) = self.body.update(cx, |b, _| b.take()) {
             d.rich = Some(ed);
         }
         let reply_to = d.reply_to;
@@ -928,7 +1050,9 @@ impl ComposerView {
             count: true,
         });
         self.queue_send(row, account.id, outgoing, self.undo_delay, cx);
-        self.hide(cx);
+        if shown {
+            self.hide(cx);
+        }
     }
 
     /// Build outbox row `row`'s message off the UI thread and queue it
@@ -1090,11 +1214,7 @@ impl ComposerView {
         let Some(id) = self.drafts.active_id() else {
             return;
         };
-        let total = self
-            .drafts
-            .get(id)
-            .map_or(0, |d| compose::attachments_size(&d.attachments));
-        let read = cx.background_spawn(async move { compose::read_files(&paths, total) });
+        let read = cx.background_spawn(async move { compose::read_files(&paths) });
         cx.spawn(async move |this, cx| {
             let (added, errors) = read.await;
             let _ = this.update(cx, |this, cx| this.add_attachments(id, added, errors, cx));
@@ -1102,19 +1222,20 @@ impl ComposerView {
         .detach();
     }
 
-    /// Files read for draft `id`: added within the hard limit and saved
-    /// once (the copies are made now, not by the autosave).
+    /// Files read for draft `id`: added, whatever their size (Komorebi
+    /// sets no limit; the server's refusal is the only one), and saved once
+    /// (the copies are made now, not by the autosave).
     pub(crate) fn add_attachments(
         &mut self,
         id: DraftId,
         added: Vec<Attached>,
-        mut errors: Vec<compose::AttachFail>,
+        errors: Vec<compose::AttachFail>,
         cx: &mut Context<Self>,
     ) {
         let Some(d) = self.drafts.get_mut(id) else {
             return;
         };
-        d.add_attachments(added, &mut errors);
+        d.add_attachments(added);
         self.guard = None;
         cx.notify();
         if !self.save_draft(id, cx) {
