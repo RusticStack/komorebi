@@ -111,7 +111,7 @@ impl Loader {
 impl Render for Loader {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync(cx);
-        let ink = cx.tokens().color.ink;
+        let ink = cx.tokens().color.accent;
         let alphas = if self.running.is_some() {
             opacities(self.step)
         } else {
@@ -165,7 +165,7 @@ impl RenderOnce for ProgressRing {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         ProgressCircle::new(self.id)
             .value(self.fraction * 100.)
-            .color(cx.tokens().color.ink)
+            .color(cx.tokens().color.accent)
             .accessibility_label(self.name)
             .with_size(Size::Size(px(layout::PROGRESS_RING)))
     }

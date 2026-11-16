@@ -14,6 +14,8 @@ pub mod about;
 pub mod account;
 pub mod accounts;
 pub mod app_password;
+pub mod appearance;
+pub mod background;
 pub mod card;
 pub mod check;
 pub mod choices;
@@ -29,6 +31,7 @@ pub mod services;
 pub mod shortcuts;
 pub mod signatures;
 pub mod text;
+pub mod theme_editor;
 pub mod trust;
 pub mod wipe;
 
@@ -110,16 +113,18 @@ pub enum Section {
     Signatures,
     Rules,
     General,
+    Appearance,
     Privacy,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 6] = [
+    pub const ALL: [Section; 7] = [
         Section::Accounts,
         Section::Signatures,
         Section::Rules,
         Section::General,
+        Section::Appearance,
         Section::Privacy,
         Section::About,
     ];
@@ -132,6 +137,7 @@ impl Section {
             Section::Signatures => tr!("Signatures"),
             Section::Rules => tr!("Rules"),
             Section::General => tr!("General"),
+            Section::Appearance => tr!("Appearance"),
             Section::Privacy => tr!("Privacy"),
             Section::About => tr!("About"),
         }
@@ -226,6 +232,12 @@ pub struct SettingsView {
     pub(crate) editor: Option<Entity<AccountEditor>>,
     /// Add account: the setup flow, inside Settings, while it shows.
     pub(crate) adding: Option<Entity<OnboardingView>>,
+    /// Appearance > Customise: the colour editor, while it shows.
+    pub(crate) customising: Option<Entity<theme_editor::ThemeEditor>>,
+    /// Appearance: why the last theme file was not taken.
+    pub(crate) theme_note: Option<String>,
+    /// Appearance > Background: its sliders, once the page has shown.
+    pub(crate) background_ui: Option<background::BackgroundUi>,
     /// What the shell reported of each account's workers.
     pub(crate) lines: HashMap<i64, AccountLine>,
     /// About > Updates: the shell's updater view.
@@ -260,6 +272,9 @@ impl SettingsView {
             message: None,
             editor: None,
             adding: None,
+            customising: None,
+            theme_note: None,
+            background_ui: None,
             lines: HashMap::new(),
             updates: None,
             sigs: sigs.clone(),
@@ -320,6 +335,7 @@ impl SettingsView {
     pub fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.editor = None;
         self.adding = None;
+        self.close_theme_editor(cx);
         self.section = section;
         self.message = None;
         self.reload(cx);
@@ -476,6 +492,11 @@ impl SettingsView {
             }
             return;
         }
+        if self.customising.is_some() {
+            self.close_theme_editor(cx);
+            window.focus(&self.focus, cx);
+            return;
+        }
         if self.editor.is_none()
             && self.section == Section::Signatures
             && self.sigs.update(cx, |s, cx| s.close(cx))
@@ -570,7 +591,7 @@ impl SettingsView {
                                 div()
                                     .size(px(layout::PLACE_SPOT))
                                     .rounded(px(radius::FULL))
-                                    .bg(c.ink),
+                                    .bg(c.accent),
                             ),
                     )
                 })
@@ -638,6 +659,9 @@ impl SettingsView {
         if let Some(flow) = &self.adding {
             return flow.clone().into_any_element();
         }
+        if let Some(editor) = &self.customising {
+            return editor.clone().into_any_element();
+        }
         match self.section {
             Section::Accounts => self.render_accounts(cx).into_any_element(),
             Section::Signatures => self.sigs.clone().into_any_element(),
@@ -646,6 +670,7 @@ impl SettingsView {
                 None => div().into_any_element(),
             },
             Section::General => self.render_general(cx).into_any_element(),
+            Section::Appearance => self.render_appearance(window, cx).into_any_element(),
             Section::Privacy => self.render_privacy(window, cx).into_any_element(),
             Section::About => self.render_about(cx).into_any_element(),
         }
@@ -681,6 +706,14 @@ impl Render for SettingsView {
                 )
                 .into_any_element()
         };
+        // A pane: see-through like the others over a background, with the
+        // blurred copy behind it when Blur behind panes is on.
+        let behind = crate::backdrop::pane_layer(gpui::Pixels::ZERO, cx);
+        let fill = if behind.is_some() {
+            t.color.clear
+        } else {
+            t.color.pane
+        };
         div()
             .id("settings")
             .key_context(CONTEXT)
@@ -698,9 +731,11 @@ impl Render for SettingsView {
             .when(compact, |el| el.flex_col())
             .when(!compact, |el| el.flex_row())
             .overflow_hidden()
-            .bg(t.color.paper)
+            .relative()
+            .bg(fill)
             .text_color(t.color.ink)
             .typo(&t.text.body)
+            .children(behind)
             .child(self.render_nav(compact, cx))
             .child(div().flex_1().min_w_0().min_h_0().child(body))
             .test_support()

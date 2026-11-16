@@ -4,6 +4,7 @@
 pub mod access;
 #[cfg(feature = "alloc-count")]
 pub mod alloc_count;
+pub mod backdrop;
 pub mod bench;
 #[cfg(feature = "gallery")]
 pub mod gallery;

@@ -380,7 +380,7 @@ fn drop_line(i: usize, edge: Edge, t: &Tokens) -> AnyElement {
         .right_0()
         .h(px(space::SP_0_5))
         .rounded(px(radius::FULL))
-        .bg(t.color.ink)
+        .bg(t.color.accent)
         .map(|el| match edge {
             Edge::Above => el.top(px(out)),
             Edge::Below => el.bottom(px(out)),

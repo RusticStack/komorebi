@@ -444,7 +444,9 @@ fn reflections(scheme: Scheme, n: u32, l: &sky::Layout, window: &mut Window) -> 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Picture {
     Band(Scheme, Band, u32, u32, u32),
-    Body(Scheme, Body, u32, u32),
+    /// Scheme, body, scale, phase, and the limb's colour (the panel's,
+    /// `0xRRGGBB`).
+    Body(Scheme, Body, u32, u32, u32),
     /// The night's still stars (those that do not twinkle): scale, scene
     /// size, line height, seed. The dark scheme's only.
     Stars(u32, i32, i32, i32, u64),
@@ -528,13 +530,14 @@ fn picture(slot: usize, key: Picture, window: &mut Window) -> Option<Arc<RenderI
         }
         let made = match key {
             Picture::Band(scheme, b, n, x0, w) => enlarge(band(scheme, b), n, x0, w),
-            Picture::Body(scheme, body, n, phase) => {
+            Picture::Body(scheme, body, n, phase, limb) => {
                 let t = tones(scheme);
+                let limb = crate::theme::presets::Rgb(limb).colour();
                 let tone = match body {
                     Body::Sun => t.sun,
                     Body::Moon => t.moon,
                 };
-                let m = body_master(body, phase as f32 / PHASE_STEPS, &tone, t.limb);
+                let m = body_master(body, phase as f32 / PHASE_STEPS, &tone, limb);
                 enlarge(&m, n, 0, m.width)
             }
             Picture::Stars(n, w, h, line_h, seed) => {
@@ -689,7 +692,8 @@ fn paint(bounds: Bounds<Pixels>, f: &Frame, window: &mut Window) {
     let up = by < horizon;
     if by - (r as f32) < horizon {
         let phase = (sky::moon_phase(f.unix) * PHASE_STEPS).round() as u32 % PHASE_STEPS as u32;
-        let key = Picture::Body(f.scheme, body, f.n, if night { phase } else { 0 });
+        let limb = crate::theme::presets::Rgb::from_colour(f.tones.limb).0;
+        let key = Picture::Body(f.scheme, body, f.n, if night { phase } else { 0 }, limb);
         if let Some(img) = picture(2, key, window) {
             let half = (r + tone.halo_reach) as f32;
             let sky_rect = area(0., 0., w as f32, horizon);
@@ -1125,8 +1129,10 @@ impl Render for RestScene {
 
         let (minute, unix) = sky::now();
         let frame = Frame {
-            scheme: t.scheme,
-            tones: tones(t.scheme),
+            // The panel's colour picks day or night art (a theme's panes
+            // may be light in the dark scheme or the other way round).
+            scheme: crate::theme::scene::art_scheme(t.color.paper),
+            tones: crate::theme::scene::tones_on(t.color.paper),
             n,
             line_h,
             minute,

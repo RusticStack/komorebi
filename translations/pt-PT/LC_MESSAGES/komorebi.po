@@ -3400,8 +3400,6 @@ msgstr "O Komorebi não consegue iniciar: o Windows não conseguiu criar um disp
 msgid "Filter"
 msgstr "Filtro"
 
-msgid "How Komorebi looks and starts."
-msgstr "Como o Komorebi se apresenta e arranca."
 
 msgid "Appearance"
 msgstr "Aspeto"
@@ -3885,3 +3883,353 @@ msgstr "Se a verificação em dois passos estiver ativa, {0} precisa de uma pala
 
 msgid "If two-step sign-in is on, it needs an app password."
 msgstr "Se a verificação em dois passos estiver ativa, é necessária uma palavra-passe de aplicação."
+
+msgid "That file is too large to be a theme."
+msgstr "Esse ficheiro é demasiado grande para ser um tema."
+
+msgid "That file isn't a Komorebi theme."
+msgstr "Esse ficheiro não é um tema do Komorebi."
+
+msgid "That theme was made by a newer Komorebi. Update Komorebi to use it."
+msgstr "Esse tema foi feito por uma versão mais recente do Komorebi. Atualize o Komorebi para o usar."
+
+msgid "That theme's dark colours have no {0}."
+msgstr "As cores escuras desse tema não têm {0}."
+
+msgid "That theme's light colours have no {0}."
+msgstr "As cores claras desse tema não têm {0}."
+
+msgid "That theme's dark {0} isn't a colour like #0f6cbd."
+msgstr "O {0} escuro desse tema não é uma cor como #0f6cbd."
+
+msgid "That theme's light {0} isn't a colour like #0f6cbd."
+msgstr "O {0} claro desse tema não é uma cor como #0f6cbd."
+
+msgid "Choose a theme file"
+msgstr "Escolher um ficheiro de tema"
+
+msgid "Text size"
+msgstr "Tamanho do texto"
+
+msgid "Komorebi follows the text size in Windows Settings > Accessibility > Text size."
+msgstr "O Komorebi segue o tamanho do texto em Definições do Windows > Acessibilidade > Tamanho do texto."
+
+msgid "Custom"
+msgstr "Personalizado"
+
+msgid "Colour theme"
+msgstr "Tema de cores"
+
+msgid "Customise colours"
+msgstr "Personalizar cores"
+
+msgid "Import theme"
+msgstr "Importar tema"
+
+msgid "How Komorebi looks."
+msgstr "O aspeto do Komorebi."
+
+msgid "Mode and text"
+msgstr "Modo e texto"
+
+msgid "Colours"
+msgstr "Cores"
+
+msgid "Presets follow light, dark or System above. Your own colours stay on this PC; export them from Customise colours to share them."
+msgstr "As predefinições seguem Claro, Escuro ou Sistema acima. As suas cores ficam neste PC; exporte-as em Personalizar cores para as partilhar."
+
+msgid "How Komorebi checks mail, notifies and starts."
+msgstr "Como o Komorebi verifica o correio, notifica e inicia."
+
+msgid "Language and mail"
+msgstr "Idioma e correio"
+
+msgid "Accent"
+msgstr "Destaque"
+
+msgid "Background"
+msgstr "Fundo"
+
+msgid "Panes"
+msgstr "Painéis"
+
+msgid "Text"
+msgstr "Texto"
+
+msgid "Text on the accent"
+msgstr "Texto sobre o destaque"
+
+msgid "Focus ring"
+msgstr "Anel de foco"
+
+msgid "Focus ring gap"
+msgstr "Intervalo do anel de foco"
+
+msgid "Secondary text and icons"
+msgstr "Texto secundário e ícones"
+
+msgid "Muted text"
+msgstr "Texto atenuado"
+
+msgid "Text on tooltips"
+msgstr "Texto nas descrições"
+
+msgid "Cards"
+msgstr "Cartões"
+
+msgid "Selection and hover"
+msgstr "Seleção e destaque ao passar"
+
+msgid "Lines"
+msgstr "Linhas"
+
+msgid "Disabled marks"
+msgstr "Marcas desativadas"
+
+msgid "Welcome shape"
+msgstr "Forma de boas-vindas"
+
+msgid "Chosen segment"
+msgstr "Segmento escolhido"
+
+msgid "Pills on cards"
+msgstr "Etiquetas nos cartões"
+
+msgid "Text on the panes is {0}:1; text needs 4.5:1."
+msgstr "O texto nos painéis está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Text on the background is {0}:1; text needs 4.5:1."
+msgstr "O texto no fundo está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Text on a selected row is {0}:1; text needs 4.5:1."
+msgstr "O texto numa linha selecionada está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Secondary text on the panes is {0}:1; text needs 4.5:1."
+msgstr "O texto secundário nos painéis está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Muted text on the panes is {0}:1; text needs 4.5:1."
+msgstr "O texto atenuado nos painéis está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Muted text on the background is {0}:1; text needs 4.5:1."
+msgstr "O texto atenuado no fundo está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Text on the accent is {0}:1; text needs 4.5:1."
+msgstr "O texto sobre o destaque está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "The accent on the panes is {0}:1; controls need 3:1."
+msgstr "O destaque nos painéis está a {0}:1; os controlos precisam de 3:1."
+
+msgid "The focus ring on its gap is {0}:1; it needs 3:1."
+msgstr "O anel de foco sobre o intervalo está a {0}:1; precisa de 3:1."
+
+msgid "Text on tooltips is {0}:1; text needs 4.5:1."
+msgstr "O texto nas descrições está a {0}:1; o texto precisa de 4,5:1."
+
+msgid "Saved as {0}."
+msgstr "Guardado como {0}."
+
+msgid "The theme was not saved: {0}"
+msgstr "O tema não foi guardado: {0}"
+
+msgid "Fix contrast"
+msgstr "Corrigir contraste"
+
+msgid "Colours for"
+msgstr "Cores para"
+
+msgid "Start from"
+msgstr "Começar a partir de"
+
+msgid "More colours"
+msgstr "Mais cores"
+
+msgid "Reset to preset"
+msgstr "Repor predefinição"
+
+msgid "Export theme"
+msgstr "Exportar tema"
+
+msgid "Changes show at once and are kept. Light and dark have their own colours."
+msgstr "As alterações aparecem logo e ficam guardadas. Claro e Escuro têm as suas próprias cores."
+
+msgid "Main colours"
+msgstr "Cores principais"
+
+msgid "These follow the main colours until you change one."
+msgstr "Estas seguem as cores principais até alterar uma."
+
+msgid "Dim"
+msgstr "Escurecer"
+
+msgid "Opacity"
+msgstr "Opacidade"
+
+msgid "Sidebar"
+msgstr "Barra lateral"
+
+msgid "Tint"
+msgstr "Tonalidade"
+
+msgid "{0} px"
+msgstr "{0} px"
+
+msgid "Fill"
+msgstr "Preencher"
+
+msgctxt "picture fit"
+msgid "Fit"
+msgstr "Ajustar"
+
+msgid "Tile"
+msgstr "Mosaico"
+
+msgid "Centre"
+msgstr "Centrar"
+
+msgctxt "material"
+msgid "None"
+msgstr "Nenhum"
+
+msgid "Mica"
+msgstr "Mica"
+
+msgid "Acrylic"
+msgstr "Acrílico"
+
+msgid "Choose a picture"
+msgstr "Escolher uma imagem"
+
+msgid "That picture is too large."
+msgstr "Essa imagem é demasiado grande."
+
+msgid "That file isn't a PNG, JPEG or WebP picture."
+msgstr "Esse ficheiro não é uma imagem PNG, JPEG ou WebP."
+
+msgid "PNG, JPEG or WebP. Kept on this PC, scaled to your largest screen."
+msgstr "PNG, JPEG ou WebP. Guardada neste PC, ajustada ao seu maior ecrã."
+
+msgid "Change picture"
+msgstr "Alterar imagem"
+
+msgid "Choose picture"
+msgstr "Escolher imagem"
+
+msgid "Remove picture"
+msgstr "Remover imagem"
+
+msgid "Fit"
+msgstr "Ajuste"
+
+msgid "Blur behind panes"
+msgstr "Desfocar atrás dos painéis"
+
+msgid "Window material"
+msgstr "Material da janela"
+
+msgid "Mica tints the window with your desktop; Acrylic blurs what is behind it."
+msgstr "O Mica tinge a janela com o seu ambiente de trabalho; o Acrílico desfoca o que está atrás dela."
+
+msgid "How much of the background colour covers the material."
+msgstr "Quanto da cor de fundo cobre o material."
+
+msgid "How much the panes and the sidebar let the background through."
+msgstr "Quanto os painéis e a barra lateral deixam ver o fundo."
+
+msgid "One opacity for all"
+msgstr "Uma opacidade para tudo"
+
+msgid "Panes and sidebar apart"
+msgstr "Painéis e barra lateral em separado"
+
+msgid "Muted text may be hard to read over this picture. An opacity of {0}% or more keeps it at 4.5:1."
+msgstr "O texto atenuado pode ser difícil de ler sobre esta imagem. Uma opacidade de {0}% ou mais mantém-no a 4,5:1."
+
+msgid "Reset appearance"
+msgstr "Repor aspeto"
+
+msgid "Include background settings"
+msgstr "Incluir as definições do fundo"
+
+msgctxt "colour"
+msgid "{0}, {1}, low contrast"
+msgstr "{0}, {1}, contraste baixo"
+
+msgctxt "colour"
+msgid "{0}, {1}"
+msgstr "{0}, {1}"
+
+msgid "Some text may be hard to read with these colours."
+msgstr "Algum texto pode ser difícil de ler com estas cores."
+
+msgid "Contrast details"
+msgstr "Detalhes do contraste"
+
+msgid "Blur image"
+msgstr "Desfocar imagem"
+
+msgid "Cell size"
+msgstr "Tamanho da célula"
+
+msgid "Vignette"
+msgstr "Vinheta"
+
+msgid "Vignette size"
+msgstr "Tamanho da vinheta"
+
+msgctxt "picture style"
+msgid "None"
+msgstr "Nenhum"
+
+msgid "Pixel art"
+msgstr "Pixel art"
+
+msgid "ASCII"
+msgstr "ASCII"
+
+msgctxt "ASCII colour"
+msgid "Picture"
+msgstr "Imagem"
+
+msgctxt "ASCII colour"
+msgid "Text"
+msgstr "Texto"
+
+msgctxt "ASCII colour"
+msgid "Accent"
+msgstr "Destaque"
+
+msgid "Style"
+msgstr "Estilo"
+
+msgid "Redraws the picture once, in cells that line up with the screen's pixels."
+msgstr "Redesenha a imagem uma vez, em células alinhadas com os píxeis do ecrã."
+
+msgid "Dithering"
+msgstr "Pontilhado"
+
+msgid "Mixes neighbouring colours in a fixed pattern, as old games did."
+msgstr "Mistura cores vizinhas num padrão fixo, como os jogos antigos."
+
+msgid "Character colour"
+msgstr "Cor dos carateres"
+
+msgid "How far in from the window's edges the fade starts."
+msgstr "A que distância dos limites da janela começa o esbatimento."
+
+msgid "Panes blur the picture behind them, like frosted glass."
+msgstr "Os painéis desfocam a imagem por trás, como vidro fosco."
+
+msgid "With a style in a light theme, each pane and the sidebar stay opaque enough for text to read over the part of the picture behind them."
+msgstr "Com um estilo num tema claro, cada painel e a barra lateral ficam opacos o suficiente para o texto se ler sobre a parte da imagem por trás."
+
+msgid "Intensity"
+msgstr "Intensidade"
+
+msgid "Bolder characters with a little of their colour behind them, so the picture reads through the panes."
+msgstr "Caracteres mais carregados, com um pouco da sua cor por trás, para que a imagem se veja através dos painéis."
+
+msgid "Blur hides the pixel art style behind panes."
+msgstr "O desfoque esconde o estilo pixel art por trás dos painéis."
+
+msgid "Blur hides the ASCII style behind panes."
+msgstr "O desfoque esconde o estilo ASCII por trás dos painéis."

@@ -101,7 +101,7 @@ impl RenderOnce for FilterPills {
                             .bottom_0()
                             .size(px(layout::TAB_SPOT))
                             .rounded(px(radius::FULL))
-                            .bg(c.ink),
+                            .bg(c.accent),
                     )
                 })
                 .when_some(pick, |el, pick| {

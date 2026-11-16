@@ -38,6 +38,8 @@ pub const ACTIONS: &[&str] = &[
     "signature-pictures",
     "settings-rules",
     "settings-general",
+    "settings-appearance",
+    "settings-appearance-custom",
     "settings-privacy",
     "settings-about",
     "rule-edit",
@@ -79,6 +81,16 @@ pub struct Request {
     /// What happens in the window between its first frame and the capture
     /// (`KOMOREBI_SNAPSHOT_FOCUS`, `_TYPE`, `_WALK`, `_SCROLL`, `_HOVER`).
     pub drive: Drive,
+    /// `KOMOREBI_SNAPSHOT_APPEARANCE`: a preset's key (`komorebi`,
+    /// `outlook`, `github`) or a theme file (`*.json`, read at start) over
+    /// the saved appearance; never saved.
+    pub appearance: Option<String>,
+    /// `KOMOREBI_SNAPSHOT_BACKGROUND`: a picture file (PNG, JPEG, WebP)
+    /// behind the panes, instead of the saved one.
+    pub background: Option<PathBuf>,
+    /// `KOMOREBI_SNAPSHOT_BACKDROP`: the background settings
+    /// (`theme::backdrop::parse_switch`).
+    pub backdrop: Option<crate::theme::backdrop::Background>,
 }
 
 /// What a snapshot does to the window before the capture, in this order:
@@ -350,6 +362,35 @@ pub fn parse(
     if let Some(clock) = get("KOMOREBI_SNAPSHOT_CLOCK") {
         parse_clock(&clock)?;
     }
+    let appearance = match get("KOMOREBI_SNAPSHOT_APPEARANCE") {
+        None => None,
+        Some(a)
+            if crate::theme::presets::Preset::from_key(a.trim()).is_some()
+                || a.trim().to_ascii_lowercase().ends_with(".json") =>
+        {
+            Some(a.trim().to_string())
+        }
+        Some(a) => {
+            return Err(format!(
+                "KOMOREBI_SNAPSHOT_APPEARANCE={a}: expected komorebi, outlook, github or a theme file (.json)"
+            ));
+        }
+    };
+    let background = match get("KOMOREBI_SNAPSHOT_BACKGROUND") {
+        None => None,
+        Some(p) if std::path::Path::new(p.trim()).is_file() => Some(PathBuf::from(p.trim())),
+        Some(p) => {
+            return Err(format!(
+                "KOMOREBI_SNAPSHOT_BACKGROUND={p}: expected a PNG, JPEG or WebP file"
+            ));
+        }
+    };
+    let backdrop = get("KOMOREBI_SNAPSHOT_BACKDROP")
+        .map(|b| {
+            crate::theme::backdrop::parse_switch(&b)
+                .map_err(|e| format!("KOMOREBI_SNAPSHOT_BACKDROP={b}: {e}"))
+        })
+        .transpose()?;
     // One row opened: the list and the reading pane both have content.
     let panes = action == "shell"
         && get("KOMOREBI_SNAPSHOT_SELECT").is_some_and(|rows| rows.trim().parse::<usize>().is_ok());
@@ -362,6 +403,9 @@ pub fn parse(
         panes,
         system_title_bar,
         drive,
+        appearance,
+        background,
+        backdrop,
     }))
 }
 

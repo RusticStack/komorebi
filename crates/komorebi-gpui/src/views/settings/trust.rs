@@ -92,8 +92,8 @@ pub fn open(
                         .flex_none()
                         .rounded(px(radius::FULL))
                         .border(px(layout::FOCUS_RING))
-                        .border_color(if on { c.ink } else { c.ink_2 })
-                        .when(on, |el| el.bg(c.ink)),
+                        .border_color(if on { c.accent } else { c.ink_2 })
+                        .when(on, |el| el.bg(c.accent)),
                 )
                 .child(
                     div()

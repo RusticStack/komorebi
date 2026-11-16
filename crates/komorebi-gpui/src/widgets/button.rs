@@ -94,7 +94,7 @@ fn colours(t: &Tokens, v: Variant, selected: bool) -> (Hsla, Hsla, Hsla) {
     let c = &t.color;
     match v {
         Variant::Primary | Variant::Destructive => {
-            (c.ink, c.ink.opacity(motion::INK_HOVER), c.on_ink)
+            (c.accent, c.accent.opacity(motion::INK_HOVER), c.on_accent)
         }
         Variant::Secondary => (c.wash, c.wash, c.ink),
         Variant::Subtle if selected => (c.wash, c.wash, c.ink),

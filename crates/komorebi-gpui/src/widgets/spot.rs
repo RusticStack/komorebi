@@ -147,8 +147,8 @@ impl RenderOnce for SenderSpot {
             .typo(text);
         match self.state {
             SpotState::Initials { unread: true } => tagged(
-                base.bg(c.ink)
-                    .text_color(c.on_ink)
+                base.bg(c.accent)
+                    .text_color(c.on_accent)
                     .font_weight(t.text.body_strong.weight)
                     .child(self.initials),
                 self.id,
@@ -170,11 +170,11 @@ impl RenderOnce for SenderSpot {
                         gpui::Toggled::False
                     })
                     .when(checked, |el| {
-                        el.bg(c.ink).child(
+                        el.bg(c.accent).child(
                             svg()
                                 .path(Icon::Checkmark.path())
                                 .size(px(layout::ICON))
-                                .text_color(c.on_ink),
+                                .text_color(c.on_accent),
                         )
                     })
                     .when(!checked, |el| {

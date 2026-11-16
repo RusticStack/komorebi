@@ -1751,7 +1751,7 @@ impl OnboardingView {
                         div()
                             .size(px(geo::STEP_DOT))
                             .rounded(px(radius::FULL))
-                            .when(on || past, |el| el.bg(c.ink))
+                            .when(on || past, |el| el.bg(c.accent))
                             .when(!on && !past, |el| {
                                 el.border(px(layout::FOCUS_RING)).border_color(c.ink_3)
                             }),
@@ -2231,7 +2231,7 @@ impl OnboardingView {
                                 div()
                                     .size(px(layout::PLACE_SPOT))
                                     .rounded(px(radius::FULL))
-                                    .bg(c.ink),
+                                    .bg(c.accent),
                             )
                         }),
                 )

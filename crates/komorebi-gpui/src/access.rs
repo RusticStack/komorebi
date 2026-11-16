@@ -103,7 +103,7 @@ pub enum Key {
 
 impl Key {
     /// Every key, in the order the table lists them.
-    pub const ALL: [Key; 24] = [
+    pub const ALL: [Key; 25] = [
         Key::NewMail,
         Key::Search,
         Key::Refresh,
@@ -126,6 +126,7 @@ impl Key {
         Key::Section(Section::Signatures),
         Key::Section(Section::Rules),
         Key::Section(Section::General),
+        Key::Section(Section::Appearance),
         Key::Section(Section::Privacy),
         Key::Section(Section::About),
     ];
@@ -172,12 +173,14 @@ impl Key {
             Key::Send => ('S', 'S'),
             Key::Attach => ('A', 'X'),
             Key::Link => ('L', 'G'),
-            // Contas, Assinaturas, Regras, Geral, Privacidade, Acerca de:
-            // none of the window's letters (P is Search, T Folders).
+            // Contas, Assinaturas, Regras, Geral, Aspeto, Privacidade,
+            // Acerca de: none of the window's letters (P is Search, T
+            // Folders). Appearance is C (A, P and E are taken), Aspeto S.
             Key::Section(Section::Accounts) => ('A', 'C'),
             Key::Section(Section::Signatures) => ('S', 'A'),
             Key::Section(Section::Rules) => ('R', 'R'),
             Key::Section(Section::General) => ('G', 'G'),
+            Key::Section(Section::Appearance) => ('C', 'S'),
             Key::Section(Section::Privacy) => ('P', 'I'),
             Key::Section(Section::About) => ('B', 'E'),
         };

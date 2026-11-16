@@ -232,7 +232,7 @@ impl RenderOnce for TitleBar {
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(c.canvas)
+                .bg(c.chrome)
                 .text_color(ink)
                 .children(self.center)
                 .into_any_element();
@@ -245,7 +245,7 @@ impl RenderOnce for TitleBar {
             .flex_none()
             .flex()
             .flex_row()
-            .bg(c.canvas)
+            .bg(c.chrome)
             .text_color(ink)
             .child(
                 // Everything not covered by a button drags the window.

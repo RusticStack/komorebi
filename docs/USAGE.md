@@ -115,8 +115,8 @@ Run anyway.
 `SHA256SUMS`. In PowerShell, compare:
 
 ```powershell
-(Get-FileHash .\komorebi-1.1.1-setup.exe -Algorithm SHA256).Hash.ToLower()
-Select-String komorebi-1.1.1-setup.exe .\SHA256SUMS
+(Get-FileHash .\komorebi-1.1.2-setup.exe -Algorithm SHA256).Hash.ToLower()
+Select-String komorebi-1.1.2-setup.exe .\SHA256SUMS
 ```
 
 How releases are made, signed and published is in
@@ -145,7 +145,8 @@ because the letter has to be in the name you read:
 | Save as .eml | Alt+S | Alt+E |
 | Send / Attach / Link (in the composer) | Alt+S / Alt+A / Alt+L | Alt+S / Alt+X / Alt+G |
 | Settings: Accounts / Signatures / Rules | Alt+A / Alt+S / Alt+R | Alt+C / Alt+A / Alt+R |
-| Settings: General / Privacy / About | Alt+G / Alt+P / Alt+B | Alt+G / Alt+I / Alt+E |
+| Settings: General / Appearance | Alt+G / Alt+C | Alt+G / Alt+S |
+| Settings: Privacy / About | Alt+P / Alt+B | Alt+I / Alt+E |
 
 The chips are drawn under the main commands, the reader's and the
 composer's buttons and the Settings sections (in Settings, Alt and a

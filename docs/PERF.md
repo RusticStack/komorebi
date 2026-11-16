@@ -13,6 +13,25 @@ Sections 1 to 7 below were measured on the 0.7 Slint app (deleted at the cut-ove
 - Memory and idle CPU. No figure for the full GPUI app exists. The feasibility spike (branch `spike/gpui`, `spike-gpui/REPORT.md` S2 and S3) measured a skeleton window with a list and no message open, against the 0.7 Slint app on the same cache (Get-Process and WorkingSetPrivate, 2 s after the first frame): private bytes 111.1 MB against 11.6 MB, private working set 22.1 MB against 10.7 MB, working set 55.2 MB against 34.1 MB, 35 threads against 11. Most of the private bytes were reserved and never touched: the DirectX runtime and driver were put at about 85 to 90 MB of commit, which the spike did not confirm with PIX or VMMap. Idle CPU over 60 s was 0.017 percent of one core visible and 0.006 percent minimized for the skeleton, against 0.012 and 0.136 percent for the Slint app. These are spike figures on a skeleton, not the shipped app; measure the release build before quoting any of them.
 - 1.1 candidates (from the spike's optimization list, not done): lazy and smaller GPU resources, dropping a RenderImage's CPU bytes after upload, capping background executor threads, glyph atlas tuning, size trims, an explicit WARP fallback.
 
+## 0.1 Appearance and background (1.1.2)
+
+Measured 2026-11-16 on the release build (`komorebi.exe` 19,622,912 bytes, ceiling 21,500,000), Windows 11 build 26300, 1280x800 window, offline, a throwaway seeded cache, normal launches (not snapshots). Idle CPU is the process's CPU time over 10 s after 6 s of settling; memory is Get-Process private bytes and working set at that point. One run each, so differences under about 2 MB are noise.
+
+| Setting | Idle CPU | Private | Working set |
+| --- | --- | --- | --- |
+| 1.1.1, defaults | 0.00% | 56.6 MB | 57.9 MB |
+| Defaults | 0.00% | 56.8 MB | 59.9 MB |
+| 4K picture (3840x2160, generated), Blur image 20 px, panes and sidebar 70%, Blur behind panes 20 px | 0.00% | 70.3 MB | 64.1 MB |
+| 4K picture, Pixel art (cell 6, 16 colours, dithered), vignette 80% | 0.00% | 81.1 MB | 69.1 MB |
+| 4K picture, ASCII (cell 7), vignette 80% | 0.00% | 76.9 MB | 68.6 MB |
+| Mica, panes 80%, tint 50% | 0.00% | 52.5 MB | 59.5 MB |
+| Acrylic, panes 80%, tint 50% | 0.00% | 52.6 MB | 59.6 MB |
+
+- Defaults add no per-frame work: no picture is held, no element is added and no token changes (`the_defaults_add_nothing`, `a_background_picture_is_kept_drawn_and_let_go`).
+- The picture is made once, off the UI thread, and drawn as one image (two with Blur behind panes); nothing is filtered per frame, so a picture costs no idle CPU. Moving a slider makes it again once the slider rests (120 ms); a picture made at the window's size (a style or a vignette) is made again once a resize or a theme change rests.
+- At most two pictures are held: the stored picture and a quarter-size pane copy. The decoded original is dropped once they are made. Without a style, a picture blurred by sigma s is kept up to 4 times smaller a side (a pixel stays under a third of s): before that, the 4K picture at Blur 20 measured 130.4 MB private; after, 70.3 MB. A style is kept at the window's size so its cells sit on whole device pixels.
+- Launch to the first frame with the defaults (`KOMOREBI_TIMING=1`, 2,000 messages, median of 7): 75.1 ms for 1.1.1, 75.3 ms for this build.
+
 ## 1. Where time goes (measured, release, 2000 messages, 2026-10)
 
 - Launch to first frame is about 37 ms in 0.3.0 and about 50 ms in 0.4.0 on a quiet machine (the cache is ready at about 20 ms; the extra time sits between database open and the first frame, not yet profiled). Roughly 45 percent is Windows/winit (window creation about 7 ms, ShowWindow about 9 ms). `AppWindow::new` is about 2 ms (fonts). Cache load (DB open, folders, ids, model) is 6 to 10 ms. Do not touch `chrome.rs`, IME or font setup for speed.

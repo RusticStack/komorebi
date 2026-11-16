@@ -208,8 +208,50 @@ Features in more detail:
   bar shows a first download's progress), each opening its account page,
   and Add account, which opens the same three steps as the first run
   (below) in the content area.
-  General: the theme (System follows Windows, or always Light or Dark;
-  an open HTML message is laid out again), how often to check for new
+  Appearance (1.1.2): the theme (System follows Windows, or always Light
+  or Dark; an open HTML message is laid out again), the text size Windows
+  sets (read only), and the colours: a card per preset (Komorebi, the
+  default; Outlook; GitHub) with a small preview in its own colours, and
+  the custom theme's card once there is one. Customise colours opens the
+  editor: a name, light and dark edited apart (the app shows the variant
+  being edited), the main four colours (accent, background, panes, text)
+  and every other colour under More colours, each a swatch with its hex
+  value and a picker; the other colours follow the main four until one is
+  changed by hand. A colour pair below WCAG AA (4.5:1 for text, 3:1 for the
+  accent on the panes and the focus ring on its gap) shows a warning with
+  Fix contrast, which moves the colour the least that makes it pass; saving
+  is never blocked. Reset to preset, Start from (another preset) and Export
+  theme (a small versioned JSON file of colours); Import theme takes such a
+  file back, and a malformed one is refused in plain words. Every change
+  shows at once in every window, with no restart.
+  Background (1.1.2, all off by default): a picture (PNG, JPEG or WebP,
+  decoded and scaled down to the largest monitor off the UI thread, kept as
+  `background.png` in `cache.appearance` beside the cache file, never in
+  the cache) with Fill, Fit, Tile or Centre; a Style (None, Pixel art with
+  a cell size of 2 to 16 px, 8, 16, 32 or 64 colours made from the picture
+  and optional ordered dithering, or ASCII, characters from ` .:-=+*%#@`
+  by brightness in the picture's colours, the text colour or the accent,
+  with an Intensity that makes them bolder over a wash of their colour);
+  Blur image (0 to 40 px), Dim (0 to 100%) and a Vignette (0 to 100%, with
+  a size) that fades the picture toward the window's edges along a rounded
+  rectangle, as a smooth fade, as pixel-art cells dropping out by ordered
+  dithering, or as ASCII characters thinning to blanks. The picture is
+  made once, off the UI thread, in a fixed order: decode, fit to the
+  window, blur, style, dim, vignette; a style or a vignette makes it at the
+  window's size, so cells sit on whole device pixels, and it is made again
+  once a resize or a theme change rests. Panes: Blur behind panes (0 to
+  40 px; each pane draws a quarter-size copy of the stored picture, blurred
+  again, clipped to its rounded corners); the window material (None,
+  Mica on Windows 11 22H2 and later, or Acrylic) with a Tint; and, once a
+  picture or a material shows, one Opacity slider for the panes and the
+  sidebar, or the two apart. Opacity never goes under 40%, and a warning
+  gives the opacity at which muted text stays at 4.5:1 over the picture's
+  average, darkest and lightest colours. Reset appearance returns to the
+  default look and deletes the picture. Export theme can include the
+  background settings (never the picture); Import theme applies them.
+  Menus, dialogs, the folder drawer, the composer's page and HTML mail stay
+  opaque.
+  General: how often to check for new
   mail (every 1, 2, 5 or 15 minutes; every folder is still synced in
   full at least hourly), the undo-send delay (off, 5, 10, 20 or 30
   seconds), when an opened message is marked read (right away, after 1 or

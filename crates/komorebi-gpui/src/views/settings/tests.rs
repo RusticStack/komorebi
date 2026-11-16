@@ -590,7 +590,7 @@ mod port {
         );
         in_window(cx, f.window, |window, cx| {
             f.view
-                .update(cx, |v, cx| v.show(Section::General, window, cx));
+                .update(cx, |v, cx| v.show(Section::Appearance, window, cx));
         });
         in_window(cx, f.window, |window, _| {
             assert_named(window, "Dark", Role::RadioButton);
@@ -1116,7 +1116,7 @@ mod port {
         let f = open(cx, "settings-seg-keys", services::refusing());
         in_window(cx, f.window, |window, cx| {
             f.view
-                .update(cx, |v, cx| v.show(Section::General, window, cx));
+                .update(cx, |v, cx| v.show(Section::Appearance, window, cx));
         });
         let before = f.db().settings().unwrap().theme;
         in_window(cx, f.window, |window, cx| {
@@ -1352,5 +1352,346 @@ mod port {
         assert!(!favicon::enabled(&f.db()));
         assert_eq!(favicon::load(&f.db(), f.account), None);
         assert!(f.events().contains(&SettingsEvent::AccountsChanged));
+    }
+
+    /// Settings > Appearance: the presets are one radio group; a choice
+    /// shows at once on the app and on Kit's pieces (the one theme path)
+    /// and is saved; the saved value is what start-up reads.
+    #[gpui::test]
+    fn a_preset_applies_at_once_and_is_saved(cx: &mut TestAppContext) {
+        use crate::theme::ActiveTokens as _;
+        use crate::theme::appearance::{Appearance, ThemeRef};
+        use crate::theme::presets::{Preset, TokenId};
+        use gpui_kit::component::Theme;
+        let f = open(cx, "settings-appearance", services::refusing());
+        in_window(cx, f.window, |window, cx| {
+            f.view
+                .update(cx, |v, cx| v.show(Section::Appearance, window, cx));
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Colour theme", Role::RadioGroup);
+            for name in ["Komorebi", "Outlook", "GitHub"] {
+                assert_named(window, name, Role::RadioButton);
+            }
+            assert_named(window, "Customise colours", Role::Button);
+            assert_named(window, "Import theme", Role::Button);
+        });
+        in_window(cx, f.window, |window, cx| {
+            crate::test_support::click_named(window, "GitHub", cx);
+        });
+        cx.run_until_parked();
+        let blue = Preset::GitHub
+            .colors(crate::theme::Scheme::Light)
+            .get(TokenId::Accent)
+            .colour();
+        cx.update(|cx| {
+            assert_eq!(cx.tokens().color.accent, blue);
+            assert_eq!(Theme::global(cx).primary, blue);
+            assert_eq!(Theme::global(cx).ring, blue);
+        });
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        assert_eq!(saved.theme, ThemeRef::Preset(Preset::GitHub));
+        // The arrows move the choice, like every radio group.
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["left"], cx);
+        });
+        cx.run_until_parked();
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        assert_eq!(saved.theme, ThemeRef::Preset(Preset::Outlook));
+    }
+
+    /// Customise colours: the editor names every main colour, a colour
+    /// below AA shows a warning with Fix contrast, and the fix makes the
+    /// theme pass; every change is saved as the custom theme.
+    #[gpui::test]
+    fn the_editor_warns_and_fixes_contrast(cx: &mut TestAppContext) {
+        use crate::theme::appearance::{Appearance, ThemeRef};
+        use crate::theme::derive;
+        use crate::theme::presets::{Rgb, TokenId};
+        let f = open(cx, "settings-theme-editor", services::refusing());
+        in_window(cx, f.window, |window, cx| {
+            f.view.update(cx, |v, cx| v.open_theme_editor(window, cx));
+        });
+        cx.run_until_parked();
+        let editor = cx.read(|cx| f.view.read(cx).theme_editor().cloned().expect("open"));
+        // A picker per colour, named for screen readers by the token's
+        // name (Kit's `ColorSelect::accessibility_label`).
+        cx.read(|cx| {
+            let e = editor.read(cx);
+            for id in TokenId::ALL {
+                assert!(e.picker(id).is_some(), "{id:?}");
+            }
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "More colours", Role::Button);
+            assert_named(window, "Reset to preset", Role::Button);
+            assert!(!names(window).iter().any(|(_, n)| n == "Fix contrast"));
+        });
+        // Pale grey text on white panes: well below 4.5:1.
+        in_window(cx, f.window, |window, cx| {
+            editor.update(cx, |e, cx| {
+                e.set(TokenId::Ink, Rgb(0xC8C8C8), window, cx);
+            });
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Fix contrast", Role::Button);
+            assert_named(window, "Details", Role::Button);
+            // One calm line; the ratios wait behind Details.
+            assert!(!names(window).iter().any(|(_, n)| n == "Contrast details"));
+        });
+        in_window(cx, f.window, |window, cx| {
+            crate::test_support::click_named(window, "Details", cx);
+        });
+        cx.run_until_parked();
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Contrast details", Role::List);
+            assert_named(window, "Hide details", Role::Button);
+        });
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        assert_eq!(saved.theme, ThemeRef::Custom);
+        in_window(cx, f.window, |window, cx| {
+            crate::test_support::click_named(window, "Fix contrast", cx);
+        });
+        cx.run_until_parked();
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        let colours = saved.custom.expect("custom").light.colors;
+        assert!(derive::check(&colours).is_empty());
+        in_window(cx, f.window, |window, _| {
+            assert!(!names(window).iter().any(|(_, n)| n == "Fix contrast"));
+        });
+        // Esc closes the editor; the page shows the custom theme's card.
+        in_window(cx, f.window, |window, cx| {
+            test_support::press(window, &["escape"], cx);
+        });
+        cx.run_until_parked();
+        cx.read(|cx| assert!(f.view.read(cx).theme_editor().is_none()));
+    }
+
+    /// Import theme: a theme file becomes the custom theme; anything else is
+    /// refused in plain words and changes nothing.
+    #[gpui::test]
+    fn a_theme_file_is_imported_or_refused(cx: &mut TestAppContext) {
+        use crate::theme::appearance::{self, Appearance, CustomTheme, ThemeRef};
+        use crate::theme::presets::Preset;
+        let f = open(cx, "settings-theme-import", services::refusing());
+        let dir = f.path.parent().unwrap().to_path_buf();
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, "{\"hello\": 1}").unwrap();
+        in_window(cx, f.window, |window, cx| {
+            f.view
+                .update(cx, |v, cx| v.import_theme_from(&bad, window, cx))
+        });
+        cx.read(|cx| {
+            assert_eq!(
+                f.view.read(cx).theme_note.as_deref(),
+                Some("That file isn't a Komorebi theme.")
+            );
+        });
+        assert!(Appearance::from_setting(&f.db().settings().unwrap().appearance).is_default());
+        let mut theme = CustomTheme::from_preset(Preset::Outlook);
+        theme.name = "Harbour".into();
+        let good = dir.join("harbour.json");
+        std::fs::write(&good, appearance::export(&theme)).unwrap();
+        in_window(cx, f.window, |window, cx| {
+            f.view
+                .update(cx, |v, cx| v.import_theme_from(&good, window, cx))
+        });
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        assert_eq!(saved.theme, ThemeRef::Custom);
+        assert_eq!(saved.custom.unwrap().name, "Harbour");
+        cx.read(|cx| assert!(f.view.read(cx).theme_note.is_none()));
+        // A file with background settings brings them (never a picture).
+        let with_bg = dir.join("harbour-glass.json");
+        let bg = crate::theme::backdrop::Background {
+            picture: true,
+            panes: 75,
+            material: crate::theme::backdrop::Material::Acrylic,
+            ..Default::default()
+        };
+        std::fs::write(&with_bg, appearance::export_with(&theme, Some(&bg))).unwrap();
+        in_window(cx, f.window, |window, cx| {
+            f.view
+                .update(cx, |v, cx| v.import_theme_from(&with_bg, window, cx))
+        });
+        cx.run_until_parked();
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        assert_eq!(
+            saved.background.material,
+            crate::theme::backdrop::Material::Acrylic
+        );
+        assert_eq!(saved.background.panes, 75);
+        assert!(!saved.background.picture);
+    }
+
+    /// Background: nothing is held or drawn by default; a picture is kept
+    /// in the app's data folder (beside the cache, not in it), made off the
+    /// UI thread and drawn with translucent panes; Remove picture and Reset
+    /// appearance let it all go.
+    #[gpui::test]
+    fn a_background_picture_is_kept_drawn_and_let_go(cx: &mut TestAppContext) {
+        use crate::backdrop::{self, Backdrop};
+        use crate::theme::ActiveTokens as _;
+        use crate::theme::appearance::Appearance;
+        use crate::theme::backdrop::Background;
+        let f = open(cx, "settings-background", services::refusing());
+        cx.update(|cx| {
+            assert!(!Backdrop::holds_picture(cx));
+            assert!(backdrop::layer(cx).is_none());
+            assert!(backdrop::pane_layer(gpui::px(8.), cx).is_none());
+            let c = cx.tokens().color;
+            assert_eq!((c.pane, c.backdrop), (c.paper, c.canvas));
+        });
+        in_window(cx, f.window, |window, cx| {
+            f.view
+                .update(cx, |v, cx| v.show(Section::Appearance, window, cx));
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Choose picture", Role::Button);
+            assert_named(window, "Reset appearance", Role::Button);
+            // No opacity until something shows through.
+            assert!(!names(window).iter().any(|(_, n)| n == "Opacity"));
+        });
+        // A generated picture: a grey ramp.
+        let dir = f.path.parent().unwrap().to_path_buf();
+        let source = dir.join("ramp.png");
+        image::RgbaImage::from_fn(400, 200, |x, _| {
+            let v = (x * 255 / 399) as u8;
+            image::Rgba([v, v, v, 255])
+        })
+        .save(&source)
+        .unwrap();
+        in_window(cx, f.window, |window, cx| {
+            f.view.update(cx, |v, cx| {
+                v.take_picture(source.clone(), (300, 300), window, cx)
+            });
+        });
+        cx.run_until_parked();
+        let kept = backdrop::picture(&f.path);
+        assert!(kept.is_file(), "kept beside the cache: {kept:?}");
+        assert!(kept.starts_with(f.path.with_extension("appearance")));
+        let saved = Appearance::from_setting(&f.db().settings().unwrap().appearance);
+        assert!(saved.background.picture);
+        cx.update(|cx| {
+            assert!(Backdrop::holds_picture(cx));
+            assert!(backdrop::layer(cx).is_some());
+            // Blur behind panes is off: the panes fill themselves.
+            assert!(backdrop::pane_layer(gpui::px(8.), cx).is_none());
+        });
+        in_window(cx, f.window, |window, _| {
+            assert_named(window, "Remove picture", Role::Button);
+            // Style, with no style's own controls while it is None.
+            assert!(names(window).iter().any(|(_, n)| n == "Style"));
+            assert!(!names(window).iter().any(|(_, n)| n == "Dithering"));
+        });
+        // Translucent panes and the softer copy behind them.
+        in_window(cx, f.window, |window, cx| {
+            f.view.update(cx, |v, cx| {
+                let bg = Background {
+                    panes: 70,
+                    pane_blur: 20,
+                    ..v.appearance(cx).background
+                };
+                v.set_background(bg, true, window, cx);
+            });
+        });
+        cx.executor()
+            .advance_clock(crate::theme::backdrop::DEBOUNCE);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let c = cx.tokens().color;
+            assert!((c.pane.a - 0.7).abs() < 1e-6);
+            assert!(backdrop::pane_layer(gpui::px(8.), cx).is_some());
+            assert!(Backdrop::tones(cx).is_some());
+        });
+        // A style: three quick changes make the pictures once, after the
+        // last rests, at the window's own size.
+        let before = cx.update(|cx| Backdrop::bakes(cx));
+        in_window(cx, f.window, |window, cx| {
+            f.view.update(cx, |v, cx| {
+                for cell in [4, 6, 8] {
+                    let bg = Background {
+                        style: crate::theme::backdrop::Style::PixelArt,
+                        cell,
+                        vignette: 60,
+                        ..v.appearance(cx).background
+                    };
+                    v.set_background(bg, false, window, cx);
+                }
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| Backdrop::bakes(cx)), before);
+        cx.executor()
+            .advance_clock(crate::theme::backdrop::DEBOUNCE);
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| Backdrop::bakes(cx)), before + 1);
+        in_window(cx, f.window, |window, cx| {
+            let (v, s) = (window.viewport_size(), window.scale_factor());
+            let want = (
+                (f32::from(v.width) * s).round() as u32,
+                (f32::from(v.height) * s).round() as u32,
+            );
+            assert_eq!(Backdrop::held_size(cx), Some(want));
+            // Only pixel art's own controls show.
+            assert!(names(window).iter().any(|(_, n)| n == "Dithering"));
+            assert!(!names(window).iter().any(|(_, n)| n == "Character colour"));
+        });
+        // Reset appearance: the default look, the picture deleted.
+        in_window(cx, f.window, |window, cx| {
+            f.view.update(cx, |v, cx| v.reset_appearance(window, cx));
+        });
+        cx.run_until_parked();
+        assert!(!kept.exists());
+        assert!(Appearance::from_setting(&f.db().settings().unwrap().appearance).is_default());
+        cx.update(|cx| {
+            assert!(!Backdrop::holds_picture(cx));
+            assert!(backdrop::layer(cx).is_none());
+            let c = cx.tokens().color;
+            assert_eq!(c.pane, c.paper);
+        });
+    }
+
+    /// A file that is not a picture is refused in plain words.
+    #[gpui::test]
+    fn a_file_that_is_not_a_picture_is_refused(cx: &mut TestAppContext) {
+        let f = open(cx, "settings-background-bad", services::refusing());
+        let bad = f.path.parent().unwrap().join("not-a-picture.png");
+        std::fs::write(&bad, b"hello").unwrap();
+        in_window(cx, f.window, |window, cx| {
+            f.view.update(cx, |v, cx| {
+                v.take_picture(bad.clone(), (300, 300), window, cx)
+            });
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert_eq!(
+                f.view.read(cx).theme_note.as_deref(),
+                Some("That file isn't a PNG, JPEG or WebP picture.")
+            );
+            assert!(!crate::backdrop::Backdrop::holds_picture(cx));
+        });
+    }
+
+    /// The chosen segment gets an outline where its pill barely stands
+    /// out from the track, except in Komorebi's own (pinned) look.
+    #[gpui::test]
+    fn the_chosen_segment_stands_out_outside_komorebi(cx: &mut TestAppContext) {
+        use crate::theme::appearance::{Appearance, ThemeRef};
+        use crate::theme::presets::Preset;
+        let _f = open(cx, "settings-segment", services::refusing());
+        cx.update(|cx| {
+            assert!(!crate::views::settings::card::outline_selected(cx));
+            for p in [Preset::Outlook, Preset::GitHub] {
+                crate::theme::set_appearance(
+                    Appearance {
+                        theme: ThemeRef::Preset(p),
+                        ..Appearance::default()
+                    },
+                    cx,
+                );
+                assert!(crate::views::settings::card::outline_selected(cx), "{p:?}");
+            }
+        });
     }
 }

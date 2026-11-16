@@ -65,10 +65,10 @@ pub const SCROLL_LINE: f32 = 60.;
 pub const SOURCE_DIALOG_W: f32 = 640.;
 pub const SOURCE_DIALOG_MAX_H: f32 = 420.;
 
-/// How strongly the selection's ink lies over the page: a grey wash that
+/// How strongly the selection's accent lies over the page: a wash that
 /// keeps the text readable on light and dark pages. The brand's
 /// selection is wash; over pixels the wash itself would hide the text, so
-/// the highlight is ink at this strength.
+/// the highlight is the accent (Komorebi's: its ink) at this strength.
 const SELECTION_ALPHA: f32 = 0.16;
 
 /// A page's own background (the message's colour, RGBA; opaque), drawn
@@ -85,7 +85,7 @@ pub fn page_colour([r, g, b, _]: [u8; 4]) -> Hsla {
 
 /// The selection highlight over a page.
 pub fn selection(p: &Palette) -> Hsla {
-    p.ink.opacity(SELECTION_ALPHA)
+    p.accent.opacity(SELECTION_ALPHA)
 }
 
 #[cfg(test)]
@@ -98,7 +98,7 @@ mod tests {
         for scheme in [Scheme::Light, Scheme::Dark] {
             let p = palette(scheme);
             let s = selection(&p);
-            assert_eq!((s.h, s.s, s.l), (p.ink.h, p.ink.s, p.ink.l));
+            assert_eq!((s.h, s.s, s.l), (p.accent.h, p.accent.s, p.accent.l));
             assert!(s.a > 0.1 && s.a < 0.3);
         }
     }

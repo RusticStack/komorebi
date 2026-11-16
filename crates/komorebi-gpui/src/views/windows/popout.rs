@@ -10,8 +10,7 @@
 
 use gpui::{
     AnyView, App, Bounds, Context, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div,
-    prelude::*, px,
+    Styled, TitlebarOptions, Window, WindowBounds, WindowOptions, div, prelude::*, px,
 };
 
 use crate::theme::{ActiveTokens as _, space};
@@ -84,7 +83,9 @@ pub fn options_at(title: &str, size: (f32, f32), n: usize, cx: &App) -> WindowOp
             traffic_light_position: None,
         }),
         window_min_size: Some(gpui::size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
-        window_background: WindowBackgroundAppearance::Opaque,
+        window_background: crate::backdrop::window_background(
+            &crate::theme::appearance(cx).background,
+        ),
         ..Default::default()
     }
 }
@@ -132,7 +133,9 @@ impl Render for Popout {
             .size_full()
             .flex()
             .flex_col()
-            .bg(c.canvas)
+            .relative()
+            .bg(c.backdrop)
+            .children(crate::backdrop::layer(cx))
             .text_color(c.ink)
             .child(TitleBar::new())
             .child(

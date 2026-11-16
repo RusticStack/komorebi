@@ -324,6 +324,22 @@ impl Segmented {
     }
 }
 
+/// Whether the chosen segment needs an outline to stand out: its pill is
+/// barely different from the track (under 1.5:1) in a theme other than
+/// Komorebi's own presets, whose look is pinned (there the pill and the
+/// stronger text weight mark it).
+pub fn outline_selected(cx: &App) -> bool {
+    use crate::theme::appearance::ThemeRef;
+    use crate::theme::presets::{Preset, Rgb, contrast};
+    let c = cx.tokens().color;
+    let faint = contrast(Rgb::from_colour(c.segment_on), Rgb::from_colour(c.inset)) < 1.5;
+    let pinned = matches!(
+        crate::theme::appearance(cx).theme,
+        ThemeRef::Default | ThemeRef::Preset(Preset::Komorebi)
+    );
+    faint && !pinned
+}
+
 impl RenderOnce for Segmented {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = cx.tokens().clone();
@@ -335,6 +351,7 @@ impl RenderOnce for Segmented {
             .position(|(v, _)| *v == self.value)
             .unwrap_or(0);
         let handles = radio_handles(&self.id, count, chosen, window, cx);
+        let outline = outline_selected(cx);
         let values: Vec<SharedString> = self.choices.iter().map(|(v, _)| v.clone()).collect();
         let segments = self
             .choices
@@ -363,6 +380,7 @@ impl RenderOnce for Segmented {
                     })
                     .text_color(if on { c.ink } else { c.ink_2 })
                     .when(on, |el| el.bg(c.segment_on))
+                    .when(on && outline, |el| el.border_1().border_color(c.ink_3))
                     .when(!on, |el| el.hover(move |s| s.text_color(c.ink)))
                     .focus_visible(ring_style(&t))
                     .child(label)
@@ -501,8 +519,8 @@ impl RenderOnce for RadioList {
                             .flex_none()
                             .rounded(px(radius::FULL))
                             .border(px(layout::FOCUS_RING))
-                            .border_color(if on { c.ink } else { c.ink_2 })
-                            .when(on, |el| el.bg(c.ink)),
+                            .border_color(if on { c.accent } else { c.ink_2 })
+                            .when(on, |el| el.bg(c.accent)),
                     )
                     .child(
                         div()

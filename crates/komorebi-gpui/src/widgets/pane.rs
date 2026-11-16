@@ -51,9 +51,14 @@ impl ParentElement for Pane {
 impl RenderOnce for Pane {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let c = cx.tokens().color;
+        // Blur behind panes: the pane draws its part of the softer picture
+        // and its fill itself, inside its corners (none: no element).
+        let behind = crate::backdrop::pane_layer(px(radius::SURFACE), cx);
+        let fill = if behind.is_some() { c.clear } else { c.pane };
         div()
             .id(self.id)
             .when_some(self.name, |el, name| el.role(Role::Pane).aria_label(name))
+            .when(behind.is_some(), |el| el.relative())
             .size_full()
             .min_w_0()
             .min_h_0()
@@ -61,8 +66,9 @@ impl RenderOnce for Pane {
             .flex_col()
             .overflow_hidden()
             .rounded(px(radius::SURFACE))
-            .bg(c.paper)
+            .bg(fill)
             .text_color(c.ink)
+            .children(behind)
             .children(self.children)
             .test_support()
     }
@@ -254,7 +260,7 @@ impl RenderOnce for ListRow {
                                 .w(px(layout::MARKER_W))
                                 .h(px(layout::MARKER_H))
                                 .rounded(px(radius::FULL))
-                                .bg(c.ink),
+                                .bg(c.accent),
                         ),
                 )
             })

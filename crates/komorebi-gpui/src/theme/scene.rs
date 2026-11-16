@@ -2,8 +2,10 @@
 //! sky's stars and clouds, the sun or moon, the water's glimmer and the path on it,
 //! the fireflies, the lantern, the birds. Neutral greys only, from the same
 //! range as the scene's own art (light: about #2E to #EE over the paper,
-//! dark: about #0E to #F0), never a hue. The scheme picks the palette; the
-//! clock picks the body.
+//! dark: about #0E to #F0), never a hue, on any theme: the art stays grey.
+//! The panel's own colour picks the palette ([`art_scheme`]: dark panes
+//! take the night art, so a light theme's dark variant and a custom dark
+//! theme read alike); the clock picks the body.
 
 use gpui::{Hsla, Rgba};
 
@@ -63,6 +65,25 @@ pub struct SceneTones {
     pub lamp_glow: Hsla,
     /// A distant bird.
     pub bird: Hsla,
+}
+
+/// The art for a panel of colour `paper`: its luminance decides, not the
+/// app's light or dark (a theme's panes may be either).
+pub fn art_scheme(paper: Hsla) -> Scheme {
+    if super::presets::Rgb::from_colour(paper).is_light() {
+        Scheme::Light
+    } else {
+        Scheme::Dark
+    }
+}
+
+/// The tones for a panel of colour `paper`: the art's own, with the moon's
+/// dark limb being the panel showing through.
+pub fn tones_on(paper: Hsla) -> SceneTones {
+    SceneTones {
+        limb: Hsla { a: 1., ..paper },
+        ..tones(art_scheme(paper))
+    }
 }
 
 pub fn tones(scheme: Scheme) -> SceneTones {
@@ -158,6 +179,23 @@ mod tests {
             let paper = Rgba::from(palette(scheme).paper);
             let limb = Rgba::from(t.limb);
             assert!((paper.r - limb.r).abs() < 0.01, "{scheme:?}");
+        }
+    }
+
+    /// Every preset's panes pick the art of their own lightness, and the
+    /// limb is the pane; the default theme's art is unchanged.
+    #[test]
+    fn the_panes_pick_the_art() {
+        use crate::theme::presets::Preset;
+        for preset in Preset::ALL {
+            for scheme in [Scheme::Light, Scheme::Dark] {
+                let p = crate::theme::Palette::from_set(&preset.colors(scheme));
+                assert_eq!(art_scheme(p.paper), scheme, "{preset:?}");
+                assert_eq!(tones_on(p.paper).limb, p.paper);
+            }
+        }
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            assert_eq!(tones_on(palette(scheme).paper), tones(scheme));
         }
     }
 }

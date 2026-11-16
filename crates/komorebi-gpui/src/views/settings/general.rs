@@ -17,8 +17,8 @@ use komorebi::i18n::{LangSetting, resolve_here};
 use komorebi::mail::rich::{ColorId, FontId, SizePt};
 use komorebi_i18n::tr;
 
-use super::card::{CARD_MAX_W, Card, Segmented, group_head, page_head};
-use super::choices::{INTERVALS, READ_CHOICES, THEMES, UNDO_CHOICES, nearest, read_index};
+use super::card::{CARD_MAX_W, Card, group_head, page_head};
+use super::choices::{INTERVALS, READ_CHOICES, UNDO_CHOICES, nearest, read_index};
 use super::{Setting, SettingsEvent, SettingsView};
 use crate::icons::Icon;
 use crate::theme::settings as geo;
@@ -44,7 +44,7 @@ fn set_autostart(on: bool) {
     let _ = on;
 }
 
-fn theme_label(theme: ThemeChoice) -> String {
+pub(crate) fn theme_label(theme: ThemeChoice) -> String {
     match theme {
         ThemeChoice::System => tr!("settings theme" => "System"),
         ThemeChoice::Light => tr!("Light"),
@@ -326,22 +326,6 @@ impl SettingsView {
 
     pub(crate) fn render_general(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let s = self.s.clone();
-        // The mockup's segmented control (`.seg`): three short choices.
-        let theme = Card::new("settings-theme", tr!("Theme"))
-            .note(tr!("System follows your Windows app mode."))
-            .control(
-                Segmented::new("settings-theme-choice", tr!("Theme"), s.theme.key())
-                    .choices(
-                        THEMES
-                            .iter()
-                            .map(|t| (t.key().to_string(), theme_label(*t))),
-                    )
-                    .on_pick(cx.listener(|this, value: &SharedString, _, cx| {
-                        if let Some(t) = THEMES.iter().find(|t| t.key() == value.as_ref()) {
-                            this.set_theme(*t, cx);
-                        }
-                    })),
-            );
         let language = self.choice_card(
             "settings-language",
             tr!("settings language" => "Language"),
@@ -476,11 +460,10 @@ impl SettingsView {
             .flex_col()
             .child(page_head(
                 Section::General.name(),
-                Some(tr!("How Komorebi looks and starts.").into()),
+                Some(tr!("How Komorebi checks mail, notifies and starts.").into()),
                 cx,
             ))
-            .child(group_head(tr!("Appearance"), cx))
-            .child(theme.icon(Icon::Color))
+            .child(group_head(tr!("Language and mail"), cx))
             .child(language.icon(Icon::Language))
             .child(check.icon(Icon::Mail))
             .child(undo.icon(Icon::Undo))

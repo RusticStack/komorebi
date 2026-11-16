@@ -1060,7 +1060,7 @@ impl AccountEditor {
                                 div()
                                     .size(px(layout::PLACE_SPOT))
                                     .rounded(px(radius::FULL))
-                                    .bg(c.ink),
+                                    .bg(c.accent),
                             )
                         }),
                 )

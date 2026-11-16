@@ -921,7 +921,7 @@ impl Render for MainWindow {
                 .flex_1()
                 .px(px(space::PANE_GAP))
                 .pb(px(space::PANE_GAP))
-                .child(div().size_full().rounded(px(radius::SURFACE)).bg(c.paper))
+                .child(div().size_full().rounded(px(radius::SURFACE)).bg(c.pane))
                 .into_any_element(),
         };
         div()
@@ -953,7 +953,8 @@ impl Render for MainWindow {
             .size_full()
             .flex()
             .flex_col()
-            .bg(c.canvas)
+            .bg(c.backdrop)
+            .children(crate::backdrop::layer(cx))
             .child(bar)
             .children(strip)
             .children(update_bar)

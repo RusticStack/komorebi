@@ -99,7 +99,7 @@ fn bar(fill: Option<f32>, cx: &App) -> AnyElement {
                     .h_full()
                     .w(gpui::relative(f.clamp(0., 1.)))
                     .rounded(px(radius::FULL))
-                    .bg(c.ink),
+                    .bg(c.accent),
             )
             .into_any_element(),
         None => track
@@ -108,7 +108,7 @@ fn bar(fill: Option<f32>, cx: &App) -> AnyElement {
                     .h_full()
                     .w(gpui::relative(0.3))
                     .rounded(px(radius::FULL))
-                    .bg(c.ink),
+                    .bg(c.accent),
             )
             .into_any_element(),
     }

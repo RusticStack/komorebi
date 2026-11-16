@@ -7,7 +7,7 @@
 //! gotchas list them).
 //!
 //! Every widget gives AccessKit a role and a name; every focusable one
-//! shows the brand's focus ring (2 px ink, 2 px paper gap) only for
+//! shows the brand's focus ring (2 px ring, 2 px gap) only for
 //! keyboard focus ([`focus_ring`]).
 
 pub mod button;
@@ -31,7 +31,8 @@ use gpui::{BoxShadow, Pixels, StyleRefinement, Styled, px};
 
 use crate::theme::{Tokens, layout};
 
-/// The keyboard focus ring: a 2 px paper gap, then a 2 px ink ring,
+/// The keyboard focus ring: a 2 px gap, then a 2 px ring, in the theme's
+/// ring and gap colours (Komorebi's: ink over paper),
 /// following the element's corners. Two crisp spreads (no blur), because
 /// the ring must sit
 /// outside the element without moving it, and `focus_visible` styles are
@@ -42,9 +43,9 @@ use crate::theme::{Tokens, layout};
 pub fn focus_ring(t: &Tokens) -> Vec<BoxShadow> {
     let zero = Pixels::ZERO;
     vec![
-        BoxShadow::new(zero, zero, t.color.ink)
+        BoxShadow::new(zero, zero, t.color.ring)
             .spread_radius(px(layout::FOCUS_GAP + layout::FOCUS_RING)),
-        BoxShadow::new(zero, zero, t.color.paper).spread_radius(px(layout::FOCUS_GAP)),
+        BoxShadow::new(zero, zero, t.color.ring_gap).spread_radius(px(layout::FOCUS_GAP)),
     ]
 }
 

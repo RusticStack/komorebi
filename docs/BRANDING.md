@@ -6,6 +6,23 @@ one hue the app shows is Windows' own red on the Close button's hover. The rules
 and voice are in the approved brand book (komorebi-brand `final/BRAND.md`); this page lists every
 asset file in this repository, where it comes from and where it is used.
 
+## Colour themes (1.1.2, the owner's reversal)
+
+From 1.1.2 the app's colours are a theme the user picks in Settings > Appearance: the default,
+**Komorebi**, is the neutral look described on this page, pixel for pixel (a test,
+`the_komorebi_preset_is_todays_look`, pins every token); **Outlook** (Fluent 2 neutrals, accent
+#0F6CBD light and #479EF5 dark) and **GitHub** (Primer, accent #0969DA light and #4493F8 dark)
+are the presets with a colour; and any of them can be customised, exported and imported as a
+small JSON file. The owner reversed "no accent colour" for the app's views only: the brand
+itself stays neutral. Whatever the theme, the seal, the app icon, the tray icons, the toast
+image, the installer and the Rest scene's art stay as this page describes (the scene picks its
+day or night art from the panes' lightness, and its panel is the panes' colour); provider icons
+and avatars keep their own colours. A background picture or Mica / Acrylic (also Settings >
+Appearance, off by default) never changes those either. In the default theme the accent is the ink, so everything
+below about the app's look holds for Komorebi; in the other themes the accent takes the ink's
+place on the primary button, the selection marker, links, the focus ring, the unread spot and
+the toggles.
+
 ## Neutral brand (after 1.0, a deviation from the brand book)
 
 The brand book draws the seal in persimmon #B3503A, the brand's one colour. After 1.0.0 the
@@ -141,7 +158,8 @@ lists each one with its use. Total about 55 KB (the test keeps it under 150 KB).
 | `png/*.png`, `png/*@2x.png` | The same at 1x and 2x for `img()`: `mark-18`, `mark-40`, `mark-72`, `wordmark-24`, `wordmark-dark-24` (24 px high), `logo-40`, `logo-dark-40` (40 px high), `fall-light`, `fall-dark` (325 x 360). |
 
 The seal never sits on dark wash; in dark mode it goes on paper, canvas or the ink Sent pill.
-No element in the app is persimmon, or any other accent colour.
+No element in the app is persimmon. In the default theme no element has an accent colour; the
+other themes (Settings > Appearance) colour the controls listed above, never the seal.
 
 ## Repository images (`.github/assets/`)
 

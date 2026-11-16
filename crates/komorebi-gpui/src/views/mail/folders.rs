@@ -250,7 +250,7 @@ fn place_spot(t: &Tokens) -> AnyElement {
             div()
                 .size(px(layout::PLACE_SPOT))
                 .rounded(px(radius::FULL))
-                .bg(t.color.ink),
+                .bg(t.color.accent),
         )
         .into_any_element()
 }
@@ -464,7 +464,7 @@ fn new_mail(rail: bool, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
             .items_center()
             .justify_center()
             .rounded(px(radius::FULL))
-            .bg(c.ink)
+            .bg(c.accent)
             .hover(move |s| s.opacity(crate::theme::motion::INK_HOVER))
             .focus_visible(ring_style(t))
             .on_click(open)
@@ -472,7 +472,7 @@ fn new_mail(rail: bool, t: &Tokens, cx: &mut Context<MailView>) -> AnyElement {
                 svg()
                     .path(Icon::Compose.at(layout::ICON_LG))
                     .size(px(layout::ICON_LG))
-                    .text_color(c.on_ink),
+                    .text_color(c.on_accent),
             );
         return div()
             .flex()
@@ -912,7 +912,7 @@ fn tile_spot(t: &Tokens) -> AnyElement {
             div()
                 .size(px(layout::TAB_SPOT))
                 .rounded(px(radius::FULL))
-                .bg(t.color.ink),
+                .bg(t.color.accent),
         )
         .into_any_element()
 }

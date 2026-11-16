@@ -23,7 +23,15 @@ feature.
    Settings > Privacy), else the bundled provider icon, else none.
 5. **Fluent 2 look.** Light and dark themes follow Windows, with Segoe UI
    Variable, Segoe Fluent Icons, a 4 px spacing grid and quiet surfaces
-   (see `FLUENT2.md` and `WINUI3.md`).
+   (see `FLUENT2.md` and `WINUI3.md`). From 1.1.2 (owner decision,
+   2026-11-16, reversing the neutral-only look) the colours are a theme:
+   Komorebi (the default, unchanged), Outlook or GitHub, each light and
+   dark, or the user's own, edited in Settings > Appearance with contrast
+   checks and shared as a small JSON file of colours. Optionally a
+   background picture behind translucent panes (blurred, redrawn as pixel
+   art or ASCII, dimmed, faded at the edges, or blurred behind each pane)
+   and Windows' Mica or Acrylic, all off by default and
+   costing nothing when off. High contrast themes are still not in 1.x.
 6. **Write mail.** Compose, reply, reply all and forward, with attachments,
    basic text formatting and named signatures. Formatted mail goes out as
    text/plain plus a generated text/html alternative; any message can be

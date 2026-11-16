@@ -16,11 +16,15 @@
 //! reduce-motion flag and refreshes the windows. It runs at start and when
 //! an input changes, and does nothing when the tokens come out the same.
 
+pub mod appearance;
+pub mod backdrop;
 pub mod color;
 pub mod composer;
+pub mod derive;
 pub mod feeds;
 pub mod kit;
 pub mod metrics;
+pub mod presets;
 pub mod reader;
 pub mod scene;
 pub mod settings;
@@ -32,6 +36,7 @@ use gpui::{App, Global};
 use komorebi::db::ThemeChoice;
 use komorebi::theme::SystemTheme;
 
+pub use appearance::Appearance;
 pub use color::{Palette, Scheme};
 pub use metrics::{layout, motion, radius, space};
 pub use text::{TextStyled, TextToken, TypeRamp};
@@ -46,6 +51,11 @@ pub struct ThemeInput {
     /// `komorebi::theme::windows_build` (Windows 10 has no Segoe UI
     /// Variable).
     pub windows_build: u32,
+    /// Settings > Appearance: the colour theme (the default is Komorebi).
+    pub appearance: Appearance,
+    /// The colour editor shows the variant it edits (light or dark) over
+    /// the theme setting while it is open; never saved.
+    pub preview: Option<Scheme>,
 }
 
 impl ThemeInput {
@@ -54,7 +64,15 @@ impl ThemeInput {
             choice,
             system,
             windows_build: komorebi::theme::windows_build(),
+            appearance: Appearance::default(),
+            preview: None,
         }
+    }
+
+    /// The same input with an appearance.
+    pub fn with_appearance(mut self, appearance: Appearance) -> Self {
+        self.appearance = appearance;
+        self
     }
 }
 
@@ -94,11 +112,14 @@ pub fn scheme_for(choice: ThemeChoice, system_dark: bool) -> Scheme {
 
 /// The one function that builds the tokens.
 pub fn tokens(input: &ThemeInput) -> Tokens {
-    let scheme = scheme_for(input.choice, input.system.dark);
+    let scheme = input
+        .preview
+        .unwrap_or_else(|| scheme_for(input.choice, input.system.dark));
     let text_scale = input.system.text_scale.clamp(1.0, 2.25);
     Tokens {
         scheme,
-        color: color::palette(scheme),
+        color: Palette::from_set(&input.appearance.colors(scheme))
+            .with_background(&input.appearance.background),
         text: text::ramp(text_scale, input.windows_build),
         text_scale,
         reduce_motion: !input.system.animate,
@@ -172,6 +193,38 @@ pub fn set_choice(choice: ThemeChoice, cx: &mut App) -> bool {
         .cloned()
         .unwrap_or_else(|| ThemeInput::new(choice, komorebi::theme::read()));
     install(ThemeInput { choice, ..input }, cx)
+}
+
+/// Settings > Appearance changed (or the saved value at start): the
+/// colours follow at once, in every window.
+pub fn set_appearance(appearance: Appearance, cx: &mut App) -> bool {
+    let input = cx
+        .theme_input()
+        .cloned()
+        .unwrap_or_else(|| ThemeInput::new(ThemeChoice::System, komorebi::theme::read()));
+    install(
+        ThemeInput {
+            appearance,
+            ..input
+        },
+        cx,
+    )
+}
+
+/// The colour editor's variant shown over the theme setting (`None`: the
+/// setting again).
+pub fn set_preview(preview: Option<Scheme>, cx: &mut App) -> bool {
+    let Some(input) = cx.theme_input().cloned() else {
+        return false;
+    };
+    install(ThemeInput { preview, ..input }, cx)
+}
+
+/// The appearance in use.
+pub fn appearance(cx: &App) -> Appearance {
+    cx.theme_input()
+        .map(|i| i.appearance.clone())
+        .unwrap_or_default()
 }
 
 /// Windows' appearance settings changed (or may have: they are re-read).

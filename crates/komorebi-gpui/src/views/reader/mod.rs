@@ -1723,7 +1723,8 @@ impl Render for ReaderView {
                 .relative()
                 .flex()
                 .flex_col()
-                .bg(c.paper)
+                // No fill of its own: the pane under it fills it (paper, or
+                // see-through over a background picture).
                 .text_color(c.ink);
         let Some(open) = self.open.take() else {
             return root;

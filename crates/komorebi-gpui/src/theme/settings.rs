@@ -116,3 +116,41 @@ pub const PT_PX: f32 = 4. / 3.;
 /// General > Compose's font boxes (the Slint page's 160 and 72 px).
 pub const FONT_BOX_W: f32 = 160.;
 pub const SIZE_BOX_W: f32 = 72.;
+
+/// Settings > Appearance: the preset cards and their small live previews
+/// (a window in the theme's colours: the folder pane on the canvas with
+/// the accent's New mail pill, a pane with lines of text, the selected
+/// row's accent marker and an unread spot), and the colour editor's rows.
+pub mod appearance {
+    /// A preset card, and its preview's height.
+    pub const CARD_W: f32 = 176.;
+    pub const PREVIEW_H: f32 = 92.;
+    /// The preview's inner padding and the gap between its panes.
+    pub const PREVIEW_PAD: f32 = 6.;
+    /// The preview's folder pane, its New mail pill and its lines.
+    pub const RAIL_W: f32 = 40.;
+    pub const PILL_W: f32 = 28.;
+    pub const PILL_H: f32 = 10.;
+    pub const LINE_H: f32 = 4.;
+    /// The preview pane's corners and its rows' corners.
+    pub const PANE_RADIUS: f32 = 6.;
+    pub const ROW_RADIUS: f32 = 4.;
+    /// The preview's selected row, its marker and its unread spot.
+    pub const ROW_H: f32 = 14.;
+    pub const MARKER_W: f32 = 2.;
+    pub const MARKER_H: f32 = 8.;
+    pub const DOT: f32 = 6.;
+    /// The lines' widths, as fractions of the pane.
+    pub const LONG: f32 = 0.78;
+    pub const MID: f32 = 0.58;
+    pub const SHORT: f32 = 0.36;
+    pub const RAIL_LINE: f32 = 0.6;
+    /// The editor: a colour's label column and its select's width.
+    pub const LABEL_W: f32 = 200.;
+    pub const COLOUR_W: f32 = 168.;
+    /// The editor's name field.
+    pub const NAME_W: f32 = 280.;
+    /// A background slider and its value beside it ("70%", "20 px").
+    pub const SLIDER_W: f32 = 200.;
+    pub const VALUE_W: f32 = 48.;
+}

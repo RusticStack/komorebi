@@ -149,7 +149,7 @@ impl RenderOnce for TabStrip {
                                 div()
                                     .size(px(layout::TAB_SPOT))
                                     .rounded(px(radius::FULL))
-                                    .bg(c.ink),
+                                    .bg(c.accent),
                             ),
                     )
                 })

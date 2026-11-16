@@ -81,7 +81,7 @@ impl RenderOnce for Toggle {
             .h(px(layout::TOGGLE_H))
             .flex_none()
             .rounded(px(radius::FULL))
-            .when(on, |el| el.bg(c.ink))
+            .when(on, |el| el.bg(c.accent))
             .when(!on, |el| {
                 el.border(px(layout::HAIRLINE)).border_color(c.ink_2)
             })
@@ -96,7 +96,7 @@ impl RenderOnce for Toggle {
                     ))
                     .size(px(layout::TOGGLE_KNOB))
                     .rounded(px(radius::FULL))
-                    .bg(if on { c.on_ink } else { c.ink_2 }),
+                    .bg(if on { c.on_accent } else { c.ink_2 }),
             );
         let mut el = div()
             .id(self.id)
@@ -171,11 +171,11 @@ impl RenderOnce for Checkbox {
             .justify_center()
             .rounded(px(radius::FULL))
             .when(checked, |el| {
-                el.bg(c.ink).child(
+                el.bg(c.accent).child(
                     svg()
                         .path(Icon::Checkmark.path())
                         .size(px(layout::ICON))
-                        .text_color(c.on_ink),
+                        .text_color(c.on_accent),
                 )
             })
             .when(!checked, |el| {

@@ -845,6 +845,11 @@ pub struct Settings {
     /// The last message window's size in logical px (key `popout_size`:
     /// `w h`).
     pub popout_size: Option<(u32, u32)>,
+    /// Settings > Appearance (key `appearance`): the colour theme and the
+    /// background, as the app's JSON (`komorebi-gpui` `theme::appearance`
+    /// reads it; an unreadable value is the default look). Empty: never
+    /// set.
+    pub appearance: String,
 }
 
 /// The new-mail check intervals Settings offers, in seconds.
@@ -950,6 +955,7 @@ impl Default for Settings {
             notify_off: Vec::new(),
             close_to_tray: false,
             popout_size: None,
+            appearance: String::new(),
         }
     }
 }
@@ -971,6 +977,7 @@ impl Settings {
                 }
                 Err(_) => {}
             },
+            "appearance" => self.appearance = value.to_string(),
             "theme" => match value.trim() {
                 "system" => self.theme = ThemeChoice::System,
                 "light" => self.theme = ThemeChoice::Light,
@@ -6915,6 +6922,11 @@ example.com"
             db.set_setting("theme", t.key()).unwrap();
             assert_eq!(db.settings().unwrap().theme, t);
         }
+        // The appearance is kept as the app wrote it (the app reads it).
+        assert_eq!(s.appearance, "");
+        db.set_setting("appearance", r#"{"theme":"github"}"#)
+            .unwrap();
+        assert_eq!(db.settings().unwrap().appearance, r#"{"theme":"github"}"#);
         db.set_setting("theme", "purple").unwrap();
         assert_eq!(db.settings().unwrap().theme, ThemeChoice::System);
         db.set_setting("check_interval_secs", "300").unwrap();

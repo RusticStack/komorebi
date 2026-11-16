@@ -174,6 +174,7 @@ impl MainWindow {
             "settings-signatures" | "signature-pictures" => Some(Section::Signatures),
             "settings-rules" | "rule-edit" => Some(Section::Rules),
             "settings-general" => Some(Section::General),
+            "settings-appearance" | "settings-appearance-custom" => Some(Section::Appearance),
             "settings-privacy" => Some(Section::Privacy),
             "settings-about" => Some(Section::About),
             _ => None,
@@ -191,6 +192,12 @@ impl MainWindow {
                 let rules = rules.clone();
                 let edit = action == "rule-edit";
                 rules.update(cx, |r, cx| r.sample(edit, window, cx));
+            }
+            // Appearance > Customise.
+            if action == "settings-appearance-custom"
+                && let Some(settings) = self.settings()
+            {
+                settings.update(cx, |s, cx| s.open_theme_editor(window, cx));
             }
             // A pasted multi-picture signature in its page.
             if action == "signature-pictures"

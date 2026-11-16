@@ -238,7 +238,7 @@ impl SettingsView {
                                     div()
                                         .h_full()
                                         .rounded(px(radius::FULL))
-                                        .bg(c.ink)
+                                        .bg(c.accent)
                                         .w(gpui::relative(fraction.unwrap_or(0.))),
                                 )
                                 .test_support(),

@@ -191,7 +191,7 @@ impl RenderOnce for TextField {
             // gets the brand ring too, as every focusable widget.
             FieldLook::Underline { label } => row
                 .border_b(px(layout::HAIRLINE))
-                .border_color(if focused { c.ink } else { c.line })
+                .border_color(if focused { c.accent } else { c.line })
                 .when(ring, |el| {
                     el.rounded(px(radius::CARD)).shadow(focus_ring(&t))
                 })
@@ -374,7 +374,7 @@ impl RenderOnce for ChipField {
             .items_center()
             .gap(px(geo::FIELD_GAP))
             .border_b(px(layout::HAIRLINE))
-            .border_color(if focused { c.ink } else { c.line })
+            .border_color(if focused { c.accent } else { c.line })
             // Keyboard focus: the brand ring as well as the ink line.
             .when(ring, |el| {
                 el.rounded(px(radius::CARD)).shadow(focus_ring(&t))

@@ -5,6 +5,64 @@ All notable changes to Komorebi are recorded here. The format follows
 follow [Semantic Versioning](https://semver.org/). Each entry says what it
 changes in the local data (the cache, its folders and Credential Manager).
 
+## [1.1.2] - 2026-11-16
+
+Komorebi 1.1.2 lets you choose how Komorebi looks: colour themes, your own
+colours, a background picture and see-through panes, all in the new
+Settings > Appearance. Nothing changes until you choose it: the default
+look is the same as in 1.1.1. Your accounts, mail and settings carry over.
+Your appearance choices are saved with your other settings, and a
+background picture you choose is kept as `background.png` in a
+`cache.appearance` folder beside the cache file; Reset appearance deletes
+it.
+
+### Added
+
+- **Colour themes.** Settings > Appearance offers Komorebi (the default),
+  Outlook and GitHub, each in light and dark, as cards with a small preview
+  in their own colours. In Outlook and GitHub the buttons, toggles, links,
+  selection marks and the unread spot take the theme's accent colour. A
+  change shows at once in every window, with no restart.
+- **Your own colours.** Customise colours edits the light and dark colours
+  apart: the accent, background, panes and text, and every other colour
+  under More colours. When a pair of colours is hard to read (below the
+  WCAG AA contrast level), a warning offers Fix contrast, which changes the
+  colour as little as it can; you can still save. Export theme saves your
+  colours as a small file to share, and Import theme reads one back; a
+  file that isn't a theme is refused with a plain reason.
+- **A background picture.** Choose a PNG, JPEG or WebP picture and how it
+  fits the window (Fill, Fit, Tile or Centre), then Blur image, Dim and a
+  Vignette that fades it toward the window's edges. Two styles redraw the
+  picture: Pixel art (cell size, 8 to 64 colours, optional dithering) and
+  ASCII (characters in the picture's colours, the text colour or the
+  accent, with an Intensity). The picture is made once, off the main
+  thread, so it costs no work while you read.
+- **Translucent panes.** Once a picture or a window material shows, the
+  panes and the sidebar can let it through, with one Opacity for both or
+  each apart (never under 40%), and Blur behind panes frosts the picture
+  behind each pane. A warning says when muted text would be hard to read
+  over the picture, and at what opacity it would be readable.
+- **Window material.** Mica (Windows 11 22H2 and later) or Acrylic, with a
+  Tint.
+- **Reset appearance** returns to the default look and deletes the
+  picture. Export theme can include the background settings, never the
+  picture itself.
+
+### Changed
+
+- **Theme moved to Appearance.** The light, dark or system theme choice
+  moved from Settings > General to Settings > Appearance, which also shows
+  the text size Windows sets. The default look is unchanged.
+
+### Known limits
+
+- Menus, dialogs, the folder drawer, the composer's page and the content
+  of mail stay opaque over a background picture or a window material.
+- Window materials need Windows 11 (Mica needs 22H2 or later; on older
+  builds the window stays opaque) and have not been checked in a screen
+  capture.
+- High contrast themes are still not available.
+
 ## [1.1.1] - 2026-11-16
 
 Komorebi 1.1.1 explains up front how to sign in to Gmail and other accounts

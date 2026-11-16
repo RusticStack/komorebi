@@ -14,14 +14,14 @@
 //! |---|---|
 //! | background, title_bar, sidebar | canvas |
 //! | list*, table*, group_box, accordion, popover, tab_bar, status_bar | paper |
-//! | foreground, caret, *_foreground on light fills, link | ink |
+//! | foreground, caret, *_foreground on light fills | ink |
 //! | muted_foreground, tab_foreground, description_list_label_foreground | ink-2 |
 //! | accent, list_hover/active, table_hover/active, button_hover, secondary, sidebar_accent, tab_bar_segmented, skeleton | wash |
-//! | primary, button_primary, slider_bar, progress_bar, switch | ink; hover and active at 0.9 |
-//! | primary_foreground, button_primary_foreground, switch_thumb, slider_thumb | on-ink |
+//! | primary, button_primary, slider_bar, progress_bar, switch, sidebar_primary, link | accent; hover and active at 0.9 |
+//! | primary_foreground, button_primary_foreground, switch_thumb, slider_thumb, sidebar_primary_foreground | on-accent |
 //! | border, sidebar/title_bar/status_bar/window border, table_row_border, list_active_border | clear (panes are split by gaps) |
 //! | input | line (the one 1 px edge, under composer fields) |
-//! | ring, drag_border | ink |
+//! | ring | ring; drag_border accent |
 //! | selection | wash (text stays ink) |
 //! | danger, warning, success, info (+ buttons) | ink: no status hues |
 //! | overlay | black at 0.32 |
@@ -43,6 +43,7 @@ pub fn assign_colors(c: &mut ThemeColor, t: &Tokens) {
     let (canvas, paper, wash, ink, ink_2, ink_3, on_ink, clear) = (
         p.canvas, p.paper, p.wash, p.ink, p.ink_2, p.ink_3, p.on_ink, p.clear,
     );
+    let (accent, on_accent) = (p.accent, p.on_accent);
 
     c.background = canvas;
     c.foreground = ink;
@@ -51,7 +52,7 @@ pub fn assign_colors(c: &mut ThemeColor, t: &Tokens) {
     c.accordion = paper;
     c.border = clear;
     c.input = p.line;
-    c.ring = ink;
+    c.ring = p.ring;
     c.caret = ink;
     c.selection = wash;
     c.overlay = p.overlay;
@@ -67,7 +68,7 @@ pub fn assign_colors(c: &mut ThemeColor, t: &Tokens) {
         c.primary_hover,
         c.primary_active,
         c.primary_foreground,
-    ) = (ink, hover(ink), hover(ink), on_ink);
+    ) = (accent, hover(accent), hover(accent), on_accent);
     (
         c.secondary,
         c.secondary_hover,
@@ -165,9 +166,9 @@ pub fn assign_colors(c: &mut ThemeColor, t: &Tokens) {
     c.group_box_foreground = ink;
     c.description_list_label = wash;
     c.description_list_label_foreground = ink_2;
-    c.drag_border = ink;
+    c.drag_border = accent;
     c.drop_target = wash;
-    (c.link, c.link_hover, c.link_active) = (ink, ink, ink);
+    (c.link, c.link_hover, c.link_active) = (accent, accent, accent);
 
     c.list = paper;
     c.list_active = wash;
@@ -180,23 +181,23 @@ pub fn assign_colors(c: &mut ThemeColor, t: &Tokens) {
     c.muted_foreground = ink_2;
     c.popover = paper;
     c.popover_foreground = ink;
-    c.progress_bar = ink;
+    c.progress_bar = accent;
     c.scrollbar = clear;
     c.scrollbar_thumb = ink_3;
     c.scrollbar_thumb_hover = ink_2;
     c.skeleton = wash;
-    c.slider_bar = ink;
-    c.slider_thumb = on_ink;
-    c.switch = ink;
-    c.switch_thumb = on_ink;
+    c.slider_bar = accent;
+    c.slider_thumb = on_accent;
+    c.switch = accent;
+    c.switch_thumb = on_accent;
 
     c.sidebar = canvas;
     c.sidebar_accent = wash;
     c.sidebar_accent_foreground = ink;
     c.sidebar_border = clear;
     c.sidebar_foreground = ink;
-    c.sidebar_primary = ink;
-    c.sidebar_primary_foreground = on_ink;
+    c.sidebar_primary = accent;
+    c.sidebar_primary_foreground = on_accent;
 
     c.tab = clear;
     c.tab_active = paper;

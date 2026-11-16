@@ -596,7 +596,7 @@ msgstr ""
 msgid "Insert picture"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/composer/text.rs
+#: crates/komorebi-gpui/src/views/composer/text.rs crates/komorebi-gpui/src/views/settings/background.rs
 msgid "Picture"
 msgstr ""
 
@@ -840,7 +840,7 @@ msgstr ""
 msgid "No contacts yet. Add one with New contact, or turn on address book sync."
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/rules/text.rs crates/komorebi-gpui/src/views/settings/editor.rs
+#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/rules/text.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
 msgid "Back"
 msgstr ""
 
@@ -948,7 +948,7 @@ msgstr ""
 msgid "Discard your changes?"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/signatures.rs
+#: crates/komorebi-gpui/src/views/contacts/text.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/signatures.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
 msgid "Name"
 msgstr ""
 
@@ -1307,7 +1307,7 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/mail/outbox.rs crates/komorebi-gpui/src/views/reader/invite.rs
+#: crates/komorebi-gpui/src/views/mail/outbox.rs crates/komorebi-gpui/src/views/reader/invite.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
 msgid "Details"
 msgstr ""
 
@@ -2245,7 +2245,7 @@ msgstr ""
 msgid "Set up manually"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/onboarding/mod.rs
+#: crates/komorebi-gpui/src/views/onboarding/mod.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
 msgid "Hide details"
 msgstr ""
 
@@ -2831,11 +2831,11 @@ msgstr ""
 msgid "Folder not found. This rule is paused."
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/rules/text.rs crates/komorebi-gpui/src/views/settings/about.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/general.rs crates/komorebi-gpui/src/views/settings/privacy.rs
+#: crates/komorebi-gpui/src/views/rules/text.rs crates/komorebi-gpui/src/views/settings/about.rs crates/komorebi-gpui/src/views/settings/background.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/general.rs crates/komorebi-gpui/src/views/settings/privacy.rs
 msgid "On"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/rules/text.rs crates/komorebi-gpui/src/views/settings/about.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/general.rs crates/komorebi-gpui/src/views/settings/privacy.rs
+#: crates/komorebi-gpui/src/views/rules/text.rs crates/komorebi-gpui/src/views/settings/about.rs crates/komorebi-gpui/src/views/settings/background.rs crates/komorebi-gpui/src/views/settings/editor.rs crates/komorebi-gpui/src/views/settings/general.rs crates/komorebi-gpui/src/views/settings/privacy.rs
 msgid "Off"
 msgstr ""
 
@@ -3296,6 +3296,304 @@ msgstr ""
 msgid "Turn on 2-Step Verification first"
 msgstr ""
 
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That file is too large to be a theme."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That file isn't a Komorebi theme."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That theme was made by a newer Komorebi. Update Komorebi to use it."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That theme's dark colours have no {0}."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That theme's light colours have no {0}."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That theme's dark {0} isn't a colour like #0f6cbd."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "That theme's light {0} isn't a colour like #0f6cbd."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Choose a theme file"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Theme"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "System follows your Windows app mode."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Text size"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Komorebi follows the text size in Windows Settings > Accessibility > Text size."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Custom"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Colour theme"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Customise colours"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Import theme"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "How Komorebi looks."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Mode and text"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Colours"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/appearance.rs
+msgid "Presets follow light, dark or System above. Your own colours stay on this PC; export them from Customise colours to share them."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Dim"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Blur image"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Cell size"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Vignette"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Vignette size"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Intensity"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Blur behind panes"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Opacity"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Panes"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Sidebar"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Tint"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "{0} px"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Fill"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgctxt "picture fit"
+msgid "Fit"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Tile"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Centre"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgctxt "picture style"
+msgid "None"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Pixel art"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "ASCII"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgctxt "ASCII colour"
+msgid "Picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgctxt "ASCII colour"
+msgid "Text"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgctxt "ASCII colour"
+msgid "Accent"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgctxt "material"
+msgid "None"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Mica"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Acrylic"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Choose a picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "That picture is too large."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "That file isn't a PNG, JPEG or WebP picture."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Style"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Redraws the picture once, in cells that line up with the screen's pixels."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Dithering"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Mixes neighbouring colours in a fixed pattern, as old games did."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Character colour"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Bolder characters with a little of their colour behind them, so the picture reads through the panes."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Background"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "PNG, JPEG or WebP. Kept on this PC, scaled to your largest screen."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Change picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Choose picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Remove picture"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Fit"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "How far in from the window's edges the fade starts."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Window material"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Mica tints the window with your desktop; Acrylic blurs what is behind it."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "How much of the background colour covers the material."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "How much the panes and the sidebar let the background through."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "One opacity for all"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Panes and sidebar apart"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Blur hides the pixel art style behind panes."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Blur hides the ASCII style behind panes."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Panes blur the picture behind them, like frosted glass."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Muted text may be hard to read over this picture. An opacity of {0}% or more keeps it at 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "With a style in a light theme, each pane and the sidebar stay opaque enough for text to read over the part of the picture behind them."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/background.rs
+msgid "Reset appearance"
+msgstr ""
+
 #: crates/komorebi-gpui/src/views/settings/check.rs
 msgid "Find the incoming server"
 msgstr ""
@@ -3506,11 +3804,11 @@ msgctxt "settings theme"
 msgid "System"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/settings/general.rs
+#: crates/komorebi-gpui/src/views/settings/general.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
 msgid "Light"
 msgstr ""
 
-#: crates/komorebi-gpui/src/views/settings/general.rs
+#: crates/komorebi-gpui/src/views/settings/general.rs crates/komorebi-gpui/src/views/settings/theme_editor.rs
 msgid "Dark"
 msgstr ""
 
@@ -3573,14 +3871,6 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/general.rs
 msgid "The quick brown fox jumps over the lazy dog."
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/general.rs
-msgid "Theme"
-msgstr ""
-
-#: crates/komorebi-gpui/src/views/settings/general.rs
-msgid "System follows your Windows app mode."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/general.rs
@@ -3673,11 +3963,11 @@ msgid "Plain text"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/general.rs
-msgid "How Komorebi looks and starts."
+msgid "How Komorebi checks mail, notifies and starts."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/general.rs
-msgid "Appearance"
+msgid "Language and mail"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/general.rs
@@ -3694,6 +3984,10 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/mod.rs
 msgid "General"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/mod.rs
+msgid "Appearance"
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/mod.rs
@@ -4862,6 +5156,172 @@ msgstr ""
 
 #: crates/komorebi-gpui/src/views/settings/text.rs
 msgid "Is your mail really at {0}? Go back and choose another provider."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Accent"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on the accent"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Focus ring"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Focus ring gap"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Secondary text and icons"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Muted text"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on tooltips"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Cards"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Selection and hover"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Lines"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Disabled marks"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Welcome shape"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Chosen segment"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Pills on cards"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on the panes is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on the background is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on a selected row is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Secondary text on the panes is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Muted text on the panes is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Muted text on the background is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on the accent is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "The accent on the panes is {0}:1; controls need 3:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "The focus ring on its gap is {0}:1; it needs 3:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Text on tooltips is {0}:1; text needs 4.5:1."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Saved as {0}."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "The theme was not saved: {0}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgctxt "colour"
+msgid "{0}, {1}, low contrast"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgctxt "colour"
+msgid "{0}, {1}"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Some text may be hard to read with these colours."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Fix contrast"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Contrast details"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Colours for"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Start from"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "More colours"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Reset to preset"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Export theme"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Include background settings"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Changes show at once and are kept. Light and dark have their own colours."
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "Main colours"
+msgstr ""
+
+#: crates/komorebi-gpui/src/views/settings/theme_editor.rs
+msgid "These follow the main colours until you change one."
 msgstr ""
 
 #: crates/komorebi-gpui/src/views/tabs/text.rs

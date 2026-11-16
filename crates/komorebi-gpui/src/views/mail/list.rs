@@ -298,7 +298,7 @@ fn progress_bar(fill: f32, t: &Tokens) -> AnyElement {
                 .h_full()
                 .w(gpui::relative(fill))
                 .rounded(px(crate::theme::radius::FULL))
-                .bg(c.ink),
+                .bg(c.accent),
         )
         .into_any_element()
 }

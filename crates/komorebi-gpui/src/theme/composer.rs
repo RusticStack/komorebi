@@ -78,13 +78,13 @@ pub fn rgba8(c: gpui::Hsla) -> [u8; 4] {
 }
 
 /// The colours the formatted editor's pages are painted with (the
-/// brand's: links in ink, list markers and quote bars in ink-3, table
+/// theme's: links in the accent (Komorebi's is its ink), list markers and quote bars in ink-3, table
 /// rules in the line colour, on paper). High contrast is not in 1.0.
 pub fn editor_theme(t: &super::Tokens) -> komorebi::mail::rich::view::Theme {
     let c = &t.color;
     komorebi::mail::rich::view::Theme {
         text: rgba8(c.ink),
-        link: rgba8(c.ink),
+        link: rgba8(c.accent),
         subtle: rgba8(c.ink_3),
         border: rgba8(c.line),
         bg: rgba8(c.paper),

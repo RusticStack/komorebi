@@ -141,7 +141,7 @@ pub fn render(tabs: &Tabs, t: &Tokens, on: Handlers) -> Option<AnyElement> {
                             div()
                                 .size(px(layout::TAB_SPOT))
                                 .rounded(px(radius::FULL))
-                                .bg(c.ink),
+                                .bg(c.accent),
                         ),
                 )
             })

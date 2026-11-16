@@ -7,10 +7,7 @@
 //! tests share test_support.rs (docs/GPUI-TESTING.md).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use gpui::{
-    App, AppContext as _, Bounds, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
-    WindowOptions, px, size,
-};
+use gpui::{App, AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use komorebi::{db, instance};
 use komorebi_gpui::theme::{self, ThemeInput, feeds};
 use komorebi_gpui::window::{self, DEFAULT_SIZE, Init, MIN_SIZE, MainWindow, Start};
@@ -198,7 +195,36 @@ fn main() -> std::process::ExitCode {
         .as_ref()
         .and_then(|r| r.theme)
         .unwrap_or(settings.theme);
-    let theme_input = ThemeInput::new(theme, system);
+    // Settings > Appearance, or a snapshot's (never saved), before the
+    // first frame.
+    let appearance = match snapshot.as_ref().and_then(|r| r.appearance.as_deref()) {
+        Some(asked) => match theme::appearance::for_snapshot(asked) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("komorebi-gpui: KOMOREBI_SNAPSHOT_APPEARANCE={asked}: {e}");
+                return std::process::ExitCode::from(snapshot::EXIT_REFUSED);
+            }
+        },
+        None => theme::Appearance::from_setting(&settings.appearance),
+    };
+    let mut appearance = appearance;
+    // A snapshot's background (never saved).
+    if let Some(r) = snapshot.as_ref() {
+        if let Some(bg) = &r.backdrop {
+            appearance.background = bg.clone();
+        }
+        appearance.background.picture = r.background.is_some();
+    }
+    let background = appearance.background.clone();
+    let picture = snapshot
+        .as_ref()
+        .and_then(|r| r.background.clone())
+        .or_else(|| {
+            background
+                .picture
+                .then(|| komorebi_gpui::backdrop::picture(&db_path))
+        });
+    let theme_input = ThemeInput::new(theme, system).with_appearance(appearance);
     // Snapshots start at their own size, never the saved place.
     let size_asked = snapshot.as_ref().map(|r| r.size.unwrap_or(DEFAULT_SIZE));
     let saved = settings.gpui_window.filter(|_| snapshot.is_none());
@@ -254,8 +280,8 @@ fn main() -> std::process::ExitCode {
                 traffic_light_position: None,
             }),
             window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
-            // No Mica or Acrylic: the paper is paper (IMPLEMENTATION.md).
-            window_background: WindowBackgroundAppearance::Opaque,
+            // Opaque unless Settings > Appearance chose Mica or Acrylic.
+            window_background: komorebi_gpui::backdrop::window_background(&background),
             // Start with Windows: hidden until the tray icon brings it.
             show: !hidden,
             focus: !hidden,
@@ -267,9 +293,28 @@ fn main() -> std::process::ExitCode {
             feeds::set_frame_dark(window, dark);
             cx.new(|cx| MainWindow::new(init, window, cx))
         });
-        if let Err(e) = opened {
-            eprintln!("komorebi-gpui: opening the window: {e:#}");
-            cx.quit();
+        match opened {
+            Err(e) => {
+                eprintln!("komorebi-gpui: opening the window: {e:#}");
+                cx.quit();
+            }
+            // The background picture: made off the UI thread, or for a
+            // snapshot now (its first frame must have it).
+            Ok((handle, _)) => {
+                if let Some(source) = picture.clone() {
+                    let bg = background.clone();
+                    let _ = handle.update(cx, |_, window, cx| {
+                        use komorebi_gpui::backdrop;
+                        if still {
+                            if let Err(e) = backdrop::install_now(source, &bg, window, cx) {
+                                eprintln!("komorebi-gpui: the background picture: {e:?}");
+                            }
+                        } else {
+                            backdrop::want(Some(source), &bg, false, window, cx);
+                        }
+                    });
+                }
+            }
         }
         mark("window created");
         if !hidden {
